@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>股票池與資料排程／量化研究平台</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='5.0.0') }}">
+</head>
+<body class="tech-body">
+  {% set active_assets = assets|selectattr('active')|list %}
+  {% set inactive_assets = assets|rejectattr('active')|list %}
+  {% include '_sidebar.html' %}
+
+  <main class="universe-main unified-main">
+    <section class="universe-hero">
+      <div><span>時點一致研究股票池</span><h1>股票池與資料排程</h1><p>保存股票何時上市、何時下市，以及研究系統何時知道這些資料，避免只用今天仍存在的公司回測。</p></div>
+      <div class="universe-stats"><article><span>啟用標的</span><strong>{{ active_assets|length }}</strong></article><article><span>歷史標的</span><strong>{{ history.symbol_count }}</strong></article><article><span>下市櫃紀錄</span><strong>{{ history.delisted_count }}</strong></article></div>
+    </section>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+
+    <section class="universe-section history-audit-v20">
+      <div class="section-head"><div><span>存活者偏差稽核</span><h2>指定日期的歷史股票池</h2></div><p>只有上市與下市邊界完整、歷史行情齊全時，跨股票回測才有資格解除研究限制。</p></div>
+      <div class="history-actions-v20">
+        <form method="get"><label>歷史查詢日<input type="date" name="effective_date" value="{{ history.query_date }}"></label><button>查詢當日股票池</button></form>
+        <form method="post" action="/universe/history/sync"><button>更新證交所與 FinMind 上下市資料</button></form>
+      </div>
+      <div class="history-kpis-v20"><article><span>查詢日有效標的</span><b>{{ history.active_count }}</b></article><article><span>有效期間</span><b>{{ history.interval_count }}</b></article><article><span>精確上市起日</span><b>{{ history.exact_start_count }}／{{ history.symbol_count }}</b></article><article><span>存活者安全門檻</span><b class="{{ 'up' if history.survivorship_safe else 'down' }}">{{ '通過' if history.survivorship_safe else '未通過' }}</b></article></div>
+      {% if history.quality_notes %}<div class="history-notes-v20">{% for note in history.quality_notes %}<p>{{ note }}</p>{% endfor %}</div>{% endif %}
+      <details class="history-members-v20"><summary>查看 {{ history.query_date }} 有效的 {{ historical_members|length }} 檔標的</summary><div>{% for item in historical_members %}<span>{{ item.symbol }}<small>{{ item.valid_from }}～{{ item.valid_to or '目前' }}</small></span>{% else %}<p>這個日期沒有可用的有效期間資料。</p>{% endfor %}</div></details>
+    </section>
+
+    <section class="scheduler-grid">
+      <article><span>台股每日資料</span><h2>台北時間 14:30</h2><p>台股正常收盤後更新所有啟用標的，資料提供者仍會拒絕尚未到可用時間的日 K。</p><form method="post" action="/scheduler/run/TW"><button>立即執行台股流程</button></form></article>
+      <article><span>美股每日資料</span><h2>台北時間 06:30</h2><p>美股收盤後更新。週二至週六執行，重疊下載最近七天並以時點一致鍵值去重。</p><form method="post" action="/scheduler/run/US"><button>立即執行美股流程</button></form></article>
+      <article class="schedule-note"><span>執行原則</span><h2>可稽核與可重複執行</h2><p>每次執行保存編號、狀態、成功／失敗標的、收到與新增筆數。單一標的失敗不會中止其他標的。</p></article>
+    </section>
+
+    <section class="universe-section">
+      <div class="section-head"><div><span>新增標的</span><h2>新增研究標的</h2></div><p>Yahoo 代號需正確，例如 AAPL、2330.TW。新增後會自動進入市場總覽與下一次排程。</p></div>
+      <form class="universe-form" method="post" action="/universe/assets">
+        <label>股票代號<input name="symbol" placeholder="AAPL / 2330.TW" required></label>
+        <label>市場<select name="market"><option value="US">美國</option><option value="TW">台灣</option></select></label>
+        <label>資產類型<select name="asset_type"><option value="EQUITY">股票</option><option value="ETF">ETF</option><option value="INDEX">指數</option></select></label>
+        <label>產業<input name="sector" placeholder="半導體／科技"></label>
+        <label>績效基準<input name="benchmark_symbol" placeholder="SPY / 0050.TW"></label>
+        <label>資料起日<input type="date" name="data_start" value="2020-01-01"></label>
+        <button type="submit">加入研究股票池</button>
+      </form>
+    </section>
+
+    <section class="universe-section">
+      <div class="section-head"><div><span>研究標的</span><h2>目前股票池</h2></div><p>名稱、產業、資本額與市值均保存為官方資料快照；缺值明確標示待補。</p></div>
+      <form class="universe-metadata-action-v1" method="post" action="/universe/metadata/sync">
+        <button>更新公司名稱、產業與規模</button>
+      </form>
+      <div class="universe-table">
+        <div class="universe-row universe-th"><span>公司／代號</span><span>市場</span><span>產業</span><span>市值</span><span>實收資本額</span><span>市值排名</span><span>資料起日</span><span>狀態／操作</span></div>
+        {% for asset in assets %}
+        <div class="universe-row">
+          <span class="stock-identity-v1"><b>{{ asset.company_abbreviation or asset.company_name or '公司名稱待補' }}</b><small>{{ asset.symbol }}{% if asset.company_name and asset.company_name != asset.company_abbreviation %} · {{ asset.company_name }}{% endif %}</small></span>
+          <span>{{ '上市' if asset.symbol.endswith('.TW') else '上櫃' if asset.symbol.endswith('.TWO') else asset.market }}<small>{{ asset.asset_type }}</small></span>
+          <span>{{ asset.sector or '產業待補' }}{% if asset.industry_code %}<small>產業代碼 {{ asset.industry_code }}</small>{% endif %}</span>
+          <span>{{ ('NT$ {:,.1f} 億'.format(asset.market_value_twd / 100000000)) if asset.market_value_twd else '待補' }}</span>
+          <span>{{ ('NT$ {:,.1f} 億'.format(asset.paid_in_capital / 100000000)) if asset.paid_in_capital else '待補' }}</span>
+          <span>{{ ('全市場第 {:,} 名'.format(asset.market_rank)) if asset.market_rank else '待補' }}</span>
+          <span>{{ asset.data_start }}</span>
+          <form method="post" action="/universe/assets/{{ asset.symbol }}/toggle"><span class="{{ 'up' if asset.active else 'down' }}">{{ '啟用' if asset.active else '停用' }}</span><input type="hidden" name="active" value="{{ 'false' if asset.active else 'true' }}"><button class="toggle-button {{ 'deactivate' if asset.active else '' }}">{{ '停用' if asset.active else '啟用' }}</button></form>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="universe-section">
+      <div class="section-head"><div><span>流程稽核紀錄</span><h2>最近執行紀錄</h2></div><p>狀態為「部分成功」時，請查看錯誤欄位並針對失敗標的重試。</p></div>
+      <div class="run-table">
+        <div class="run-row run-th"><span>RUN ID</span><span>JOB</span><span>MARKET</span><span>STARTED</span><span>COMPLETED</span><span>STATUS</span><span>ERROR</span></div>
+        {% for run in runs %}<div class="run-row"><b>#{{ run.id }}</b><span>{{ run.job_name }}</span><span>{{ run.market }}</span><span>{{ run.started_at }}</span><span>{{ run.completed_at or 'RUNNING' }}</span><span class="run-status {{ run.status.value }}">{{ run.status.value|upper }}</span><span title="{{ run.error or '' }}">{{ run.error or '—' }}</span></div>{% else %}<div class="run-empty">尚無 pipeline 執行紀錄。可先執行上方 TW 或 US pipeline。</div>{% endfor %}
+      </div>
+    </section>
+  </main>
+</body>
+</html>

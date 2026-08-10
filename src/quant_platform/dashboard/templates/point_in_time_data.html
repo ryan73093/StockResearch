@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>盤中與衍生資料／量化研究平台</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.0.0') }}">
+</head>
+<body class="tech-body">{% include '_sidebar.html' %}<main class="tech-main pit-main-v36">
+  <header class="tech-header"><div><span class="tech-kicker">POINT-IN-TIME／盤中／衍生品／事件／替代資料</span><h1>盤中、衍生與事件資料</h1><p>每筆資料同時保存事件時間、來源公開時間與實際匯入時間；歷史查詢只顯示指定時間當下已經可見的版本。</p></div><div class="pit-token-v36 {{ 'ready' if overview.token_configured else '' }}"><span>FinMind 權限</span><b>{{ '已設定 Token' if overview.token_configured else '尚未設定 Token' }}</b><small>證交所、櫃買與 MOPS 公開來源免 Token；分鐘線與逐筆資料依官方會員方案。</small></div></header>
+  {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+
+  <section class="tech-section"><div class="pit-kpis-v36">
+    <article><span>資料集目錄</span><b>{{ overview.dataset_count }} 種</b><small>已啟用來源 {{ overview.enabled_count }} 種</small></article>
+    <article><span>已保存觀測</span><b>{{ '{:,}'.format(overview.stored_row_count) }} 筆</b><small>不含重複匯入</small></article>
+    <article><span>歷史修訂</span><b>{{ '{:,}'.format(overview.revision_count) }} 個版本</b><small>原始版本之外的更正</small></article>
+    <article><span>時間查詢</span><b>{{ taipei_time(overview.selected_as_of).strftime('%Y-%m-%d %H:%M') if overview.selected_as_of else '目前可見' }}</b><small>台北時間</small></article>
+  </div></section>
+
+  <section class="tech-section pit-forms-v36">
+    <article><div class="section-head"><div><span>下載資料</span><h2>建立版本化觀測值</h2></div></div><form method="post" action="/point-in-time-data/run">
+      <label>資料集<select name="dataset">{% for item in overview.datasets if item.enabled %}<option value="{{ item.dataset_key }}" {{ 'selected' if item.dataset_key==overview.selected_dataset else '' }}>{{ item.display_name }}</option>{% endfor %}</select></label>
+      <label>標的代號<input name="entity" value="{{ overview.selected_entity }}" placeholder="2330、TX、TXO"></label>
+      <label>開始日期<input type="date" name="start_date"></label><label>結束日期<input type="date" name="end_date"></label>
+      <button>下載並保存</button>
+    </form></article>
+    <article><div class="section-head"><div><span>歷史可見性</span><h2>當時可以看到什麼？</h2></div></div><form method="get">
+      <label>資料集<select name="dataset">{% for item in overview.datasets %}<option value="{{ item.dataset_key }}" {{ 'selected' if item.dataset_key==overview.selected_dataset else '' }}>{{ item.display_name }}</option>{% endfor %}</select></label>
+      <label>標的代號<input name="entity" value="{{ overview.selected_entity }}"></label>
+      <label>回測當時時間<input type="datetime-local" name="as_of" value="{{ as_of_text }}"></label>
+      <button>執行 As-of 查詢</button>
+    </form></article>
+  </section>
+
+  <section class="tech-section"><div class="section-head"><div><span>來源與授權</span><h2>資料集目錄</h2></div><p>停用代表介接器尚未完成，不代表資料不存在。</p></div><div class="pit-catalog-v36">
+    {% for item in overview.datasets %}<article class="{{ 'enabled' if item.enabled else 'planned' }}"><div><span>{{ item.category }}／{{ item.frequency }}</span><b>{{ '可下載' if item.enabled else '規劃中' }}</b></div><h3>{{ item.display_name }}</h3><dl><dt>來源資料集</dt><dd>{{ item.source }}／{{ item.source_dataset }}</dd><dt>存取層級</dt><dd>{{ item.access_tier }}</dd><dt>歷史起點</dt><dd>{{ item.history_start or '依來源實際回傳' }}</dd><dt>發布規則</dt><dd>{{ item.publication_rule }}</dd><dt>修訂規則</dt><dd>{{ item.revision_policy }}</dd></dl><a href="{{ item.source_url }}">查看官方來源</a></article>{% endfor %}
+  </div></section>
+
+  <section class="tech-section"><div class="section-head"><div><span>資料涵蓋</span><h2>已保存範圍</h2></div></div><div class="paper-table-v26"><table><thead><tr><th>資料集</th><th>標的</th><th>來源</th><th>觀測值</th><th>修訂</th><th>最早事件</th><th>最近事件</th><th>最近公開</th></tr></thead><tbody>{% for item in overview.coverage %}<tr><td>{{ item.dataset_key }}</td><td>{{ item.entity_id }}</td><td>{{ item.source }}</td><td>{{ '{:,} 筆'.format(item.row_count) }}</td><td>{{ '{:,} 個版本'.format(item.revision_count) }}</td><td>{{ taipei_time(item.first_event_time).strftime('%Y-%m-%d %H:%M') }}</td><td>{{ taipei_time(item.last_event_time).strftime('%Y-%m-%d %H:%M') }}</td><td>{{ taipei_time(item.last_available_time).strftime('%Y-%m-%d %H:%M') }}</td></tr>{% else %}<tr><td colspan="8">尚無盤中或衍生品資料。未設定付費 Token 時，可先嘗試期貨／選擇權日資料。</td></tr>{% endfor %}</tbody></table></div></section>
+
+  <section class="tech-section"><div class="section-head"><div><span>AS-OF RESULT</span><h2>查詢結果</h2></div><p>每個數值均顯示官方欄位單位；未知單位不自行猜測。</p></div><div class="pit-observations-v36">
+    {% for item in overview.observations %}<article><div><b>{{ item.entity_id }}</b><span>{{ taipei_time(item.event_time).strftime('%Y-%m-%d %H:%M:%S') }}</span></div><small>來源可用：{{ taipei_time(item.available_time).strftime('%Y-%m-%d %H:%M') }}／匯入：{{ taipei_time(item.ingested_at).strftime('%Y-%m-%d %H:%M') }}</small><dl>{% for key,value in item.payload.items() %}<dt>{{ key }}</dt><dd>{% if value is number %}{{ '{:,.4f}'.format(value).rstrip('0').rstrip('.') }} {{ item.units.get(key,'（來源未標示單位）') }}{% else %}{{ value }}{% endif %}</dd>{% endfor %}</dl></article>{% else %}<div class="backtest-empty">這個條件目前沒有可見資料。請先下載資料，或放寬標的／As-of 時間。</div>{% endfor %}
+  </div></section>
+</main></body></html>

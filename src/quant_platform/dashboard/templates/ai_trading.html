@@ -1,0 +1,457 @@
+{% macro term(name, explanation) -%}<span class="term-help-v6" tabindex="0" title="{{ explanation }}" data-help="{{ explanation }}">{{ name }}<sup>?</sup></span>{%- endmacro %}
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>盤後 AI 決策／量化研究平台</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.2.0') }}">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+  <style>
+    .ai-command-v12{min-height:0;padding:9px 0}.ai-command-v12 h1{margin:1px 0;font-size:22px}.ai-command-v12 p{margin:0;font-size:11px}.ai-command-v12 button{min-height:32px}
+    .ai-terminal-v12{padding:0!important;border:1px solid var(--border);background:rgba(4,13,21,.92)}.ai-terminal-v12>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-bottom:1px solid var(--border);background:#091723}.ai-terminal-v12>header div{display:flex;align-items:center;gap:9px;min-width:0}.ai-terminal-v12>header b{font-size:14px}.ai-terminal-v12>header span{overflow:hidden;color:var(--muted);font-size:11px;text-overflow:ellipsis;white-space:nowrap}.ai-live-state-v12{padding:3px 7px;border:1px solid var(--red);color:var(--red)!important;font:700 10px var(--font-mono);letter-spacing:.06em}.ai-terminal-v12>header time{color:var(--muted);font:500 10px var(--font-mono);white-space:nowrap}
+    .ai-result-strip-v12{display:grid;grid-template-columns:1.35fr repeat(5,1fr);border-bottom:1px solid var(--border);background:var(--border);gap:1px}.ai-result-strip-v12>div{min-width:0;padding:7px 9px;background:var(--panel)}.ai-result-strip-v12 span,.ai-result-strip-v12 small{display:block;color:var(--muted);font-size:9px}.ai-result-strip-v12 b{display:block;margin:2px 0;font:650 14px var(--font-mono)}.ai-result-strip-v12 .research-verdict b{color:var(--amber)}.ai-result-strip-v12 .positive b{color:var(--green)}.ai-result-strip-v12 .negative b{color:var(--red)}
+    .ai-terminal-body-v12{display:grid;grid-template-columns:minmax(440px,.95fr) minmax(420px,1.05fr);min-height:238px}.ai-order-desk-v12,.ai-proof-desk-v12{min-width:0;padding:9px 10px}.ai-order-desk-v12{border-right:1px solid var(--border)}.ai-desk-head-v12{display:flex;align-items:start;justify-content:space-between;gap:9px;margin-bottom:6px}.ai-desk-head-v12 span{color:var(--cyan);font:600 9px var(--font-mono);letter-spacing:.08em}.ai-desk-head-v12 h2{margin:1px 0;font-size:16px}.ai-desk-head-v12 p{margin:0;color:var(--muted);font-size:10px}.ai-desk-head-v12 strong{padding:3px 6px;border:1px solid var(--amber);color:var(--amber);font-size:9px;white-space:nowrap}.ai-order-table-v1 .ai-terminal-table-v12{width:100%;min-width:0;table-layout:fixed;border-collapse:collapse}.ai-terminal-table-v12 th,.ai-terminal-table-v12 td{padding:5px 6px;border-bottom:1px solid var(--border-soft);font-size:10px;text-align:left;vertical-align:top}.ai-terminal-table-v12 th{color:var(--muted);font-size:9px}.ai-terminal-table-v12 th:nth-child(1){width:48px}.ai-terminal-table-v12 th:nth-child(3){width:60px}.ai-terminal-table-v12 th:nth-child(4){width:105px}.ai-terminal-table-v12 .order-reason-v14 td{padding:3px 6px 6px;color:#b9c9d7;font-size:9px;line-height:1.35}.ai-terminal-table-v12 .order-reason-v14 b{color:var(--cyan)}.ai-terminal-empty-v12{display:grid;place-content:center;min-height:145px;border:1px dashed var(--border);text-align:center}.ai-terminal-empty-v12 b{color:var(--amber);font-size:15px}.ai-terminal-empty-v12 p{max-width:430px;margin:5px auto 0;color:var(--muted);font-size:10px}.model-proof-chart-v10{height:184px;margin-top:4px}.ai-proof-note-v12{display:flex;gap:5px;overflow:auto;margin-top:5px}.ai-proof-note-v12 span{padding:2px 5px;border:1px solid var(--border);color:var(--muted);font-size:9px;white-space:nowrap}.ai-proof-note-v12 span.fail{border-color:rgba(255,99,116,.45);color:var(--red)}.ai-proof-note-v12 span.pass{border-color:rgba(86,227,159,.4);color:var(--green)}
+    .ai-research-drawer-v12{margin-top:6px;border:1px solid var(--border);background:var(--panel)}.ai-research-drawer-v12>summary{padding:8px 10px;color:var(--cyan);font-size:11px;cursor:pointer}.ai-research-drawer-v12 .drawer-body-v12{display:grid;gap:6px;padding:0 8px 8px}.ai-research-drawer-v12 .failure-memory-v10{max-height:260px}
+    .ai-risk-progress-v13{display:grid;grid-template-columns:220px repeat(4,minmax(180px,1fr));gap:1px;margin-top:6px;border:1px solid var(--border);background:var(--border)}.ai-risk-progress-v13>header,.ai-risk-progress-v13>article{min-width:0;padding:7px 9px;background:var(--panel)}.ai-risk-progress-v13>header span,.ai-risk-progress-v13>article span,.ai-risk-progress-v13 small{display:block;color:var(--muted);font-size:9px}.ai-risk-progress-v13>header b{display:block;margin:2px 0;color:var(--cyan);font-size:12px}.ai-risk-progress-v13>article b{display:block;overflow:hidden;margin-bottom:3px;font-size:10px;text-overflow:ellipsis;white-space:nowrap}.ai-risk-progress-v13>article em{float:right;color:var(--red);font:normal 9px var(--font-mono)}
+    .ai-execution-clock-v14{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;border-bottom:1px solid var(--border);background:var(--border)}.ai-execution-clock-v14 div{padding:5px 9px;background:#07131e}.ai-execution-clock-v14 b,.ai-execution-clock-v14 small{display:block}.ai-execution-clock-v14 b{color:var(--cyan);font:650 10px var(--font-mono)}.ai-execution-clock-v14 small{color:var(--muted);font-size:9px}.ai-execution-clock-v14 .warn b{color:var(--amber)}
+    .ai-model-tracker-v14{display:grid;grid-template-columns:240px repeat(4,1fr);gap:1px;margin-top:6px;border:1px solid var(--border);background:var(--border)}.ai-model-tracker-v14>header,.ai-model-tracker-v14>article{min-width:0;padding:7px 9px;background:var(--panel)}.ai-model-tracker-v14 span,.ai-model-tracker-v14 small{display:block;color:var(--muted);font-size:9px}.ai-model-tracker-v14 b{display:block;margin:2px 0;font-size:11px}.ai-model-tracker-v14 header b{color:var(--cyan)}.ai-model-tracker-v14 .fail b{color:var(--red)}.ai-model-tracker-v14 .wait b{color:var(--amber)}.ai-model-tracker-v14 .pass b{color:var(--green)}
+    .ai-gpu-v9{display:flex;gap:8px;align-items:center;padding:7px 10px;border-left:3px solid var(--red);background:rgba(255,91,111,.06);font-size:12px}.ai-gpu-v9.ready{border-color:var(--green);background:rgba(70,220,150,.05)}.ai-gpu-v9.running{border-color:var(--amber)}.ai-gpu-v9 b{white-space:nowrap}.ai-gpu-v9 span{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-gpu-v9 time{margin-left:auto;white-space:nowrap;color:var(--muted)}
+    .failure-memory-v10{max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:7px}.failure-memory-v10 article{display:grid;grid-template-columns:125px minmax(190px,.8fr) minmax(260px,1.5fr) 70px;gap:8px;padding:7px 9px;border-bottom:1px solid var(--border);align-items:start;font-size:12px}.failure-memory-v10 article:last-child{border-bottom:0}.failure-memory-v10 time,.failure-memory-v10 small{color:var(--muted)}.failure-memory-v10 b{color:var(--red)}.failure-memory-v10 p{margin:0}.failure-memory-v10 em{font-style:normal;color:var(--amber);text-align:right}.failure-memory-v10 details{grid-column:2/5}.failure-memory-v10 summary{cursor:pointer;color:var(--cyan)}
+    .model-proof-trades-v10{max-height:220px;overflow:auto;margin-top:6px}
+    @media(max-width:1050px){.ai-result-strip-v12{grid-template-columns:repeat(3,1fr)}.ai-terminal-body-v12{grid-template-columns:1fr}.ai-order-desk-v12{border-right:0;border-bottom:1px solid var(--border)}.ai-risk-progress-v13,.ai-model-tracker-v14{grid-template-columns:repeat(2,1fr)}.ai-risk-progress-v13>header,.ai-model-tracker-v14>header{grid-column:1/-1}.ai-execution-clock-v14{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:620px){.ai-result-strip-v12{grid-template-columns:repeat(2,1fr)}.ai-terminal-body-v12{display:block}.ai-command-v12{align-items:stretch}.ai-terminal-v12>header{align-items:flex-start}.ai-terminal-v12>header div{align-items:flex-start;flex-direction:column}.ai-terminal-v12>header span{white-space:normal}.ai-order-desk-v12{overflow:auto}}
+  </style>
+</head>
+<body class="tech-body">
+{% include '_sidebar.html' %}
+<main class="tech-main after-hours-ai-main-v1">
+  {% with messages=get_flashed_messages(with_categories=true) %}
+    {% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+  {% endwith %}
+
+  <header class="tech-header ai-command-v12">
+    <div>
+      <span class="tech-kicker">盤後交易工作台／最多 3 個動作</span>
+      <h1>盤後 AI 決策</h1>
+      <p>第一屏直接回答研究成果、今天做什麼與能否使用；詳細研究資料收在下方。</p>
+    </div>
+    <form method="post" action="/ai-trading/run"><button>重新計算今日決策</button></form>
+  </header>
+
+  {% set market_closed = plan.headline.startswith('今日休市') or plan.mode.startswith('休市預覽') %}
+  <section class="tech-section ai-terminal-v12">
+    <header>
+      <div><span class="ai-live-state-v12">實盤不可用</span><b>{% if model_validation %}研究已完成，風險門檻未通過{% else %}研究結果背景載入中{% endif %}</b><span>{% if model_validation %}長期研究有超額報酬，但最大跌幅與部分市場狀態仍不合格。{% else %}正在重播已保存的模型預測，不會重新下載資料。{% endif %}</span></div>
+      <time>決策資料 {{ taipei_time(plan.decision_time).strftime('%Y-%m-%d %H:%M') if plan.decision_time else '尚無' }}</time>
+    </header>
+    <div class="ai-result-strip-v12">
+      <div class="research-verdict"><span>研究結論</span><b>{% if model_validation %}有優勢，但風險不合格{% else %}正在載入{% endif %}</b><small>{% if model_validation %}只可模擬，不可照單實盤{% else %}完成後本頁自動更新{% endif %}</small></div>
+      <div><span>多年驗證</span><b>{{ model_validation.decision_sessions if model_validation else '—' }} 日</b><small>{% if model_validation %}{{ taipei_time(model_validation.simulation_start).strftime('%Y-%m-%d') }}～{{ taipei_time(model_validation.simulation_end).strftime('%Y-%m-%d') }}{% else %}等待結果{% endif %}</small></div>
+      <div class="{{ 'positive' if model_validation and model_validation.total_return > 0 else '' }}"><span>策略扣成本報酬</span><b>{{ '%+.2f%%'|format(model_validation.total_return*100) if model_validation else '—' }}</b><small>歷史模擬，不是保證</small></div>
+      <div><span>同期持有 0050</span><b>{{ '%+.2f%%'|format(model_validation.benchmark_return*100) if model_validation and model_validation.benchmark_return is not none else '—' }}</b><small>同起訖日比較</small></div>
+      <div class="{{ 'positive' if model_validation and model_validation.excess_return and model_validation.excess_return > 0 else 'negative' }}"><span>比 0050 多／少賺</span><b>{{ '%+.2f%%'|format(model_validation.excess_return*100) if model_validation and model_validation.excess_return is not none else '—' }}</b><small>策略報酬減 0050</small></div>
+      <div class="negative"><span>{{ term('最大跌幅','資產從歷史高點跌到後續最低點的最大幅度；數字越負，曾經承受的虧損越大。') }}</span><b>{{ '%.2f%%'|format(model_validation.max_drawdown*100) if model_validation else '—' }}</b><small>目前風險不合格</small></div>
+    </div>
+    <div class="ai-execution-clock-v14">
+      <div><b>13:30｜資料定格</b><small>只使用當日收盤前後已公開資料</small></div>
+      <div><b>13:30～13:40｜模型計算</b><small>排名、股數、風險與限價一次完成</small></div>
+      <div><b>13:40～14:30｜盤後零股委託</b><small>限價申報；不是看到 14:30 成交價後才下單</small></div>
+      <div class="warn"><b>14:30｜一次集合競價</b><small>成交價與未成交必須回填，才算真正向前驗證</small></div>
+    </div>
+    <div class="ai-terminal-body-v12">
+      <div class="ai-order-desk-v12">
+        <div class="ai-desk-head-v12"><div><span>TODAY / 今日模擬委託</span><h2>{{ plan.headline }}</h2><p>{% if market_closed and plan.orders %}使用最近收盤後的有效決策，列出下個交易日待執行的模擬清單。{% elif market_closed %}休市時保留最近研究成果；下一交易日收盤後再產生新清單。{% elif plan.orders %}依優先順序最多執行 3 筆模擬委託。{% else %}沒有股票通過條件，不沿用舊訊號。{% endif %}</p></div><strong>{{ plan.orders|length }}／3 筆</strong></div>
+        {% if plan.orders %}<div class="ai-order-table-v1"><table class="ai-terminal-table-v12"><thead><tr><th>動作</th><th>公司／股票</th><th>股數</th><th>參考價／金額</th></tr></thead><tbody>{% for item in plan.orders %}{% set asset = asset_lookup.get(item.symbol) %}<tr><td><b class="{{ 'up' if item.side == 'BUY' else 'down' }}">{{ '買進' if item.side == 'BUY' else '賣出' }}</b></td><td><a class="stock-identity-v1" href="/stocks?symbol={{ item.symbol }}"><b>{{ asset.company_abbreviation or asset.company_name if asset else '公司名稱待補' }}</b><small>{{ item.symbol }} · {{ asset.sector or '產業待補' if asset else '產業待補' }}</small></a></td><td>{{ item.quantity }} 股</td><td>{{ '{:,.2f}'.format(item.reference_price) }}<small>{{ '{:,.0f}'.format(item.estimated_amount) }} 元</small></td></tr><tr class="order-reason-v14"><td colspan="4"><b>為什麼： </b>{{ item.reason }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="ai-terminal-empty-v12"><b>{{ '休市，沒有今日委託' if market_closed else '今日 0 筆操作' }}</b><p>{{ plan.headline }}。這不是系統沒有結果，而是目前快照不允許建立新委託；多年研究成績仍顯示在右側。</p></div>{% endif %}
+        <div class="ai-proof-note-v12"><span>模擬資產 {{ '{:,.0f}'.format(plan.equity) }} 元</span><span>現金 {{ '{:,.0f}'.format(plan.cash) }} 元</span><span>買 {{ plan.buy_count }}／賣 {{ plan.sell_count }}</span><span>觀察與阻擋 {{ plan.watchlist|length }} 檔</span></div>
+      </div>
+      <div class="ai-proof-desk-v12">
+        <div class="ai-desk-head-v12"><div><span>RESEARCH / 多年歷史研究</span><h2>{% if model_validation %}AI 模型與 0050 資金曲線{% else %}研究結果正在背景建立{% endif %}</h2><p>{% if model_validation %}{{ model_validation.simulated_orders }} 筆模擬成交；成交基準：{{ model_validation.execution_assumption }}。{% else %}頁面可先看今日結論，研究完成後會自動更新。{% endif %}</p></div><strong>{% if model_validation %}{{ model_validation.status }}{% else %}{{ model_validation_state.status }}{% endif %}</strong></div>
+        {% if model_validation %}<div id="modelProofChart" class="model-proof-chart-v10" aria-label="AI 模型與 0050 長期資金曲線"></div><div class="ai-proof-note-v12">{% for item in model_validation.regime_results %}<span class="{{ 'pass' if item.passed else 'fail' }}">{{ item.label }} {{ '通過' if item.passed else '未通過' }} {{ '%+.1f%%'|format(item.excess_return*100) }}</span>{% endfor %}</div>{% else %}<div class="ai-terminal-empty-v12"><b>{{ model_validation_state.status }}</b><p>{{ model_validation_state.error or '正在讀取既有預測與行情；這項工作完成後才顯示長期績效。' }}</p></div>{% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="ai-model-tracker-v14">
+    {% if model_tracking %}
+    <header><span>MODEL VALIDATION / 模型鎖版追蹤</span><b>{{ model_tracking.name }} v{{ model_tracking.version }}／實驗 {{ model_tracking.id }}</b><small>完成 {{ taipei_time(model_tracking.completed_at).strftime('%Y-%m-%d %H:%M') }}；完成後的資料才算向前驗證</small></header>
+    <article class="{{ 'pass' if model_tracking.history_ready else 'fail' }}"><span>歷史門檻</span><b>{{ '通過' if model_tracking.history_ready else '未通過' }}</b><small>目前回撤與熊市表現仍阻擋使用</small></article>
+    <article class="wait"><span>獨立向前追蹤</span><b>{{ model_tracking.tracked_sessions }}／{{ model_tracking.target_sessions }} 日</b><small>{{ model_tracking.paper_orders }} 委託／{{ model_tracking.paper_fills }} 成交；仍少 {{ model_tracking.remaining_sessions }} 日</small></article>
+    <article class="wait"><span>過度擬合風險</span><b>{{ model_tracking.overfitting_risk }}</b><small>同段歷史反覆調參；向前資料不可回頭改模型</small></article>
+    <article class="{{ 'pass' if model_tracking.usable else 'fail' }}"><span>允許使用</span><b>{{ '可以' if model_tracking.usable else '不可以' }}</b><small>最早約 {{ taipei_time(model_tracking.estimated_minimum_end).strftime('%Y-%m-%d') }}；穩健目標 504 日</small></article>
+    {% else %}<header><b>尚無可追蹤模型版本</b><small>模型成功保存後，系統才開始計算獨立向前績效。</small></header>{% endif %}
+  </section>
+
+  <details class="ai-research-drawer-v12"><summary>展開研究稽核：GPU 結果、歷史交易、失敗案例記憶：{{ failure_cases|length }} 筆</summary><div class="drawer-body-v12">
+    <div class="ai-gpu-v9 {{ gpu_research.state }}"><b>GPU 深度學習｜{{ gpu_research.headline }}</b><span title="{{ gpu_research.detail }}">{{ gpu_research.detail }}</span>{% if gpu_research.time %}<time>{{ taipei_time(gpu_research.time).strftime('%m-%d %H:%M') }}</time>{% endif %}</div>
+    {% if model_validation %}<details><summary>模型歷史交易明細（顯示最近 100／共 {{ model_validation.simulated_orders }} 筆成交）</summary><div class="model-proof-trades-v10 ai-order-table-v1"><table><thead><tr><th>日期</th><th>股票</th><th>動作</th><th>股數</th><th>價格</th><th>成本</th><th>原因</th></tr></thead><tbody>{% for item in model_validation.trades[:100] %}<tr><td>{{ taipei_time(item.event_time).strftime('%Y-%m-%d') }}</td><td>{{ item.symbol }}</td><td>{{ '買進' if item.side == 'BUY' else '賣出' }}</td><td>{{ '{:,}'.format(item.quantity) }}</td><td>{{ '{:,.2f}'.format(item.price) }}</td><td>{{ '{:,.0f}'.format(item.cost) }}</td><td>{{ item.reason }}</td></tr>{% endfor %}</tbody></table></div></details>{% endif %}
+    <details><summary>失敗案例記憶（{{ failure_cases|length }} 筆）</summary><div class="failure-memory-v10">{% for item in failure_cases %}<article><time>{{ taipei_time(item.case.last_occurred_at).strftime('%Y-%m-%d %H:%M') }}<small>{{ item.case.module }}</small></time><b>{{ item.case.title }}{% if item.case.status == 'resolved' %}（已解決）{% endif %}</b><p>{{ item.case.cause }}<br><small>修正：{{ item.case.correction }}</small></p><em>{% if item.case.status == 'resolved' %}已驗證修正{% elif item.case.repeat_count > 1 %}重複 {{ item.case.repeat_count }} 次{% else %}待修正{% endif %}</em><details><summary>查看證據</summary><code>{{ item.evidence|tojson }}</code>{% if item.case.verification %}<p>驗證：{{ item.case.verification }}</p>{% endif %}</details></article>{% else %}<article><b>尚無失敗案例</b></article>{% endfor %}</div></details>
+  </div></details>
+
+  <section class="ai-risk-progress-v13">
+    <header><span>LATEST RESEARCH / 最新風控研究</span><b>{{ risk_research_trials|length }} 條路線已驗證</b><small>目前 0 條升級；現有 Ridge 主線維持不變</small></header>
+    {% for item in risk_research_trials %}<article title="{{ item.correction }}"><em>{{ item.status }}</em><b>{{ item.title }}</b><span>{% if item.return is not none %}報酬 {{ '%+.2f%%'|format(item.return*100) }}{% else %}沒有有效成績{% endif %}{% if item.excess is not none %} · 超額 {{ '%+.2f%%'|format(item.excess*100) }}{% endif %}</span><small>{% if item.drawdown is not none %}最大跌幅 {{ '%.2f%%'|format(item.drawdown*100) }} · {% endif %}下一步：{{ item.correction }}</small></article>{% else %}<article><b>尚無風控比較</b><small>新研究完成後會保留在這裡。</small></article>{% endfor %}
+  </section>
+
+  <section class="tech-section ai-plan-grid-v1">
+    <article>
+      <div class="section-head"><div><span>為什麼沒有下單</span><h2>觀察與阻擋清單</h2></div></div>
+      <div class="ai-watchlist-v1">
+      {% for item in plan.watchlist %}
+        {% set asset = asset_lookup.get(item.symbol) %}
+        <a href="/stocks?symbol={{ item.symbol }}">
+          <div><b>{{ asset.company_abbreviation or asset.company_name if asset else '公司名稱待補' }}</b><span class="decision-tag-v1 {{ item.status }}">{{ item.status }}</span></div>
+          <small>{{ item.symbol }} · {{ asset.sector or '產業待補' if asset else '產業待補' }}</small>
+          <p>分數 {{ '%.2f'|format(item.score) }}／五日預估 {{ '%+.2f%%'|format((item.predicted_return_5d or 0)*100) }}／權重 {{ '%.1f%%'|format(item.suggested_weight*100) }}</p>
+          <small>{{ item.blocker }}</small>
+        </a>
+      {% else %}<p>目前沒有被阻擋的標的。</p>{% endfor %}
+      </div>
+    </article>
+
+    <article>
+      <div class="section-head"><div><span>不可繞過</span><h2>安全與成交規則</h2></div></div>
+      <ol class="ai-rules-v1">{% for item in plan.hard_rules %}<li>{{ item }}</li>{% endfor %}</ol>
+      <div class="ai-flow-v1">
+        <b>每日資料更新</b><i>→</i><b>模型預測</b><i>→</i><b>研究閘門</b><i>→</i><b>股數最佳化</b><i>→</i><b>模擬草稿</b>
+      </div>
+      <p class="ai-note-v1">「讓報酬最大化」在系統內實作為扣除交易成本後的風險調整報酬；最大回撤、單股集中、現金與未成交風險會優先限制部位。</p>
+    </article>
+  </section>
+
+  <section id="validation" class="tech-section ai-validation-v2">
+    <div class="section-head">
+      <div><span>先看一句話答案</span><h2>歷史研究結論：{{ validation.status }}</h2></div>
+      <p>這裡比較的是「{{ validation.strategy_name }}」與同期 0050；它是研究室裡的配置策略，不是假裝成今天盤後委託的真實績效。</p>
+    </div>
+    <div class="ai-validation-alert-v2 {{ 'unsafe' if validation.status in ['未驗證','驗證不一致'] else 'review' }}">
+      <b>{{ validation.conclusion }}</b>
+      <span>模擬期間：{{ taipei_time(validation.simulation_start).strftime('%Y-%m-%d') if validation.simulation_start else '尚無' }} ～ {{ taipei_time(validation.simulation_end).strftime('%Y-%m-%d') if validation.simulation_end else '尚無' }}</span>
+    </div>
+    <div class="ai-validation-alert-v2 unsafe">
+      <b>目前唯一採用的答案：{{ '%+.2f%%'|format(validation.total_return*100) }}；同期 0050 是 {{ '%+.2f%%'|format(validation.benchmark_return*100) if validation.benchmark_return is not none else '無資料' }}</b>
+      <span>舊版 +48.13% 的算法把「分配給各股票策略的權重」誤當成「直接買股票的持股比例」，算的是另一套交易，已作廢且不再列入績效。</span>
+    </div>
+    <div class="ai-validation-kpis-v2">
+      <article><span>{{ term('可驗證決策日','當天的決策已保存，而且後面已有下一個交易日行情，才能重播成交與計算損益。') }}</span><b>{{ validation.decision_sessions }}／60</b><small>{% if validation_days_short %}距初步判讀仍少 {{ validation_days_short }} 日{% else %}已達初步判讀日數{% endif %}</small></article>
+      <article><span>參與股票策略</span><b>{{ validation.decision_symbols }}</b><small>不是只有少數股票的八天紀錄</small></article>
+      <article><span>研究策略報酬</span><b class="{{ 'up' if validation.total_return > 0 else 'down' if validation.total_return < 0 else '' }}">{{ '%+.2f%%'|format(validation.total_return*100) }}</b><small>研究引擎保存的正式結果</small></article>
+      <article><span>0050 同期</span><b>{{ '%+.2f%%'|format(validation.benchmark_return*100) if validation.benchmark_return is not none else '樣本不足' }}</b><small>不是存款利率比較</small></article>
+      <article><span>比 0050 多／少賺</span><b class="{{ 'up' if validation.excess_return and validation.excess_return > 0 else 'down' }}">{{ '%+.2f%%'|format(validation.excess_return*100) if validation.excess_return is not none else '無法計算' }}</b><small>負數就是跑輸大盤</small></article>
+      <article><span>{{ term('最大回撤','資產從某個歷史高點跌到後續最低點的最大跌幅；例如 100 萬跌到 90 萬就是 -10%。') }}</span><b class="down">{{ '%.2f%%'|format(validation.max_drawdown*100) }}</b><small>歷史高點至低點</small></article>
+      <article><span>{{ term('換手率','一段期間內買賣金額相對資產的比例。100% 約等於把整個投資組合換過一次；越高通常成本越高。') }}</span><b>{{ '%.1f%%'|format(validation.turnover*100) }}</b><small>成交金額／初始資金</small></article>
+      <article><span>真實模擬成交</span><b>{{ validation.paper_fills }}</b><small>{{ validation.paper_orders }} 筆委託；帳戶 {{ '%+.2f%%'|format(validation.paper_return*100) }}</small></article>
+    </div>
+    <div class="ai-regime-gates-v40">
+      {% for item in validation.regime_results %}<article class="{{ 'pass' if item.passed else 'fail' }}"><span>{{ item.label }}／{{ item.session_count }} 日</span><b>{{ '通過' if item.passed else '未通過' }}</b><small>策略 {{ '%+.2f%%'|format(item.strategy_return*100) }}／0050 {{ '%+.2f%%'|format(item.benchmark_return*100) }}／超額 {{ '%+.2f%%'|format(item.excess_return*100) }}</small></article>{% else %}<article class="fail"><span>市場狀態驗證</span><b>資料不足</b><small>尚無法同時驗證牛市、熊市、盤整與高波動。</small></article>{% endfor %}
+    </div>
+    {% if validation_chart %}
+    <div id="afterHoursEquityChart" class="ai-equity-chart-v2" aria-label="盤後 AI 歷史模擬資金曲線"></div>
+    {% else %}
+    <div class="ai-empty-proof-v2">沒有足夠的歷史決策可以畫出資金曲線。這代表尚未驗證，不代表報酬為零或策略安全。</div>
+    {% endif %}
+  </section>
+
+  <section class="tech-section ai-strategy-management-v5">
+    <div class="section-head">
+      <div><span>全部放在同一頁比較</span><h2>盤後策略比較與管理</h2></div>
+      <p>{{ term('統計配置','用歷史報酬、波動、相關性和風險公式決定資金比例，本身不會學習複雜非線性規律。') }}決定資金怎麼分；{{ term('機器學習','讓演算法從價格、籌碼、財報與總經特徵學習預測規律；必須用模型沒看過的期間驗證。') }}預測股票相對強弱。兩者用途不同，不能把模型分數冒充投資報酬。</p>
+    </div>
+    <div class="ai-order-table-v1">
+      <table>
+        <thead><tr><th>策略</th><th>用了什麼</th><th>{{ term('狀態','研究中＝尚未通過門檻；可候選＝通過歷史門檻但仍需向前模擬與人工審查。') }}</th><th>策略報酬</th><th>0050</th><th>多／少賺</th><th>{{ term('最大跌幅','也稱最大回撤，衡量途中最慘曾經跌多少。') }}</th><th>{{ term('交易頻率','此處用換手率表示；越高代表買賣越頻繁，成本和滑價風險越高。') }}</th><th>測試日數</th></tr></thead>
+        <tbody>{% for item in strategy_rows %}
+          <tr><td><a href="/portfolios?run={{ item.id }}"><b>{{ item.name }}</b><small>v{{ item.version }}</small></a></td><td>{{ item.method }}</td><td><b>{{ item.status }}</b><small>{{ item.status_detail }}</small></td><td>{{ '%+.2f%%'|format(item.return*100) }}</td><td>{{ '%+.2f%%'|format(item.benchmark*100) }}</td><td class="{{ 'up' if item.excess > 0 else 'down' }}">{{ '%+.2f%%'|format(item.excess*100) }}</td><td class="down">{{ '%.2f%%'|format(item.drawdown*100) }}</td><td>{{ '%.0f%%'|format(item.turnover*100) }}</td><td>{{ item.observations }}</td></tr>
+        {% else %}<tr><td colspan="9">尚無可比較的策略。</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+    <div class="ai-status-explainer-v6">
+      <article>
+        <b>「研究中」接下來會怎樣？</b>
+        <p>結果會保存，但不准升級成候選策略。系統會繼續補資料、重跑訓練與回測並建立新版本；只有樣本外至少 252 個交易日、扣成本後贏過 0050、回撤與資料品質都合格，才會改成「可候選」。可候選仍只能先做向前模擬，不會自動連券商下真單。</p>
+      </article>
+      <article>
+        <b>每日向前決策仍不是一年</b>
+        <p>{{ validation.decision_sessions }} 個交易日約為 {{ '%.1f'|format(validation.decision_sessions / 21) }} 個月，模擬期間 {{ taipei_time(validation.simulation_start).strftime('%Y-%m-%d') if validation.simulation_start else '尚無' }} ～ {{ taipei_time(validation.simulation_end).strftime('%Y-%m-%d') if validation.simulation_end else '尚無' }}。252 是最低研究門檻，不代表目前已達標。</p>
+      </article>
+    </div>
+    <div class="ai-validation-alert-v2 {{ 'review' if model_validation else 'unsafe' }}">
+      {% if model_validation %}<b>AI 選股歷史重播已接通，但結果仍未通過使用門檻。</b>
+      <span>已保存並重播 {{ model_validation.decision_sessions }} 個樣本外交易日、{{ model_validation.simulated_orders }} 筆買賣；扣成本後 {{ '%+.2f%%'|format(model_validation.total_return*100) }}，同期 0050 {{ '%+.2f%%'|format(model_validation.benchmark_return*100) }}。目前阻擋原因直接列在本頁最上方，不會再用 11 天每日紀錄取代多年模型驗證。</span>
+      {% else %}<b>AI 選股歷史重播正在背景計算。</b><span>歷史樣本外預測已保存；完成後會以後一交易日價格、滑價、手續費與交易稅重播，並和每日向前紀錄分開顯示。</span>{% endif %}
+    </div>
+    <div class="ai-model-methods-v5">
+      {% for item in model_rows %}<a href="/models?run={{ item.id }}"><b>{{ item.name }}</b><span>{{ item.method }}</span><small>{{ item.status }} · 完成 {{ taipei_time(item.updated_at).strftime('%Y-%m-%d %H:%M') }} · 方向答對 {{ '%.1f%%'|format(item.direction*100) }} · {{ term('排名 IC','Rank Information Coefficient；模型預測排名與後來實際報酬排名的相關性。接近 0 代表幾乎沒有排序能力，正值越大越好。') }} {{ '%.3f'|format(item.rank_ic or 0) }}</small></a>{% endfor %}
+    </div>
+    <div class="ai-funding-explainer-v6">
+      <div>
+        <h3>目前資金怎麼選股票</h3>
+        <p>「大盤核心＋主動選股」先依 0050 的 20／60 日趨勢，保留 {{ '%.0f%%'|format(benchmark_core_weight*100) }} 大盤核心；剩餘資金每 21 個交易日重排一次。主動部分看的不是單純「這支股票最近有沒有漲贏大盤」，而是該股票策略過去的超額報酬除以追蹤誤差，並受單股與產業上限約束。</p>
+        <p class="ai-note-v1">所以一支股票即使價格曾跑贏 0050，也可能因模型訊號轉弱、主動報酬不穩、波動過大、產業過度集中或資料過期而沒有持續持有。這也暴露目前缺口：尚未有獨立的「個股相對強勢能否延續」機器學習組合回測，不能把統計配置說成完整 AI 選股。</p>
+      </div>
+      <div class="ai-current-allocations-v6">
+        <h3>最新主動配置</h3>
+        {% for item in selected_allocations[:12] %}
+          <a href="/stocks?symbol={{ item.symbol }}"><span><b>{{ item.company }}</b><small>{{ item.symbol }} · {{ item.sector }}</small></span><em>{{ '%.1f%%'|format(item.weight*100) }}</em></a>
+        {% else %}<p>目前沒有主動配置。</p>{% endfor %}
+      </div>
+    </div>
+    <div class="ai-rebalance-history-v7">
+      <h3>策略歷史調倉紀錄（回測）</h3>
+      <p>這是資金曲線真正使用的歷史權重變化，不是今天送進券商的成交。增加／減少代表該次再平衡把目標權重調高或調低。</p>
+      <div class="ai-order-table-v1"><table>
+        <thead><tr><th>日期</th><th>主要調整</th><th>換手率</th><th>成本</th><th>現金</th></tr></thead>
+        <tbody>{% for item in strategy_rebalances %}
+          <tr>
+            <td>{{ taipei_time(item.time).strftime('%Y-%m-%d') }}</td>
+            <td>{% for change in item.changes[:8] %}<span class="rebalance-chip-v7 {{ 'up' if change.delta > 0 else 'down' }}">{{ change.company }} {{ change.side }} {{ '%+.1f%%'|format(change.delta*100) }}（{{ '%.1f%%'|format(change.before*100) }}→{{ '%.1f%%'|format(change.after*100) }}）</span>{% endfor %}</td>
+            <td>{{ '%.1f%%'|format(item.turnover*100) }}</td>
+            <td>{{ '%.3f%%'|format(item.cost*100) }}</td>
+            <td>{{ '%.1f%%'|format(item.cash*100) }}</td>
+          </tr>
+        {% else %}<tr><td colspan="5">這個策略沒有保存調倉權重，不能宣稱已有交易歷程。</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </div>
+    <div class="ai-strategy-change-log-v5">
+      <h3>策略為什麼改、改完有沒有比較好</h3>
+      {% for item in strategy_change_log %}<article><time>{{ item.date }}</time><b>v{{ item.version }} · {{ item.change }}</b><p>{{ item.reason }}</p><small>{{ item.result }}</small></article>{% endfor %}
+    </div>
+    <details class="ai-strategy-history-v5"><summary>查看最近 30 筆策略更新紀錄</summary>
+      {% for item in strategy_history %}<a href="/portfolios?run={{ item.id }}"><time>{{ taipei_time(item.time).strftime('%Y-%m-%d %H:%M') }}</time><b>{{ item.name }}</b><span>v{{ item.version }} · {{ item.status }}</span><em>{{ '%+.2f%%'|format(item.return*100) }}；0050 {{ '%+.2f%%'|format(item.benchmark*100) }}</em></a>{% endfor %}
+    </details>
+  </section>
+
+  <section id="odd-lot" class="tech-section ai-oddlot-integrated-v6">
+    <div class="section-head">
+      <div><span>盤後 AI 的執行方式</span><h2>盤後零股投入研究（已整合）</h2></div>
+      <p>上面的 AI 決定「選什麼、配置多少」；這裡研究「每月投入多少、零股成本會不會吃掉報酬」。兩者共用同一個模擬帳戶與成本設定。</p>
+    </div>
+    <form class="oddlot-form-v19" method="get" action="/ai-trading#odd-lot">
+      <label>每月投入<input type="number" name="budget" min="1000" step="1000" value="{{ odd_lot.assumptions.monthly_budget }}"></label>
+      <label>薪資日<input type="number" name="salary_day" min="1" max="28" value="{{ odd_lot.assumptions.salary_day }}"></label>
+      <label>{{ term('手續費折數','券商牌告手續費的折扣，例如 0.28 代表約 2.8 折。') }}<input type="number" name="discount" min="0.01" max="1" step="0.01" value="{{ odd_lot.assumptions.commission_discount }}"></label>
+      <label>最低手續費<input type="number" name="minimum_fee" min="0" value="{{ odd_lot.assumptions.minimum_fee }}"></label>
+      <label>{{ term('滑價 bps','bps 是基點，1 bps＝0.01%。10 bps＝0.1%，用來估計理論價格和實際成交價格的差。') }}<input type="number" name="slippage_bps" min="0" step="1" value="{{ odd_lot.assumptions.slippage_bps }}"></label>
+      <button>重新計算零股策略</button>
+    </form>
+    <div class="oddlot-kpis-v19">
+      <article><span>研究期間</span><b>{{ odd_lot.data_start or '—' }}</b><small>至 {{ odd_lot.data_end or '—' }} · {{ odd_lot.observation_count }} 個交易日</small></article>
+      <article><span>固定買 0050 年化報酬</span><b>{{ '%.2f%%'|format(odd_lot.benchmark_annualized_return*100) }}</b><small>同薪資日、同預算、同成本</small></article>
+      <article><span>目前最佳規則</span><b>{{ odd_lot.best_strategy.strategy if odd_lot.best_strategy else '沒有通過門檻' }}</b><small>沒有通過就維持固定投入基準</small></article>
+      <article><span>資料狀態</span><b>{{ '初步足夠' if odd_lot.research_ready else '仍不足' }}</b><small>{{ odd_lot.quality_notes|join('；') }}</small></article>
+    </div>
+    {% if odd_lot.results %}<div class="ai-order-table-v1"><table>
+      <thead><tr><th>每月投入規則</th><th>做法</th><th>年化報酬</th><th>比固定買 0050</th><th>累積損益</th><th>最大跌幅</th><th>最近投入</th></tr></thead>
+      <tbody>{% for item in odd_lot.results %}<tr><td><b>{{ item.strategy }}</b></td><td>{{ item.description }}</td><td>{{ '%.2f%%'|format(item.annualized_return*100) }}</td><td class="{{ 'up' if item.excess_annualized_return > 0 else 'down' }}">{{ '%+.2f%%'|format(item.excess_annualized_return*100) }}</td><td>{{ '{:+,.0f}'.format(item.profit) }}</td><td class="down">{{ '%.2f%%'|format(item.max_drawdown*100) }}</td><td>{{ item.latest_allocation }}</td></tr>{% endfor %}</tbody>
+    </table></div>{% endif %}
+  </section>
+
+  <section class="tech-section ai-strategy-v2">
+    <div class="section-head">
+      <div><span>實際程式正在做什麼</span><h2>交易策略與資金配置</h2></div>
+      <p>不是請語言模型臨場猜股票，而是把每日模型訊號轉成受限的組合委託。</p>
+    </div>
+    <div class="ai-strategy-grid-v2">
+      <article><i>01</i><h3>股票橫向排序</h3><p>只選「候選」、五日預估報酬為正且資料品質無阻擋的股票。排序分數＝五日預估報酬－0.5×預測分歧＋0.05×綜合分數。</p></article>
+      <article><i>02</i><h3>目標股數</h3><p>模型建議權重換算成股數；單股最多 20%，全帳戶總曝險最多 80%，不能超過可用現金。</p></article>
+      <article><i>03</i><h3>成交假設</h3><p>正式目標是 13:40～14:30 盤後零股限價委託、14:30 一次撮合。沒有實際 14:30 歷史價時，只能用 13:30 收盤價加 10 bps 滑價做代理，並明確標示為代理結果。</p></article>
+      <article><i>04</i><h3>退出規則</h3><p>持股決策變成「避免」或「資料不足」時，在當日盤後零股時段提出退出草稿；未取得 14:30 成交回報就維持待成交，不假裝已賣出。</p></article>
+      <article><i>05</i><h3>風險優先</h3><p>先處理退出，再配置新買單。沒有標的通過閘門時持有現金，不為了每天交易而硬選股票。</p></article>
+      <article><i>06</i><h3>晉級門檻</h3><p>少於 60 個決策日或 20 筆模擬委託一律標成未驗證；未證明扣成本後優於 0050 就不能接真實券商。</p></article>
+    </div>
+  </section>
+
+  <section class="tech-section ai-data-lineage-v1">
+    <div class="section-head">
+      <div><span>資料不是抓到就算有用</span><h2>資料 → 模組 → 買賣決策血緣</h2></div>
+      <p>只有真正進入特徵、時間序列驗證、投資組合與股數計算的資料才能標示「已接通」；獨立頁面有資料但模型沒使用時，明確標成「未接模型」。</p>
+    </div>
+    <div class="ai-order-table-v1">
+      <table>
+        <thead><tr><th>資料域</th><th>蒐集模組</th><th>保存位置</th><th>使用模組</th><th>如何影響買賣</th><th>狀態</th></tr></thead>
+        <tbody>
+        {% for domain, collector, storage, consumers, impact, state in data_lineage %}
+          <tr>
+            <td><b>{{ domain }}</b></td>
+            <td>{{ collector }}</td>
+            <td><code>{{ storage }}</code></td>
+            <td>{{ consumers }}</td>
+            <td>{{ impact }}</td>
+            <td><span class="lineage-state-v1 {{ 'ready' if state == '已接通' else 'blocked' if state in ['未接模型','資料不完整'] else 'partial' }}">{{ state }}</span></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="ai-validation-alert-v2 unsafe">
+      <b>目前不能宣稱「全部資料已用於 AI」</b>
+      <span>新聞、法說與完整產業鏈仍未正式接入模型；盤後零股、公司行動與短歷史新股目前只有部分流程。這些缺口補完並通過 point-in-time 回測前，不得標示為完成。</span>
+    </div>
+  </section>
+
+  <section class="tech-section ai-training-roadmap-v4">
+    <div class="section-head">
+      <div><span>完成不是只有模型檔案</span><h2>訓練方法與完成門檻</h2></div>
+      <p>歷史回測只能回答「照這套規則重播過去會怎樣」，不能代替真實時間觀察。真正可靠前，還要從今天開始每天記錄它實際會下什麼單、後來賺或賠多少。</p>
+    </div>
+    <div class="ai-training-steps-v4">
+      <article class="{{ 'done' if expansion.registered_assets >= 100 else 'running' }}"><i>01</i><h3>前 100 大資料池</h3><b>{{ expansion.registered_assets }}／100</b><p>官方市值排序；成熟股、新上市股分層保留，再補日線、財報、月營收、法人、融資融券、借券與事件資料。</p><small>{{ '代號與行情完成' if expansion.registered_assets >= 100 else '進行中' }}</small></article>
+      <article class="{{ 'done' if expansion.data_ready_assets >= 500 else 'blocked' }}"><i>02</i><h3>擴到前 500 大</h3><b>{{ expansion.data_ready_assets }}／500</b><p>先確保前 100 大穩定，再擴大橫斷面；下市股與歷史成員仍保留，避免存活者偏差。</p><small>{{ '完成' if expansion.data_ready_assets >= 500 else '等待前 100 大' }}</small></article>
+      <article class="{{ 'running' if model_validation else 'blocked' }}"><i>03</i><h3>{{ term('Walk-forward 樣本外回測','把時間切成多段：每次只用當時以前的資料訓練，再預測下一段；時間往前移動後重新訓練。這可避免模型看到未來資料。') }}</h3><b>{% if model_validation %}{{ model_validation.decision_sessions }} 個交易日{% else %}背景建立中{% endif %}</b><p>每次只用較早資料訓練，再驗證下一段未參與調整的歷史資料；比較統計、線性與 GPU 深度學習模型。</p><small>{{ '已產生成績，但風險與歷史股票池門檻未通過' if model_validation else '目標：至少 100 檔、5 年資料' }}</small></article>
+      <article class="{{ 'running' if validation.decision_sessions else 'blocked' }}"><i>04</i><h3>舊版每日決策重播</h3><b>{{ validation.decision_sessions }} 個決策日</b><p>目前這條紀錄仍採下一開盤成交，只能診斷決策邏輯，不能當作盤後零股成交證據。</p><small>盤後零股版本需另用 14:30 價格重播</small></article>
+      <article class="{{ 'running' if model_tracking and model_tracking.tracked_sessions else 'blocked' }}"><i>05</i><h3>鎖版後向前模擬</h3><b>{{ model_tracking.tracked_sessions if model_tracking else 0 }}／252 日</b><p>每日只用 13:30 已知資料產生限價草稿，14:30 後保存成交或未成交；不准拿後來資料回頭改當天答案。</p><small>最少 252 交易日、20 筆成交且扣成本贏 0050</small></article>
+      <article class="blocked"><i>06</i><h3>真實交易審查</h3><b>硬性關閉</b><p>只有扣成本後穩定優於基準、回撤與資料漂移合格，再經人工核准及券商沙盒驗收；系統不保證報酬最大化。</p><small>目前禁止真實下單</small></article>
+    </div>
+    <div class="ai-completion-estimate-v4">
+      <b>預估時程（資料來源正常時）</b>
+      <span>前 100 大研究版：1～2 天；前 500 大：5～10 天；具備向前模擬晉級證據：最早約 60 個交易日。來源限流或資料品質不合格會延後，頁面進度以實際入庫筆數為準。</span>
+    </div>
+  </section>
+
+  <section class="tech-section ai-universe-proof-v2">
+    <div class="section-head">
+      <div><span>資金輪動的前提</span><h2>股票池覆蓋不是少數幾檔就算完成</h2></div>
+      <p>知道市場上有這家公司，不代表我們已經抓齊它的價格、財報和籌碼資料。下面直接分開顯示兩個數量。</p>
+    </div>
+    <div class="ai-universe-kpis-v2">
+      <article><span>目前上市櫃普通代號</span><b>{{ '{:,}'.format(expansion.eligible_common_stocks) }}</b><small>歷史股票池在今日仍有效</small></article>
+      <article><span>研究池已啟用</span><b>{{ expansion.registered_assets }}</b><small>股票與 ETF，不含指數</small></article>
+      <article><span>成熟樣本 ≥252 日</span><b>{{ expansion.data_ready_assets }}／{{ expansion.target_ready_assets }}</b><small>完整技術模型與長期回測</small></article>
+      <article><span>短歷史 60～251 日</span><b>{{ expansion.short_history_assets }}</b><small>短週期、產業、基本面與事件模型</small></article>
+      <article><span>新上市 20～59 日</span><b>{{ expansion.new_listing_assets }}</b><small>事件與流動性模型；限制部位</small></article>
+      <article><span>今日決策有覆蓋</span><b>{{ expansion.decision_covered_assets }}</b><small>實際能參與資金輪動的數量</small></article>
+    </div>
+    <div class="ai-database-status-v6">
+      <b>資料庫尚未建完，現在不能標示完成。</b>
+      <span>已發現普通股 {{ '{:,}'.format(expansion.eligible_common_stocks) }} 檔；研究池 {{ expansion.registered_assets }} 檔；具 252 日價格 {{ expansion.data_ready_assets }} 檔；今日 AI 決策覆蓋 {{ expansion.decision_covered_assets }} 檔；目前投資組合歷史回測只覆蓋 {{ validation.decision_symbols }} 檔。新聞、法說、完整產業鏈及歷史成分股資料仍是部分接通或未接模型。</span>
+    </div>
+    <div class="ai-expansion-progress-v3">
+      <div><b>{{ expansion.status }}</b><span>常駐背景工作每 10 分鐘檢查一次，有缺口才建立最多 {{ expansion.daily_batch_size }} 檔的下載任務；沒有工作時不寫入「0 檔成功」。距目前 {{ expansion.target_ready_assets }} 檔目標還差 {{ backfill_remaining }} 檔，約 {{ backfill_batches }} 批。全市場仍有 {{ '{:,}'.format(expansion.remaining_assets) }} 檔等待後續擴充。排序依據：{{ expansion.selection_basis }}。</span></div>
+      <progress max="{{ expansion.target_ready_assets }}" value="{{ expansion.data_ready_assets }}"></progress>
+      <p>下一批：
+        {% for symbol in expansion.next_symbols %}
+          {% set asset = asset_lookup.get(symbol) %}<span class="ai-next-symbol-v1"><b>{{ asset.company_abbreviation or asset.company_name if asset else '公司名稱待補' }}</b><small>{{ symbol }} · {{ asset.sector or '產業待補' if asset else '產業待補' }}</small></span>
+        {% else %}第一階段已完成{% endfor %}
+      </p>
+      <form method="post" action="/ai-trading/expand-universe">
+        <input type="hidden" name="batch_size" value="20">
+        <input type="hidden" name="prices_only" value="true">
+        <button>立即建立下一批 20 檔價格樣本</button>
+      </form>
+    </div>
+    <div class="ai-expansion-runs-v7">
+      <div class="section-head"><div><span>INGESTION RUNS</span><h3>最近補資料批次</h3></div><a href="/database">查看完整資料庫 →</a></div>
+      {% for run in expansion_runs %}
+      <article class="{{ run.status }}">
+        <div><time>{{ taipei_time(run.started_at).strftime('%Y-%m-%d %H:%M:%S') }}</time><b>{{ {'succeeded':'成功','partial':'部分成功','failed':'失敗','running':'執行中'}.get(run.status,run.status) }}</b></div>
+        <p>嘗試 {{ run.attempted }} 檔 · 保留 {{ run.kept_active }} 檔 · 新增 {{ '{:,}'.format(run.inserted_bars) }} 根日線</p>
+        {% if run.symbols %}<small>代號：{{ run.symbols|join('、') }}</small>{% endif %}
+        {% if run.failures %}<details><summary>查看 {{ run.failures|length }} 個失敗／警告</summary>{% for failure in run.failures %}<span>{{ failure }}</span>{% endfor %}</details>{% endif %}
+      </article>
+      {% else %}<p class="ai-note-v1">尚無可稽核的補資料批次；新版開始後每次手動與每日批次都會保留紀錄。</p>{% endfor %}
+    </div>
+    <div class="ai-validation-alert-v2 unsafe">
+      <b>目前還不是全市場策略。</b>
+      <span>有一年以上價格的公司可使用完整模型；資料不到一年的新公司不會被刪掉，而是改用較少資料也能計算的產業、財報、事件和流動性方法，並限制部位。完全沒行情時才不能計算。</span>
+    </div>
+    <a class="ai-inline-link-v2" href="/universe">查看股票池與歷史成員資料 →</a>
+  </section>
+
+  <section class="tech-section ai-history-v2">
+    <div class="section-head">
+      <div><span>真正送進模擬帳戶的紀錄</span><h2>模擬交易歷程</h2></div>
+      <p>下表不是回測推估；只有實際建立過的模擬委託與成交才會出現在這裡。</p>
+    </div>
+    <div class="ai-order-table-v1">
+      <table>
+        <thead><tr><th>送單時間</th><th>公司／股票</th><th>方向</th><th>股數</th><th>參考價</th><th>狀態</th><th>拒絕原因</th></tr></thead>
+        <tbody>
+        {% for item in paper.orders %}
+          {% set asset = asset_lookup.get(item.symbol) %}
+          <tr><td>{{ taipei_time(item.submitted_at).strftime('%Y-%m-%d %H:%M') }}</td><td><span class="stock-identity-v1"><b>{{ asset.company_abbreviation or asset.company_name if asset else '公司名稱待補' }}</b><small>{{ item.symbol }} · {{ asset.sector or '產業待補' if asset else '產業待補' }}</small></span></td><td>{{ '買進' if item.side == 'BUY' else '賣出' }}</td><td>{{ '{:,}'.format(item.quantity) }} 股</td><td>{{ '{:,.2f}'.format(item.estimated_price) }}</td><td>{{ {'pending':'待成交','filled':'已成交','cancelled':'已取消','rejected':'風控拒絕'}.get(item.status.value,item.status.value) }}</td><td>{{ item.rejection_reason or '—' }}</td></tr>
+        {% else %}
+          <tr><td colspan="7"><div class="ai-no-trade-v1"><b>0 筆模擬委託、0 筆成交</b><p>目前沒有實盤式模擬歷程，因此不能展示勝率、實現損益或宣稱有效益。</p></div></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="ai-history-links-v2"><a href="/paper-trading">開啟完整模擬帳戶</a><a href="/shadow-trading">查看獨立的影子交易研究</a><a href="/backtests">查看單股 Walk-forward 回測</a></div>
+  </section>
+
+  <section class="tech-section ai-sim-trades-v2">
+    <div class="section-head">
+      <div><span>依當時保存的決策重播</span><h2>歷史決策成交明細：{{ validation.simulated_orders }} 筆</h2></div>
+      <p>每個決策日只保留當日最後版本。舊紀錄採下一交易日開盤價；新的盤後零股研究另採 13:30 收盤價代理，並等待 14:30 實際成交／未成交資料累積，兩種結果不可混用。</p>
+    </div>
+    <div class="ai-order-table-v1">
+      <table>
+        <thead><tr><th>模擬成交日</th><th>公司／股票</th><th>方向</th><th>股數</th><th>成交價</th><th>成本</th><th>規則</th></tr></thead>
+        <tbody>
+        {% for item in validation.trades %}
+          {% set asset = asset_lookup.get(item.symbol) %}
+          <tr><td>{{ taipei_time(item.event_time).strftime('%Y-%m-%d') }}</td><td><span class="stock-identity-v1"><b>{{ asset.company_abbreviation or asset.company_name if asset else '公司名稱待補' }}</b><small>{{ item.symbol }} · {{ asset.sector or '產業待補' if asset else '產業待補' }}</small></span></td><td>{{ '買進' if item.side == 'BUY' else '賣出' }}</td><td>{{ '{:,}'.format(item.quantity) }}</td><td>{{ '{:,.2f}'.format(item.price) }}</td><td>NT$ {{ '{:,.0f}'.format(item.cost) }}</td><td>{{ item.reason }}</td></tr>
+        {% else %}
+          <tr><td colspan="7"><b>目前只保留可驗證的資金曲線與每次配置版本。</b><br>要產生正確逐筆買賣，研究引擎必須從下一次回測開始保存「每檔股票策略當天實際持有多少」；完成前不再捏造股數。</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="tech-section ai-next-v1">
+    <div class="section-head"><div><span>每日自動執行</span><h2>排程與通知</h2></div></div>
+    <p>台股每日研究排程完成後會建立盤後決策、以防重複方式寫入模擬帳戶，並把摘要加入每日 Email 報告。Email 尚未設定時，仍可在本頁查看完整結果。</p>
+    <div><a href="/automation">設定排程與通知</a><a href="/decisions?market=TW">查看底層每日決策</a><a href="/paper-trading">查看模擬帳戶</a></div>
+  </section>
+</main>
+{% if validation_chart %}
+<script>
+const afterHoursCurve={{ validation_chart|tojson }};
+const afterHoursChart=echarts.init(document.getElementById('afterHoursEquityChart'));
+afterHoursChart.setOption({
+  animation:false,
+  grid:{left:78,right:28,top:32,bottom:48},
+  tooltip:{
+    trigger:'axis',
+    backgroundColor:'rgba(10,18,29,.78)',
+    borderColor:'rgba(86,214,255,.38)',
+    textStyle:{color:'#edf7ff'},
+    valueFormatter:value=>'NT$ '+Number(value).toLocaleString('zh-TW',{maximumFractionDigits:0})
+  },
+  legend:{data:['研究策略','0050','現金'],textStyle:{color:'#a8b7c9'}},
+  xAxis:{type:'category',data:afterHoursCurve.map(item=>item.date),axisLabel:{color:'#91a2b8',hideOverlap:true}},
+  yAxis:{type:'value',axisLabel:{color:'#91a2b8',formatter:value=>(value/10000).toFixed(0)+'萬'},splitLine:{lineStyle:{color:'#1c2b3e'}}},
+  series:[
+    {name:'研究策略',type:'line',showSymbol:false,data:afterHoursCurve.map(item=>item.equity),lineStyle:{color:'#36d7ff',width:2},areaStyle:{color:'rgba(54,215,255,.08)'}},
+    {name:'0050',type:'line',showSymbol:false,data:afterHoursCurve.map(item=>item.benchmark),lineStyle:{color:'#ff6b7a',width:2}},
+    {name:'現金',type:'line',showSymbol:false,data:afterHoursCurve.map(item=>item.cash),lineStyle:{color:'#ffc45c',width:1.5,type:'dashed'}}
+  ]
+});
+addEventListener('resize',()=>afterHoursChart.resize());
+</script>
+{% endif %}
+{% if model_validation_chart %}
+<script>
+const modelProofCurve={{ model_validation_chart|tojson }};
+const modelProofChart=echarts.init(document.getElementById('modelProofChart'));
+modelProofChart.setOption({animation:false,grid:{left:72,right:22,top:26,bottom:42},tooltip:{trigger:'axis',backgroundColor:'rgba(10,18,29,.78)',borderColor:'rgba(86,214,255,.38)',textStyle:{color:'#edf7ff'},valueFormatter:value=>'NT$ '+Number(value).toLocaleString('zh-TW',{maximumFractionDigits:0})},legend:{data:['AI 模型','0050'],textStyle:{color:'#a8b7c9'}},xAxis:{type:'category',data:modelProofCurve.map(item=>item.date),axisLabel:{color:'#91a2b8',hideOverlap:true}},yAxis:{type:'value',axisLabel:{color:'#91a2b8',formatter:value=>(value/10000).toFixed(0)+'萬'},splitLine:{lineStyle:{color:'#1c2b3e'}}},series:[{name:'AI 模型',type:'line',showSymbol:false,data:modelProofCurve.map(item=>item.equity),lineStyle:{color:'#36d7ff',width:2}},{name:'0050',type:'line',showSymbol:false,data:modelProofCurve.map(item=>item.benchmark),lineStyle:{color:'#ff6b7a',width:2}}]});
+addEventListener('resize',()=>modelProofChart.resize());
+</script>
+{% endif %}
+{% if validation.status == '建立中' or not model_validation %}
+<script>
+const validationPoll=setInterval(async()=>{
+  try{
+    const response=await fetch('/api/ai-trading/validation-status',{cache:'no-store'});
+    const state=await response.json();
+    const dailyDone={{ 'true' if validation.status == '建立中' else 'false' }}&&(state.daily.ready||state.daily.error);
+    const modelDone={{ 'true' if not model_validation else 'false' }}&&(state.model.ready||state.model.error);
+    if(dailyDone||modelDone){clearInterval(validationPoll);location.reload()}
+  }catch(error){console.warn('歷史模擬狀態讀取失敗',error)}
+},2000);
+</script>
+{% endif %}
+{% include '_glossary.html' %}
+</body>
+</html>

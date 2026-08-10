@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>資料建置進度｜Quant OS</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.0.0') }}">
+</head>
+<body class="tech-body">
+{% include '_sidebar.html' %}
+<main class="tech-main pipeline-main-v1">
+  <header class="tech-header">
+    <div>
+      <span class="tech-kicker">BACKGROUND DATA PIPELINE</span>
+      <h1>資料建置進度</h1>
+      <p>伺服器在背景下載與運算；本頁每 5 秒更新一次，不會重新整理或閃動，也不會使用對話 Token。</p>
+    </div>
+    <div class="pipeline-live-v1"><i></i><span id="pipelineStatus">{{ pipeline.status }}</span><small id="pipelineUpdated">{{ pipeline.updated_at }}</small></div>
+  </header>
+
+  <section class="tech-section pipeline-progress-v1">
+    <div class="section-head"><div><span>CURRENT STAGE</span><h2 id="currentStage">{{ pipeline.current_stage }}</h2></div><b id="progressText">{{ pipeline.ready_assets }} / {{ pipeline.target_assets }} 檔</b></div>
+    <div class="pipeline-bar-v1" role="progressbar" aria-label="成熟股票資料建置進度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ pipeline.progress }}"><i id="progressBar" style="width:{{ pipeline.progress }}%"></i></div>
+    <p><b>價格樣本覆蓋：</b><span id="progressPercent">{{ pipeline.progress }}%</span> · 尚差 <b id="remainingAssets">{{ pipeline.remaining_assets }}</b> 檔 · 每批最多 {{ pipeline.batch_size }} 檔 · 每 10 分鐘檢查一次。</p>
+    <p id="currentDetail" class="pipeline-current-detail-v2"></p>
+    <div id="pipelineBlockers" class="pipeline-blockers-v2"></div>
+  </section>
+
+  <section class="pipeline-kpis-v1">
+    <article><span>已註冊股票</span><b id="registeredAssets">{{ pipeline.registered_assets }}</b><small>已加入研究股票池</small></article>
+    <article><span>有台股行情代號</span><b id="twSymbols">{{ pipeline.tw_symbols }}</b><small>market_bars 中的不同代號</small></article>
+    <article><span>日線總筆數</span><b id="marketBars">{{ '{:,}'.format(pipeline.counts.market_bars) }}</b><small>價格、成交量與 OHLC</small></article>
+    <article><span>特徵值</span><b id="featureValues">{{ '{:,}'.format(pipeline.counts.feature_values) }}</b><small>供統計與機器學習使用</small></article>
+    <article><span>報酬標籤</span><b id="labelValues">{{ '{:,}'.format(pipeline.counts.label_values) }}</b><small>訓練模型要預測的答案</small></article>
+    <article><span>歷史模擬交易</span><b id="backtestTrades">{{ '{:,}'.format(pipeline.counts.backtest_trades) }}</b><small>回測實際買進與賣出紀錄</small></article>
+  </section>
+
+  <section class="tech-section pipeline-grid-v1">
+    <article>
+      <div class="section-head"><div><span>NEXT BATCH</span><h2>下一批候選股票</h2></div></div>
+      <div id="nextSymbols" class="pipeline-symbols-v1">{% for symbol in pipeline.next_symbols %}<a href="/stocks?symbol={{ symbol }}">{{ symbol }}</a>{% else %}<span>目前沒有待補代號</span>{% endfor %}</div>
+      <dl class="pipeline-range-v1"><div><dt>最早行情</dt><dd id="earliestBar">{{ pipeline.earliest_bar }}</dd></div><div><dt>最新行情</dt><dd id="latestBar">{{ pipeline.latest_bar }}</dd></div></dl>
+    </article>
+    <article>
+      <div class="section-head"><div><span>WHAT HAPPENS NEXT</span><h2>每批資料的處理順序</h2></div></div>
+      <ol class="pipeline-steps-v1"><li>下載股票歷史日線</li><li>檢查至少 252 個交易日</li><li>建立技術、量價與基本面特徵</li><li>建立未來報酬標籤</li><li>重跑歷史策略與交易紀錄</li><li>達 500 檔後重訓模型與盤後決策</li></ol>
+    </article>
+  </section>
+
+  <section class="tech-section">
+    <div class="section-head"><div><span>LIVE JOB LOG</span><h2>背景工作紀錄</h2></div><p>「成功」一定要有實際工作；0 檔空跑不再建立成功紀錄。</p></div>
+    <div id="pipelineRuns" class="pipeline-runs-v1"></div>
+  </section>
+</main>
+<script>
+const initialPipeline = {{ pipeline|tojson }};
+const number = value => Number(value || 0).toLocaleString('zh-TW');
+const duration = seconds => { const value=Number(seconds||0); const minutes=Math.floor(value/60); return minutes < 1 ? `${value} 秒` : `${minutes} 分 ${value%60} 秒`; };
+const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+function renderRuns(runs) {
+  const host = document.getElementById('pipelineRuns');
+  host.innerHTML = runs.map(run => {
+    const details = [];
+    if (run.attempted !== null && run.attempted !== undefined) details.push(`嘗試 ${number(run.attempted)} 檔`);
+    if (run.kept_active !== null && run.kept_active !== undefined) details.push(`保留 ${number(run.kept_active)} 檔`);
+    if (run.inserted_bars !== null && run.inserted_bars !== undefined) details.push(`新增 ${number(run.inserted_bars)} 根日線`);
+    const symbols = (run.symbols || []).length ? `<small>${run.symbols.map(escapeHtml).join('、')}</small>` : '';
+    const failures = Array.isArray(run.failures) ? run.failures : [];
+    const error = run.error || failures.join('；');
+    const label = run.status === 'running' ? '執行中' : run.status === 'succeeded' ? '成功' : run.status === 'partial' ? '部分完成' : '失敗';
+    return `<article class="${escapeHtml(run.status)}"><header><div><b>${escapeHtml(run.label)}</b><time>${escapeHtml(run.started_at)}</time></div><span>${label}</span></header><p>${details.join(' · ') || (run.status === 'running' ? '背景處理中，完成後顯示新增量' : '已完成')}</p>${symbols}${error ? `<em>${escapeHtml(error)}</em>` : ''}</article>`;
+  }).join('') || '<p>尚無背景工作紀錄。</p>';
+}
+function renderPipeline(data) {
+  document.getElementById('pipelineStatus').textContent = data.status;
+  document.getElementById('pipelineUpdated').textContent = `更新 ${data.updated_at}`;
+  document.getElementById('currentStage').textContent = data.current_stage;
+  document.getElementById('currentDetail').textContent = data.current_started_at ? `開始時間 ${data.current_started_at} · 已執行 ${duration(data.current_elapsed_seconds)} · 畫面心跳正常` : '目前沒有執行中的工作，等待下一個排程時間。';
+  document.getElementById('progressText').textContent = `${data.ready_assets} / ${data.target_assets} 檔`;
+  document.getElementById('progressPercent').textContent = `${data.progress}%`;
+  document.getElementById('progressBar').style.width = `${data.progress}%`;
+  document.querySelector('.pipeline-bar-v1').setAttribute('aria-valuenow', data.progress);
+  document.getElementById('remainingAssets').textContent = number(data.remaining_assets);
+  document.getElementById('registeredAssets').textContent = number(data.registered_assets);
+  document.getElementById('twSymbols').textContent = number(data.tw_symbols);
+  document.getElementById('marketBars').textContent = number(data.counts.market_bars);
+  document.getElementById('featureValues').textContent = number(data.counts.feature_values);
+  document.getElementById('labelValues').textContent = number(data.counts.label_values);
+  document.getElementById('backtestTrades').textContent = number(data.counts.backtest_trades);
+  document.getElementById('earliestBar').textContent = data.earliest_bar;
+  document.getElementById('latestBar').textContent = data.latest_bar;
+  document.getElementById('nextSymbols').innerHTML = data.next_symbols.length ? data.next_symbols.map(symbol => `<a href="/stocks?symbol=${encodeURIComponent(symbol)}">${escapeHtml(symbol)}</a>`).join('') : '<span>目前沒有待補代號</span>';
+  document.getElementById('pipelineBlockers').innerHTML = (data.blockers || []).map(item => `<article><b>資料來源受限：${escapeHtml(item.source)}</b><span>${escapeHtml(item.message)}</span></article>`).join('');
+  renderRuns(data.runs);
+}
+renderPipeline(initialPipeline);
+setInterval(async () => {
+  try {
+    const response = await fetch('/api/data-pipeline/status', {cache:'no-store'});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderPipeline(await response.json());
+  } catch (error) {
+    document.getElementById('pipelineStatus').textContent = '暫時無法更新';
+  }
+}, 5000);
+</script>
+</body>
+</html>

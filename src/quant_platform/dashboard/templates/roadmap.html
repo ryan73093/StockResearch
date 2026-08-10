@@ -1,0 +1,26 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>開發藍圖／量化研究平台</title><link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}"><link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.0.0') }}"></head>
+<body class="tech-body">{% include '_sidebar.html' %}<main class="tech-main roadmap-main-v1">
+  <header class="tech-header"><div><span class="tech-kicker">最終目標、完成度與後續階段</span><h1>開發藍圖</h1><p>「長期超越大盤」是需要持續驗證的研究目標，不是可以由軟體保證的結果。所有階段以樣本外、成本後、相對基準績效驗收。</p></div></header>
+  <section class="tech-section"><div class="roadmap-summary-v1"><article><b>12 個階段</b><span>核心與治理已有 v1</span><small>包含資料品質、模型解釋、向量 RAG、漂移與安全沙盒</small></article><article><b>1 個階段進行中</b><span>替代資料擴充</span><small>分鐘、期權、零股與法說會已完成；搜尋與社群情緒待開發</small></article><article><b>13 個階段</b><span>總建設階段</span><small>正式登入、Docker 與券商連線仍延後至發布前</small></article></div></section>
+  <section class="tech-section"><div class="section-head"><div><span>分階段交付</span><h2>從研究平台到自動交易</h2></div></div><div class="phase-list-v1">
+    <article class="done"><i>01</i><div><h3>基礎架構</h3><p>Clean Architecture、依賴注入、SQLAlchemy、Flask、FastAPI、設定、日誌與測試。</p></div><b>已完成 v1</b></article>
+    <article class="done"><i>02</i><div><h3>時點一致資料平台 v2</h3><p>跨資產、FRED、台股季財報、盤後零股、歷史股票池、新聞與每日情緒特徵均已完成 v1。</p></div><b>已完成 v1</b></article>
+    <article class="done"><i>03</i><div><h3>量化研究核心</h3><p>特徵、標籤、市場狀態、因子檢驗、滾動回測、策略整合、組合最佳化與風險控制。</p></div><b>已完成 v1</b></article>
+    <article class="done"><i>04</i><div><h3>機器學習與可解釋人工智慧</h3><p>台股籌碼／基本面時點合併、樣本外排列重要性、單股反事實解釋；SHAP 待樹模型版本穩定後加入。</p></div><b>已完成 v1</b></article>
+    <article class="done"><i>05</i><div><h3>自動模型研究</h3><p>Optuna 巢狀時間調參、Random Forest、SVM、實驗去重、漂移監控與冠軍／挑戰者均已完成；MLflow 留待正式實驗服務。</p></div><b>已完成 v1</b></article>
+    <article class="done"><i>06</i><div><h3>每日報告與知識庫助手</h3><p>台／美股報告、持久化向量切塊、中文／英文混合檢索、來源引用、問答稽核、無證據拒答與可選 OpenAI Adapter 已完成。</p></div><b>已完成 v2</b></article>
+    <article><i>07</i><div><h3>正式環境與帳號</h3><p>部署與登入底層已保留但不再優先；目前 Windows＋SQLite 不需要 Docker，Google 登入等網站準備發布時才啟用。</p></div><b>延後至發布前</b></article>
+    <article class="done"><i>08</i><div><h3>模擬交易</h3><p>台股訂單狀態機、下一交易日開盤成交、零股、現金／持倉帳務、手續費、證交稅、滑價與集中度／曝險／流動性風控已完成 v1。</p></div><b>已完成 v1</b></article>
+    <article class="done"><i>09</i><div><h3>RL、影子交易與安全沙盒</h3><p>交易環境、walk-forward、CPU／PPO／DQN、獨立影子交易、11 項晉級政策、人工核准狀態機、自動撤銷與本機券商沙盒均已完成 v1。真實券商與自動下單仍維持關閉。</p></div><b>已完成 v1</b></article>
+    <article class="done"><i>10</i><div><h3>模型治理與漂移監控</h3><p>最新挑戰者登錄、人工冠軍升降級、特徵 PSI、品質漂移、決策稽核與每日自動降級均已完成 v1。</p></div><b>已完成 v1</b></article>
+    <article class="done"><i>11</i><div><h3>Point-in-time 資料品質</h3><p>行情修訂版 as-of 解析、時間因果、完整性、時效性、OHLCV、共同交易日、特徵覆蓋、品質快照與兩段式研究阻擋均已完成 v1。</p></div><b>已完成 v1</b></article>
+    <article class="done"><i>12</i><div><h3>研究知識智能</h3><p>文件內容雜湊、冪等索引、384 維本機向量、可替換 OpenAI Embeddings／Responses、合法引用驗證與 API 已完成 v1。</p></div><b>已完成 v1</b></article>
+    <article class="current"><i>13</i><div><h3>盤中、衍生品與替代資料</h3><p>版本化目錄、As-of、分鐘／期貨／選擇權、零股、26 項衍生特徵，以及上市／上櫃法說會公告、MOPS 簡報與影音均已完成；接續 Google Trends 與社群情緒。</p></div><b>法說會完成／搜尋與社群待做</b></article>
+  </div></section>
+  <section class="tech-section"><div class="section-head"><div><span>需求完成矩陣</span><h2>原始目標目前做到哪裡</h2></div></div><div class="completion-grid-v1">
+    <article class="done"><b>已完成 v1</b><p>每日收集與更新、技術與台股籌碼特徵、因子研究、市場狀態、滾動回測、策略評估、五日報酬預測、風險控制、九種組合最佳化、研究資料庫。</p></article>
+    <article class="partial"><b>部分完成</b><p>模型動物園、AutoML、台股基本面、總經與跨資產、分鐘／期權資料與特徵、策略自動排名、深度學習介面、可解釋人工智慧、外部 LLM 實際金鑰驗收與正式環境。</p></article>
+    <article><b>尚未完成</b><p>Google Trends、Reddit／社群情緒、完整事件研究引擎、完整波動率曲面、MLflow、Google 登入正式驗收，以及正式券商 API 與真實交易營運驗收。</p></article>
+  </div></section>
+  <section class="tech-section"><div class="section-head"><div><span>ML／DL 用途</span><h2>機器學習與深度學習該做什麼</h2></div></div><div class="ml-dl-grid-v1"><article><h3>機器學習（ML）</h3><p>最適合目前的表格型資料：價格、法人、融資、估值、財務與總經特徵。Random Forest、XGBoost、LightGBM、CatBoost、SVM 可預測報酬、漲跌機率或超越基準機率，也比較容易解釋與做時間序列驗證。</p><b>現在優先</b></article><article><h3>深度學習（DL）</h3><p>LSTM、GRU、Transformer、TFT、N-BEATS 適合長序列；GNN 適合公司／產業關係；AutoEncoder 適合異常與市場狀態。需要更多乾淨資料、GPU、嚴格基準模型比較，不能預設一定勝過 ML。</p><b>資料成熟後導入</b></article><article><h3>強化學習（RL）</h3><p>PPO、DQN 比較適合動態部位、執行與成本控制，不應直接被當成預知股價的工具。可信模擬器、共用成本與 walk-forward 研究框架已完成，接著才訓練代理。</p><b>研究框架已可用</b></article></div></section>
+</main></body></html>

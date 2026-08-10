@@ -1,0 +1,112 @@
+name: quant-platform
+
+x-app: &app
+  build:
+    context: .
+    args:
+      QUANT_EXTRAS: data,ml,infra
+  environment: &app-environment
+    APP_ENV: production
+    SECRET_KEY: ${SECRET_KEY:?請在 .env.docker 設定 SECRET_KEY}
+    DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD:?請設定 POSTGRES_PASSWORD}@postgres:5432/quant
+    REDIS_URL: redis://redis:6379/0
+    REDIS_ENABLED: "true"
+    REDIS_REQUIRED: "true"
+    SCHEDULER_ENABLED: "true"
+    SCHEDULER_IN_WEB: "false"
+    SCHEDULER_TIMEZONE: Asia/Taipei
+    WEB_HOST: 0.0.0.0
+    WEB_PORT: "5000"
+    API_HOST: 0.0.0.0
+    API_PORT: "8000"
+    FINMIND_TOKEN: ${FINMIND_TOKEN:-}
+    EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+    SMTP_HOST: ${SMTP_HOST:-}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_USERNAME: ${SMTP_USERNAME:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    SMTP_FROM: ${SMTP_FROM:-}
+    REPORT_EMAIL_TO: ${REPORT_EMAIL_TO:-}
+    SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+    GOOGLE_OAUTH_ENABLED: ${GOOGLE_OAUTH_ENABLED:-false}
+    GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://127.0.0.1:5000/auth/google/callback}
+    GOOGLE_ALLOWED_DOMAIN: ${GOOGLE_ALLOWED_DOMAIN:-}
+    AUTH_SESSION_DAYS: ${AUTH_SESSION_DAYS:-14}
+    AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+    API_WRITE_TOKEN: ${API_WRITE_TOKEN:?請設定 API_WRITE_TOKEN}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    init:
+      condition: service_completed_successfully
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: quant
+      POSTGRES_USER: quant
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?請設定 POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant -d quant"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  init:
+    <<: *app
+    command: ["python", "-m", "quant_platform.database.cli"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    <<: *app
+    command: ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "120", "quant_platform.dashboard.wsgi:app"]
+    ports:
+      - "5000:5000"
+    volumes:
+      - artifacts:/app/artifacts
+
+  api:
+    <<: *app
+    command: ["uvicorn", "quant_platform.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - artifacts:/app/artifacts
+
+  worker:
+    <<: *app
+    command: ["quant-worker"]
+    stop_grace_period: 45s
+    volumes:
+      - artifacts:/app/artifacts
+
+volumes:
+  postgres_data:
+  redis_data:
+  artifacts:

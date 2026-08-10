@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>策略中心／量化研究平台</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.0.0') }}">
+</head>
+<body class="tech-body">
+{% include '_sidebar.html' %}
+<main class="tech-main unified-main strategy-main-v39">
+  <header class="tech-header">
+    <div><span class="tech-kicker">比較／版本／解釋／治理</span><h1>策略中心</h1>
+      <p>同一頁比較規則策略、統計配置與機器學習模型。績效一律對照同期 0050，研究中不等於可以交易。</p>
+    </div>
+    <a class="tech-button-link-v39" href="/ai-trading">查看盤後 AI 決策</a>
+  </header>
+
+  <section class="tech-section">
+    <div class="section-head"><div><span>目前結論</span><h2>為什麼盤後 AI 還沒有贏過大盤</h2></div></div>
+    <div class="strategy-diagnosis-v39">
+      <article><b>大盤上漲太快</b><p>{% if best_portfolio %}最新最佳配置 {{ best_portfolio.name }} 報酬 {{ '%+.2f%%'|format(best_portfolio.return*100) }}，同期 0050 {{ '%+.2f%%'|format(best_portfolio.benchmark*100) }}，少 {{ '%.2f'|format((best_portfolio.benchmark-best_portfolio.return)*100) }} 個百分點。{% else %}尚無可比較的投資組合研究。{% endif %}</p></article>
+      <article><b>樣本仍太短</b><p>{% if best_portfolio %}目前只有 {{ best_portfolio.sample }} 個樣本外交易日，低於正式晉級要求的 252 日。{% else %}需要至少 252 個樣本外交易日。{% endif %}</p></article>
+      <article><b>預測優勢偏弱</b><p>多數模型的 R² 接近或低於 0；即使排名相關為正，也只是微弱排序訊號，不能抵銷成本與市場輪動。</p></article>
+      <article><b>驗證口徑未對齊／{{ validation.status }}</b><p>{{ validation.conclusion }}</p></article>
+      <article><b>股票池與歷史不足</b><p>策略覆蓋仍小於完整台灣市場，且產業歷史與存活者偏誤資料尚未完全補齊。</p></article>
+      <article><b>目標函數不一樣</b><p>CVaR、最小變異與風險平價先控制波動和尾端損失，不是專門追逐強勢大盤，因此多頭期可能明顯落後。</p></article>
+    </div>
+  </section>
+
+  <section class="tech-section">
+    <div class="section-head"><div><span>可直接比較的交易績效</span><h2>規則策略與投資組合</h2></div><p>報酬、0050 與超額報酬使用同一研究期間；單股規則顯示各股票最新結果的中位數，避免極端值誤導。</p></div>
+    <div class="strategy-table-v39"><table>
+      <thead><tr><th>策略</th><th>方法</th><th>版本／狀態</th><th>策略報酬</th><th>0050</th><th>超額</th><th>樣本</th><th>說明</th></tr></thead>
+      <tbody>
+      {% for row in rule_rows + portfolio_rows %}
+        <tr><td><a href="{{ row.href }}"><b>{{ row.name }}</b></a></td><td>{{ row.method }}</td><td>{{ row.version }}<br><span class="{{ 'up' if row.status == '候選' else 'down' }}">{{ row.status }}</span></td><td>{{ '%+.2f%%'|format(row.return*100) }}</td><td>{{ '%+.2f%%'|format(row.benchmark*100) }}</td><td class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '%+.2f%%'|format(row.excess*100) }}</td><td>{{ row.sample|int }}</td><td>{{ row.note }}</td></tr>
+      {% else %}<tr><td colspan="8">尚無策略研究結果。</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="tech-section">
+    <div class="section-head"><div><span>預測方法不是績效</span><h2>模型分類與解釋</h2></div><p>統計模型建立基準；機器學習從特徵學習五日報酬。最終仍需由回測與投資組合驗證。</p></div>
+    <div class="strategy-table-v39"><table>
+      <thead><tr><th>模型</th><th>方法分類</th><th>版本／狀態</th><th>R²</th><th>方向正確率</th><th>排名 IC</th><th>觀測數</th><th>用途</th></tr></thead>
+      <tbody>{% for row in model_rows %}
+        <tr><td><a href="{{ row.href }}"><b>{{ row.name }}</b></a></td><td>{{ row.method }}</td><td>{{ row.version }}<br>{{ row.status }}</td><td>{{ '%.4f'|format(row.r2) }}</td><td>{{ '%.2f%%'|format(row.direction*100) }}</td><td>{{ '%.4f'|format(row.rank_ic or 0) }}</td><td>{{ row.sample }}</td><td>{{ row.note }}</td></tr>
+      {% else %}<tr><td colspan="8">尚無模型研究結果。</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+
+  <section class="tech-section">
+    <div class="section-head"><div><span>更新與分析紀錄</span><h2>策略版本時間軸</h2></div><p>每次研究結果都有版本、計算時間與狀態；詳細參數、折疊與失敗門檻保留在原研究頁。</p></div>
+    <div class="strategy-history-v39">{% for item in history %}
+      <a href="{{ item.href }}"><time>{{ taipei_time(item.time).strftime('%Y-%m-%d %H:%M') }}</time><b>{{ item.name }}</b><span>{{ item.kind }}</span><code>v{{ item.version }}</code><em>{{ item.status }}</em></a>
+    {% else %}<p>尚無版本紀錄。</p>{% endfor %}</div>
+  </section>
+</main>
+</body>
+</html>

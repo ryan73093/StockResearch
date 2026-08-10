@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Regime & Factor Lab / Quant OS</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='5.0.0') }}">
+</head>
+<body class="tech-body">
+  {% include '_sidebar.html' %}
+
+  <main class="factor-main unified-main">
+    <section class="factor-hero">
+      <div><span>REGIME-CONDITIONAL / CROSS-SECTIONAL / AUDITABLE</span><h1>Market Regime & Factor Research</h1><p>用歷史當下可得的 Feature 預測延遲揭曉的 future return，逐日檢驗 Pearson IC、Rank IC、分位數超額報酬、換手與因子衰退。排名是研究證據，不是買賣訊號。</p></div>
+      <div class="factor-actions"><form method="post" action="/factors/research/TW"><button>RESEARCH TW</button></form><form method="post" action="/factors/research/US"><button>RESEARCH US</button></form></div>
+    </section>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+
+    <section class="factor-kpis">
+      <article><span>RESEARCH RESULTS</span><strong>{{ overview.result_count }}</strong><small>versioned factor × market studies</small></article>
+      <article><span>MARKETS</span><strong>{{ overview.market_count }}</strong><small>US and Taiwan evaluated separately</small></article>
+      <article><span>CURRENT REGIMES</span><strong>{{ overview.latest_regimes|length }}</strong><small>benchmark-driven point-in-time states</small></article>
+      <article class="gate"><span>PROMOTION CANDIDATES</span><strong>{{ overview.candidate_count }}</strong><small>requires ≥30 assets and stable evidence</small></article>
+    </section>
+
+    <section class="factor-section">
+      <div class="section-head"><div><span>01 / MARKET REGIME</span><h2>最新市場狀態</h2></div><p>趨勢使用 20/60 或 50/200 日均線與 60 日動能；波動狀態依自身 trailing distribution 分類，不使用固定門檻。</p></div>
+      <div class="regime-cards">
+        {% for item in overview.latest_regimes %}<article class="regime-card {{ item.trend_regime|lower }}"><div><span>{{ item.symbol }}</span><em>v{{ item.regime_version }}</em></div><strong>{{ item.composite_regime }}</strong><dl><div><dt>TREND SCORE</dt><dd>{{ '%+.3f'|format(item.trend_score) }}</dd></div><div><dt>VOL SCORE</dt><dd>{{ '%+.3f'|format(item.volatility_score) }}</dd></div><div><dt>CONFIDENCE</dt><dd>{{ '%.0f%%'|format(item.confidence * 100) }}</dd></div></dl><small>AS OF {{ item.event_time }}</small></article>{% else %}<div class="factor-empty">尚未建立 Regime，請執行研究。</div>{% endfor %}
+      </div>
+    </section>
+
+    <section class="factor-section">
+      <div class="section-head"><div><span>02 / FACTOR EVIDENCE</span><h2>因子有效性排名</h2></div><p>依 |Rank IC 5D| 排序；DIRECTION=LOW 代表低因子值歷史上較有利。因目前每市場不足 30 個資產，所有結果維持 SMALL_UNIVERSE，不進入策略。</p></div>
+      <div class="factor-research-table">
+        <div class="factor-research-row factor-research-head"><span>#</span><span>MARKET</span><span>FACTOR</span><span>DIR</span><span>RANK IC 5D</span><span>RANK IC 20D</span><span>IC IR</span><span>SPREAD 5D</span><span>TURNOVER</span><span>DECAY</span><span>AVG N</span><span>BEST REGIME</span><span>RECENT IC</span><span>GATE</span></div>
+        {% for view in overview.results %}{% set item = view.result %}<div class="factor-research-row"><span>{{ '%02d'|format(loop.index) }}</span><b>{{ item.market }}</b><strong>{{ item.feature_name }}</strong><span class="{{ 'up' if view.direction == 'HIGH' else 'down' }}">{{ view.direction }}</span><span class="{{ 'up' if (item.rank_ic_5d or 0) >= 0 else 'down' }}">{{ '%+.3f'|format(item.rank_ic_5d or 0) }}</span><span>{{ '%+.3f'|format(item.rank_ic_20d or 0) }}</span><span>{{ '%.2f'|format(item.ic_ir_5d or 0) }}</span><span class="{{ 'up' if (item.quantile_spread_5d or 0) >= 0 else 'down' }}">{{ '%+.2f%%'|format((item.quantile_spread_5d or 0) * 100) }}</span><span>{{ '%.0f%%'|format((item.turnover or 0) * 100) }}</span><span>{{ '%.2f'|format(item.decay_ratio or 0) }}</span><span>{{ '%.1f'|format(view.average_assets) }}</span><span>{{ item.best_regime or '—' }}</span><svg viewBox="0 0 100 26" preserveAspectRatio="none"><line x1="0" y1="13" x2="100" y2="13"></line><polyline points="{{ sparkline_points(view.ic_curve, 100, 26) }}"></polyline></svg><span class="factor-gate {{ view.quality_gate|lower }}">{{ view.quality_gate }}</span></div>{% else %}<div class="factor-empty">尚未有因子研究結果。</div>{% endfor %}
+      </div>
+    </section>
+
+    <section class="factor-section methodology-grid">
+      <article><span>IC / RANK IC</span><h3>預測方向與排序能力</h3><p>每日橫斷面計算 Feature 與 future return 的 Pearson／Spearman correlation，再對時間取平均；不把單一日期的相關性當成 Alpha。</p></article>
+      <article><span>QUANTILE SPREAD</span><h3>Top − Bottom 超額報酬</h3><p>使用相對各自 benchmark 的 5 日超額報酬，檢查排名是否能轉化成可交易 spread；尚未扣除交易成本。</p></article>
+      <article><span>DECAY / TURNOVER</span><h3>有效期與交易負擔</h3><p>Decay 比較 20D 與 5D Rank IC；Turnover 衡量前 20% 名單更替。高 IC 但高換手的因子可能無法落地。</p></article>
+      <article class="method-warning"><span>PROMOTION GATE</span><h3>目前禁止投入策略</h3><p>美股只有 12 個 ETF、台股只有 4 個 ETF，存在小樣本與 selection bias。需擴充 point-in-time 股票池、納入成本及 walk-forward 穩健性後才可晉級。</p></article>
+    </section>
+  </main>
+</body>
+</html>

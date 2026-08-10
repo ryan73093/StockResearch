@@ -1,0 +1,81 @@
+<aside id="techSidebar" class="tech-sidebar" data-auth-state="{{ 'authenticated' if current_user else 'local' }}">
+  <div class="sidebar-brand-v2">
+    <a class="tech-logo" href="/"><span>Q</span><div><b>QUANT OS</b><small>研究決策平台</small></div></a>
+    <button id="sidebarToggle" class="sidebar-toggle-v2" type="button" aria-label="收折側邊欄" aria-expanded="true" title="收折側邊欄">‹</button>
+  </div>
+
+  <nav aria-label="主要功能">
+    <details class="sidebar-group-v2 important" open>
+      <summary><span>核心決策</span><small>每天最重要</small></summary>
+      <div>
+        <a class="{{ 'active' if request.path == '/' else '' }}" href="/" title="市場總覽"><i>01</i><span>市場總覽</span></a>
+        <a class="priority {{ 'active' if request.path.startswith('/stocks') else '' }}" href="/stocks" title="單股研究"><i>02</i><span>單股研究</span><b>重要</b></a>
+        <a class="priority {{ 'active' if request.path.startswith('/ai-trading') or request.path.startswith('/odd-lot') or request.path.startswith('/decisions') else '' }}" href="/ai-trading" title="盤後選股、每日決策、資金配置與零股投入"><i>03</i><span>盤後 AI／零股</span><b>重要</b></a>
+        <a class="priority {{ 'active' if request.path.startswith('/strategies') else '' }}" href="/strategies" title="策略、模型、回測、解釋與版本管理"><i>04</i><span>策略中心</span><b>重要</b></a>
+        <a class="priority {{ 'active' if request.path.startswith('/progress') or request.path.startswith('/roadmap') else '' }}" href="/progress" title="查看系統目的、量化完成度與後續藍圖"><i>05</i><span>系統進度／藍圖</span><b>重要</b></a>
+      </div>
+    </details>
+
+    <details class="sidebar-group-v2" {% if request.path.startswith('/strategies') or request.path.startswith('/explain') or request.path.startswith('/factors') or request.path.startswith('/models') or request.path.startswith('/backtests') or request.path.startswith('/ensembles') or request.path.startswith('/rl-lab') %}open{% endif %}>
+      <summary><span>進階研究</span><small>需要細查時使用</small></summary>
+      <div>
+        <a class="{{ 'active' if request.path.startswith('/models') or request.path.startswith('/explain') else '' }}" href="/models" title="模型績效與解釋"><i>05</i><span>模型與解釋</span></a>
+        <a class="{{ 'active' if request.path.startswith('/backtests') else '' }}" href="/backtests" title="歷史交易與樣本外驗證"><i>06</i><span>回測與交易歷程</span></a>
+      </div>
+    </details>
+
+    <details class="sidebar-group-v2" {% if request.path.startswith('/data-pipeline') or request.path.startswith('/database') or request.path.startswith('/data-quality') or request.path.startswith('/reports') or request.path.startswith('/news') %}open{% endif %}>
+      <summary><span>資料與記憶</span><small>資料是否完整</small></summary>
+      <div>
+        <a class="priority {{ 'active' if request.path.startswith('/data-pipeline') else '' }}" href="/data-pipeline" title="背景補資料、特徵與研究進度"><i>07</i><span>資料建置進度</span><b>重要</b></a>
+        <a class="priority {{ 'active' if request.path.startswith('/reports') or request.path.startswith('/news') else '' }}" href="/reports" title="財經新聞、向量記憶與OpenAI研究問答"><i>08</i><span>財經記憶與問答</span><b>新</b></a>
+        <a class="priority {{ 'active' if request.path.startswith('/data-quality') else '' }}" href="/data-quality" title="資料品質與缺漏"><i>09</i><span>資料品質與缺漏</span><b>閘門</b></a>
+        <a class="{{ 'active' if request.path.startswith('/database') else '' }}" href="/database" title="查看資料表筆數、行情範圍與補抓歷程"><i>DB</i><span>資料庫檢視</span></a>
+      </div>
+    </details>
+
+    <details class="sidebar-group-v2" {% if request.path.startswith('/automation') or request.path.startswith('/paper-trading') or request.path.startswith('/model-governance') %}open{% endif %}>
+      <summary><span>執行與監控</span><small>下單前後流程</small></summary>
+      <div>
+        <a class="priority {{ 'active' if request.path.startswith('/paper-trading') else '' }}" href="/paper-trading" title="模擬委託、成交與持倉"><i>10</i><span>模擬交易</span><b>重要</b></a>
+        <a class="{{ 'active' if request.path.startswith('/automation') else '' }}" href="/automation" title="自動排程與通知"><i>11</i><span>自動排程</span></a>
+        <a class="{{ 'active' if request.path.startswith('/model-governance') else '' }}" href="/model-governance" title="模型治理、漂移與晉級狀態"><i>12</i><span>模型治理</span></a>
+      </div>
+    </details>
+
+    <details class="sidebar-group-v2" {% if request.path.startswith('/guide') or request.path.startswith('/account') or request.path.startswith('/auth') %}open{% endif %}>
+      <summary><span>說明與設定</span><small>產品導覽</small></summary>
+      <div>
+        <a class="{{ 'active' if request.path.startswith('/guide') else '' }}" href="/guide" title="使用指南"><i>28</i><span>使用指南</span></a>
+        {% if google_login_enabled %}<a class="{{ 'active' if request.path.startswith('/account') or request.path.startswith('/auth') else '' }}" href="/account" title="帳號與資料隔離"><i>30</i><span>帳號與資料隔離</span></a>{% endif %}
+      </div>
+    </details>
+  </nav>
+
+  <div class="system-box account-box">
+    <span><i></i> 系統運行中</span>
+    {% if current_user %}<small>{{ current_user.display_name }}<br>{{ current_user.email }}<br>v3.8.1／真實交易關閉</small>{% else %}<small>本機研究模式<br>SQLite／免 Docker<br>v3.8.1／真實交易關閉</small>{% endif %}
+  </div>
+</aside>
+<script>
+(() => {
+  const sidebar = document.getElementById('techSidebar');
+  const toggle = document.getElementById('sidebarToggle');
+  if (!sidebar || !toggle) return;
+  const apply = collapsed => {
+    document.body.classList.toggle('sidebar-collapsed-v2', collapsed);
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.setAttribute('aria-label', collapsed ? '展開側邊欄' : '收折側邊欄');
+    toggle.title = collapsed ? '展開側邊欄' : '收折側邊欄';
+    toggle.textContent = collapsed ? '›' : '‹';
+  };
+  apply(localStorage.getItem('quant-sidebar-collapsed') === '1');
+  toggle.addEventListener('click', () => {
+    const collapsed = !document.body.classList.contains('sidebar-collapsed-v2');
+    localStorage.setItem('quant-sidebar-collapsed', collapsed ? '1' : '0');
+    apply(collapsed);
+  });
+})();
+</script>
+<script src="{{ url_for('static',filename='js/echarts_formatters.js',v='1.0.1') }}"></script>
+{% include '_glossary.html' %}

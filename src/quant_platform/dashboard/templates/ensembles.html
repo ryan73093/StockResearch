@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Strategy Ensemble / Quant OS</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='5.0.0') }}">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+</head>
+<body class="tech-body lab-body">
+  <aside class="tech-sidebar legacy-sidebar" aria-hidden="true">
+    <a class="tech-logo" href="/"><span>Q</span><div><b>QUANT OS</b><small>RESEARCH TERMINAL</small></div></a>
+    <nav>
+      <a href="/"><i>01</i>市場總覽</a>
+      <a href="/factors"><i>02</i>Factor Lab</a>
+      <a href="/backtests"><i>03</i>Backtest Lab</a>
+      <a class="active" href="/ensembles"><i>04</i>Ensemble Lab</a>
+      <a href="/portfolios"><i>05</i>Portfolio / Risk</a>
+      <a href="/features"><i>06</i>Feature Store</a>
+      <a href="/universe"><i>07</i>股票池與排程</a>
+      <a href="/data"><i>08</i>資料中心</a>
+    </nav>
+    <div class="system-box"><span><i></i> MODULE ONLINE</span><small>STRATEGY ENSEMBLE v1.0<br>LIVE TRADING / OFF</small></div>
+  </aside>
+
+  {% include '_sidebar.html' %}
+  <main class="tech-main ensemble-main">
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+    <header class="tech-header">
+      <div><span class="tech-kicker">LAGGED OOS ALLOCATION / REGIME-AWARE</span><h1>Strategy Ensemble Lab</h1><p>依近期樣本外績效與前一日市場狀態動態配置；每次調整均計入成本。</p></div>
+      <div class="lab-actions"><form method="post" action="/ensembles/run/TW"><button type="submit">RUN TW</button></form><form method="post" action="/ensembles/run/US"><button type="submit">RUN US</button></form></div>
+    </header>
+
+    <section class="tech-section">
+      <div class="kpi-grid">
+        <article><span>ENSEMBLE RUNS</span><strong>{{ overview.run_count }}</strong><small>每個標的一份完整研究快照</small></article>
+        <article><span>PROMOTION CANDIDATES</span><strong>{{ overview.candidate_count }}</strong><small>元件與集成門檻皆須通過</small></article>
+        <article><span>AVG EDGE VS EQUAL</span><strong class="{{ 'up' if overview.average_excess >= 0 else 'down' }}">{{ '%+.2f%%'|format(overview.average_excess * 100) }}</strong><small>動態配置相對等權策略</small></article>
+        <article class="gate"><span>EXECUTION MODE</span><strong>RESEARCH</strong><small>不會下單，也不會連接券商</small></article>
+      </div>
+
+      {% if overview.selected %}{% set selected = overview.selected %}{% set run = selected.run %}
+      <div class="ensemble-detail-grid">
+        <article class="tech-panel ensemble-chart-panel">
+          <div class="panel-title"><div><span>{{ run.symbol }} / EQUITY</span><h2>動態集成 vs 三策略等權</h2></div><em class="run-gate {{ run.promotion_gate|lower }}">{{ run.promotion_gate }}</em></div>
+          <div id="ensembleEquityChart" class="echart-large"></div>
+        </article>
+        <article class="tech-panel ensemble-weight-panel">
+          <div class="panel-title"><div><span>ADAPTIVE ALLOCATION</span><h2>策略權重與 Regime</h2></div><b>{{ run.observation_count }} OOS DAYS</b></div>
+          <div id="ensembleWeightChart" class="echart-large"></div>
+        </article>
+      </div>
+      <div class="ensemble-metrics">
+        <div><span>RETURN</span><b>{{ '%+.2f%%'|format(run.total_return * 100) }}</b></div>
+        <div><span>EQUAL WEIGHT</span><b>{{ '%+.2f%%'|format(run.equal_weight_return * 100) }}</b></div>
+        <div><span>EXCESS</span><b class="{{ 'up' if run.excess_to_equal >= 0 else 'down' }}">{{ '%+.2f%%'|format(run.excess_to_equal * 100) }}</b></div>
+        <div><span>SHARPE / EQUAL</span><b>{{ '%.2f / %.2f'|format(run.sharpe, run.equal_weight_sharpe) }}</b></div>
+        <div><span>MAX DD</span><b class="down">{{ '%.2f%%'|format(run.max_drawdown * 100) }}</b></div>
+        <div><span>TURNOVER</span><b>{{ '%.2f'|format(run.turnover) }}</b></div>
+      </div>
+      <script>
+        const weightPoints = {{ overview.selected_weights|tojson }};
+        const equityPoints = {{ selected.equity|tojson }};
+        const chartTheme = {textStyle:{color:'#a9b5c7'},backgroundColor:'transparent'};
+        const axis = {axisLine:{lineStyle:{color:'#344158'}},axisLabel:{color:'#8290a6'},splitLine:{lineStyle:{color:'rgba(76,91,117,.22)'}}};
+        const equity = echarts.init(document.getElementById('ensembleEquityChart'));
+        equity.setOption({...chartTheme, animation:false, tooltip:{trigger:'axis'}, legend:{top:0,textStyle:{color:'#a9b5c7'}}, grid:{left:52,right:18,top:38,bottom:36}, xAxis:{...axis,type:'category',data:equityPoints.map(p=>p.event_time.slice(0,10)),boundaryGap:false}, yAxis:{...axis,type:'value',scale:true}, dataZoom:[{type:'inside'},{type:'slider',height:16,bottom:5}], series:[{name:'Dynamic Ensemble',type:'line',showSymbol:false,data:equityPoints.map(p=>p.equity),lineStyle:{width:2,color:'#48e5c2'},areaStyle:{color:'rgba(72,229,194,.08)'}},{name:'Equal Weight',type:'line',showSymbol:false,data:equityPoints.map(p=>p.equal_weight_equity),lineStyle:{width:1.5,color:'#8093f1'}}]});
+        const weights = echarts.init(document.getElementById('ensembleWeightChart'));
+        weights.setOption({...chartTheme, animation:false, tooltip:{trigger:'axis'}, legend:{top:0,textStyle:{color:'#a9b5c7'}}, grid:{left:52,right:18,top:38,bottom:36}, xAxis:{...axis,type:'category',data:weightPoints.map(p=>p.time.slice(0,10)),boundaryGap:false}, yAxis:{...axis,type:'value',min:0,max:.7,axisLabel:{formatter:v=>(v*100).toFixed(0)+'%',color:'#8290a6'}}, dataZoom:[{type:'inside'},{type:'slider',height:16,bottom:5}], series:[['trend_momentum','#48e5c2'],['mean_reversion','#ffb454'],['regime_aware','#8093f1']].map(([name,color])=>({name,type:'line',stack:'weights',showSymbol:false,areaStyle:{opacity:.18},lineStyle:{width:1.5,color},itemStyle:{color},data:weightPoints.map(p=>p.weights[name])}))});
+        addEventListener('resize',()=>{equity.resize();weights.resize();});
+      </script>
+      {% else %}<article class="tech-panel ensemble-empty"><h2>尚無策略集成研究結果</h2><p>需先完成三種策略的 Walk-forward 回測，再執行 TW 或 US Ensemble。</p></article>{% endif %}
+    </section>
+
+    <section class="tech-section">
+      <div class="section-head"><div><span>RESEARCH DATABASE</span><h2>集成排名與部署門檻</h2></div><p>點選任一列查看完整績效與每日權重。</p></div>
+      <div class="ensemble-run-table">
+        <div class="ensemble-run-row ensemble-run-head"><span>ASSET</span><span>MARKET</span><span>RETURN</span><span>EQUAL</span><span>EDGE</span><span>SHARPE</span><span>MAX DD</span><span>LATEST WEIGHTS</span><span>GATE / FAILED CHECKS</span></div>
+        {% for view in overview.runs %}{% set item = view.run %}<a class="ensemble-run-row" href="/ensembles?run={{ item.id }}"><b>{{ item.symbol }}</b><span>{{ item.market }}</span><span class="{{ 'up' if item.total_return >= 0 else 'down' }}">{{ '%+.1f%%'|format(item.total_return * 100) }}</span><span>{{ '%+.1f%%'|format(item.equal_weight_return * 100) }}</span><span class="{{ 'up' if item.excess_to_equal >= 0 else 'down' }}">{{ '%+.1f%%'|format(item.excess_to_equal * 100) }}</span><span>{{ '%.2f'|format(item.sharpe) }}</span><span class="down">{{ '%.1f%%'|format(item.max_drawdown * 100) }}</span><span class="weight-chips"><i>T {{ '%.0f%%'|format(view.latest_weights.trend_momentum * 100) }}</i><i>M {{ '%.0f%%'|format(view.latest_weights.mean_reversion * 100) }}</i><i>R {{ '%.0f%%'|format(view.latest_weights.regime_aware * 100) }}</i></span><span><em class="run-gate {{ item.promotion_gate|lower }}">{{ item.promotion_gate }}</em><small>{{ view.failed_gates|join(' · ') or 'ALL CHECKS PASSED' }}</small></span></a>{% else %}<div class="backtest-empty">尚無研究紀錄。</div>{% endfor %}
+      </div>
+    </section>
+  </main>
+</body>
+</html>

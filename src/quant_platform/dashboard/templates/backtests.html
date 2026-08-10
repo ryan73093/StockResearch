@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Walk-forward Backtest Lab / Quant OS</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='5.0.0') }}">
+</head>
+<body class="tech-body">
+  {% include '_sidebar.html' %}
+
+  <main class="backtest-main unified-main">
+    <section class="backtest-hero">
+      <div><span>NEXT-OPEN EXECUTION / WALK-FORWARD / COST-AWARE</span><h1>Bias-safe Backtest Lab</h1><p>每個 fold 只用訓練區間挑選參數，訊號在收盤資料可用後產生，下一交易日開盤才成交；所有排名只使用未參與調參的 OOS 報酬。</p></div>
+      <div class="backtest-actions"><form method="post" action="/backtests/run/TW"><button>RUN TW OOS</button></form><form method="post" action="/backtests/run/US"><button>RUN US OOS</button></form></div>
+    </section>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+
+    <section class="backtest-kpis">
+      <article><span>BACKTEST RUNS</span><strong>{{ overview.run_count }}</strong><small>asset × strategy research artifacts</small></article>
+      <article><span>OOS FOLDS</span><strong>{{ overview.fold_count }}</strong><small>non-overlapping test windows</small></article>
+      <article><span>RECORDED TRADES</span><strong>{{ overview.trade_count }}</strong><small>entry, exit, reason and cost retained</small></article>
+      <article class="gate"><span>PROMOTION CANDIDATES</span><strong>{{ overview.candidate_count }}</strong><small>requires ≥4 folds / ≥252 OOS sessions</small></article>
+    </section>
+
+    {% if overview.selected %}{% set selected = overview.selected %}{% set run = selected.run %}{% set curve = selected.equity|map(attribute='equity')|list %}{% set benchmark_curve = selected.equity|map(attribute='benchmark_equity')|list %}{% set all_curve = curve + benchmark_curve %}
+    <section class="backtest-section">
+      <div class="section-head"><div><span>01 / SELECTED OOS RUN</span><h2>{{ run.symbol }} / {{ run.strategy_name }}</h2></div><p>{{ run.data_start.date() }} → {{ run.data_end.date() }} · {{ run.fold_count }} folds · commission {{ '%.0f'|format(run.commission_bps) }} bps + slippage {{ '%.0f'|format(run.slippage_bps) }} bps</p></div>
+      <div class="selected-backtest">
+        <article class="oos-chart-panel">
+          <div class="chart-meta"><span>STITCHED OOS EQUITY</span><div><i></i>STRATEGY <i></i>BENCHMARK</div></div>
+          <svg viewBox="0 0 100 34" preserveAspectRatio="none"><line x1="0" y1="33" x2="100" y2="33"></line><polyline class="strategy-equity" points="{{ shared_chart_points(curve, all_curve|min, all_curve|max, 100, 33) }}"></polyline><polyline class="benchmark-equity" points="{{ shared_chart_points(benchmark_curve, all_curve|min, all_curve|max, 100, 33) }}"></polyline></svg>
+          <div class="axis"><span>{{ run.data_start.date() }}</span><span>Only out-of-sample windows</span><span>{{ run.data_end.date() }}</span></div>
+        </article>
+        <article class="oos-metrics"><div><span>TOTAL RETURN</span><strong class="{{ 'up' if run.total_return >= 0 else 'down' }}">{{ '%+.2f%%'|format(run.total_return * 100) }}</strong></div><div><span>BENCHMARK</span><strong>{{ '%+.2f%%'|format(run.benchmark_return * 100) }}</strong></div><div><span>EXCESS</span><strong class="{{ 'up' if run.excess_return >= 0 else 'down' }}">{{ '%+.2f%%'|format(run.excess_return * 100) }}</strong></div><div><span>SHARPE</span><strong>{{ '%.2f'|format(run.sharpe) }}</strong></div><div><span>SORTINO</span><strong>{{ '%.2f'|format(run.sortino) }}</strong></div><div><span>MAX DD</span><strong class="down">{{ '%.2f%%'|format(run.max_drawdown * 100) }}</strong></div><div><span>PROFIT FACTOR</span><strong>{{ '%.2f'|format(run.profit_factor or 0) }}</strong></div><div><span>GATE</span><strong class="gate-value {{ run.promotion_gate|lower }}">{{ run.promotion_gate }}</strong></div></article>
+      </div>
+    </section>
+
+    <section class="backtest-section detail-grid">
+      <div><div class="section-head compact"><div><span>02 / WALK-FORWARD FOLDS</span><h2>Train → Test 稽核</h2></div></div><div class="fold-table"><div class="fold-row fold-head"><span>#</span><span>TRAIN</span><span>TEST</span><span>PARAMETERS</span><span>TRAIN SR</span><span>TEST RET</span><span>TEST SR</span><span>MAX DD</span><span>TRADES</span></div>{% for fold in selected.folds %}<div class="fold-row"><b>{{ fold.sequence }}</b><span>{{ fold.train_start.date() }}<br>{{ fold.train_end.date() }}</span><span>{{ fold.test_start.date() }}<br>{{ fold.test_end.date() }}</span><span title="{{ fold.selected_parameters_json }}">{{ fold.selected_parameters_json }}</span><span>{{ '%.2f'|format(fold.train_sharpe) }}</span><span class="{{ 'up' if fold.test_return >= 0 else 'down' }}">{{ '%+.1f%%'|format(fold.test_return * 100) }}</span><span>{{ '%.2f'|format(fold.test_sharpe) }}</span><span class="down">{{ '%.1f%%'|format(fold.max_drawdown * 100) }}</span><span>{{ fold.trade_count }}</span></div>{% endfor %}</div></div>
+      <div><div class="section-head compact"><div><span>03 / RECENT TRADES</span><h2>成交與退出原因</h2></div></div><div class="trade-table"><div class="trade-row trade-head"><span>ENTRY</span><span>EXIT</span><span>SIZE</span><span>RETURN</span><span>HOLD</span><span>REASON</span><span>COST</span></div>{% for trade in (selected.trades|reverse|list)[:20] %}<div class="trade-row"><span>{{ trade.entry_time.date() }}</span><span>{{ trade.exit_time.date() }}</span><span>{{ '%.0f%%'|format(trade.size * 100) }}</span><span class="{{ 'up' if trade.net_return >= 0 else 'down' }}">{{ '%+.2f%%'|format(trade.net_return * 100) }}</span><span>{{ trade.holding_sessions }}D</span><span>{{ trade.exit_reason }}</span><span>{{ '%.3f%%'|format(trade.costs * 100) }}</span></div>{% else %}<div class="backtest-empty">此 OOS run 沒有完成交易。</div>{% endfor %}</div></div>
+    </section>{% endif %}
+
+    <section class="backtest-section">
+      <div class="section-head"><div><span>04 / OOS STRATEGY RANKING</span><h2>正式 Walk-forward 研究排名</h2></div><p>點擊任一列查看完整 folds 與 trades。高 Sharpe 若沒有超越 benchmark、fold 不穩定或 OOS 歷史不足，仍不得晉級。</p></div>
+      <div class="backtest-run-table"><div class="backtest-run-row backtest-run-head"><span>#</span><span>ASSET</span><span>STRATEGY</span><span>OOS RETURN</span><span>BENCHMARK</span><span>EXCESS</span><span>SHARPE</span><span>SORTINO</span><span>CALMAR</span><span>MAX DD</span><span>PF</span><span>WIN</span><span>FOLDS</span><span>OOS N</span><span>TRADES</span><span>GATE / FAILED CHECKS</span></div>{% for view in overview.runs %}{% set item = view.run %}<a class="backtest-run-row" href="/backtests?run={{ item.id }}"><span>{{ '%02d'|format(loop.index) }}</span><b>{{ item.symbol }}</b><strong>{{ item.strategy_name }}</strong><span class="{{ 'up' if item.total_return >= 0 else 'down' }}">{{ '%+.1f%%'|format(item.total_return * 100) }}</span><span>{{ '%+.1f%%'|format(item.benchmark_return * 100) }}</span><span class="{{ 'up' if item.excess_return >= 0 else 'down' }}">{{ '%+.1f%%'|format(item.excess_return * 100) }}</span><span>{{ '%.2f'|format(item.sharpe) }}</span><span>{{ '%.2f'|format(item.sortino) }}</span><span>{{ '%.2f'|format(item.calmar) }}</span><span class="down">{{ '%.1f%%'|format(item.max_drawdown * 100) }}</span><span>{{ '%.2f'|format(item.profit_factor or 0) }}</span><span>{{ '%.0f%%'|format(item.win_rate * 100) }}</span><span>{{ item.fold_count }}</span><span>{{ item.observation_count }}</span><span>{{ item.trade_count }}</span><span><em class="run-gate {{ item.promotion_gate|lower }}">{{ item.promotion_gate }}</em><small>{{ view.failed_gates|join(' · ') or 'ALL CHECKS PASSED' }}</small></span></a>{% else %}<div class="backtest-empty">尚未執行正式 Walk-forward 回測。</div>{% endfor %}</div>
+    </section>
+
+    <section class="backtest-section backtest-methodology"><article><span>BIAS CONTROL</span><h3>訊號與成交分離</h3><p>收盤後才能知道的訊號，不會取得同日收盤成交價；一律延遲至下一 session open，並保留 overnight 與 intraday P&L。</p></article><article><span>WALK-FORWARD</span><h3>參數只在 Train 選擇</h3><p>252 日 rolling train 選擇參數，後續 63 日 test 完全不參與選擇。畫面績效只串接非重疊 OOS folds。</p></article><article><span>EXECUTION & RISK</span><h3>成本、滑價與部位</h3><p>每次 turnover 收取 5 bps commission 與 5 bps slippage；部位依 trailing volatility 縮放，並使用延遲執行的停損停利。</p></article><article class="method-warning"><span>PROMOTION GATE</span><h3>至少一年 OOS</h3><p>需要 ≥4 folds、≥252 OOS sessions、正超額報酬、Sharpe≥0.75、Max DD≤25%、PF≥1.10 且至少 2/3 folds 為正。</p></article></section>
+  </main>
+</body>
+</html>

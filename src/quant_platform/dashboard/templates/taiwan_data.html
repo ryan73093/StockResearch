@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>台股研究資料／量化研究平台</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.0.0') }}">
+</head>
+<body class="tech-body">{% include '_sidebar.html' %}<main class="tech-main tw-data-main-v1">
+  <header class="tech-header">
+    <div><span class="tech-kicker">籌碼、估值與基本面資料</span><h1>台股研究資料</h1><p>FinMind 作為主要研究來源；每筆資料保留事件時間、公告可用時間與匯入時間，避免回測使用尚未公告的資料。</p></div>
+    <form method="post" action="/taiwan-data/run"><button class="tw-run-v1">更新台股研究資料</button></form>
+  </header>
+  {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+  <section class="tech-section"><div class="tw-kpis-v1">
+    <article><span>保存資料</span><b>{{ '{:,}'.format(overview.total_rows) }} 筆</b><small>包含歷史修訂版本</small></article>
+    <article><span>涵蓋股票</span><b>{{ overview.symbol_count }} 檔</b><small>研究股票池內台股</small></article>
+    <article><span>資料種類</span><b>{{ overview.dataset_names|length }} 種</b><small>籌碼、估值、營收</small></article>
+    <article><span>最近可用時間</span><b>{{ taipei_time(overview.last_available_time).strftime('%Y-%m-%d') if overview.last_available_time else '尚無資料' }}</b><small>台北時間／模型允許讀取</small></article>
+  </div></section>
+  <section class="tech-section"><div class="section-head"><div><span>季報衍生特徵</span><h2>最新財務品質快照</h2></div><p>季報日期後採 90 天保守可用時間，避免回測提前看到財報。</p></div><div class="financial-snapshot-grid-v18">{% for item in overview.financial_snapshots %}<article><div><strong>{{ item.symbol }}</strong><small>財報期 {{ taipei_time(item.event_time).strftime('%Y-%m-%d') }}</small></div><dl>{% for name,value in item.values %}<dt>{{ feature_label(name) }}</dt><dd>{% if name in ['roe_annualized','roa_annualized','gross_margin','free_cash_flow_margin'] %}{{ '%.2f%%'|format(value*100) }}{% elif name == 'free_cash_flow' %}{{ '%.2f 億元'|format(value/100000000) }}{% elif name == 'quarterly_eps' %}{{ '%.2f 元／股'|format(value) }}{% else %}{{ '%.2f（來源未標示單位）'|format(value) }}{% endif %}</dd>{% endfor %}</dl><small>模型可用：{{ taipei_time(item.available_time).strftime('%Y-%m-%d %H:%M') }}</small></article>{% else %}<div class="backtest-empty">尚無季財報特徵。更新台股研究資料後，這裡會顯示 EPS、ROE、ROA、毛利率與自由現金流。</div>{% endfor %}</div></section>
+  <section class="tech-section">
+    <div class="section-head"><div><span>查詢個股</span><h2>資料涵蓋狀況</h2></div><form class="tw-filter-v1" method="get"><input name="symbol" value="{{ selected_symbol }}" placeholder="2330.TW"><button>查詢</button></form></div>
+    <div class="tw-coverage-v1"><div class="tw-coverage-row-v1 tw-head-v1"><span>股票</span><span>資料種類</span><span>來源</span><span>資料筆數</span><span>最早事件</span><span>最近事件</span><span>最近公告可用時間</span></div>
+    {% for item in overview.coverage %}<div class="tw-coverage-row-v1"><strong>{{ item.symbol }}</strong><span>{{ overview.dataset_names.get(item.dataset,item.dataset) }}</span><span>{{ 'FinMind' if item.source=='finmind' else item.source }}</span><b>{{ '{:,}'.format(item.row_count) }} 筆</b><span>{{ taipei_time(item.first_event_time).strftime('%Y-%m-%d') }}</span><span>{{ taipei_time(item.last_event_time).strftime('%Y-%m-%d') }}</span><span>{{ taipei_time(item.last_available_time).strftime('%Y-%m-%d %H:%M') }}</span></div>{% else %}<div class="backtest-empty">尚無台股籌碼與基本面資料。請按右上角「更新台股研究資料」。</div>{% endfor %}</div>
+  </section>
+  <section class="tech-section">
+    <div class="section-head"><div><span>最新資料</span><h2>各股票最新原始紀錄</h2></div><p>每個數值都顯示單位；若來源文件未定義單位，會明確標示，不自行猜測。</p></div>
+    <div class="tw-preview-grid-v1">{% for item in overview.latest %}<article>
+      <div><b>{{ item.symbol }}</b><span>{{ item.dataset_name }}</span></div>
+      <small>事件日期 {{ taipei_time(item.event_time).strftime('%Y-%m-%d') }}／公告可用 {{ taipei_time(item.available_time).strftime('%Y-%m-%d %H:%M') }}（台北時間）</small>
+      <dl>{% for key,value in item.fields.items() if key not in ['date','stock_id'] %}<dt>{{ taiwan_field_label(key) }}</dt><dd>{{ taiwan_value_display(item.dataset,key,value,item.fields) }}</dd>{% endfor %}</dl>
+    </article>{% else %}<div class="backtest-empty">沒有可顯示的最新資料。</div>{% endfor %}</div>
+  </section>
+</main></body></html>

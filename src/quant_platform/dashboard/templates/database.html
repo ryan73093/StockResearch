@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>資料完成度與資料庫／Quant OS</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.1.0') }}">
+  <style>
+    .db-verdict-v8{display:grid;grid-template-columns:minmax(250px,1.2fr) repeat(3,minmax(110px,.55fr));gap:6px}.db-verdict-v8 article{padding:9px 11px;border:1px solid var(--border);border-radius:7px;background:var(--panel)}.db-verdict-v8 article:first-child{border-color:var(--amber);background:rgba(255,184,76,.05)}.db-verdict-v8 span,.db-verdict-v8 small{display:block;color:var(--muted);font-size:12px}.db-verdict-v8 b{display:block;margin:2px 0;font-size:18px}
+    .db-ready-list-v8{display:grid;gap:5px}.db-ready-row-v8{display:grid;grid-template-columns:150px minmax(150px,.8fr) minmax(210px,1.2fr) 95px 26px;gap:9px;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:inherit;text-decoration:none}.db-ready-row-v8:hover{border-color:var(--cyan)}.db-ready-row-v8 span,.db-ready-row-v8 small{font-size:12px}.db-ready-row-v8 small{color:var(--muted)}.db-bar-v8{height:7px;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden}.db-bar-v8 i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--cyan),var(--green))}
+    .db-work-v8{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:8px}.db-work-v8>article{min-width:0}.db-pending-v8{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0}.db-pending-v8 a{padding:3px 7px;border:1px solid var(--border);border-radius:5px;font-size:12px}.db-provider-v8{padding:7px 9px;border-left:3px solid var(--amber);background:rgba(255,184,76,.05);font-size:12px;overflow-wrap:anywhere}
+    .db-jobs-v8{display:grid;gap:4px;max-height:235px;overflow:auto}.db-job-v8{display:grid;grid-template-columns:145px 75px 125px 1fr;gap:7px;align-items:start;padding:7px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px}.db-job-v8.failed,.db-job-v8.partial{border-left:3px solid var(--red)}.db-job-v8.running{border-left:3px solid var(--cyan)}.db-job-v8.succeeded{border-left:3px solid var(--green)}.db-job-v8 time,.db-job-v8 small{color:var(--muted)}
+    .db-two-v8{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:8px}.db-scroll-v8{max-height:460px;overflow:auto;border:1px solid var(--border);border-radius:7px}.db-scroll-v8 table{width:100%;border-collapse:collapse}.db-scroll-v8 th{position:sticky;top:0;z-index:1;background:var(--panel-strong)}.db-scroll-v8 th,.db-scroll-v8 td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:left;font-size:12px}.db-scroll-v8 td:last-child,.db-scroll-v8 th:last-child{text-align:right}
+    @media(max-width:950px){.db-verdict-v8{grid-template-columns:1fr 1fr}.db-verdict-v8 article:first-child{grid-column:1/-1}.db-work-v8,.db-two-v8{grid-template-columns:1fr}.db-ready-row-v8{grid-template-columns:130px 1fr 75px 24px}.db-ready-row-v8 small{grid-column:1/-1}.db-job-v8{grid-template-columns:120px 65px 1fr}.db-job-v8 small{grid-column:1/-1}}
+  </style>
+</head>
+<body class="tech-body">{% include '_sidebar.html' %}
+<main class="tech-main database-main-v7">
+  <header class="tech-header"><div><span class="tech-kicker">資料是否真的建完</span><h1>資料完成度與資料庫</h1><p>先看缺什麼，再查資料表與排程；大量資料表採主鍵最大值估算，避免每次開頁掃描數千萬列。</p></div><a class="tech-button-link-v39" href="/progress#roadmap">系統藍圖</a></header>
+
+  <section class="tech-section"><div class="db-verdict-v8">
+    <article><span>目前結論</span><b>基礎行情接近完成，決策驗證與向前模擬未完成</b><small>這就是盤後 AI 目前還不能視為可靠實盤答案的主要原因。</small></article>
+    <article><span>長歷史行情</span><b>{{ readiness.price_ready_assets }}／{{ readiness.registered_assets }}</b><small>{{ readiness.price_percent }}%，待補 {{ readiness.price_missing_assets }} 檔</small></article>
+    <article><span>歷史決策日</span><b>{{ readiness.decision_days }}／{{ readiness.decision_target }}</b><small>還差 {{ readiness.decision_missing_days }} 日</small></article>
+    <article><span>向前模擬日</span><b>{{ readiness.paper_days }}／{{ readiness.paper_target }}</b><small>{{ readiness.paper_orders }} 委託／{{ readiness.paper_fills }} 成交</small></article>
+  </div></section>
+
+  <section class="tech-section">
+    <div class="section-head"><div><span>完成度</span><h2>每類資料還缺多少</h2></div><p>百分比只代表列出的明確門檻，不代表策略一定有效。</p></div>
+    <div class="db-ready-list-v8">{% for item in readiness_rows %}<a class="db-ready-row-v8" href="{{ item.url }}"><b>{{ item.name }}</b><span>{{ item.current }}<br><small>{{ item.target }}</small></span><small>{{ item.missing }}</small><div class="db-bar-v8"><i style="width:{{ item.percent }}%"></i></div><em>{{ item.percent }}%</em></a>{% endfor %}</div>
+  </section>
+
+  <section class="tech-section db-work-v8">
+    <article><div class="section-head"><div><span>下一批</span><h2>等待補抓的股票</h2></div></div>
+      <p>{{ expansion.status }}；{{ expansion.selection_basis }}</p>
+      <div class="db-pending-v8">{% for symbol in expansion.next_symbols %}<a href="/stocks?symbol={{ symbol }}">{{ symbol }}</a>{% else %}<span>目前沒有等待加入股票池的標的。</span>{% endfor %}</div>
+      <div class="db-provider-v8"><b>輔助資料來源狀態：</b> {{ provider_summary }}</div>
+    </article>
+    <article><div class="section-head"><div><span>背景工作</span><h2>最近排程與失敗原因</h2></div></div>
+      <div class="db-jobs-v8">{% for item in recent_jobs %}<div class="db-job-v8 {{ item.status }}"><b>{{ item.job }}</b><span>{{ item.status }}</span><time>{{ taipei_time(item.started_at).strftime('%m-%d %H:%M:%S') }}</time><small>嘗試 {{ item.metrics.get('attempted','—') }} 檔／新增 {{ item.metrics.get('inserted_bars','—') }} 根{% if item.error %}；{{ item.error }}{% elif item.metrics.get('failures') %}；{{ item.metrics.get('failures')|join('；') if item.metrics.get('failures') is not string else item.metrics.get('failures') }}{% endif %}</small></div>{% else %}<p>尚無排程紀錄。</p>{% endfor %}</div>
+    </article>
+  </section>
+
+  <section class="tech-section db-two-v8" data-details-url="/api/database/details">
+    <article><div class="section-head"><div><span>資料表</span><h2 id="dbTableSummary">背景讀取資料表明細…</h2></div></div><div class="db-scroll-v8"><table><thead><tr><th>資料表</th><th>用途</th><th>估計列數</th></tr></thead><tbody id="dbTableRows"><tr><td colspan="3">載入中；上方完成度已可先查看。</td></tr></tbody></table></div></article>
+    <article><div class="section-head"><div><span>行情範圍</span><h2 id="dbCoverageSummary">背景彙整每檔行情…</h2></div></div><div class="db-scroll-v8"><table><thead><tr><th>股票</th><th>市場</th><th>筆數</th><th>第一筆</th><th>最新</th><th>研究</th></tr></thead><tbody id="dbCoverageRows"><tr><td colspan="6">載入中，不會阻擋主畫面。</td></tr></tbody></table></div></article>
+  </section>
+</main>
+<script>
+(() => {
+  const section=document.querySelector('[data-details-url]');
+  const tableBody=document.getElementById('dbTableRows');
+  const coverageBody=document.getElementById('dbCoverageRows');
+  const addCell=(row,value,tag='td')=>{const cell=document.createElement(tag);cell.textContent=value;row.appendChild(cell);return cell};
+  fetch(section.dataset.detailsUrl).then(response=>{if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.json()}).then(data=>{
+    tableBody.replaceChildren();
+    data.tables.forEach(item=>{const row=document.createElement('tr');addCell(row,item.name);addCell(row,item.description);addCell(row,Number(item.count).toLocaleString('zh-TW'));tableBody.appendChild(row)});
+    document.getElementById('dbTableSummary').textContent=`${data.tables.length} 張表／約 ${Number(data.total_rows).toLocaleString('zh-TW')} 列`;
+    coverageBody.replaceChildren();
+    data.bar_coverage.forEach(item=>{const row=document.createElement('tr');addCell(row,item.symbol);addCell(row,item.market);addCell(row,Number(item.row_count).toLocaleString('zh-TW'));addCell(row,item.data_start||'—');addCell(row,item.data_end||'—');const cell=addCell(row,'');const link=document.createElement('a');link.href=`/stocks?symbol=${encodeURIComponent(item.symbol)}`;link.textContent='開啟';cell.appendChild(link);coverageBody.appendChild(row)});
+    document.getElementById('dbCoverageSummary').textContent=`${data.bar_coverage.length} 個代號已載入`;
+  }).catch(error=>{
+    tableBody.innerHTML=`<tr><td colspan="3">明細載入失敗：${error.message}</td></tr>`;
+    coverageBody.innerHTML='<tr><td colspan="6">行情彙整載入失敗；可稍後重試。</td></tr>';
+  });
+})();
+</script>
+</body></html>

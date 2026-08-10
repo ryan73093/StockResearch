@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>系統建置進度與開發藍圖／量化研究平台</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.1.0') }}">
+  <style>
+    .progress-purpose-v8{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(0,2.2fr);gap:10px;align-items:stretch}
+    .progress-answer-v8{padding:12px 14px;border:1px solid var(--cyan);background:rgba(44,214,255,.055);border-radius:8px}.progress-answer-v8 span,.progress-answer-v8 small{display:block;color:var(--muted)}.progress-answer-v8 b{display:block;margin:3px 0;font-size:18px;color:var(--text)}
+    .progress-flow-v8{display:grid;grid-template-columns:repeat(6,minmax(90px,1fr));gap:6px;margin:0;padding:0;list-style:none}.progress-flow-v8 li{position:relative;padding:9px 8px;border:1px solid var(--border);background:var(--panel);border-radius:7px;font-size:12px}.progress-flow-v8 b,.progress-flow-v8 small{display:block}.progress-flow-v8 small{margin-top:3px;color:var(--muted)}
+    .progress-mini-v8{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.progress-mini-v8 article{display:flex;align-items:baseline;gap:7px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--panel)}.progress-mini-v8 b{font-size:20px}.progress-mini-v8 span{font-size:12px;color:var(--muted)}
+    .roadmap-list-v8{display:grid;gap:5px}.roadmap-row-v8{display:grid;grid-template-columns:minmax(130px,.7fr) minmax(150px,1fr) minmax(210px,1.2fr) 78px 28px;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:inherit;text-decoration:none}.roadmap-row-v8:hover{border-color:var(--cyan)}.roadmap-row-v8 span,.roadmap-row-v8 small{font-size:12px}.roadmap-row-v8 small{color:var(--muted)}.roadmap-bar-v8{height:7px;background:rgba(255,255,255,.07);border-radius:999px;overflow:hidden}.roadmap-bar-v8 i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--green));border-radius:inherit}
+    .progress-table-v8{overflow:auto;max-height:520px;border:1px solid var(--border);border-radius:8px}.progress-table-v8 table{width:100%;border-collapse:collapse}.progress-table-v8 th{position:sticky;top:0;z-index:1;background:var(--panel-strong)}.progress-table-v8 th,.progress-table-v8 td{padding:8px 9px;border-bottom:1px solid var(--border);vertical-align:top;text-align:left;font-size:12px}.progress-table-v8 td:nth-child(1){min-width:150px}.progress-table-v8 td:nth-child(3){min-width:240px;color:var(--muted)}.progress-table-v8 td:nth-child(4){min-width:260px}.progress-state-v8{display:inline-block;padding:2px 7px;border:1px solid currentColor;border-radius:999px;white-space:nowrap}.progress-state-v8.usable{color:var(--green)}.progress-state-v8.verifying{color:var(--cyan)}.progress-state-v8.building{color:var(--amber)}.progress-state-v8.planned{color:var(--muted)}
+    @media(max-width:980px){.progress-purpose-v8{grid-template-columns:1fr}.progress-flow-v8{grid-template-columns:repeat(3,1fr)}.roadmap-row-v8{grid-template-columns:140px 1fr 78px 24px}.roadmap-row-v8 small{grid-column:1/-1}.progress-mini-v8{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:620px){.progress-flow-v8{grid-template-columns:repeat(2,1fr)}.roadmap-row-v8{grid-template-columns:1fr 64px 20px}.roadmap-row-v8 span{grid-column:1/-1}.progress-mini-v8{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body class="tech-body">{% include '_sidebar.html' %}<main class="tech-main unified-main">
+  <header class="tech-header"><div><span class="tech-kicker">同一頁看方向、完成度與缺口</span><h1>系統建置進度與開發藍圖</h1><p>數字達標才算完成；百分比都有明確分母，不用「研究中」代替答案。</p></div><small>更新：{{ taipei_time(generated_at).strftime('%Y-%m-%d %H:%M:%S') }}</small></header>
+
+  <section class="tech-section progress-purpose-v8">
+    <div class="progress-answer-v8"><span>整個系統最終要做什麼</span><b>收盤後給你最多 3 個買／賣動作</b><small>顯示股票、股數、金額、原因；沒有優勢就直接顯示不交易。真實券商下單目前關閉。</small></div>
+    <ol class="progress-flow-v8">
+      <li><b>1. 自動補資料</b><small>行情、財務、新聞</small></li><li><b>2. 品質檢查</b><small>缺漏與時間穿越</small></li><li><b>3. 模型排名</b><small>預估相對強弱</small></li><li><b>4. 風險配置</b><small>現金、集中與成本</small></li><li><b>5. 今日動作</b><small>最多 3 個委託</small></li><li><b>6. 持續驗證</b><small>交易歷程對照 0050</small></li>
+    </ol>
+  </section>
+
+  <section class="tech-section"><div class="progress-mini-v8">
+    <article><b class="up">{{ summary.usable }}</b><span>已可使用</span></article><article><b>{{ summary.verifying }}</b><span>已做待驗收</span></article><article><b class="warning">{{ summary.building }}</b><span>建置／研究中</span></article><article><b>{{ summary.planned }}</b><span>尚未完成</span></article>
+  </div></section>
+
+  <section id="roadmap" class="tech-section">
+    <div class="section-head"><div><span>可量化藍圖</span><h2>離可靠盤後決策還差多少</h2></div><p>歷史驗證與向前模擬分開計算；回測不能代替真實時間觀察。</p></div>
+    <div class="roadmap-list-v8">{% for phase in roadmap %}
+      <a class="roadmap-row-v8" href="{{ phase.url }}"><b>{{ phase.name }}</b><span>{{ phase.current }}</span><small>{{ phase.missing }}</small><div class="roadmap-bar-v8"><i style="width:{{ phase.percent }}%"></i></div><em>{{ phase.percent }}%</em></a>
+    {% endfor %}</div>
+  </section>
+
+  <section class="tech-section">
+    <div class="section-head"><div><span>功能清單</span><h2>已做什麼、下一步做什麼</h2></div><p>表格固定高度，可直接捲動，不再用大型卡片撐長頁面。</p></div>
+    <div class="progress-table-v8"><table><thead><tr><th>項目</th><th>狀態</th><th>目前證據</th><th>下一個缺口</th><th>驗證</th></tr></thead><tbody>
+      {% for item in items %}<tr><td><b>{{ item.title }}</b><br><small>{{ item.summary }}</small></td><td><span class="progress-state-v8 {{ item.status_key }}">{{ item.status }}</span></td><td>{{ item.evidence|join('；') }}</td><td>{{ item.next }}</td><td><a href="{{ item.url }}">{{ item.action }} →</a></td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</main></body></html>

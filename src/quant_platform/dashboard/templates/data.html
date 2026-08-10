@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data Vault / Quant Research Platform</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='5.0.0') }}">
+</head>
+<body class="tech-body">
+  <div class="noise"></div>
+  {% include '_sidebar.html' %}
+  <main class="data-main unified-main">
+    <section class="data-hero">
+      <div><p class="eyebrow">POINT-IN-TIME DATA PLATFORM</p><h1>Data<br><em>Vault.</em></h1></div>
+      <div class="data-stats"><div><span>DATASETS</span><strong>{{ overview.dataset_count }}</strong></div><div><span>OBSERVATIONS</span><strong>{{ overview.row_count }}</strong></div></div>
+    </section>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}<div class="alert {{ category }}">{{ message }}</div>{% endfor %}
+    {% endwith %}
+
+    <section class="ingest-panel">
+      <div><p class="eyebrow">MANUAL INGESTION</p><h2>更新日線資料</h2><p>Yahoo 日線暫以收盤後 15 分鐘作為保守的 available time。正式研究會再接交易所日曆與供應商時間戳。</p></div>
+      <form method="post" action="/data/ingest">
+        <label>SYMBOL<input name="symbol" placeholder="SPY / 0050.TW" required></label>
+        <label>MARKET<select name="market"><option value="US">US</option><option value="TW">TW</option></select></label>
+        <label>START<input type="date" name="start_date"></label>
+        <label>END<input type="date" name="end_date"></label>
+        <button type="submit">RUN INGESTION →</button>
+      </form>
+    </section>
+
+    <section class="coverage-section">
+      <div class="section-heading"><div><p class="eyebrow">DATA LINEAGE</p><h2>資料覆蓋</h2></div><span>EVENT / AVAILABLE / INGESTED</span></div>
+      <div class="coverage-table">
+        <div class="coverage-row header"><span>SYMBOL</span><span>SOURCE</span><span>RANGE</span><span>ROWS</span><span>STATUS</span></div>
+        {% for item in overview.coverage %}
+        <div class="coverage-row"><strong>{{ item.symbol }}</strong><span>{{ item.source }}</span><span>{{ item.first_event_time.strftime('%Y-%m-%d') }} → {{ item.last_event_time.strftime('%Y-%m-%d') }}</span><span>{{ item.row_count }}</span><span class="quality-ok">VALIDATED</span></div>
+        {% else %}
+        <div class="empty-state"><b>NO DATASETS YET</b><span>執行上方 ingestion，建立第一個 point-in-time dataset。</span></div>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+  <footer><span>QUANT RESEARCH PLATFORM / DATA v0.2.0</span><span>資料可得時間優先於漂亮回測</span></footer>
+</body>
+</html>

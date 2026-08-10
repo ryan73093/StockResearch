@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>單股研究／量化研究平台</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.0.0') }}">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+</head>
+<body class="tech-body">
+{% include '_sidebar.html' %}
+<main class="tech-main stock-main-v1">
+  <header class="tech-header">
+    <div>
+      <span class="tech-kicker">行情、模型、回測與系統決策</span>
+      <h1>單一股票研究</h1>
+      <p>這一頁回答四件事：目前結論、為什麼、風險在哪裡、下一步該做什麼。</p>
+      {% if view.asset %}<a class="header-link-v1" href="/explain?symbol={{ view.symbol }}">查看模型解釋 →</a>{% endif %}
+    </div>
+    <form class="stock-search-v1" method="get" action="/stocks">
+      <input name="symbol" value="{{ view.symbol }}" placeholder="2330 / AAPL" required>
+      <button>查詢</button>
+    </form>
+  </header>
+
+  {% if view.auto_refresh_state in ['queued','running'] %}
+  <section class="tech-section">
+    <div id="stockRefreshNotice" data-status-url="{{ url_for('stock_refresh_status',symbol=view.symbol) }}" class="flash warning stock-refresh-progress-v1">
+      <div><b>正在自動補齊 {{ view.symbol }}</b><span id="stockRefreshStage">{{ view.auto_refresh_state }}</span><strong id="stockRefreshPercent">0%</strong></div>
+      <progress id="stockRefreshBar" max="100" value="0"></progress>
+      <small>使用 fetch 背景載入，頁面不會持續閃爍；完成後會自動更新一次。</small>
+    </div>
+  </section>
+  {% elif view.auto_refresh_error %}
+  <section class="tech-section"><div class="flash warning"><b>自動補資料未完整完成：</b> {{ view.auto_refresh_error }}</div></section>
+  {% elif view.auto_refresh_state == 'succeeded' or view.auto_refresh_attempted %}
+  <section class="tech-section"><div class="flash success"><b>{{ view.symbol }} 研究資料已備妥</b> 行情、台股研究資料、特徵、模型、因子與回測流程已執行。</div></section>
+  {% endif %}
+
+  {% if not view.asset %}
+  <section class="tech-section">
+    <div class="stock-empty-v1">
+      <h2>{{ '正在建立 '+view.symbol if view.auto_refresh_state in ['queued','running'] else '找不到 '+view.symbol }}</h2>
+      <p>{{ '資料仍在背景整理，完成後會顯示研究結論。' if view.auto_refresh_state in ['queued','running'] else '請確認股票代號，或到股票池查看是否已加入研究範圍。' }}</p>
+      <a href="/universe">查看股票池與排程 →</a>
+    </div>
+  </section>
+  {% else %}
+  {% set decision_summary = stock_decision_summary(view.decision) %}
+  {% set prediction_summary = stock_prediction_summary(view.predictions, view.decision) %}
+  {% set backtest_summary = stock_backtest_summary(view.backtests) %}
+
+  <section class="tech-section stock-decision-hero-v2 status-{{ decision_summary.status }}">
+    <div class="stock-decision-main-v2">
+      <span>系統決策／{{ decision_summary.status }}</span>
+      <h2>{{ decision_summary.headline }}</h2>
+      <p>{{ decision_summary.action }}</p>
+      {% if view.decision %}
+      <div class="stock-decision-metrics-v2">
+        <b>綜合分數 {{ '%.2f'|format(decision_summary.score) }}</b>
+        <b>建議權重 {{ '%.1f%%'|format(decision_summary.weight*100) }}</b>
+        <b>資料時間 {{ taipei_time(decision_summary.event_time).strftime('%Y-%m-%d %H:%M') }}</b>
+      </div>
+      {% endif %}
+    </div>
+    <div class="stock-decision-evidence-v2">
+      <article>
+        <h3>系統為什麼這樣判斷</h3>
+        {% for item in decision_summary.reasons %}<p>＋ {{ item }}</p>{% else %}<p>目前沒有可用理由。</p>{% endfor %}
+      </article>
+      <article>
+        <h3>阻擋交易的風險／閘門</h3>
+        {% for item in decision_summary.risks %}<p>！ {{ item }}</p>{% endfor %}
+        {% for item in decision_summary.gates %}<p>× {{ item }}</p>{% endfor %}
+        {% if not decision_summary.risks and not decision_summary.gates %}<p>目前沒有額外阻擋項目。</p>{% endif %}
+      </article>
+    </div>
+    <div class="stock-decision-links-v2">
+      <a href="/decisions?market={{ view.asset.market }}">查看所有股票的每日決策</a>
+      <a href="/data-quality">查看資料品質閘門</a>
+      <a href="/paper-trading">前往模擬交易</a>
+    </div>
+  </section>
+
+  <section class="tech-section">
+    <div class="stock-summary-v1">
+      <article><span>股票</span><b>{{ view.symbol }}</b><small>{{ view.asset.market }}／{{ view.asset.sector or '未分類' }}</small></article>
+      <article><span>市場狀態</span><b>{{ {'BULL_HIGH_VOL':'高波動多頭','BULL_NORMAL_VOL':'一般波動多頭','BULL_LOW_VOL':'低波動多頭','BEAR_HIGH_VOL':'高波動空頭','BEAR_NORMAL_VOL':'一般波動空頭','BEAR_LOW_VOL':'低波動空頭','RANGE_HIGH_VOL':'高波動盤整','RANGE_NORMAL_VOL':'一般波動盤整','RANGE_LOW_VOL':'低波動盤整'}.get(view.regime.composite_regime,view.regime.composite_regime) if view.regime else '資料不足' }}</b><small>{{ '信心 %.0f%%'|format(view.regime.confidence*100) if view.regime else '尚未判定' }}</small></article>
+      <article><span>技術面結論</span><b>{{ view.technical_analysis.stance }}</b><small>分數 {{ '%+.2f'|format(view.technical_analysis.score) }}／完整度 {{ '%.0f%%'|format(view.technical_analysis.confidence*100) }}</small></article>
+      <article><span>回測可用性</span><b>{{ backtest_summary.candidate_count if backtest_summary.available else 0 }} 個候選</b><small>共 {{ view.backtests|length }} 個樣本外結果</small></article>
+    </div>
+  </section>
+
+  <section class="tech-section">
+    <div class="section-head">
+      <div><span>規則式自動解讀</span><h2>技術分析摘要</h2></div>
+      <p>根據當下已知特徵產生，不代表因果或獲利保證。</p>
+    </div>
+    <div class="technical-summary-v1">
+      <article class="technical-stance-v1">
+        <span>綜合判斷</span><b>{{ view.technical_analysis.stance }}</b>
+        <small>技術分數 {{ '%+.2f'|format(view.technical_analysis.score) }}／資料完整度 {{ '%.0f%%'|format(view.technical_analysis.confidence*100) }}</small>
+      </article>
+      <div class="technical-evidence-v1">
+        {% for item in view.technical_analysis.evidence %}
+        <article><div><strong>{{ item.name }}</strong><em class="{{ 'up' if item.signal in ['偏多','超賣'] else 'down' if item.signal in ['偏空','超買'] else '' }}">{{ item.signal }}</em><code>{{ item.value }}</code></div><p>{{ item.explanation }}</p></article>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="technical-context-v1">
+      <article><h3>技術風險</h3>{% for item in view.technical_analysis.risk_notes %}<p>• {{ item }}</p>{% endfor %}</article>
+      <article><h3>跨資產環境</h3>{% for item in view.technical_analysis.market_context %}<p>• {{ item }}</p>{% else %}<p>尚無跨資產資料。</p>{% endfor %}</article>
+    </div>
+  </section>
+
+  <section class="tech-section stock-chart-grid-v1">
+    <article class="tech-panel stock-chart-card-v1">
+      <div class="panel-title"><div><span>日線行情與技術指標</span><h2>{{ view.symbol }} K 線分析</h2></div></div>
+      <div class="stock-chart-controls-v1">
+        <label><input type="checkbox" data-stock-series="週均線（MA5）" checked>週均線（MA5）</label>
+        <label><input type="checkbox" data-stock-series="月均線（MA20）" checked>月均線（MA20）</label>
+        <label><input type="checkbox" data-stock-series="季均線（MA60）" checked>季均線（MA60）</label>
+        <label><input type="checkbox" data-stock-series="布林上軌|布林中軌|布林下軌" checked>布林通道</label>
+        <label><input type="checkbox" data-stock-series="RSI（14日）" checked>RSI</label>
+        <label><input type="checkbox" data-stock-series="MACD|訊號線|MACD柱狀圖" checked>MACD</label>
+      </div>
+      <div id="stockCandleChart" class="stock-chart-v1"></div>
+    </article>
+
+    <article class="tech-panel stock-chart-card-v1 stock-feature-panel-v2">
+      <div class="panel-title">
+        <div><span>最新研究特徵</span><h2>依用途分類</h2><small class="feature-hover-hint-v1">滑入或聚焦特徵，可查看用途說明</small></div>
+      </div>
+      <div class="feature-groups-v2">
+        {% for group in group_stock_features(view.latest_features) %}
+        <section class="feature-group-v2 category-{{ group.key }}">
+          <header><div><h3>{{ group.label }}</h3><p>{{ group.description }}</p></div><b>{{ group["items"]|length }}</b></header>
+          <div class="indicator-list-v1">
+            {% for name,value in group["items"] %}
+            <div tabindex="0" title="{{ feature_help(name) }}" data-feature-help="{{ feature_help(name) }}"><span>{{ feature_label(name) }}</span><b>{{ feature_value_display(name,value) }}</b></div>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="tech-section prediction-section-v2">
+    <div class="section-head">
+      <div><span>模型預估</span><h2>未來五日報酬：{{ prediction_summary.headline }}</h2></div>
+      <p>{{ prediction_summary.explanation }}</p>
+    </div>
+    <article class="research-conclusion-v2 {{ 'positive' if prediction_summary.available and prediction_summary.mean > 0 else 'negative' }}">
+      {% if prediction_summary.available %}
+      <div><span>多模型平均</span><b>{{ '%+.2f%%'|format(prediction_summary.mean*100) }}</b></div>
+      <div><span>模型分歧</span><b>{{ '%.2f%%'|format(prediction_summary.dispersion*100) }}</b></div>
+      <div><span>看多模型</span><b>{{ prediction_summary.positive_count }}／{{ prediction_summary.model_count }}</b></div>
+      <div><span>股票池平均排名</span><b>{{ '%.0f%%'|format(prediction_summary.mean_rank*100) }}</b></div>
+      {% endif %}
+      <p><strong>怎麼用：</strong>{{ prediction_summary.action }}</p>
+    </article>
+    <div class="prediction-grid-v1">
+      {% for item in view.predictions %}
+      <article>
+        <span>{{ model_label(item.model_name) }}</span>
+        <b class="{{ 'up' if item.predicted_value>=0 else 'down' }}">{{ '%+.2f%%'|format(item.predicted_value*100) }}</b>
+        <small>股票池排名 {{ '%.0f'|format(item.rank_score*100) }}%</small>
+      </article>
+      {% else %}<div class="backtest-empty">目前沒有最新模型預測。</div>{% endfor %}
+    </div>
+  </section>
+
+  <section class="tech-section backtest-section-v2">
+    <div class="section-head">
+      <div><span>樣本外驗證</span><h2>回測結論：{{ backtest_summary.headline }}</h2></div>
+      <p>只有通過候選門檻的策略，才可進入影子或模擬交易。</p>
+    </div>
+    <article class="research-conclusion-v2">
+      <div class="backtest-verdict-v2">
+        {% if backtest_summary.available %}
+        <span>目前最佳</span>
+        <b>{{ backtest_summary.best_name }}</b>
+        <small>策略 {{ '%+.1f%%'|format(backtest_summary.best.total_return*100) }}／基準 {{ '%+.1f%%'|format(backtest_summary.best.benchmark_return*100) }}／超額 {{ '%+.1f%%'|format(backtest_summary.best.excess_return*100) }}</small>
+        {% endif %}
+      </div>
+      <p><strong>結論：</strong>{{ backtest_summary.conclusion }}</p>
+      <p><strong>「研究中」是什麼：</strong>代表策略只供研究，尚未通過樣本外穩定性、資料品質、風險或交易成本等完整門檻，不能當成真實下單許可。</p>
+    </article>
+    <div class="stock-backtest-v1">
+      <div class="stock-backtest-row-v1 stock-backtest-head-v1"><span>策略／用途</span><span>策略報酬</span><span>基準報酬</span><span>超額報酬</span><span>夏普值</span><span>最大回撤</span><span>交易數</span><span>狀態</span></div>
+      {% for item in view.backtests %}
+      {% set strategy_name = {'trend_momentum':'趨勢動能','mean_reversion':'均值回歸','regime_aware':'市場狀態調整'}.get(item.strategy_name,item.strategy_name) %}
+      <a class="stock-backtest-row-v1" href="/backtests?run={{ item.id }}" title="{{ strategy_description(item.strategy_name) }}">
+        <strong>{{ strategy_name }}<small>{{ strategy_description(item.strategy_name) }}</small></strong>
+        <span>{{ '%+.1f%%'|format(item.total_return*100) }}</span>
+        <span>{{ '%+.1f%%'|format(item.benchmark_return*100) }}</span>
+        <span class="{{ 'up' if item.excess_return > 0 else 'down' }}">{{ '%+.1f%%'|format(item.excess_return*100) }}</span>
+        <span>{{ '%.2f'|format(item.sharpe) }}</span>
+        <span>{{ '%.1f%%'|format(item.max_drawdown*100) }}</span>
+        <span>{{ item.trade_count }}</span>
+        <em class="run-gate {{ item.promotion_gate|lower }}">{{ '候選' if item.promotion_gate=='CANDIDATE' else '研究中' }}</em>
+      </a>
+      {% else %}<div class="backtest-empty">尚無這檔股票的樣本外回測。</div>{% endfor %}
+    </div>
+  </section>
+  {% endif %}
+</main>
+
+{% if view.auto_refresh_state in ['queued','running'] %}
+<script>
+const refreshNotice=document.getElementById('stockRefreshNotice'),refreshStage=document.getElementById('stockRefreshStage'),refreshPercent=document.getElementById('stockRefreshPercent'),refreshBar=document.getElementById('stockRefreshBar');
+const pollRefresh=async()=>{try{const response=await fetch(refreshNotice.dataset.statusUrl,{cache:'no-store'}),status=await response.json();refreshStage.textContent=status.stage;refreshPercent.textContent=`${status.percent}%`;refreshBar.setAttribute('value',status.percent);if(['queued','running'].includes(status.state)){setTimeout(pollRefresh,1500);return}location.reload()}catch(error){refreshStage.textContent='連線暫時失敗，稍後重試';setTimeout(pollRefresh,5000)}};pollRefresh();
+</script>
+{% endif %}
+{% if view.asset and view.candle_dates %}
+<script>window.stockChartPayload={dates:{{ view.candle_dates|list|tojson }},candles:{{ view.candle_data|list|tojson }},volumes:{{ view.volumes|list|tojson }}};</script>
+<script src="{{ url_for('static',filename='js/stock_chart.js',v='1.0.1') }}"></script>
+{% endif %}
+</body>
+</html>

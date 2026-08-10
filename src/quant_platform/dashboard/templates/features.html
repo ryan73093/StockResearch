@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feature Store / Quant OS</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='5.0.0') }}">
+</head>
+<body class="tech-body">
+  {% include '_sidebar.html' %}
+
+  <main class="feature-main unified-main">
+    <section class="feature-hero">
+      <div><span>VERSIONED / POINT-IN-TIME / REPRODUCIBLE</span><h1>Feature & Label Store</h1><p>把原始 OHLCV 轉成模型可直接使用的特徵矩陣。所有特徵保留事件時間、可用時間與版本；未來報酬標籤只在預測期間結束後才可用，避免 Look-ahead Bias。</p></div>
+      <div class="feature-actions"><form method="post" action="/features/build/TW"><button>BUILD TW STORE</button></form><form method="post" action="/features/build/US"><button>BUILD US STORE</button></form></div>
+    </section>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+
+    <section class="feature-kpis">
+      <article><span>FEATURE DEFINITIONS</span><strong>{{ overview.feature_definition_count }}</strong><small>v1.0.0 deterministic transforms</small></article>
+      <article><span>FEATURE VALUES</span><strong>{{ '{:,}'.format(overview.feature_value_count) }}</strong><small>versioned point-in-time values</small></article>
+      <article><span>LABEL VALUES</span><strong>{{ '{:,}'.format(overview.label_value_count) }}</strong><small>future outcomes with delayed availability</small></article>
+      <article><span>COVERED SYMBOLS</span><strong>{{ overview.symbol_count }}</strong><small>active research assets materialized</small></article>
+    </section>
+
+    <section class="feature-section">
+      <div class="section-head"><div><span>01 / FEATURE CATALOG</span><h2>已註冊的特徵定義</h2></div><p>增加新特徵時建立新版本，不覆蓋舊研究結果；lookback 是開始產生有效值所需的最少歷史深度。</p></div>
+      <div class="catalog-table">
+        <div class="catalog-row catalog-head"><span>NAME</span><span>FAMILY</span><span>VERSION</span><span>LOOKBACK</span><span>DESCRIPTION</span></div>
+        {% for item in definitions %}<div class="catalog-row"><b>{{ item.name }}</b><span>{{ item.family|upper }}</span><span>{{ item.version }}</span><span>{{ item.lookback }} sessions</span><span>{{ item.description }}</span></div>{% endfor %}
+      </div>
+    </section>
+
+    <section class="feature-section">
+      <div class="section-head"><div><span>02 / LEAKAGE-SAFE LABELS</span><h2>監督式學習標籤</h2></div><p>event_time 是做預測的日期；available_time 則是答案真正揭曉的日期。模型訓練切分必須使用 available_time。</p></div>
+      <div class="label-grid">
+        {% for item in overview.label_definitions %}<article><span>{{ item.name }}</span><strong>{{ item.horizon }} SESSIONS</strong><p>{{ item.description }}</p></article>{% endfor %}
+      </div>
+    </section>
+
+    <section class="feature-section">
+      <div class="section-head"><div><span>03 / MATERIALIZATION COVERAGE</span><h2>最近的儲存覆蓋</h2></div><p>這裡顯示每個資產與特徵版本的實際資料筆數，重新建置採 upsert，不會累積重複資料。</p></div>
+      <div class="coverage-tabs">
+        <div class="store-table">
+          <div class="store-row store-head"><span>SYMBOL</span><span>FEATURE</span><span>VER</span><span>ROWS</span><span>LAST EVENT</span></div>
+          {% for item in overview.feature_coverage[:80] %}<div class="store-row"><b>{{ item.symbol }}</b><span>{{ item.item_name }}</span><span>{{ item.item_version }}</span><span>{{ item.row_count }}</span><span>{{ item.last_event_time }}</span></div>{% else %}<div class="store-empty">尚未建立 Feature Store，請按上方 BUILD 按鈕。</div>{% endfor %}
+        </div>
+        <div class="store-table label-table">
+          <div class="store-row store-head"><span>SYMBOL</span><span>LABEL</span><span>VER</span><span>ROWS</span><span>LAST AVAILABLE</span></div>
+          {% for item in overview.label_coverage[:40] %}<div class="store-row"><b>{{ item.symbol }}</b><span>{{ item.item_name }}</span><span>{{ item.item_version }}</span><span>{{ item.row_count }}</span><span>{{ item.last_available_time }}</span></div>{% else %}<div class="store-empty">標籤會在具備足夠未來資料後建立。</div>{% endfor %}
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

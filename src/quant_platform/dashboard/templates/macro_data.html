@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>總經資料中心／量化研究平台</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.0.0') }}">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body class="tech-body">{% include '_sidebar.html' %}<main class="tech-main macro-main-v1">
+  <header class="tech-header"><div><span class="tech-kicker">FRED／時點一致總經特徵</span><h1>總經資料中心</h1><p>CPI、利率、失業率、GDP 與殖利率曲線會保存原始觀測值、模型可用時間及偵測到的修訂版本，供台股與美股模型使用。</p></div><form method="post" action="/macro-data/run"><button class="macro-run-v1">更新 FRED 總經資料</button></form></header>
+  {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+  <section class="tech-section"><div class="macro-kpis-v1"><article><span>總經序列</span><b>{{ overview.series_count }}</b><small>物價、景氣、利率與債券</small></article><article><span>有效觀測值</span><b>{{ '{:,}'.format(overview.total_rows) }}</b><small>每個日期只取最新匯入版本</small></article><article><span>模型特徵</span><b>7</b><small>台股與美股共同使用</small></article><article><span>資料起點</span><b>2010</b><small>可重複更新，不重複寫入</small></article></div></section>
+  <section class="tech-section macro-layout-v1"><article class="tech-panel macro-chart-panel-v1"><div class="panel-title"><div><span>歷史趨勢</span><h2 id="macroChartTitle">選擇總經序列</h2></div><select id="macroSeriesSelect">{% for item in overview.series %}<option value="{{ loop.index0 }}">{{ item.name }}（{{ item.series_id }}）</option>{% endfor %}</select></div><div id="macroChart" class="macro-chart-v1"></div></article><article class="tech-panel macro-method-v1"><div class="panel-title"><div><span>回測安全設計</span><h2>模型何時能看到資料？</h2></div></div><ol><li>事件時間是 FRED 觀測期，不等於公告日。</li><li>目前以保守公告延遲建立「可用時間」，防止提前看到資料。</li><li>公開 CSV 提供目前版本；日後再次下載若數值改變，系統會保留新的修訂版本。</li><li>完整歷史修訂回測將於 ALFRED vintage 模組加入，現階段不宣稱已做到完整即時資料集。</li></ol></article></section>
+  <section class="tech-section"><div class="section-head"><div><span>序列涵蓋</span><h2>目前保存的 FRED 資料</h2></div><p>最新值僅供研究展示，不構成買賣建議。</p></div><div class="macro-table-v1"><div class="macro-row-v1 macro-head-v1"><span>中文名稱</span><span>FRED 代碼</span><span>觀測筆數</span><span>最新觀測期</span><span>模型可用時間</span><span>最新值</span></div>{% for item in overview.series %}<div class="macro-row-v1"><strong>{{ item.name }}</strong><code>{{ item.series_id }}</code><b>{{ item.row_count }}</b><span>{{ item.latest.event_time.strftime('%Y-%m-%d') if item.latest else '尚未更新' }}</span><span>{{ taipei_time(item.latest.available_time).strftime('%Y-%m-%d %H:%M') if item.latest else '—' }}</span><em>{{ '%.3f'|format(item.latest.value) if item.latest else '—' }}</em></div>{% endfor %}</div></section>
+</main><script>
+const macroSeries={{ overview.series|tojson }};
+const select=document.getElementById('macroSeriesSelect'),title=document.getElementById('macroChartTitle');
+const chart=echarts.init(document.getElementById('macroChart'));
+function drawMacro(){const item=macroSeries[Number(select.value)||0],points=item?.points||[];title.textContent=item?item.name:'尚無資料';chart.setOption({animation:false,grid:{left:62,right:24,top:28,bottom:46},tooltip:{trigger:'axis'},xAxis:{type:'category',data:points.map(x=>x.date),axisLabel:{color:'#91a2b8',hideOverlap:true},axisLine:{lineStyle:{color:'#2b3b51'}}},yAxis:{type:'value',scale:true,axisLabel:{color:'#91a2b8'},splitLine:{lineStyle:{color:'#1c2b3e'}}},dataZoom:[{type:'inside'},{type:'slider',height:16,bottom:8,borderColor:'#26384e',textStyle:{color:'#91a2b8'}}],series:[{type:'line',showSymbol:false,smooth:.12,data:points.map(x=>x.value),lineStyle:{width:2,color:'#36d7ff'},areaStyle:{color:'rgba(54,215,255,.08)'}}]});}
+select.addEventListener('change',drawMacro);drawMacro();addEventListener('resize',()=>chart.resize());
+</script></body></html>

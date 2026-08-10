@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>財經記憶與研究問答</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.0.0') }}">
+  <style>
+    .memory-flow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+    .memory-flow article,.memory-note{padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}
+    .memory-flow b,.memory-flow span{display:block}.memory-flow span{margin-top:6px;color:var(--muted);font-size:.88rem}
+    .memory-local{border-color:#23a36d!important}.memory-api{border-color:#4e8cff!important}
+    .news-memory-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;max-height:430px;overflow:auto;padding-right:4px}
+    .news-memory-list article{padding:13px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+    .news-memory-list small,.news-memory-list p{color:var(--muted)}
+    .memory-tag{display:inline-block;padding:2px 8px;border-radius:999px;background:rgba(35,163,109,.12);color:#23a36d;font-size:.78rem}
+    @media(max-width:850px){.memory-flow{grid-template-columns:1fr}.news-memory-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:560px){.news-memory-list{grid-template-columns:1fr}}
+  </style>
+</head>
+<body class="tech-body">{% include '_sidebar.html' %}<main class="tech-main unified-main reports-main-v22">
+<header class="tech-header">
+  <div>
+    <span class="tech-kicker">本機向量檢索 × OpenAI 證據回答</span>
+    <h1>財經記憶與研究問答</h1>
+    <p>新聞在本機建立向量與搜尋。只有提問時，才會把問題和最多 4 段相關證據送給 OpenAI API 產生中文回答。</p>
+  </div>
+  <div class="report-actions-v22">
+    <form method="post" action="/news/update"><button>更新新聞資料</button></form>
+    <form method="post" action="/reports/generate/TW"><button>產生台股研究報告</button></form>
+    <form method="post" action="/reports/reindex"><button>同步本機索引</button></form>
+  </div>
+</header>
+{% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+
+<section class="tech-section">
+  <div class="section-head"><div><span>資料流向</span><h2>哪些資料留在公司，哪些會送出</h2></div></div>
+  <div class="memory-flow">
+    <article class="memory-local"><b>1. 本機離線建立向量</b><span>{{ overview.embedding_model }} · {{ overview.embedding_device|upper }} · {{ overview.embedding_dimensions }} 維</span></article>
+    <article class="memory-local"><b>2. 本機搜尋相關證據</b><span>新聞、研究報告與回測資料都在本機資料庫比對，不呼叫 embedding API。</span></article>
+    <article class="memory-api"><b>3. OpenAI API 回答問題</b><span>只傳問題與最多 4 段已找到的文字；不傳整個資料庫，也不傳向量。</span></article>
+  </div>
+</section>
+
+<section class="tech-section"><div class="report-kpis-v22 rag-kpis-v35">
+  <article><span>財經新聞記憶</span><b>{{ overview.news_document_count|int }} 則</b><small>已寫入研究知識庫</small></article>
+  <article><span>全部研究文件</span><b>{{ overview.document_count }} 份</b><small>新聞、報告、模型與回測</small></article>
+  <article><span>可搜尋片段</span><b>{{ overview.chunk_count }} 段</b><small>本機語意向量</small></article>
+  <article><span>回答方式</span><b>{{ 'OpenAI API' if overview.external_llm_enabled else '本機證據摘要' }}</b><small>{{ overview.answer_model }}</small></article>
+  <article><span>Embedding（向量化）</span><b>本機離線</b><small>{{ overview.embedding_provider }}</small></article>
+  <article><span>最近問答紀錄</span><b>{{ overview.recent_query_count }} 筆</b><small>保留引用與耗時，方便稽核</small></article>
+</div></section>
+
+<section class="tech-section">
+  <div class="section-head"><div><span>有來源的回答</span><h2>詢問財經新聞與研究資料</h2></div><p>回答中的「來源 1、來源 2」可展開核對；證據不足時系統應直接說不知道。</p></div>
+  <form class="rag-form-v22" method="get"><input name="question" value="{{ overview.answer.question if overview.answer else '' }}" placeholder="例如：最近哪些半導體新聞可能影響盤後策略？" required><button>搜尋記憶並回答</button></form>
+  {% if overview.answer %}<article class="rag-answer-v22 rag-answer-v35">
+    <div class="rag-answer-meta-v35"><span>{{ overview.answer.mode }}</span><b class="{{ 'up' if overview.answer.grounded else 'down' }}">{{ '已找到可引用證據' if overview.answer.grounded else '證據不足，未強行回答' }}</b><small>問答紀錄 #{{ overview.answer.query_id }} · {{ overview.answer.latency_ms }} 毫秒 · {{ overview.answer.provider }} / {{ overview.answer.model }}</small></div>
+    <pre>{{ overview.answer.answer }}</pre>
+    <div class="rag-evidence-v35">{% for item in overview.answer.evidence %}<a href="{{ item.source_uri or '/reports' }}"><b>{{ item.citation }} {{ item.title }}</b><em>相關度 {{ '%.1f%%'|format(item.score*100) }}</em><small>{{ item.document_type }} · 片段 #{{ item.chunk_index + 1 }}<br>{{ item.excerpt }}</small></a>{% else %}<small>找不到足以回答的本機證據。請先更新新聞與同步本機索引，或縮小問題範圍。</small>{% endfor %}</div>
+  </article>{% endif %}
+</section>
+
+<section class="tech-section">
+  <div class="section-head"><div><span>已蒐集內容</span><h2>最近財經新聞</h2></div><p>目前共 {{ news.total_count }} 則；下方只顯示最近 20 則，避免頁面過長。</p></div>
+  <div class="news-memory-list">{% for item in news.items %}<article>
+    <span class="memory-tag">{{ item.sentiment_label }}</span>
+    <h3>{{ item.title }}</h3>
+    <small>{{ item.symbol }} · {{ item.source_name }} · {{ taipei_time(item.available_time).strftime('%Y-%m-%d %H:%M') }}</small>
+    {% if item.summary %}<p>{{ item.summary }}</p>{% endif %}
+  </article>{% else %}<div class="backtest-empty">目前沒有新聞資料，請按「更新新聞資料」。</div>{% endfor %}</div>
+</section>
+
+<section class="tech-section">
+  <div class="section-head"><div><span>每日研究記憶</span><h2>研究報告</h2></div><p>報告產生後會連同新聞、模型與回測證據一起建立本機索引。</p></div>
+  <div class="report-list-v22">{% for item in overview.reports %}<details {% if loop.first %}open{% endif %}><summary><b>{{ item.title }}</b><span>{{ taipei_time(item.generated_at).strftime('%Y-%m-%d %H:%M') }}</span></summary><pre>{{ item.body_markdown }}</pre><div><a href="/decisions">每日決策</a><a href="/backtests">回測</a><a href="/models">模型</a><a href="/portfolios">投資組合</a></div></details>{% else %}<div class="backtest-empty">尚無研究報告，請先產生台股研究報告。</div>{% endfor %}</div>
+</section>
+
+<section class="tech-section memory-note"><b>名詞解釋</b><p><strong>Embedding（向量化）</strong>：把文字轉成一串數字，讓系統在本機找出意思相近的新聞。<strong>向量資料庫</strong>：這裡是把向量與來源存在現有資料庫中供相似度搜尋。<strong>RAG（檢索增強生成）</strong>：先找證據，再請語言模型依證據回答，降低憑空編造。</p></section>
+</main></body></html>

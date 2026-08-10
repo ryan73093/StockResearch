@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>自動模型研究／量化研究平台</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='5.0.0') }}">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+</head>
+<body class="tech-body lab-body">
+  {% include '_sidebar.html' %}
+  <main class="tech-main model-main-v1">
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+    <header class="tech-header">
+      <div><span class="tech-kicker">巢狀時間切分／標籤可用時間限制／可重現</span><h1>自動模型研究</h1><p>Optuna 只在正式樣本外區間之前調參；每次執行保存最佳參數、驗證分數、時間分段與特徵重要性。</p></div>
+      <div class="lab-actions"><form method="post" action="/models/run/TW"><button type="submit">訓練台股</button></form><form method="post" action="/models/run/US"><button type="submit">訓練美股</button></form></div>
+    </header>
+    <section id="modelTrainingStatus" class="model-training-status-v1" data-market="{{ request.args.get('training','') }}" hidden><div><i></i><span>模型研究準備中</span></div><b>請保留此頁，完成後會自動載入最新結果。</b></section>
+    <section class="tech-section"><div class="kpi-grid">
+      <article><span>研究實驗</span><strong>{{ overview.run_count }}</strong><small>可重現研究快照</small></article><article><span>可用模型</span><strong>{{ overview.available_model_count }}</strong><small>目前本機可直接訓練</small></article><article><span>自動調參實驗</span><strong>{{ overview.automl_run_count }}</strong><small>Optuna 巢狀時間驗證</small></article><article class="gate"><span>晉級候選</span><strong>{{ overview.candidate_count }}</strong><small>必須通過全部樣本外門檻</small></article>
+    </div></section>
+    <section class="tech-section"><div class="section-head"><div><span>01／模型目錄</span><h2>模型與可調參數</h2></div><p>精簡顯示；點選模型才展開用途與參數範圍。</p></div><div class="model-catalog-compact-v1">
+      {% for model in overview.catalog %}{% if model.available %}<details class="available"><summary><strong>{{ model_label(model.name) }}</strong><span>{{ model.backend }}</span><code>{{ model.search_space }}</code><em>可使用</em></summary><p>{{ model.description }}</p></details>{% endif %}{% endfor %}
+      <details class="planned planned-group-v1"><summary><strong>後續模型</strong><span>4 個 Adapter</span><code>XGBoost／LightGBM／CatBoost／序列深度學習</code><em>尚未安裝</em></summary><div>{% for model in overview.catalog %}{% if not model.available %}<p><b>{{ model_label(model.name) }}</b>：{{ model.description }}</p>{% endif %}{% endfor %}</div></details>
+    </div></section>
+    {% if overview.selected %}{% set view = overview.selected %}{% set run = view.experiment %}
+    <section class="tech-section"><div class="section-head"><div><span>02／選取的實驗</span><h2>{{ run.market }}／{{ model_label(run.model_name) }}</h2></div><p>{{ run.data_start.date() }} → {{ run.data_end.date() }} · {{ run.fold_count }} 個時間切分 · {{ run.observation_count }} 筆樣本外資料</p></div>
+      <div class="model-metrics-v1"><div><span>RMSE</span><b>{{ '%.4f'|format(run.rmse) }}</b></div><div><span>MAE</span><b>{{ '%.4f'|format(run.mae) }}</b></div><div><span>R²</span><b>{{ '%+.3f'|format(run.r2) }}</b></div><div><span>DIRECTION</span><b>{{ '%.1f%%'|format(run.directional_accuracy * 100) }}</b></div><div><span>RANK IC</span><b>{{ '%+.3f'|format(run.rank_ic or 0) }}</b></div><div><span>L/S SPREAD</span><b>{{ '%+.2f%%'|format((run.long_short_spread or 0) * 100) }}</b></div></div>
+      <div class="model-chart-grid-v1"><article class="tech-panel model-chart-card-v1"><div class="panel-title"><div><span>FEATURE IMPORTANCE</span><h2>模型主要依據</h2></div></div><div id="modelImportanceChart" class="model-echart-v1"></div></article><article class="tech-panel model-chart-card-v1"><div class="panel-title"><div><span>FOLD STABILITY</span><h2>時間切分誤差</h2></div></div><div id="modelFoldChart" class="model-echart-v1"></div></article></div>
+      <div class="automl-summary-v1"><article><span>調參引擎</span><b>{{ view.parameters.get('automl_engine','未啟用') }}</b><small>調參範圍只使用正式樣本外區間之前的資料</small></article><article><span>試驗次數</span><b>{{ view.parameters.get('automl_trials',0) }}</b><small>固定亂數種子，可重現搜尋</small></article><article><span>最佳驗證 RMSE</span><b>{% if view.parameters.get('automl_best_validation_rmse') is not none %}{{ '%.5f'|format(view.parameters.get('automl_best_validation_rmse')) }}{% else %}基準模型{% endif %}</b><small>不是正式樣本外績效</small></article><article><span>最佳參數</span><div>{% for key,value in view.parameters.get('model_parameters',{}).items() %}<code>{{ key }}={{ value }}</code>{% else %}<code>無需調參</code>{% endfor %}</div><small>已保存於研究資料庫<br>資料指紋：{{ view.parameters.get('dataset_fingerprint','舊版無指紋') }}</small></article></div>
+      <div class="model-gate-v1"><span class="run-gate {{ run.promotion_gate|lower }}">{{ run.promotion_gate }}</span><p>{{ view.failed_gates|join(' · ') or 'ALL OOS CHECKS PASSED' }}</p></div>
+    </section>{% endif %}
+    <section class="tech-section"><div class="section-head"><div><span>03／實驗紀錄</span><h2>目前模型排名</h2></div><p>每個市場／模型只顯示最新快照；另保存 {{ overview.archived_run_count }} 筆歷史版本供稽核。</p></div>
+      <div class="model-table-wrap-v1"><div class="model-run-row-v1 model-run-head-v1"><span>市場</span><span>模型</span><span>標籤</span><span>RMSE</span><span>MAE</span><span>R²</span><span>方向率</span><span>排序 IC</span><span>多空差</span><span>樣本外</span><span>狀態／未過門檻</span></div>{% for view in overview.runs %}{% set item = view.experiment %}<a class="model-run-row-v1" href="/models?run={{ item.id }}"><b>{{ item.market }}</b><strong>{{ model_label(item.model_name) }}</strong><span>未來五日報酬</span><span>{{ '%.4f'|format(item.rmse) }}</span><span>{{ '%.4f'|format(item.mae) }}</span><span>{{ '%+.3f'|format(item.r2) }}</span><span>{{ '%.1f%%'|format(item.directional_accuracy * 100) }}</span><span>{{ '%+.3f'|format(item.rank_ic or 0) }}</span><span>{{ '%+.2f%%'|format((item.long_short_spread or 0) * 100) }}</span><span>{{ item.observation_count }}</span><span><em class="run-gate {{ item.promotion_gate|lower }}">{{ '候選' if item.promotion_gate=='CANDIDATE' else '研究中' }}</em><small>{{ view.failed_gates|join(' · ') or '全部樣本外門檻通過' }}</small></span></a>{% else %}<div class="backtest-empty">尚未執行模型研究。請先建立特徵資料庫，再訓練台股或美股。</div>{% endfor %}</div>
+    </section>
+  </main>
+  <script>
+    const trainingBox=document.getElementById('modelTrainingStatus'),trainingMarket=trainingBox?.dataset.market;
+    if(trainingMarket){trainingBox.hidden=false;const poll=async()=>{try{const response=await fetch('/models/training-status/'+trainingMarket),status=await response.json();trainingBox.querySelector('span').textContent=status.message;trainingBox.dataset.state=status.state;if(status.state==='succeeded'){trainingBox.querySelector('b').textContent='研究完成，正在載入最新實驗…';setTimeout(()=>location.href='/models',900);return}if(status.state==='failed'){trainingBox.querySelector('b').textContent='請查看錯誤後重新執行。';return}setTimeout(poll,1200)}catch(error){trainingBox.querySelector('b').textContent='暫時無法取得進度，稍後自動重試。';setTimeout(poll,2000)}};poll()}
+  </script>
+  {% if overview.selected %}<script>
+    const importanceEntries={{ overview.selected.feature_importance|list|tojson }},foldMetrics={{ overview.selected.fold_metrics|list|tojson }};const chartText='#91a2b8',chartGrid='#223046',cyan='#36d7ff',amber='#ffc45c';
+    const importanceChart=echarts.init(document.getElementById('modelImportanceChart'));importanceChart.setOption({grid:{left:125,right:25,top:18,bottom:30},xAxis:{type:'value',axisLabel:{color:chartText},splitLine:{lineStyle:{color:chartGrid}}},yAxis:{type:'category',data:importanceEntries.map(x=>x[0]).reverse(),axisLabel:{color:chartText}},series:[{type:'bar',data:importanceEntries.map(x=>x[1]).reverse(),itemStyle:{color:cyan}}],tooltip:{trigger:'axis'}});
+    const foldChart=echarts.init(document.getElementById('modelFoldChart'));foldChart.setOption({legend:{data:['RMSE','MAE'],textStyle:{color:chartText}},grid:{left:55,right:24,top:46,bottom:35},xAxis:{type:'category',data:foldMetrics.map(x=>'FOLD '+x.sequence),axisLabel:{color:chartText}},yAxis:{type:'value',axisLabel:{color:chartText},splitLine:{lineStyle:{color:chartGrid}}},series:[{name:'RMSE',type:'line',data:foldMetrics.map(x=>x.rmse),smooth:true,itemStyle:{color:cyan}},{name:'MAE',type:'line',data:foldMetrics.map(x=>x.mae),smooth:true,itemStyle:{color:amber}}],tooltip:{trigger:'axis'}});addEventListener('resize',()=>{importanceChart.resize();foldChart.resize()});
+  </script>{% endif %}
+</body></html>

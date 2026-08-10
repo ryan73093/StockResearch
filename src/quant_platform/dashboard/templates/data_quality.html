@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>資料品質與缺漏監控</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.0.0') }}">
+</head>
+<body class="tech-body">{% include '_sidebar.html' %}
+<main class="tech-main unified-main quality-terminal-v41">
+  <header class="quality-command-v41">
+    <div><span class="tech-kicker">DATA QUALITY TERMINAL</span><h1>資料品質與缺漏監控</h1><p>先處理影響研究的缺漏；方法與稽核紀錄收在下方。</p></div>
+    <div class="quality-actions-v34">
+      <form method="post" action="/data-quality/evaluate"><input type="hidden" name="market" value="TW"><input type="hidden" name="stage" value="full"><button>檢查台股</button></form>
+      <form method="post" action="/data-quality/evaluate"><input type="hidden" name="market" value="US"><input type="hidden" name="stage" value="full"><button>檢查美股</button></form>
+    </div>
+  </header>
+  {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+
+  <nav class="quality-switch-v41"><a class="{{ 'active' if market=='TW' else '' }}" href="/data-quality?market=TW">TW 台股</a><a class="{{ 'active' if market=='US' else '' }}" href="/data-quality?market=US">US 美股</a></nav>
+
+  {% if selected %}
+  <section class="quality-statusbar-v41 {{ selected.snapshot.status.value }}">
+    <div><span>研究狀態</span><b>{{ '允許研究' if selected.snapshot.research_allowed else '阻擋研究' }}</b></div>
+    <div><span>資料日期</span><b>{{ selected.snapshot.data_as_of.strftime('%Y-%m-%d') if selected.snapshot.data_as_of else '無資料' }}</b></div>
+    <div><span>日線覆蓋</span><b>{{ selected.snapshot.covered_asset_count }}/{{ selected.snapshot.active_asset_count }} · {{ '%.1f%%'|format(selected.snapshot.bar_coverage_rate*100) }}</b></div>
+    <div><span>特徵覆蓋</span><b>{{ '%.1f%%'|format(selected.snapshot.feature_coverage_rate*100) if selected.snapshot.feature_coverage_rate is not none else '未計算' }}</b></div>
+    <div><span>問題</span><b>{{ selected.snapshot.issue_count }} 筆</b></div>
+    <div><span>嚴重</span><b>{{ selected.snapshot.blocking_issue_count }} 筆</b></div>
+    <div><span>缺交易日</span><b>{{ selected.snapshot.missing_session_count }} 日</b></div>
+  </section>
+
+  {% if market == 'TW' %}
+  {% set fm=provider_status.get('finmind',{}) %}
+  <section class="quality-provider-line-v41">
+    <div><i class="ok"></i><b>TWSE／TPEx 官方資料</b><span>正常，FinMind 被擋時仍繼續補估值資料</span></div>
+    <div><i class="{{ 'ok' if fm.get('available',True) else 'wait' }}"></i><b>FinMind</b>
+      <span>{% if fm.get('available',True) %}可用；請求自動節流{% else %}冷卻中，不送 HTTP · {{ fm.get('reason','等待恢復') }}{% endif %}</span>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="quality-workbench-v41">
+    <header>
+      <div><span>REPAIR QUEUE</span><h2>缺漏與異常</h2></div>
+      <div class="quality-issue-tools-v40">
+        <div><b>{{ selected.snapshot.issue_count }} 筆</b><span>嚴重 {{ severity_counts.get('critical',0) }} · 警告 {{ severity_counts.get('warning',0) }}</span></div>
+        <form method="get"><input type="hidden" name="market" value="{{ market }}"><input name="q" value="{{ issue_query }}" placeholder="代號、類別或缺漏"><button>搜尋</button>{% if issue_query %}<a href="/data-quality?market={{ market }}">清除</a>{% endif %}</form>
+      </div>
+    </header>
+    <div class="quality-issues-v34"><table><thead><tr><th>級別</th><th>類別</th><th>標的</th><th>問題</th><th>現值</th><th>門檻</th><th>影響</th></tr></thead><tbody>
+      {% for issue in visible_issues %}<tr class="{{ issue.severity.value }}"><td>{{ {'info':'資訊','warning':'警告','critical':'嚴重'}.get(issue.severity.value,issue.severity.value) }}</td><td>{{ issue.category }}</td><td>{{ issue.symbol or '整體市場' }}</td><td>{{ issue.message }}</td><td>{{ quality_value_display(issue.observed,issue.unit) }}</td><td>{{ quality_value_display(issue.threshold,issue.unit) }}</td><td>{{ '阻擋研究' if issue.blocks_research else '待補' }}</td></tr>
+      {% else %}<tr><td colspan="7">沒有符合條件的問題。</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+
+  <section class="quality-diagnostics-v41">
+    <details><summary>品質規則與時間鏈</summary><div class="quality-layout-v34"><article><div class="quality-checks-v34">{% for check in selected.checks %}<div class="{{ 'pass' if check.passed else 'fail' }}"><i>{{ '通過' if check.passed else '未過' }}</i><strong>{{ check.label }}</strong><span>目前 {{ quality_value_display(check.value,check.unit) }}</span><small>門檻 {{ quality_value_display(check.threshold,check.unit) }} · {{ check.explanation }}</small></div>{% endfor %}</div></article><article><ol class="quality-time-chain-v34"><li><b>事件時間</b><span>市場或公司事件實際發生時間</span></li><li><b>公開時間</b><span>外界可取得資料的時間</span></li><li><b>寫入時間</b><span>系統真正收到資料的時間</span></li><li><b>計算時間</b><span>特徵或模型產生結果的時間</span></li></ol></article></div></details>
+    <details><summary>最近品質稽核紀錄</summary><div class="quality-history-v34"><table><thead><tr><th>檢查時間</th><th>市場</th><th>階段</th><th>狀態</th><th>日線覆蓋</th><th>特徵覆蓋</th><th>嚴重</th><th>缺交易日</th></tr></thead><tbody>{% for item in overview.recent %}<tr><td>{{ taipei_time(item.snapshot.computed_at).strftime('%Y-%m-%d %H:%M') }}</td><td>{{ item.snapshot.market }}</td><td>{{ '原始資料' if item.snapshot.stage=='raw' else '完整資料' }}</td><td>{{ {'pass':'通過','warning':'警告','blocked':'阻擋'}.get(item.snapshot.status.value,item.snapshot.status.value) }}</td><td>{{ '%.1f%%'|format(item.snapshot.bar_coverage_rate*100) }}</td><td>{{ '%.1f%%'|format(item.snapshot.feature_coverage_rate*100) if item.snapshot.feature_coverage_rate is not none else '未計算' }}</td><td>{{ item.snapshot.blocking_issue_count }}</td><td>{{ item.snapshot.missing_session_count }}</td></tr>{% else %}<tr><td colspan="8">尚無紀錄</td></tr>{% endfor %}</tbody></table></div></details>
+  </section>
+  {% else %}<section class="tech-section"><div class="empty-state"><h2>尚無 {{ market }} 品質快照</h2><p>按右上方按鈕建立。</p></div></section>{% endif %}
+</main></body></html>

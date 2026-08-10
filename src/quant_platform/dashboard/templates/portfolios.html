@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portfolio & Risk Lab / Quant OS</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='5.0.0') }}">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+</head>
+<body class="tech-body lab-body">
+  <aside class="tech-sidebar legacy-sidebar" aria-hidden="true">
+    <a class="tech-logo" href="/"><span>Q</span><div><b>QUANT OS</b><small>RESEARCH TERMINAL</small></div></a>
+    <nav>
+      <a href="/"><i>01</i>市場總覽</a>
+      <a href="/factors"><i>02</i>Factor Lab</a>
+      <a href="/backtests"><i>03</i>Backtest Lab</a>
+      <a href="/ensembles"><i>04</i>Ensemble Lab</a>
+      <a class="active" href="/portfolios"><i>05</i>Portfolio / Risk</a>
+      <a href="/features"><i>06</i>Feature Store</a>
+      <a href="/universe"><i>07</i>股票池與排程</a>
+      <a href="/data"><i>08</i>資料中心</a>
+    </nav>
+    <div class="system-box"><span><i></i> MODULE ONLINE</span><small>PORTFOLIO / RISK v1.0<br>LIVE TRADING / OFF</small></div>
+  </aside>
+
+  {% include '_sidebar.html' %}
+  <main class="tech-main portfolio-main-v1">
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+    <header class="tech-header">
+      <div><span class="tech-kicker">ROLLING OOS / CONSTRAINED ALLOCATION / STRESS TESTED</span><h1>Portfolio & Risk Lab</h1><p>九種配置方法使用 t-1 以前資料估計，每 21 日再平衡並計入交易成本。</p></div>
+      <div class="lab-actions"><form method="post" action="/portfolios/run/TW"><button type="submit">RUN TW</button></form><form method="post" action="/portfolios/run/US"><button type="submit">RUN US</button></form></div>
+    </header>
+
+    <section class="tech-section">
+      <div class="kpi-grid">
+        <article><span>PORTFOLIO RUNS</span><strong>{{ overview.run_count }}</strong><small>市場 × 配置方法研究快照</small></article>
+        <article><span>PROMOTION CANDIDATES</span><strong>{{ overview.candidate_count }}</strong><small>需同時通過報酬、風險與資料門檻</small></article>
+        <article><span>METHODS / MARKETS</span><strong>9 <em>/</em> {{ overview.market_count }}</strong><small>配置器 / 已研究市場</small></article>
+        <article class="gate"><span>BEST OOS SHARPE</span><strong>{{ '%.2f'|format(overview.best_sharpe) }}</strong><small>仍須檢查 promotion gate</small></article>
+      </div>
+
+      {% if overview.selected and overview.selected_view %}{% set selected = overview.selected %}{% set view = overview.selected_view %}{% set run = selected.run %}
+      <div class="portfolio-chart-grid-v1">
+        <article class="tech-panel portfolio-equity-panel-v1">
+          <div class="panel-title"><div><span>{{ run.market }} / {{ run.method|upper|replace('_',' ') }}</span><h2>組合 vs 等權 vs 市場基準</h2></div><em class="run-gate {{ run.promotion_gate|lower }}">{{ run.promotion_gate }}</em></div>
+          <div id="portfolioEquityChart" class="portfolio-echart-v1"></div>
+        </article>
+        <article class="tech-panel portfolio-weight-panel-v1">
+          <div class="panel-title"><div><span>LATEST CONSTRAINED ALLOCATION</span><h2>標的權重與現金</h2></div><b>{{ run.asset_count }} ASSETS</b></div>
+          <div id="portfolioWeightChart" class="portfolio-echart-v1"></div>
+        </article>
+      </div>
+
+      <div class="portfolio-risk-kpis-v1">
+        <div><span>RETURN</span><b class="{{ 'up' if run.total_return >= 0 else 'down' }}">{{ '%+.2f%%'|format(run.total_return * 100) }}</b></div>
+        <div><span>VS EQUAL</span><b class="{{ 'up' if run.excess_to_equal >= 0 else 'down' }}">{{ '%+.2f%%'|format(run.excess_to_equal * 100) }}</b></div>
+        <div><span>VS BENCHMARK</span><b class="{{ 'up' if run.excess_to_benchmark >= 0 else 'down' }}">{{ '%+.2f%%'|format(run.excess_to_benchmark * 100) }}</b></div>
+        <div><span>SHARPE / SORTINO</span><b>{{ '%.2f / %.2f'|format(run.sharpe, run.sortino) }}</b></div>
+        <div><span>MAX DRAWDOWN</span><b class="down">{{ '%.2f%%'|format(run.max_drawdown * 100) }}</b></div>
+        <div><span>VOLATILITY</span><b>{{ '%.2f%%'|format(run.annual_volatility * 100) }}</b></div>
+        <div><span>VaR / CVaR 95</span><b>{{ '%.2f%% / %.2f%%'|format(run.var_95 * 100, run.cvar_95 * 100) }}</b></div>
+        <div><span>BETA</span><b>{{ '%.2f'|format(run.beta or 0) }}</b></div>
+        <div><span>EFFECTIVE N</span><b>{{ '%.2f'|format(run.effective_asset_count) }}</b></div>
+        <div><span>DIVERSIFICATION</span><b>{{ '%.2f'|format(run.diversification_ratio) }}</b></div>
+        <div><span>AVG CORRELATION</span><b>{{ '%.2f'|format(run.average_correlation) }}</b></div>
+        <div><span>LIQUIDITY RISK</span><b>{{ '%.2f'|format(run.liquidity_risk) }}</b></div>
+      </div>
+
+      <div class="portfolio-diagnostics-v1">
+        <article class="tech-panel"><div class="panel-title"><div><span>SECTOR EXPOSURE</span><h2>產業集中度</h2></div></div><div id="sectorExposureChart" class="risk-chart-v1"></div></article>
+        <article class="tech-panel"><div class="panel-title"><div><span>FACTOR PROXIES</span><h2>因子曝險</h2></div></div><dl class="risk-detail-list-v1">{% for name, value in view.factor_exposure.items() %}<div><dt>{{ name|upper|replace('_',' ') }}</dt><dd>{{ '%+.3f'|format(value) }}</dd></div>{% endfor %}</dl></article>
+        <article class="tech-panel stress-panel-v1"><div class="panel-title"><div><span>STRESS TESTS</span><h2>壓力情境損失</h2></div></div><dl class="risk-detail-list-v1">{% for name, value in view.stress_tests.items() %}<div><dt>{{ name|upper|replace('_',' ') }}</dt><dd class="down">{{ '%+.2f%%'|format(value * 100) }}</dd></div>{% endfor %}</dl></article>
+      </div>
+
+      <script>
+        const portfolioEquity={{ selected.equity|tojson }};
+        const portfolioAllocations={{ overview.selected_allocations|tojson }};
+        const latestWeights={{ view.latest_weights|tojson }};
+        latestWeights.CASH=Math.max(0,1-Object.values(latestWeights).reduce((a,b)=>a+b,0));
+        const sectorExposure={{ view.sector_exposure|tojson }};
+        const riskAxis={axisLine:{lineStyle:{color:'#344158'}},axisLabel:{color:'#8290a6'},splitLine:{lineStyle:{color:'rgba(76,91,117,.22)'}}};
+        const portfolioChart=echarts.init(document.getElementById('portfolioEquityChart'));
+        portfolioChart.setOption({animation:false,tooltip:{trigger:'axis'},legend:{top:0,textStyle:{color:'#a9b5c7'}},grid:{left:52,right:18,top:38,bottom:38},xAxis:{...riskAxis,type:'category',data:portfolioEquity.map(p=>p.event_time.slice(0,10)),boundaryGap:false},yAxis:{...riskAxis,type:'value',scale:true},dataZoom:[{type:'inside'},{type:'slider',height:16,bottom:5}],series:[['Portfolio','equity','#48e5c2'],['Equal Weight','equal_weight_equity','#8093f1'],['Benchmark','benchmark_equity','#ffb454']].map(([name,key,color])=>({name,type:'line',showSymbol:false,data:portfolioEquity.map(p=>p[key]),lineStyle:{width:name==='Portfolio'?2:1.4,color},areaStyle:name==='Portfolio'?{color:'rgba(72,229,194,.07)'}:undefined}))});
+        const weightChart=echarts.init(document.getElementById('portfolioWeightChart'));
+        weightChart.setOption({animation:false,tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},grid:{left:88,right:30,top:15,bottom:25},xAxis:{...riskAxis,type:'value',max:Math.max(.4,...Object.values(latestWeights)),axisLabel:{formatter:v=>(v*100).toFixed(0)+'%'}},yAxis:{...riskAxis,type:'category',data:Object.keys(latestWeights)},series:[{type:'bar',data:Object.entries(latestWeights).map(([name,value])=>({value,itemStyle:{color:name==='CASH'?'#718098':'#48e5c2'}})),barMaxWidth:18,label:{show:true,position:'right',formatter:p=>(p.value*100).toFixed(1)+'%',color:'#b8c5d6'}}]});
+        const sectorChart=echarts.init(document.getElementById('sectorExposureChart'));
+        sectorChart.setOption({animation:false,tooltip:{trigger:'item',formatter:'{b}: {d}%'},legend:{type:'scroll',bottom:0,textStyle:{color:'#a9b5c7'}},series:[{type:'pie',radius:['42%','70%'],center:['50%','43%'],label:{color:'#a9b5c7',fontSize:12},data:Object.entries(sectorExposure).map(([name,value])=>({name,value}))}]});
+        addEventListener('resize',()=>{portfolioChart.resize();weightChart.resize();sectorChart.resize();});
+      </script>
+      {% else %}<article class="tech-panel portfolio-empty-v1"><h2>尚無 Portfolio/Risk 研究結果</h2><p>需先完成市場的 Ensemble 研究，再執行 TW 或 US Portfolio。</p></article>{% endif %}
+    </section>
+
+    <section class="tech-section">
+      <div class="section-head"><div><span>METHOD COMPARISON</span><h2>九種配置器 OOS 排名</h2></div><p>點選任一列查看績效、權重與風險診斷。</p></div>
+      <div class="portfolio-run-table-v1">
+        <div class="portfolio-run-row-v1 portfolio-run-head-v1"><span>MARKET</span><span>METHOD</span><span>RETURN</span><span>VS EQUAL</span><span>VS BENCH</span><span>SHARPE</span><span>MAX DD</span><span>CVaR 95</span><span>EFF. N</span><span>TURNOVER</span><span>GATE / FAILED CHECKS</span></div>
+        {% for item in overview.runs %}{% set run = item.run %}<a class="portfolio-run-row-v1" href="/portfolios?run={{ run.id }}"><b>{{ run.market }}</b><strong>{{ run.method|upper|replace('_',' ') }}</strong><span class="{{ 'up' if run.total_return >= 0 else 'down' }}">{{ '%+.1f%%'|format(run.total_return * 100) }}</span><span class="{{ 'up' if run.excess_to_equal >= 0 else 'down' }}">{{ '%+.1f%%'|format(run.excess_to_equal * 100) }}</span><span class="{{ 'up' if run.excess_to_benchmark >= 0 else 'down' }}">{{ '%+.1f%%'|format(run.excess_to_benchmark * 100) }}</span><span>{{ '%.2f'|format(run.sharpe) }}</span><span class="down">{{ '%.1f%%'|format(run.max_drawdown * 100) }}</span><span>{{ '%.2f%%'|format(run.cvar_95 * 100) }}</span><span>{{ '%.1f'|format(run.effective_asset_count) }}</span><span>{{ '%.2f'|format(run.turnover) }}</span><span><em class="run-gate {{ run.promotion_gate|lower }}">{{ run.promotion_gate }}</em><small>{{ item.failed_gates|join(' · ') or 'ALL CHECKS PASSED' }}</small></span></a>{% else %}<div class="backtest-empty">尚無研究紀錄。</div>{% endfor %}
+      </div>
+    </section>
+
+    <section class="tech-section portfolio-methods-v1">
+      <div class="section-head"><div><span>METHODOLOGY</span><h2>配置器與防偏誤設計</h2></div></div>
+      <div class="backtest-methodology"><article><span>01 / TIME SAFETY</span><h3>Rolling t-1 Estimate</h3><p>每次再平衡只使用前 60 個 OOS 交易日，不讀取當日或未來報酬。</p></article><article><span>02 / CONSTRAINTS</span><h3>Long-only + Caps</h3><p>單一標的、產業與總曝險受限制；無法安全分配的資金留在現金。</p></article><article><span>03 / EXECUTION</span><h3>Drift + Turnover Cost</h3><p>持倉每日隨報酬漂移，再平衡時計算雙邊換手並扣除 5 bps 成本。</p></article><article><span>04 / PROMOTION</span><h3>Strict Research Gate</h3><p>需超越等權及市場基準、風險合格且上游 Ensemble 全數通過，才可能成為候選。</p></article></div>
+    </section>
+  </main>
+</body>
+</html>

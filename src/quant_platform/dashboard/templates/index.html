@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quant OS / Research Terminal</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='5.0.0') }}">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+</head>
+<body class="tech-body">
+  <aside class="tech-sidebar legacy-sidebar" aria-hidden="true">
+    <a class="tech-logo" href="/"><span>Q</span><div><b>QUANT OS</b><small>RESEARCH TERMINAL</small></div></a>
+    <nav>
+      <a class="active" href="#overview"><i>01</i>總覽</a>
+      <a href="#universe"><i>02</i>市場監控</a>
+      <a href="/factors"><i>03</i>Factor Lab</a>
+      <a href="/backtests"><i>04</i>Backtest Lab</a>
+      <a href="/ensembles"><i>05</i>Ensemble Lab</a>
+      <a href="/portfolios"><i>06</i>Portfolio / Risk</a>
+      <a href="#report"><i>07</i>研究報告</a>
+      <a href="/universe"><i>08</i>股票池／排程</a>
+      <a href="/data"><i>09</i>資料管理</a>
+      <a href="/features"><i>10</i>Feature Store</a>
+    </nav>
+    <div class="system-box"><span><i></i> SYSTEM ONLINE</span><small>v1.0.0<br>{{ data_overview.dataset_count }} DATASETS / {{ data_overview.row_count }} ROWS</small></div>
+  </aside>
+
+  {% include '_sidebar.html' %}
+  <main class="tech-main">
+    <header class="tech-header">
+      <div><span class="tech-kicker">POINT-IN-TIME QUANT RESEARCH</span><h1>Research Command Center</h1></div>
+      <div class="header-meta"><span>LAST CALCULATION</span><b>{{ command.generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</b><em>LIVE TRADING / OFF</em></div>
+    </header>
+
+    <section id="workflow" class="tech-section decision-workflow-v1">
+      <div class="section-head"><div><span>DAILY INVESTMENT WORKFLOW</span><h2>每天如何使用這個系統</h2></div><p>研究結果必須依序通過資料、訊號、模型、策略與風控；尚未過關的內容只供研究，不形成買賣建議。</p></div>
+      <div class="workflow-grid-v1">
+        <a href="/universe"><i>01</i><strong>更新資料</strong><span>執行 TW／US Daily Pipeline，確認資料日期與缺漏。</span><em>DATA / SCHEDULER →</em></a>
+        <a href="/factors"><i>02</i><strong>判斷市場</strong><span>查看牛熊、波動 Regime 與仍有效的因子。</span><em>FACTOR / REGIME →</em></a>
+        <a href="/models"><i>03</i><strong>驗證預測</strong><span>比較 OOS Rank IC、方向命中率與模型穩定性。</span><em>MODEL ZOO →</em></a>
+        <a href="/ensembles"><i>04</i><strong>組合策略</strong><span>只讓通過 Backtest 的策略進入動態 Ensemble。</span><em>BACKTEST / ENSEMBLE →</em></a>
+        <a href="/portfolios"><i>05</i><strong>決定部位</strong><span>查看權重、VaR、CVaR、壓力測試與禁止部署原因。</span><em>PORTFOLIO / RISK →</em></a>
+      </div>
+      <div class="workflow-status-v1"><b>CURRENT OUTPUT</b><span>研究平台已能驗證訊號與風險；「每日買什麼／買多少／為什麼」決策頁是下一個優先模組。</span></div>
+    </section>
+
+    <section id="overview" class="tech-section">
+      <div class="kpi-grid">
+        <article><span>UNIVERSE BREADTH</span><strong>{{ '%.1f%%'|format(command.breadth.positive_ratio * 100) }}</strong><small>{{ command.breadth.positive }} / {{ command.breadth.total }} 資產兩年報酬為正</small></article>
+        <article><span>CURRENT REGIME</span><strong>{{ command.breadth.bull }} <em>/</em> {{ command.breadth.bear }}</strong><small>BULL / BEAR，{{ command.breadth.range }} RANGE</small></article>
+        <article><span>RESEARCH DEPTH</span><strong>{{ data_overview.row_count }}</strong><small>validated daily observations</small></article>
+        <article class="gate"><span>PROMOTION GATE</span><strong>BLOCKED</strong><small>SMALL UNIVERSE / WALK-FORWARD PENDING</small></article>
+      </div>
+
+      <div class="major-indicator-grid">
+        {% for asset in command.major_indicators %}<article class="indicator-card"><span>{{ asset.symbol }}</span><b>{{ '%.2f'|format(asset.last_close) }}</b><em class="{{ 'up' if asset.change_1d >= 0 else 'down' }}">{{ '%+.2f%%'|format(asset.change_1d * 100) }}</em><small>{{ asset.regime }} · {{ asset.last_date }}</small></article>{% else %}<article class="indicator-card indicator-empty"><b>重大指標等待資料</b><small>執行 US / TW 每日 Pipeline 後會顯示 NASDAQ、S&P 500、SOX、黃金、匯率、VIX 與 Brent。</small></article>{% endfor %}
+      </div>
+      <div class="dashboard-grid market-chart-grid">
+        <article class="tech-panel performance-panel"><div class="panel-title"><div><span>MAJOR INDICATORS / NORMALIZED</span><h2>全球重大指標走勢</h2></div></div><div id="majorIndicatorChart" class="echart-market"></div></article>
+        <article class="tech-panel performance-panel"><div class="panel-title"><div><span>TAIWAN MARKET / OHLC</span><h2>台股 K 線</h2></div><select id="twCandleSelect">{% for asset in command.taiwan_assets %}<option value="{{ loop.index0 }}">{{ asset.symbol }}</option>{% endfor %}</select></div><div id="twCandleChart" class="echart-market"></div></article>
+      </div>
+      <script>
+        const indicators = {{ command.major_indicators|tojson }};
+        const twAssets = {{ command.taiwan_assets|tojson }};
+        const marketAxis={axisLine:{lineStyle:{color:'#344158'}},axisLabel:{color:'#8290a6'},splitLine:{lineStyle:{color:'rgba(76,91,117,.22)'}}};
+        const majorChart=echarts.init(document.getElementById('majorIndicatorChart'));
+        majorChart.setOption({animation:false,tooltip:{trigger:'axis'},legend:{type:'scroll',top:0,textStyle:{color:'#a9b5c7'}},grid:{left:50,right:18,top:42,bottom:42},xAxis:{...marketAxis,type:'category',data:indicators[0]?.candle_dates||[],boundaryGap:false},yAxis:{...marketAxis,type:'value',scale:true},dataZoom:[{type:'inside'},{type:'slider',height:16,bottom:7}],series:indicators.map(a=>({name:a.symbol,type:'line',showSymbol:false,data:a.price_curve,lineStyle:{width:1.4}}))});
+        const candleChart=echarts.init(document.getElementById('twCandleChart'));
+        function renderCandle(index){const a=twAssets[index];candleChart.clear();if(!a)return;candleChart.setOption({animation:false,tooltip:{trigger:'axis'},grid:{left:52,right:18,top:18,bottom:42},xAxis:{...marketAxis,type:'category',data:a.candle_dates,boundaryGap:true},yAxis:{...marketAxis,type:'value',scale:true},dataZoom:[{type:'inside',start:70,end:100},{type:'slider',start:70,end:100,height:16,bottom:7}],series:[{name:a.symbol,type:'candlestick',data:a.candle_data,itemStyle:{color:'#65e6a4',color0:'#ff6f7d',borderColor:'#65e6a4',borderColor0:'#ff6f7d'}}]});}
+        renderCandle(0);document.getElementById('twCandleSelect').addEventListener('change',e=>renderCandle(Number(e.target.value)));addEventListener('resize',()=>{majorChart.resize();candleChart.resize();});
+      </script>
+    </section>
+
+    <section id="universe" class="tech-section">
+      <div class="section-head"><div><span>02 / TAIWAN STOCK MONITOR</span><h2>台股標的獨立監控</h2></div><p>重大指標已移至上方；此處只保留台股研究標的。</p></div>
+      <div class="tech-table asset-table">
+        <div class="tech-row tech-th"><span>#</span><span>SYMBOL</span><span>MARKET</span><span>LAST</span><span>1D</span><span>2Y WINDOW</span><span>ANN. VOL</span><span>MAX DD</span><span>REGIME</span><span>AS OF</span></div>
+        {% for asset in command.taiwan_assets %}
+        <div class="tech-row"><span>{{ '%02d'|format(loop.index) }}</span><b>{{ asset.symbol }}</b><span>{{ asset.market }}</span><span>{{ '%.2f'|format(asset.last_close) }}</span><span class="{{ 'up' if asset.change_1d >= 0 else 'down' }}">{{ '%+.2f%%'|format(asset.change_1d * 100) }}</span><span class="{{ 'up' if asset.total_return >= 0 else 'down' }}">{{ '%+.2f%%'|format(asset.total_return * 100) }}</span><span>{{ '%.1f%%'|format(asset.annual_volatility * 100) }}</span><span class="down">{{ '%.1f%%'|format(asset.max_drawdown * 100) }}</span><span><i class="regime-dot {{ asset.regime|lower|replace(' ','-') }}"></i>{{ asset.regime }}</span><span>{{ asset.last_date }}</span></div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section id="factors" class="tech-section">
+      <div class="section-head"><div><span>03 / FACTOR RESEARCH</span><h2>橫斷面因子排名</h2></div><p>Composite = 45% 60D momentum + 35% trend − 20% volatility，以 universe z-score 合成。</p></div>
+      <div class="two-column">
+        <div class="tech-table factor-table">
+          <div class="tech-row tech-th"><span>RANK</span><span>SYMBOL</span><span>SCORE</span><span>MOM 20D</span><span>MOM 60D</span><span>VOL 20D</span><span>TREND</span></div>
+          {% for factor in command.factor_rankings %}
+          <div class="tech-row"><b>{{ '%02d'|format(factor.rank) }}</b><strong>{{ factor.symbol }}</strong><span class="score-bar"><i style="width: {{ [[50 + factor.composite_score * 22, 100]|min, 0]|max }}%"></i><em>{{ '%+.2f'|format(factor.composite_score) }}</em></span><span class="{{ 'up' if factor.momentum_20d >= 0 else 'down' }}">{{ '%+.1f%%'|format(factor.momentum_20d * 100) }}</span><span class="{{ 'up' if factor.momentum_60d >= 0 else 'down' }}">{{ '%+.1f%%'|format(factor.momentum_60d * 100) }}</span><span>{{ '%.1f%%'|format(factor.volatility_20d * 100) }}</span><span>{{ '%+.1f%%'|format(factor.trend_score * 100) }}</span></div>
+          {% endfor %}
+        </div>
+        <aside class="research-note"><span>RESEARCH STATUS</span><strong>FACTOR LAB ACTIVE<br>PROMOTION BLOCKED</strong><p>IC、Rank IC、benchmark-relative spread、turnover、decay 與分 Regime 統計已保存於 Factor Lab；目前每市場不足 30 檔，所有結果強制維持 SMALL_UNIVERSE。</p><a href="/factors">OPEN FACTOR LAB →</a><dl><div><dt>UNIVERSE</dt><dd>16</dd></div><div><dt>HISTORY</dt><dd>2Y</dd></div><div><dt>IC STATUS</dt><dd>SMALL N</dd></div></dl></aside>
+      </div>
+    </section>
+
+    <section id="backtest" class="tech-section">
+      <div class="section-head"><div><span>04 / STRATEGY RESEARCH</span><h2>SMA 5/20 趨勢策略排名</h2></div><p>訊號 lag 1 session、每次換倉 10 bps；依 Sharpe 排序，不以 in-sample 報酬挑冠軍。</p></div>
+      <div class="tech-table strategy-table">
+        <div class="tech-row tech-th"><span>RANK</span><span>ASSET</span><span>STRATEGY RETURN</span><span>BUY & HOLD</span><span>SHARPE</span><span>MAX DD</span><span>WIN RATE</span><span>TRADES</span><span>OBS</span><span>STATUS</span></div>
+        {% for test in command.strategy_rankings %}
+        <div class="tech-row"><span>{{ '%02d'|format(loop.index) }}</span><b>{{ test.symbol }}</b><span class="{{ 'up' if test.total_return >= 0 else 'down' }}">{{ '%+.1f%%'|format(test.total_return * 100) }}</span><span>{{ '%+.1f%%'|format(test.benchmark_return * 100) }}</span><span>{{ '%.2f'|format(test.sharpe) }}</span><span class="down">{{ '%.1f%%'|format(test.max_drawdown * 100) }}</span><span>{{ '%.1f%%'|format(test.win_rate * 100) }}</span><span>{{ test.trades }}</span><span>{{ test.observations }}</span><span class="status-tag">RESEARCH</span></div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section id="portfolio" class="tech-section">
+      <div class="section-head"><div><span>05 / PORTFOLIO & RISK</span><h2>16 資產 inverse-volatility 組合</h2></div><p>權重只反映 realized volatility，不代表建議配置。</p></div>
+      {% if command.portfolio %}
+      <div class="portfolio-layout">
+        <article class="tech-panel weights-panel"><div class="panel-title"><div><span>ALLOCATION</span><h2>Risk-parity weights</h2></div><b>{{ command.portfolio.observations }} COMMON DAYS</b></div><div class="weights-list">{% for symbol, weight in command.portfolio.weights.items() %}<div><b>{{ symbol }}</b><span><i style="width: {{ weight * 100 }}%"></i></span><em>{{ '%.1f%%'|format(weight * 100) }}</em></div>{% endfor %}</div></article>
+        <article class="risk-grid">
+          <div><span>TOTAL RETURN</span><strong>{{ '%+.2f%%'|format(command.portfolio.total_return * 100) }}</strong></div>
+          <div><span>ANNUAL VOL</span><strong>{{ '%.2f%%'|format(command.portfolio.annual_volatility * 100) }}</strong></div>
+          <div><span>MAX DRAWDOWN</span><strong>{{ '%.2f%%'|format(command.portfolio.max_drawdown * 100) }}</strong></div>
+          <div><span>HIST. VaR 95</span><strong>{{ '%.2f%%'|format(command.portfolio.var_95 * 100) }}</strong></div>
+          <div><span>HIST. CVaR 95</span><strong>{{ '%.2f%%'|format(command.portfolio.cvar_95 * 100) }}</strong></div>
+          <div><span>ASSETS</span><strong>{{ command.portfolio.weights|length }}</strong></div>
+        </article>
+      </div>
+      {% endif %}
+    </section>
+
+    <section id="report" class="tech-section report-section">
+      <div class="section-head"><div><span>06 / DAILY RESEARCH BRIEF</span><h2>今日可執行結論</h2></div><p>這是規則型研究摘要，不冒充 LLM 或投資建議。</p></div>
+      <div class="brief-grid">
+        <article class="brief-decision"><span>DEPLOYMENT DECISION</span><strong>NO LIVE CAPITAL</strong><p>研究內容已增加，但尚缺正式股票池、corporate actions、walk-forward 與 factor IC，因此維持研究模式。</p></article>
+        <article><span>MARKET BREADTH</span><h3>{{ command.breadth.bull }} Bull / {{ command.breadth.bear }} Bear</h3><p>{{ command.breadth.positive }} 個資產的兩年觀察窗為正報酬。目前狀態分化，不能只用單一市場 regime 控制所有資產。</p></article>
+        {% if command.factor_rankings %}<article><span>TOP FACTOR</span><h3>{{ command.factor_rankings[0].symbol }}</h3><p>Composite score {{ '%+.2f'|format(command.factor_rankings[0].composite_score) }}。這是相對排名，不等於預測報酬或買進訊號。</p></article>{% else %}<article><span>TOP FACTOR</span><h3>NO DATA</h3><p>至少需要 61 個可用交易日才能計算 60D momentum composite。</p></article>{% endif %}
+        {% if command.strategy_rankings %}<article><span>TOP BACKTEST</span><h3>{{ command.strategy_rankings[0].symbol }}</h3><p>Sharpe {{ '%.2f'|format(command.strategy_rankings[0].sharpe) }}，策略窗報酬 {{ '%+.1f%%'|format(command.strategy_rankings[0].total_return * 100) }}。尚未通過 out-of-sample promotion gate。</p></article>{% else %}<article><span>TOP BACKTEST</span><h3>NO DATA</h3><p>至少需要 21 個可用交易日才能執行 SMA 5/20 回測。</p></article>{% endif %}
+      </div>
+    </section>
+  </main>
+</body>
+</html>
