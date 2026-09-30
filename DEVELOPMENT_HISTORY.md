@@ -2,6 +2,31 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-09-30 — S2-W05 每日備份與還原演練
+
+- `application/database_backup.py` `DatabaseBackupService`：SQLite backup API 單一步驟（`pages=-1`）取得一致快照，其他連線照常寫入 WAL；副本先寫 `.partial`，改為 `journal_mode=DELETE` 成為獨立檔，`quick_check` 通過後記錄全部 50 個資料表筆數，改名並寫入 `instance/backups/daily/manifest.jsonl`；保留最新 7 份（只輪替本目錄 `quant_platform-*.db`）；寫入 `database_backup`／`SYSTEM` 執行紀錄；超過 26 小時無新備份視為逾期。
+- 排程：worker 新增 `database_backup` 工作（每日 03:00，錯過 2 小時內補跑，不需每日流程的鎖）；`_add_calendar_refresh_job` 改名 `_add_maintenance_jobs`（02:30 預測封存、03:00 備份、每小時日曆檢查）。
+- `scripts/database_backup.py`：`status`、`run`（手動備份）、`drill`（還原到 `instance/backups/drill/`、唯讀開啟、quick_check、逐表筆數與 manifest 比對、報告 JSON，預設刪除還原出的副本；不動正式檔）。還原正式檔的步驟寫在 `AGENTS.md`「資料庫安全」。
+- 系統頁：新增「資料庫備份」狀態（最近時間、大小、份數）與「每日排程」表（02:30 封存、03:00 備份、06:30 美股、13:50 台股休市日略過，及背景工作說明）；「最近排程」改名「最近執行」。
+- 實測（23:41 部署後）：
+  - 手動備份 `quant_platform-20260930-234151.db`：9.62 GiB，總計 141.5 秒（複製約 22 秒，其餘為 quick_check 與筆數），quick_check ok，50 表。
+  - 還原演練 `drill-20260930-234642.json`：複製 4.6 秒、quick_check ok、50 表筆數與 manifest 一致、台股最新行情 2026-09-30，passed。
+  - 兩端：本機 `http://127.0.0.1:5000/system` 與外網（已登入，23:46）都顯示「資料庫備份 正常｜最近 09/30 23:41・9.6 GiB・共 1 份（上限 7）」與每日排程表。
+- 開機自動恢復：排程工作 `StockResearchLocalServices` 在使用者登入時觸發（與 VectorDB 的 `PimiServices-VectorDB-User` 相同）；重開機後登入即自動恢復 web、api、worker、Tunnel。重開機後、登入前網站離線；是否改為開機觸發或自動登入屬系統設定，列入需求 §14 待使用者決定，未變更。
+- 測試：新增 `test_database_backup.py` 8 項（獨立副本與筆數、持有未提交交易時的快照、輪替、逾期、失敗紀錄、演練通過與筆數不符、系統頁狀態）；排程工作清單加 `database_backup`。
+- 回復：停用備份只需移除排程工作的 `database_backup` 註冊並重新部署；備份目錄可整個保留。
+
+## 2026-09-30 — S2-W03 第二版：電腦／iPad／手機版面與深色主題
+
+- 使用者要求（2026-09-30）：介面電腦與 iPad 也會用，要有暗色主題。
+- 版面：同一套 HTML 三種版面——電腦（≥1200 px）完整側邊欄（品牌、五項導覽、台股時段、主題切換、登入 email）；iPad（768–1199 px）84 px 圖示側欄；手機（<768 px）頂端列（品牌、時段、主題）＋底部五分頁。今日頁在 ≥1100 px 分主欄（委託單、觀察清單）與側欄（為什麼、資料狀態、交易守則）；單欄時以 `order` 依重要性交錯（委託 → 為什麼 → 觀察 → 資料狀態 → 守則）。手機表格改逐筆卡片（`data-label`）。
+- 主題：深色為預設；`sr_theme` cookie（dark／light，一年、SameSite=Lax、https 加 Secure）由伺服器直接輸出 `<html data-theme>`，不會閃爍；非法值一律深色。Mermaid 圖隨主題重新渲染。台股慣例紅漲綠跌、買紅賣綠（`--up`／`--down`）。
+- 內容：今日行動卡加委託筆數、預估金額、模擬權益、可用現金；持倉加權重條；研究頁 AI 研究員說明與工具分組兩欄，暫停模組收合；系統頁狀態磚（手機兩欄）與文件直欄分頁（≥1024 px）。
+- 導覽的台股時段：盤前、盤中、已收盤（13:30–13:40）、盤後零股進行中（13:40–14:30）、今日已收盤、休市（附原因與下一交易日），依官方交易日曆。
+- 驗收（內建瀏覽器，5055 預覽＋部署後 5000 與外網）：375、820、1180、1440 px 各頁整頁水平溢出 0；深淺色切換後重新整理仍維持；外網登入後側欄顯示擁有者 email、CSS `v2.css?v=2.1.0`。
+- 測試：`test_dashboard_v2.py` 改為檢查側欄與底部分頁各一份導覽、`aria-current`；新增主題 cookie 1 項、台股時段 7 項。全部測試 252 通過、1 略過。
+- 回復：`git revert` 本 commit 後以 `scripts\deploy.ps1` 部署。
+
 ## 2026-09-30 — S2-W02 Cloudflare 上線
 
 - 使用者回饋（2026-09-30）：其他專案由 AI 自行完成 Cloudflare 設定，不應要求使用者手動複製 AUD。查證 `C:\ProgramData\PimiServices\Important System Log\2026-09-10 AutoLayout Cloudflare Deployment.md`：當時由 AI 在 Cloudflare 後台建立 Access application。改為由開發者在內建瀏覽器操作；使用者只完成 Cloudflare 登入（登入由本人操作，登入狀態保存在內建瀏覽器）。

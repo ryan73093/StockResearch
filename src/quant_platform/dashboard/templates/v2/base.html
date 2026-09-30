@@ -1,10 +1,14 @@
+{% from "v2/_icons.html" import icon, brand_mark %}
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" data-theme="{{ theme }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="{{ '#f3f5f8' if theme == 'light' else '#0d1015' }}">
   <title>{% block title %}盤後決策台{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css', v='2.0.0') }}">
+  <link rel="icon" href="{{ url_for('static', filename='mark.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css', v=asset_version) }}">
 </head>
 <body>
   {% set nav_items = [
@@ -14,29 +18,71 @@
     ('research', '/research', '研究'),
     ('system', '/system', '系統'),
   ] %}
-  <header class="topbar">
-    <div class="topbar__inner">
-      <a class="brand" href="/">盤後決策台<small>台股</small></a>
-      <nav class="nav" aria-label="主要功能">
+  <div class="app">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="盤後決策台首頁">{{ brand_mark() }}<span class="brand__text"><strong>盤後決策台</strong><small>台股盤後零股</small></span></a>
+      <nav class="sidenav" aria-label="主要功能">
         {% for key, href, label in nav_items %}
-          <a href="{{ href }}" class="{{ 'is-active' if active_nav == key else '' }}">{{ label }}</a>
+          <a href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span></a>
         {% endfor %}
       </nav>
+      <div class="sidebar__foot">
+        <div class="session session--{{ market_session.tone }}" title="台股{{ market_session.label }}：{{ market_session.detail }}">
+          <span class="session__dot"></span>
+          <span class="session__short">{{ market_session.short }}</span>
+          <span class="session__text">台股{{ market_session.label }}<small>{{ market_session.detail }}</small></span>
+        </div>
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="切換深色或淺色主題">
+          <span class="when-dark">{{ icon('sun') }}<span class="theme-toggle__text">切換淺色</span></span>
+          <span class="when-light">{{ icon('moon') }}<span class="theme-toggle__text">切換深色</span></span>
+        </button>
+        {% if current_user and current_user.email %}
+          <div class="user" title="{{ current_user.email }}">{{ '本機直連' if current_user.email == 'local@localhost' else current_user.email }}</div>
+        {% endif %}
+      </div>
+    </aside>
+
+    <div class="page-wrap">
+      <header class="appbar">
+        <a class="brand" href="/" aria-label="盤後決策台首頁">{{ brand_mark() }}<span>盤後決策台</span></a>
+        <span class="session session--{{ market_session.tone }}" title="{{ market_session.detail }}"><span class="session__dot"></span><span class="session__short">{{ market_session.short }}</span></span>
+        <button type="button" class="icon-btn" data-theme-toggle aria-label="切換深色或淺色主題">
+          <span class="when-dark">{{ icon('sun') }}</span><span class="when-light">{{ icon('moon') }}</span>
+        </button>
+      </header>
+      <main class="page">
+        {% block heading %}{% endblock %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for category, message in messages %}
+            <div class="card flash"><span class="badge {{ 'badge--bad' if category == 'error' else 'badge--ok' }}">{{ '錯誤' if category == 'error' else '完成' }}</span>{{ message }}</div>
+          {% endfor %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+      </main>
     </div>
-  </header>
-  <main>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, message in messages %}
-        <div class="card"><span class="badge {{ 'badge--bad' if category == 'error' else 'badge--ok' }}">{{ '錯誤' if category == 'error' else '完成' }}</span> {{ message }}</div>
+
+    <nav class="tabbar" aria-label="主要功能">
+      {% for key, href, label in nav_items %}
+        <a href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span></a>
       {% endfor %}
-    {% endwith %}
-    {% block content %}{% endblock %}
-  </main>
-  <nav class="tabbar" aria-label="主要功能">
-    {% for key, href, label in nav_items %}
-      <a href="{{ href }}" class="{{ 'is-active' if active_nav == key else '' }}">{{ label }}</a>
-    {% endfor %}
-  </nav>
+    </nav>
+  </div>
+  <script>
+  (() => {
+    const root = document.documentElement;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const next = root.dataset.theme === 'light' ? 'dark' : 'light';
+        root.dataset.theme = next;
+        const secure = location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = `sr_theme=${next}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+        if (meta) meta.content = next === 'light' ? '#f3f5f8' : '#0d1015';
+        window.dispatchEvent(new CustomEvent('themechange', { detail: next }));
+      });
+    });
+  })();
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

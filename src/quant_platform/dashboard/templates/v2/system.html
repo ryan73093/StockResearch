@@ -1,48 +1,71 @@
 {% extends "v2/base.html" %}
 {% block title %}系統 · 盤後決策台{% endblock %}
-{% block content %}
-<section class="card">
-  <h2>運作狀態</h2>
-  <div class="stats">
-    {% for item in health_items %}
-      <div class="stat">
-        <div class="stat__label">{{ item.label }}</div>
-        <div class="stat__value" style="font-size:15px"><span class="badge {{ item.badge }}">{{ item.state }}</span></div>
-        <div class="small muted">{{ item.detail }}</div>
-      </div>
-    {% endfor %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>系統</h1>
+    <p class="page-head__sub">服務、資料、備份與專案文件</p>
   </div>
+  <div class="page-head__meta">更新 {{ checked_at }}</div>
+</header>
+{% endblock %}
+{% block content %}
+<section class="tiles" aria-label="運作狀態">
+  {% for item in health_items %}
+    <div class="tile tile--{{ item.tone }}">
+      <div class="tile__label">{{ item.label }}</div>
+      <div class="tile__state"><span class="tile__dot"></span>{{ item.state }}</div>
+      <div class="tile__detail">{{ item.detail }}</div>
+    </div>
+  {% endfor %}
 </section>
 
-<section class="card">
-  <h2>最近排程</h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>開始（台北）</th><th>工作</th><th>市場</th><th>結果</th></tr></thead>
-      <tbody>
-      {% for run in recent_runs %}
-        <tr>
-          <td class="small num">{{ run.started }}</td>
-          <td>{{ run.job }}</td>
-          <td>{{ run.market }}</td>
-          <td><span class="badge {{ run.badge }}">{{ run.status }}</span></td>
-        </tr>
-      {% else %}
-        <tr><td colspan="4" class="muted">尚無排程紀錄</td></tr>
+<div class="grid grid--main-side">
+  <section class="card order-1">
+    <div class="card__head"><h2>最近執行</h2><span class="muted small">台北時間</span></div>
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>工作</th><th>開始</th><th>市場</th><th>結果</th></tr></thead>
+        <tbody>
+        {% for run in recent_runs %}
+          <tr>
+            <td data-primary><strong>{{ run.job }}</strong><span class="badge {{ run.badge }} stack-only">{{ run.status }}</span></td>
+            <td data-label="開始">{{ run.started }}</td>
+            <td data-label="市場">{{ run.market }}</td>
+            <td class="table-only" data-label="結果"><span class="badge {{ run.badge }}">{{ run.status }}</span></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="muted">尚無執行紀錄</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card order-2">
+    <div class="card__head"><h2>每日排程</h2><span class="muted small">台北時間</span></div>
+    <ul class="timeline">
+      {% for item in schedule %}
+        <li class="{{ '' if item.enabled else 'is-off' }}">
+          <span class="timeline__time">{{ item.at.strftime('%H:%M') }}</span>
+          <span class="timeline__text"><strong>{{ item.name }}</strong><span>{{ item.rule }}{% if not item.enabled %}（已停用）{% endif %}</span></span>
+        </li>
       {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+    </ul>
+    <p class="note">{{ background_jobs }}</p>
+  </section>
+</div>
 
 <section class="card" id="project">
-  <h2>專案資訊</h2>
-  <div class="tabs" role="tablist">
-    {% for key, label in doc_tabs %}
-      <button type="button" data-doc="{{ key }}" class="{{ 'is-active' if loop.first else '' }}">{{ label }}</button>
-    {% endfor %}
+  <div class="card__head"><h2>專案資訊</h2></div>
+  <div class="doc-layout">
+    <div class="doc-tabs" role="tablist" aria-label="專案文件">
+      {% for key, label in doc_tabs %}
+        <button type="button" role="tab" data-doc="{{ key }}" aria-selected="{{ 'true' if loop.first else 'false' }}">{{ label }}</button>
+      {% endfor %}
+    </div>
+    <article class="doc" id="doc-body" role="tabpanel"><p class="muted">載入中…</p></article>
   </div>
-  <article class="doc" id="doc-body"><p class="muted">載入中…</p></article>
 </section>
 {% endblock %}
 {% block scripts %}
@@ -52,11 +75,12 @@
 (() => {
   const body = document.getElementById('doc-body');
   const buttons = [...document.querySelectorAll('[data-doc]')];
-  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default' });
   const escapeHtml = (text) => text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  let current = null;
+  const mermaidTheme = () => (document.documentElement.dataset.theme === 'light' ? 'default' : 'dark');
   async function show(key) {
-    buttons.forEach((button) => button.classList.toggle('is-active', button.dataset.doc === key));
+    current = key;
+    buttons.forEach((button) => button.setAttribute('aria-selected', String(button.dataset.doc === key)));
     body.innerHTML = '<p class="muted">載入中…</p>';
     const response = await fetch(`/system/docs/${key}`, { credentials: 'same-origin' });
     if (!response.ok) { body.innerHTML = '<p class="muted">文件讀取失敗</p>'; return; }
@@ -68,11 +92,15 @@
       const lang = typeof code === 'object' ? code.lang : language;
       return lang === 'mermaid' ? `<pre class="mermaid">${escapeHtml(source)}</pre>` : baseCode(code, language);
     };
-    body.innerHTML = `<p class="muted small">${payload.path} · 更新 ${payload.modified}</p>` + marked.parse(payload.markdown, { renderer });
-    if (window.mermaid) await mermaid.run({ nodes: body.querySelectorAll('.mermaid') });
+    body.innerHTML = `<p class="doc__meta">${payload.path} · 更新 ${payload.modified}</p>` + marked.parse(payload.markdown, { renderer });
+    if (window.mermaid) {
+      mermaid.initialize({ startOnLoad: false, theme: mermaidTheme() });
+      await mermaid.run({ nodes: body.querySelectorAll('.mermaid') });
+    }
     history.replaceState(null, '', `#${key}`);
   }
   buttons.forEach((button) => button.addEventListener('click', () => show(button.dataset.doc)));
+  window.addEventListener('themechange', () => { if (current) show(current); });
   const initial = buttons.find((button) => `#${button.dataset.doc}` === location.hash) || buttons[0];
   if (initial) show(initial.dataset.doc);
 })();

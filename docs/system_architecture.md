@@ -19,6 +19,8 @@
 | D7 | 主要評估指標是「相同現金流下相對定期定額」，勝率只作參考 | 勝率高但偶爾大虧的策略會輸給定期定額 |
 | D8 | 發布使用本專案專屬 Cloudflare Tunnel，公開網址 `https://stockresearch.pimi-sunsun.com`，origin 只綁 `127.0.0.1:5000` | 與 VectorDB、AutoLayout、YtSummary 同一台主機，各專案 Tunnel 與程序互不影響 |
 | D9 | 交易日以證交所官方開休市日期判斷，資料隨程式發布並每日更新快取；臨時休市人工補登 | 休市日不誤報缺資料；證交所 API 不可用時仍有離線資料 |
+| D10 | 介面一套 HTML、三種版面：電腦完整側邊欄、iPad 圖示側欄、手機底部分頁；深色預設、可切換淺色（cookie，由伺服器直接輸出 `data-theme`，不閃爍） | 使用者會用電腦、iPad、手機開啟（2026-09-30）；不另做 App |
+| D11 | 資料庫每天 03:00 以 SQLite backup API 單一步驟線上備份，轉獨立檔後 `quick_check`、記錄各表筆數，保留 7 份；還原演練在暫存路徑核對筆數 | 9.6 GiB 複製約 20 秒，不需停機；WAL 模式下讀取快照不擋寫入 |
 
 ## 圖 1：目標架構總覽
 
@@ -63,7 +65,7 @@ flowchart TB
     FILL["使用者回報成交<br/>或券商對帳單"]
     NOTIFY["通知 13:40 前"]
     CF["Cloudflare Access + Tunnel"]
-    PHONE["使用者手機／電腦"]
+    PHONE["使用者（電腦／iPad／手機）"]
 
     SRC --> INGEST --> STORE
     STORE --> RESEARCH
@@ -167,11 +169,13 @@ flowchart TB
       FEAT[特徵快照：每個版本一個檔]
       CURVE[試驗逐日資產曲線]
     end
-    subgraph BACKUP["備份"]
-      BK[每日 SQLite 線上備份 + 還原演練]
+    subgraph BACKUP["備份（instance/backups/daily/，保留 7 份）"]
+      BK["每日 03:00 線上備份<br/>quick_check + 各表筆數 → manifest.jsonl"]
+      DRILL["還原演練<br/>scripts/database_backup.py drill"]
     end
     TRIALS -->|檔案路徑 + SHA-256| FILES
-    SQLITE --> BK
+    SQLITE -->|backup API 單一步驟快照| BK
+    BK -->|複製到暫存路徑、核對筆數| DRILL
 ```
 
 ## 圖 6：部署拓撲
@@ -184,7 +188,9 @@ flowchart LR
         WORKER["排程 Worker"]
         APIAPP["FastAPI<br/>127.0.0.1:8000，只限本機"]
         DB[(instance/)]
+        BKDIR[("instance/backups/daily<br/>每日 03:00 備份")]
         TUN_SR["cloudflared（由監督程序管理）<br/>Tunnel：stockresearch-pimi-sunsun<br/>只在 AUTH_MODE=cloudflare-access 時啟動"]
+        TASK["排程工作 StockResearchLocalServices<br/>使用者登入時啟動監督程序"]
       end
       VDB["VectorDB 5001 + 專屬 Tunnel"]
       AL["AutoLayout 4173"]
@@ -196,6 +202,8 @@ flowchart LR
     WEBAPP --- DB
     WORKER --- DB
     APIAPP --- DB
+    WORKER -->|線上備份| BKDIR
+    TASK -.->|啟動並監督| WEBAPP
     TUN_SR -->|只轉送到 127.0.0.1:5000| WEBAPP
     TUN_SR <-->|主動外連，不開路由器 port| EDGE
     PHONE -->|"stockresearch.pimi-sunsun.com（HTTPS）"| EDGE
@@ -222,7 +230,7 @@ flowchart LR
 | 強化學習、影子交易、晉級沙盒、模型治理 | 可用 | 凍結並移出導覽；S8 退場 | S8 |
 | RAG 知識庫、新聞情緒 | 可用 | 凍結；需要文字解釋時再評估 | S8 |
 | 盤中／衍生品、Google Trends、法說會 | 可用 | 停止排程收集，保留程式；S8 決定去留 | S1、S8 |
-| Dashboard（38 個模板） | 資訊過載 | 新介面 5 頁 + 專案資訊；舊頁收進「研究 › 舊版工具」，S8 移除 | S2、S6 |
+| Dashboard（38 個模板） | 資訊過載；新介面 5 頁已上線（電腦／iPad／手機、深色預設） | 新介面 5 頁 + 專案資訊；舊頁收進「研究 › 舊版工具」，S8 移除 | S2、S6 |
 
 ## 目標程式結構
 
@@ -233,7 +241,8 @@ flowchart LR
 | `market_calendar/` | 官方交易日曆與臨時休市（已建立；CLI：`python -m quant_platform.market_calendar`） |
 | `research/` | 策略設定檔 schema、現金流對照回測引擎、盤後成交模型、試驗登錄、統計檢定、AI 研究員 |
 | `decision/` | 投資計畫、決策引擎、委託單、帳務與影子帳戶 |
-| `dashboard/v2.py`、`dashboard/templates/v2/`、`static/css/v2.css` | 新介面：今日、持倉、計畫、研究、系統（含專案資訊，直接讀 docs 原始檔）（S2-W03／W04 第一版已建立） |
+| `dashboard/v2.py`、`dashboard/templates/v2/`、`static/css/v2.css` | 新介面：今日、持倉、計畫、研究、系統（含專案資訊，直接讀 docs 原始檔）；電腦／iPad／手機三種版面、深色預設（S2-W03 第二版） |
+| `application/database_backup.py`、`scripts/database_backup.py` | 每日線上備份、保留 7 份、狀態與還原演練（S2-W05） |
 | `dashboard/cloudflare_access.py` | Cloudflare Access JWT 驗證、擁有者允許清單、本機 loopback 例外、安全標頭（S2-W01） |
 | `application/prediction_archive.py` | 預測保留政策與 Parquet 封存（S1-W03） |
 | `application/listing_reconciliation.py` | 官方名冊比對與下市處理（S1-W02） |

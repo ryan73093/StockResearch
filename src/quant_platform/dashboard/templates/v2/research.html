@@ -1,19 +1,50 @@
 {% extends "v2/base.html" %}
+{% from "v2/_icons.html" import icon %}
 {% block title %}研究 · 盤後決策台{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>研究</h1>
+    <p class="page-head__sub">AI 研究員與既有研究工具</p>
+  </div>
+</header>
+{% endblock %}
 {% block content %}
-<section class="card">
-  <h2>AI 研究員 <span class="badge">S4 建置中</span></h2>
-  <p class="muted">策略工廠會在這裡顯示每週研究報告、試驗排行（含失敗次數）、候選策略與前向模擬狀態，以及晉級核准。</p>
-</section>
-
-{% for group in tool_groups %}
-<section class="card">
-  <h2>{{ group.title }} {% if group.badge %}<span class="badge {{ group.badge_class }}">{{ group.badge }}</span>{% endif %}</h2>
-  <div class="tool-grid">
-    {% for href, name, note in group.tools %}
-      <a class="tool" href="{{ href }}"><strong>{{ name }}</strong><span>{{ note }}</span></a>
-    {% endfor %}
+<section class="card feature">
+  <div class="card__head" style="margin-bottom:0">
+    <h2>AI 研究員 <span class="badge badge--accent">S4 建置中</span></h2>
+  </div>
+  <p class="muted" style="margin:0">AI 提出與測試交易規則，以相同現金流的定期定額為基準；通過多重檢定與保留期驗證的規則才會進入前向模擬。</p>
+  <div class="feature__items">
+    <div class="feature__item"><strong>每週研究報告</strong><span>本週試了什麼、結果與下一步</span></div>
+    <div class="feature__item"><strong>試驗排行</strong><span>含失敗次數與多重檢定校正</span></div>
+    <div class="feature__item"><strong>候選與前向模擬</strong><span>保留期與上線前觀察</span></div>
+    <div class="feature__item"><strong>晉級核准</strong><span>由你決定是否採用</span></div>
   </div>
 </section>
+
+<div class="grid grid--half">
+  {% for group in tool_groups if not group.paused %}
+  <section class="card">
+    <div class="card__head"><h2>{{ group.title }}</h2></div>
+    <div class="tool-grid">
+      {% for href, name, note in group.tools %}
+        <a class="tool" href="{{ href }}"><span class="tool__text"><strong>{{ name }}</strong><span>{{ note }}</span></span>{{ icon('arrow') }}</a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+
+{% for group in tool_groups if group.paused %}
+<details class="card card--quiet">
+  <summary><h2>{{ group.title }} <span class="badge {{ group.badge_class }}">{{ group.badge }}</span></h2></summary>
+  <p class="muted small">這些模組暫停新功能開發（需求 §13），在 S8 決定保留、合併或移除；目前仍可開啟查看。</p>
+  <div class="tool-grid">
+    {% for href, name, note in group.tools %}
+      <a class="tool" href="{{ href }}"><span class="tool__text"><strong>{{ name }}</strong><span>{{ note }}</span></span>{{ icon('arrow') }}</a>
+    {% endfor %}
+  </div>
+</details>
 {% endfor %}
 {% endblock %}

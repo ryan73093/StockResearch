@@ -1,11 +1,21 @@
 {% extends "v2/base.html" %}
+{% from "v2/_icons.html" import icon %}
 {% block title %}計畫 · 盤後決策台{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>計畫</h1>
+    <p class="page-head__sub">每月投入、目標配置與風險承受度</p>
+  </div>
+</header>
+{% endblock %}
 {% block content %}
 <section class="card empty">
+  <div class="empty__icon">{{ icon('plan') }}</div>
   <h2>建立你的投資計畫</h2>
   <p class="muted">每月投入金額、薪資日、允許標的、目標配置與可承受回撤會在這裡設定，每日建議會依照計畫產生。</p>
   <p class="muted small">排在路線圖 S5（決策核心與帳務）。目前的每日建議沿用既有的研究決策與模擬帳戶。</p>
-  <div class="actions-row" style="justify-content:center">
+  <div class="actions-row">
     <a class="btn" href="/system#roadmap">查看路線圖</a>
   </div>
 </section>

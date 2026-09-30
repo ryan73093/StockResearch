@@ -7,6 +7,7 @@ from typing import Callable
 from quant_platform import __version__
 from quant_platform.market_calendar import MarketCalendarStore, TwseHolidayScheduleClient
 from quant_platform.application.listing_reconciliation import TaiwanListingReconciliationService
+from quant_platform.application.database_backup import DatabaseBackupService
 from quant_platform.application.prediction_archive import (
     PredictionArchiveService,
     active_registry_experiment_ids,
@@ -164,14 +165,20 @@ class Container:
     research_failure_memory_service: ResearchFailureMemoryService
     market_calendar: MarketCalendarStore
     prediction_archive: PredictionArchiveService
+    database_backup: DatabaseBackupService | None
+
+
+def _sqlite_path(database_url: str) -> Path | None:
+    prefix = "sqlite:///"
+    if database_url.startswith(prefix) and ":memory:" not in database_url:
+        return Path(database_url[len(prefix):].split("?", 1)[0])
+    return None
 
 
 def _instance_dir(database_url: str) -> Path:
     """Runtime files live next to the SQLite database (``instance/`` by default)."""
-    prefix = "sqlite:///"
-    if database_url.startswith(prefix) and ":memory:" not in database_url:
-        return Path(database_url[len(prefix):]).parent
-    return Path("instance")
+    path = _sqlite_path(database_url)
+    return path.parent if path is not None else Path("instance")
 
 
 def build_container(settings: Settings | None = None) -> Container:
@@ -532,5 +539,14 @@ def build_container(settings: Settings | None = None) -> Container:
             registry_ids=lambda: active_registry_experiment_ids(
                 model_governance_repository.list_entries()
             ),
+        ),
+        database_backup=(
+            DatabaseBackupService(
+                _sqlite_path(resolved.database_url),
+                _instance_dir(resolved.database_url) / "backups" / "daily",
+                keep=7,
+                runs=job_run_repository,
+            )
+            if _sqlite_path(resolved.database_url) is not None else None
         ),
     )

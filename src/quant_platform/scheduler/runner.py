@@ -182,11 +182,20 @@ def archive_superseded_predictions(container: "Container") -> object | None:
     )
 
 
-def _add_calendar_refresh_job(scheduler: "BaseScheduler", container: "Container") -> None:
-    """Refresh the TWSE schedule shortly after start and then at most once per day.
+def backup_database(container: "Container") -> object | None:
+    """Nightly online backup; the job run and the manifest record the result."""
+    if container.database_backup is None:
+        logger.warning("Database backup skipped: the database is not a SQLite file")
+        return None
+    return container.database_backup.run()
 
-    Also registers the nightly prediction archive (02:30), which needs the same
-    exclusive database lock as the daily workflows.
+
+def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") -> None:
+    """Nightly prediction archive (02:30) and database backup (03:00), plus the
+    TWSE calendar refresh shortly after start and then at most once per day.
+
+    The archive needs the same exclusive database lock as the daily workflows;
+    the backup reads one consistent snapshot and needs no lock.
     """
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
@@ -202,6 +211,17 @@ def _add_calendar_refresh_job(scheduler: "BaseScheduler", container: "Container"
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        backup_database,
+        args=[container],
+        trigger=CronTrigger(hour=3, minute=0, timezone=timezone),
+        id="database_backup",
+        name="資料庫線上備份（每日 03:00，保留 7 份）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=2 * 60 * 60,
     )
     scheduler.add_job(
         refresh_market_calendar,
@@ -232,7 +252,7 @@ def start_background_scheduler(container: "Container") -> "BackgroundScheduler |
     timezone = container.settings.scheduler_timezone
     scheduler = BackgroundScheduler(timezone=timezone)
     job_count = configure_scheduler(scheduler, container)
-    _add_calendar_refresh_job(scheduler, container)
+    _add_maintenance_jobs(scheduler, container)
     scheduler.add_job(
         run_startup_catch_up,
         args=[container],
@@ -295,7 +315,7 @@ def run_scheduler_worker(container: "Container | None" = None) -> None:
     dependencies.automation_service.recover_stale_runs()
     scheduler = BlockingScheduler(timezone=dependencies.settings.scheduler_timezone)
     job_count = configure_scheduler(scheduler, dependencies)
-    _add_calendar_refresh_job(scheduler, dependencies)
+    _add_maintenance_jobs(scheduler, dependencies)
     timezone = dependencies.settings.scheduler_timezone
     scheduler.add_job(
         run_startup_catch_up,

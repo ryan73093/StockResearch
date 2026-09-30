@@ -11,10 +11,13 @@ from datetime import UTC, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, jsonify, render_template
+from flask import Blueprint, abort, jsonify, render_template, request
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
+ASSET_VERSION = "2.1.0"
+THEME_COOKIE = "sr_theme"
+THEMES = ("dark", "light")
 DOCS = {
     "roadmap": ("路線圖", "docs/development_roadmap.md"),
     "architecture": ("架構", "docs/system_architecture.md"),
@@ -35,7 +38,21 @@ JOB_LABELS = {
     "daily_decision_build": "每日決策",
     "tw_listing_reconciliation": "官方名冊比對",
     "tw_universe_expansion": "股票池擴充",
+    "database_backup": "資料庫備份",
 }
+WEEKDAY_RULES = {
+    "mon-fri": "週一至週五",
+    "tue-sat": "週二至週六",
+    "mon-sat": "週一至週六",
+    "mon-sun": "每日",
+    "*": "每日",
+}
+# Code-defined jobs (scheduler/runner.py); the daily workflows come from automation_schedules.
+MAINTENANCE_JOBS = (
+    (time(2, 30), "預測封存", "每日；舊實驗預測移到 Parquet"),
+    (time(3, 0), "資料庫備份", "每日；保留最近 7 份"),
+)
+BACKGROUND_JOBS = "背景工作：每 15 分鐘檢查漏跑、每 10 分鐘補台股研究池資料、每小時檢查證交所休市日。"
 STATUS_BADGES = {
     "succeeded": ("成功", "badge--ok"),
     "partial": ("部分成功", "badge--warn"),
@@ -49,7 +66,7 @@ QUALITY_BADGES = {
 }
 TOOL_GROUPS = (
     {
-        "title": "決策與交易", "badge": "", "badge_class": "",
+        "title": "決策與交易", "badge": "", "badge_class": "", "paused": False,
         "tools": (
             ("/ai-trading", "盤後 AI（舊版）", "完整盤後清單、歷史重播與驗證"),
             ("/decisions", "每日決策明細", "逐檔分數、門檻與風險"),
@@ -58,7 +75,7 @@ TOOL_GROUPS = (
         ),
     },
     {
-        "title": "市場與個股", "badge": "", "badge_class": "",
+        "title": "市場與個股", "badge": "", "badge_class": "", "paused": False,
         "tools": (
             ("/market", "市場總覽（舊版）", "指標、K 線與跨資產熱圖"),
             ("/stocks", "單股研究", "K 線、特徵、預測與回測"),
@@ -66,7 +83,7 @@ TOOL_GROUPS = (
         ),
     },
     {
-        "title": "模型與策略", "badge": "", "badge_class": "",
+        "title": "模型與策略", "badge": "", "badge_class": "", "paused": False,
         "tools": (
             ("/strategies", "策略中心", "策略、模型與版本"),
             ("/models", "模型研究", "樣本外績效與 AutoML"),
@@ -78,7 +95,7 @@ TOOL_GROUPS = (
         ),
     },
     {
-        "title": "資料", "badge": "", "badge_class": "",
+        "title": "資料", "badge": "", "badge_class": "", "paused": False,
         "tools": (
             ("/data-quality", "資料品質", "閘門、缺漏與排除標的"),
             ("/data-pipeline", "資料建置進度", "補資料與特徵進度"),
@@ -89,7 +106,7 @@ TOOL_GROUPS = (
         ),
     },
     {
-        "title": "暫停中的模組", "badge": "S8 決定去留", "badge_class": "badge--warn",
+        "title": "暫停中的模組", "badge": "S8 決定去留", "badge_class": "badge--warn", "paused": True,
         "tools": (
             ("/rl-lab", "強化學習", "PPO／DQN 研究"),
             ("/shadow-trading", "影子交易", "代理假想委託"),
@@ -119,8 +136,56 @@ def _project_root() -> Path:
     return Path.cwd()
 
 
+def _tone(badge: str) -> str:
+    return badge.removeprefix("badge--") if badge else "none"
+
+
+def market_session(now: datetime, calendar) -> dict[str, str]:
+    """Taiwan session phase shown in the navigation (after-hours odd lots: 13:40–14:30)."""
+    local = now.astimezone(TAIPEI)
+    day, clock = local.date(), local.time()
+    if not calendar.is_trading_day(day):
+        closure = calendar.closure(day)
+        reason = closure.name if closure is not None and closure.source != "weekday" else "週末"
+        return {
+            "short": "休市",
+            "label": f"休市（{reason}）",
+            "detail": f"下一個交易日 {calendar.next_trading_day(day):%m/%d}",
+            "tone": "closed",
+        }
+    if clock < time(9, 0):
+        return {"short": "盤前", "label": "盤前", "detail": "09:00 開盤", "tone": "closed"}
+    if clock < time(13, 30):
+        return {"short": "盤中", "label": "盤中", "detail": "13:30 收盤後產生決策", "tone": "live"}
+    if clock < time(13, 40):
+        return {
+            "short": "收盤", "label": "已收盤", "detail": "13:40 開始盤後零股委託", "tone": "soon",
+        }
+    if clock < time(14, 30):
+        return {
+            "short": "盤後零股", "label": "盤後零股進行中", "detail": "14:30 一次撮合", "tone": "live",
+        }
+    return {
+        "short": "已收盤",
+        "label": "今日已收盤",
+        "detail": f"下一個交易日 {calendar.next_trading_day(day):%m/%d}",
+        "tone": "closed",
+    }
+
+
 def create_v2_blueprint(dependencies) -> Blueprint:
     blueprint = Blueprint("v2", __name__)
+
+    @blueprint.context_processor
+    def layout_context() -> dict[str, object]:
+        theme = request.cookies.get(THEME_COOKIE)
+        return {
+            "theme": theme if theme in THEMES else "dark",
+            "asset_version": ASSET_VERSION,
+            "market_session": market_session(
+                datetime.now(TAIPEI), dependencies.market_calendar.calendar("TW")
+            ),
+        }
 
     def names_for(symbols) -> dict[str, str]:
         wanted = set(symbols)
@@ -128,6 +193,29 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             asset.symbol: asset.company_abbreviation or ""
             for asset in dependencies.research_universe_service.list_all()
             if asset.symbol in wanted
+        }
+
+    def backup_tile(now: datetime) -> dict[str, str]:
+        service = dependencies.database_backup
+        if service is None:
+            return {"label": "資料庫備份", "state": "未啟用", "badge": "", "detail": "非 SQLite 檔案"}
+        status = service.status(now)
+        if status.latest is None:
+            return {
+                "label": "資料庫備份",
+                "state": "尚無備份",
+                "badge": "badge--warn",
+                "detail": f"每日 03:00 自動備份，保留 {status.keep} 份",
+            }
+        latest = status.latest
+        return {
+            "label": "資料庫備份",
+            "state": "逾期" if status.overdue else "正常",
+            "badge": "badge--warn" if status.overdue else "badge--ok",
+            "detail": (
+                f"最近 {_taipei_text(latest.created)}・{latest.size_bytes / 2**30:.1f} GiB・"
+                f"共 {status.count} 份（上限 {status.keep}）"
+            ),
         }
 
     def quality_status(market: str) -> dict[str, object]:
@@ -194,6 +282,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             today={"label": label},
             deadline_iso=deadline,
             reasons=reasons,
+            totals={
+                "amount": sum(order.estimated_amount for order in plan.orders),
+                "cost": sum(order.estimated_cost for order in plan.orders),
+            },
             names=names_for(
                 [order.symbol for order in plan.orders] + [item.symbol for item in plan.watchlist]
             ),
@@ -259,6 +351,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "badge": "badge--ok" if calendar_status["current_year_covered"] else "badge--warn",
             "detail": f"{years[0]}–{years[-1]} 年；人工休市 {manual} 筆" if years else "尚無資料",
         })
+        items.append(backup_tile(now))
         access_on = dependencies.settings.auth_mode == "cloudflare-access"
         items.append({
             "label": "外網發布",
@@ -266,8 +359,23 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "badge": "badge--ok" if access_on else "",
             "detail": dependencies.settings.public_url or "stockresearch.pimi-sunsun.com（設定中）",
         })
+        overview = dependencies.automation_service.overview()
+        schedule = [
+            {
+                "at": time(item.hour, item.minute),
+                "name": item.display_name,
+                "rule": WEEKDAY_RULES.get(item.weekdays, item.weekdays)
+                + ("；休市日略過" if item.market == "TW" else ""),
+                "enabled": item.enabled,
+            }
+            for item in overview.schedules
+        ] + [
+            {"at": at, "name": name, "rule": rule, "enabled": True}
+            for at, name, rule in MAINTENANCE_JOBS
+        ]
+        schedule.sort(key=lambda item: item["at"])
         runs = []
-        for run in dependencies.automation_service.overview().recent_runs[:12]:
+        for run in overview.recent_runs[:12]:
             status_label, badge = STATUS_BADGES.get(run.status.value, (run.status.value, ""))
             runs.append({
                 "started": _taipei_text(run.started_at),
@@ -276,11 +384,16 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                 "status": status_label,
                 "badge": badge,
             })
+        for item in items:
+            item["tone"] = _tone(item["badge"])
         return render_template(
             "v2/system.html",
             active_nav="system",
             health_items=items,
             recent_runs=runs,
+            schedule=schedule,
+            background_jobs=BACKGROUND_JOBS,
+            checked_at=_taipei_text(now),
             doc_tabs=[(key, label) for key, (label, _) in DOCS.items()],
         )
 

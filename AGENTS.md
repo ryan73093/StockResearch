@@ -42,7 +42,9 @@
 
 ## 資料庫安全
 
-- 主資料庫 `instance/quant_platform.db`（約 22 GiB，WAL 模式）。任何結構變更、大量刪除或 VACUUM 前：停止 worker 與 web → 確認無其他寫入者 → 建立完整備份並記錄路徑 → 執行 → 驗證 → 在開發歷程記錄回復方式。
+- 主資料庫 `instance/quant_platform.db`（約 9.6 GiB，WAL 模式）。任何結構變更、大量刪除或 VACUUM 前：停止 worker 與 web → 確認無其他寫入者 → 建立完整備份並記錄路徑 → 執行 → 驗證 → 在開發歷程記錄回復方式。
+- 每日備份在 `instance/backups/daily/`（03:00，保留 7 份）。手動備份與演練：`.\.venv\Scripts\python.exe scripts\database_backup.py run|status|drill`。
+- 還原正式檔：`stop-services.ps1` → 把 `instance\quant_platform.db`（及 `-wal`、`-shm`）移到 `instance\backups\` 並加上時間後綴（不刪除）→ 複製選定的備份檔為 `instance\quant_platform.db` → `start-services.ps1` → 系統頁確認行情日期與備份狀態 → 在開發歷程記錄。
 - 大量資料刪除前先匯出 Parquet 封存。
 - 唯讀分析使用 `file:...?mode=ro` 連線，不在交易時段（13:30–14:40）執行長時間掃描。
 

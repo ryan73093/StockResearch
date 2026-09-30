@@ -1,35 +1,49 @@
 {% extends "v2/base.html" %}
 {% block title %}持倉 · 盤後決策台{% endblock %}
-{% block content %}
-<section class="card">
-  <h2>模擬帳戶 <span class="badge">真實帳戶與定期定額對照列入 S5</span></h2>
-  <div class="stats">
-    <div class="stat"><div class="stat__label">權益</div><div class="stat__value">{{ '{:,.0f}'.format(overview.equity) }} 元</div></div>
-    <div class="stat"><div class="stat__label">現金</div><div class="stat__value">{{ '{:,.0f}'.format(overview.account.cash) }} 元</div></div>
-    <div class="stat"><div class="stat__label">累計報酬</div><div class="stat__value">{{ '{:+.2%}'.format(overview.total_return) }}</div></div>
-    <div class="stat"><div class="stat__label">持股曝險</div><div class="stat__value">{{ '{:.1%}'.format(overview.gross_exposure) }}</div></div>
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>持倉</h1>
+    <p class="page-head__sub">模擬帳戶　·　真實帳戶與定期定額對照列入 S5</p>
   </div>
+</header>
+{% endblock %}
+{% block content %}
+<section class="kpis kpis--four kpis--page" aria-label="模擬帳戶">
+  <div class="kpi"><div class="kpi__label">權益</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.equity) }}<small>元</small></div></div>
+  <div class="kpi"><div class="kpi__label">現金</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.account.cash) }}<small>元</small></div></div>
+  <div class="kpi"><div class="kpi__label">累計報酬</div><div class="kpi__value {{ 'up' if overview.total_return > 0 else ('down' if overview.total_return < 0 else '') }}">{{ '{:+.2%}'.format(overview.total_return) }}</div></div>
+  <div class="kpi"><div class="kpi__label">持股曝險</div><div class="kpi__value">{{ '{:.1%}'.format(overview.gross_exposure) }}</div></div>
 </section>
 
 <section class="card">
-  <h2>持股 <span class="badge">{{ overview.positions|length }} 檔</span></h2>
+  <div class="card__head">
+    <h2>持股 <span class="badge">{{ overview.positions|length }} 檔</span></h2>
+    <span class="muted small">損益顏色依台股慣例：紅漲綠跌</span>
+  </div>
   {% if overview.positions %}
-  <div class="table-wrap">
-    <table>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
       <thead><tr>
         <th>標的</th><th class="num">股數</th><th class="num">平均成本（元）</th><th class="num">現價（元）</th>
         <th class="num">市值（元）</th><th class="num">未實現損益（元）</th><th class="num">權重</th>
       </tr></thead>
       <tbody>
       {% for item in overview.positions %}
+        {% set pnl_class = 'up' if item.unrealized_pnl > 0 else ('down' if item.unrealized_pnl < 0 else '') %}
         <tr>
-          <td><strong>{{ item.position.symbol.split('.')[0] }}</strong> <span class="muted small">{{ names.get(item.position.symbol, '') }}</span></td>
-          <td class="num">{{ '{:,}'.format(item.position.quantity) }}</td>
-          <td class="num">{{ '{:,.2f}'.format(item.position.average_cost) }}</td>
-          <td class="num">{{ '{:,.2f}'.format(item.mark_price) }}</td>
-          <td class="num">{{ '{:,.0f}'.format(item.market_value) }}</td>
-          <td class="num" style="color: var({{ '--ok' if item.unrealized_pnl >= 0 else '--bad' }})">{{ '{:+,.0f}'.format(item.unrealized_pnl) }}</td>
-          <td class="num">{{ '{:.1%}'.format(item.portfolio_weight) }}</td>
+          <td data-primary>
+            <span class="symbol"><strong>{{ item.position.symbol.split('.')[0] }}</strong><span>{{ names.get(item.position.symbol, '') }}</span></span>
+            <span class="stack-only num {{ pnl_class }}">{{ '{:+,.0f}'.format(item.unrealized_pnl) }} 元</span>
+          </td>
+          <td class="num" data-label="股數">{{ '{:,}'.format(item.position.quantity) }}</td>
+          <td class="num" data-label="平均成本">{{ '{:,.2f}'.format(item.position.average_cost) }}</td>
+          <td class="num" data-label="現價">{{ '{:,.2f}'.format(item.mark_price) }}</td>
+          <td class="num" data-label="市值">{{ '{:,.0f}'.format(item.market_value) }}</td>
+          <td class="num table-only {{ pnl_class }}" data-label="未實現損益">{{ '{:+,.0f}'.format(item.unrealized_pnl) }}</td>
+          <td class="num" data-label="權重">
+            <span class="weight"><span class="weight__bar"><i style="width: {{ [[item.portfolio_weight * 100, 0]|max, 100]|min }}%"></i></span>{{ '{:.1%}'.format(item.portfolio_weight) }}</span>
+          </td>
         </tr>
       {% endfor %}
       </tbody>
@@ -42,18 +56,21 @@
 
 {% if overview.orders %}
 <details class="card">
-  <summary>最近委託 {{ [overview.orders|length, 10]|min }} 筆</summary>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>時間</th><th>標的</th><th>買賣</th><th class="num">股數</th><th>狀態</th></tr></thead>
+  <summary><h2>最近委託 <span class="badge">{{ [overview.orders|length, 10]|min }} 筆</span></h2></summary>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>標的</th><th>時間</th><th>買賣</th><th class="num">股數</th><th>狀態</th></tr></thead>
       <tbody>
       {% for order in overview.orders[:10] %}
         <tr>
-          <td class="small">{{ order.submitted_at.strftime('%m/%d %H:%M') }}</td>
-          <td>{{ order.symbol.split('.')[0] }}</td>
-          <td>{{ '買' if order.side == 'BUY' else '賣' }}</td>
-          <td class="num">{{ '{:,}'.format(order.quantity) }}</td>
-          <td>{{ order.status.value }}</td>
+          <td data-primary>
+            <span class="symbol"><strong>{{ order.symbol.split('.')[0] }}</strong><span class="stack-only">{{ order.submitted_at.strftime('%m/%d %H:%M') }}</span></span>
+            <span class="badge {{ 'badge--buy' if order.side == 'BUY' else 'badge--sell' }} stack-only">{{ '買進' if order.side == 'BUY' else '賣出' }}</span>
+          </td>
+          <td class="table-only small num" data-label="時間">{{ order.submitted_at.strftime('%m/%d %H:%M') }}</td>
+          <td class="table-only" data-label="買賣"><span class="badge {{ 'badge--buy' if order.side == 'BUY' else 'badge--sell' }}">{{ '買進' if order.side == 'BUY' else '賣出' }}</span></td>
+          <td class="num" data-label="股數">{{ '{:,}'.format(order.quantity) }}</td>
+          <td data-label="狀態">{{ order.status.value }}</td>
         </tr>
       {% endfor %}
       </tbody>

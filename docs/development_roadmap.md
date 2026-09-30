@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | S0 | 基線保全與規劃 | done | — | 0.5 |
 | S1 | 每日流程可信與資料庫瘦身 | doing | S0 | 4–6 |
-| S2 | Cloudflare 發布與新介面骨架 | doing（使用者決定提前） | S1-W04 | 3–4 |
+| S2 | Cloudflare 發布與新介面骨架 | done（開機即恢復方式待使用者決定） | S1-W04 | 3–4 |
 | S3 | 長歷史資料與現金流對照回測引擎 | todo | S1 | 6–9 |
 | S4 | AI 研究迴圈（策略工廠） | todo | S3 | 7–10 |
 | S5 | 決策核心、帳務與前向模擬 | todo | S3；S4 晉級結果 | 6–9 |
@@ -21,7 +21,7 @@
 合計初估 42–61 工作天。S5 可在 S4 進行時先用定期定額與再平衡等基準策略開發；S4 產生的冠軍策略晉級後才接入每日建議。
 
 里程碑：
-- M1（S1 + S2 完成）：每日流程穩定、資料庫瘦身、可從 Cloudflare 用手機開啟新介面骨架與專案資訊頁。
+- M1（S1 + S2 完成）：每日流程穩定、資料庫瘦身、可從 Cloudflare 用電腦、iPad、手機開啟新介面骨架與專案資訊頁。
 - M2（S3 + S5 基準版完成）：「今日」頁每天給出定期定額／再平衡的委託單，並與定期定額影子帳戶對帳。
 - M3（S4 第一批研究完成）：產出第一份研究報告；有通過門檻的策略則開始前向模擬。
 - M4（前向模擬 8–12 週後）：決定是否把研究策略接入每日建議。
@@ -62,17 +62,17 @@
 
 ---
 
-## S2 Cloudflare 發布與新介面骨架
+## S2 Cloudflare 發布與新介面骨架（done）
 
-目標：用手機透過 Cloudflare 安全開啟網站；新介面骨架上線，之後每輪交付都在本機與 Cloudflare 兩端驗收。
+目標：用電腦、iPad、手機透過 Cloudflare 安全開啟網站；新介面骨架上線，之後每輪交付都在本機與 Cloudflare 兩端驗收。
 
 | 工作包 | 內容 | 驗收 | 狀態 |
 |---|---|---|---|
 | S2-W01 Access 驗證 | `dashboard/cloudflare_access.py`：驗證 `Cf-Access-Jwt-Assertion`（RS256、audience、issuer、exp、email）、擁有者 email 允許清單、本機 loopback 例外、設定不完整一律 503、跨來源寫入拒絕、安全標頭 | 11 項測試通過；2026-09-30 21:39 啟用（`AUTH_MODE=cloudflare-access`） | done |
 | S2-W02 專屬 Tunnel | Tunnel `stockresearch-pimi-sunsun`（id `e37bb649-…`，憑證 `.runtime/cloudflared/`）與 DNS；Access application `StockResearch`（id `c49fc706-…`，Google 登入、instant authentication）＋規則 `StockResearch owner only`（Include 擁有者 email、Require Google）；監督程序只在 `AUTH_MODE=cloudflare-access` 時啟動 Tunnel | 未登入 302 到 Access 登入頁；偽造標頭被擋；登入後瀏覽器看到新版今日頁與系統頁；Tunnel 4 條連線 | done |
-| S2-W03 新版面骨架 | 設計 token（淺色、手機優先）、共用頁面骨架、頂部／底部導覽只有 今日／持倉／計畫／研究／系統；首頁 `/` 改為輕量「今日」頁；舊頁面移到「研究」入口，舊市場總覽改到 `/market` | 375 px 無水平溢出；導覽 5 項；首頁熱快取 20–50 ms（舊版 4.8 秒）；舊功能可進入 | done（第一版） |
+| S2-W03 新版面骨架 | 第一版：共用頁面骨架、導覽只有 今日／持倉／計畫／研究／系統；首頁 `/` 改為輕量「今日」頁；舊頁面移到「研究」入口，舊市場總覽改到 `/market`。第二版（使用者要求電腦、iPad 也要好用＋深色）：電腦完整側邊欄、iPad 圖示側欄、手機頂端列＋底部分頁；深色預設、cookie 切換淺色；手機表格改逐筆卡片；台股紅漲綠跌；導覽顯示台股時段（盤前／盤中／盤後零股／已收盤／休市） | 375、820、1180、1440 px 各頁無水平溢出；導覽 5 項；首頁熱快取 20–50 ms（舊版 4.8 秒）；舊功能可進入 | done |
 | S2-W04 專案資訊頁 | 系統頁「專案資訊」：路線圖、架構（Mermaid）、需求、交接、開發歷程，即時讀取 repo 原始檔（白名單） | 本機與 Cloudflare 兩端驗收完成 | done |
-| S2-W05 開機自動恢復 | 登入時排程工作啟動監督程序（含 Tunnel）；每日 SQLite 線上備份與還原演練 | 重開機後兩端自動恢復；備份檔可還原 | doing（自動啟動已具備；備份與演練待做） |
+| S2-W05 備份與自動恢復 | 登入時排程工作啟動監督程序（含 Tunnel）；每日 03:00 SQLite 線上備份（backup API 單一步驟、轉獨立檔、quick_check、各表筆數寫 manifest、保留 7 份）；`scripts/database_backup.py`（status／run／drill）；系統頁備份狀態與每日排程表 | 首次備份 9.62 GiB、141.5 秒、quick_check ok、50 表；還原演練複製 4.6 秒、50 表筆數一致；系統頁兩端顯示「資料庫備份 正常」。重開機後要等使用者登入 Windows 才恢復；是否改為開機即恢復待使用者決定（需求 §14） | done |
 
 依賴：S1-W04。子網域 `stockresearch.pimi-sunsun.com`（2026-09-30 定案）。Cloudflare 後台操作：內建瀏覽器已保存使用者的 Cloudflare 登入，之後的 Access／DNS 調整由開發者在該瀏覽器完成；登入失效時請使用者重新登入。
 
