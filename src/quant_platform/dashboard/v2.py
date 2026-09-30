@@ -16,6 +16,8 @@ from flask import Blueprint, abort, jsonify, render_template, request
 from quant_platform.application.close_availability import SOURCES as CLOSE_SOURCES
 from quant_platform.application.close_availability import recent_table
 from quant_platform.config.settings import PAUSABLE_MODULES
+from quant_platform.container import _instance_dir
+from quant_platform.research.reports import latest_reports, report_rows
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
@@ -319,7 +321,13 @@ def create_v2_blueprint(dependencies) -> Blueprint:
 
     @blueprint.get("/research")
     def research():
-        return render_template("v2/research.html", active_nav="research", tool_groups=TOOL_GROUPS)
+        reports_dir = _instance_dir(dependencies.settings.database_url) / "research" / "reports"
+        return render_template(
+            "v2/research.html",
+            active_nav="research",
+            tool_groups=TOOL_GROUPS,
+            baseline_rows=report_rows(latest_reports(reports_dir)),
+        )
 
     @blueprint.get("/system")
     def system():

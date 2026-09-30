@@ -23,6 +23,42 @@
   </div>
 </section>
 
+<section class="card">
+  <div class="card__head">
+    <h2>定期定額對照 <span class="badge">相同現金流</span></h2>
+    <span class="muted small">基準：每次入帳當天以盤後零股全數買進 0050</span>
+  </div>
+  {% if baseline_rows %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr>
+        <th>策略</th><th>期間</th><th class="num">期末（元）</th><th class="num">定期定額（元）</th>
+        <th class="num">XIRR</th><th class="num">最大回撤</th><th class="num">3 年勝率</th><th class="num">5 年勝率</th><th class="num">最差 3 年</th>
+      </tr></thead>
+      <tbody>
+      {% for row in baseline_rows %}
+        {% set excess_class = 'up' if (row.excess or 0) > 0 else ('down' if (row.excess or 0) < 0 else '') %}
+        <tr>
+          <td data-primary><strong>{{ row.name }}</strong><span class="stack-only num {{ excess_class }}">{{ '{:+.1%}'.format(row.excess or 0) }}</span></td>
+          <td class="small" data-label="期間" data-wide>{{ row.period }}</td>
+          <td class="num {{ excess_class }}" data-label="期末">{{ '{:,.0f}'.format(row.final) }}</td>
+          <td class="num" data-label="定期定額">{{ '{:,.0f}'.format(row.benchmark_final) }}</td>
+          <td class="num" data-label="XIRR">{{ '{:.2%}'.format(row.xirr) if row.xirr is not none else '—' }}<span class="muted small"> / {{ '{:.2%}'.format(row.benchmark_xirr) if row.benchmark_xirr is not none else '—' }}</span></td>
+          <td class="num" data-label="最大回撤">{{ '{:.1%}'.format(row.drawdown) }}<span class="muted small"> / {{ '{:.1%}'.format(row.benchmark_drawdown) }}</span></td>
+          <td class="num" data-label="3 年勝率">{{ '{:.0%}'.format(row.three_year.win_ratio) if row.three_year else '—' }}</td>
+          <td class="num" data-label="5 年勝率">{{ '{:.0%}'.format(row.five_year.win_ratio) if row.five_year else '—' }}</td>
+          <td class="num" data-label="最差 3 年">{{ '{:+.1%}'.format(row.three_year.worst.excess) if row.three_year else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">每月投入 {{ '{:,.0f}'.format(baseline_rows[0].monthly or 0) }} 元。勝率＝每個月起算的滾動 3／5 年視窗中，期末資產高於定期定額的比例；「最差 3 年」是落後最多的視窗（以投入金額計）。含手續費、證交稅與盤後零股滑價；歷史結果只作研究參考。</p>
+  {% else %}
+  <p class="muted" style="margin:0">尚無回測結果。長歷史資料下載完成後會跑四個基準策略（定期定額、每月 6 日扣款、定期不定額、股債再平衡）與定期定額比較。</p>
+  {% endif %}
+</section>
+
 <div class="grid grid--half">
   {% for group in tool_groups if not group.paused %}
   <section class="card">
