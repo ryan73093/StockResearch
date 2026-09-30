@@ -1,0 +1,125 @@
+"""Append-only trial registry (S4-W01).
+
+Every evaluation of a strategy spec is one trial, including failures, so
+multiple-testing corrections can use the true number of attempts
+(REQUIREMENTS §7). Records form a hash chain: each carries the previous
+record's hash and its own hash over its content, so an edited or deleted
+line breaks ``verify()``. Registering the same inputs again returns the
+existing record instead of counting a new trial.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+TAIPEI = ZoneInfo("Asia/Taipei")
+GENESIS = "0" * 64
+
+
+def _digest(payload: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class TrialRecord:
+    trial_id: int
+    kind: str
+    period: str
+    spec_hash: str
+    spec_name: str
+    input_hash: str
+    data_fingerprint: str
+    metrics: dict[str, object]
+    report_file: str
+    created_at: str
+    prev_hash: str
+    record_hash: str
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (self.kind, self.period, self.input_hash)
+
+
+class TrialRegistry:
+    def __init__(self, path: str | Path) -> None:
+        self._path = Path(path)
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def records(self) -> list[TrialRecord]:
+        if not self._path.is_file():
+            return []
+        return [
+            TrialRecord(**json.loads(line))
+            for line in self._path.read_text(encoding="utf-8").splitlines() if line.strip()
+        ]
+
+    def find(self, kind: str, period: str, input_hash: str) -> TrialRecord | None:
+        return next(
+            (record for record in self.records() if record.key == (kind, period, input_hash)), None
+        )
+
+    def register(
+        self,
+        *,
+        kind: str,
+        period: str,
+        spec_hash: str,
+        spec_name: str,
+        input_hash: str,
+        data_fingerprint: str,
+        metrics: dict[str, object],
+        report_file: str = "",
+    ) -> TrialRecord:
+        existing = self.find(kind, period, input_hash)
+        if existing is not None:
+            return existing
+        records = self.records()
+        body = {
+            "trial_id": len(records) + 1,
+            "kind": kind,
+            "period": period,
+            "spec_hash": spec_hash,
+            "spec_name": spec_name,
+            "input_hash": input_hash,
+            "data_fingerprint": data_fingerprint,
+            "metrics": metrics,
+            "report_file": report_file,
+            "created_at": datetime.now(TAIPEI).isoformat(timespec="seconds"),
+            "prev_hash": records[-1].record_hash if records else GENESIS,
+        }
+        record = TrialRecord(**body, record_hash=_digest(body))
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with self._path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({**body, "record_hash": record.record_hash}, ensure_ascii=False) + "\n")
+        return record
+
+    def count(self, kind: str | None = None, period: str | None = None) -> int:
+        return sum(
+            1 for record in self.records()
+            if (kind is None or record.kind == kind) and (period is None or record.period == period)
+        )
+
+    def verify(self) -> list[str]:
+        """Problems found in the chain; an empty list means intact."""
+        problems = []
+        previous = GENESIS
+        for index, record in enumerate(self.records(), 1):
+            body = {name: getattr(record, name) for name in TrialRecord.__slots__ if name != "record_hash"}
+            if record.trial_id != index:
+                problems.append(f"第 {index} 筆的編號是 {record.trial_id}")
+            if record.prev_hash != previous:
+                problems.append(f"第 {index} 筆的前一筆雜湊不符（紀錄被刪除或重排）")
+            if _digest(body) != record.record_hash:
+                problems.append(f"第 {index} 筆內容與雜湊不符（紀錄被修改）")
+            previous = record.record_hash
+        return problems

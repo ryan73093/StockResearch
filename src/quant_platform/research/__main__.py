@@ -1,12 +1,12 @@
-"""Research CLI (S3).
+"""Research CLI (S3, S4-W01/W02).
 
-    python -m quant_platform.research backtest --spec baseline:ma_value [--benchmark baseline:benchmark_dca]
-        [--monthly 10000] [--day 5] [--start 2004-02-11] [--end 2026-09-30] [--windows 36,60] [--cost-scale 1]
-    python -m quant_platform.research baselines [--monthly 10000] [--day 5]
-    python -m quant_platform.research schema
+    python -m quant_platform.research baselines [--period full] [--monthly 10000] [--day 5]
+    python -m quant_platform.research trial --spec path.json --period development|validation|holdout
+    python -m quant_platform.research trials            # list and verify the registry
+    python -m quant_platform.research schema            # StrategySpec JSON Schema
 
-Reports are written to instance/research/reports/ and never overwrite an
-earlier file (the name carries the report hash).
+Every run is registered in instance/research/trials.jsonl (append-only hash
+chain) and its report saved under instance/research/reports/.
 """
 
 from __future__ import annotations
@@ -14,22 +14,20 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from quant_platform.research.cashflow import ContributionPlan
-from quant_platform.research.compare import compare_to_benchmark
 from quant_platform.research.costs import CostModel
 from quant_platform.research.market import DEFAULT_BASE, load_market
+from quant_platform.research.periods import PERIODS, ResearchGateError, run_trial
+from quant_platform.research.registry import TrialRegistry
+from quant_platform.research.significance import significance
 from quant_platform.research.spec import BASELINES, json_schema, load_spec
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-REPORTS = Path("instance") / "research" / "reports"
-
-
-def _date(value: str | None) -> date | None:
-    return date.fromisoformat(value) if value else None
+RESEARCH = Path("instance") / "research"
 
 
 def _line(report: dict) -> str:
@@ -48,52 +46,85 @@ def _line(report: dict) -> str:
     )
 
 
-def _save(report: dict, prefix: str) -> Path:
-    REPORTS.mkdir(parents=True, exist_ok=True)
-    path = REPORTS / f"{prefix}-{report['report_hash'][:12]}.json"
-    path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
-    parser.add_argument("command", choices=("backtest", "baselines", "schema"))
-    parser.add_argument("--spec", default="baseline:ma_value")
-    parser.add_argument("--benchmark", default="baseline:benchmark_dca")
+    parser.add_argument("command", choices=("baselines", "trial", "trials", "stats", "schema"))
+    parser.add_argument("--spec")
+    parser.add_argument("--period", default="full", choices=tuple(PERIODS))
     parser.add_argument("--monthly", type=float, default=10_000)
     parser.add_argument("--day", type=int, default=5)
-    parser.add_argument("--start")
-    parser.add_argument("--end")
     parser.add_argument("--windows", default="36,60")
     parser.add_argument("--cost-scale", type=float, default=1.0)
     parser.add_argument("--dividend-lag", type=int, default=25)
+    parser.add_argument("--execution-lag", type=int, default=0, help="穩健性：晚幾個交易日成交")
     parser.add_argument("--base", default=str(DEFAULT_BASE))
     args = parser.parse_args()
+    registry = TrialRegistry(RESEARCH / "trials.jsonl")
 
     if args.command == "schema":
         print(json.dumps(json_schema(), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "trials":
+        for record in registry.records():
+            metrics = record.metrics
+            print(
+                f"#{record.trial_id:<4d} {record.created_at} {record.kind:9s} {record.period:11s} "
+                f"{record.spec_name}：超額 {metrics.get('full_period_excess')}、XIRR {metrics.get('xirr')}",
+            )
+        problems = registry.verify()
+        print("雜湊鏈完整" if not problems else "\n".join(problems))
+        return 0 if not problems else 1
+
+    if args.command == "stats":
+        report = significance(registry, RESEARCH / "reports", args.period)
+        if not report["candidates"]:
+            print(f"{args.period} 沒有候選試驗")
+            return 1
+        RESEARCH.joinpath("stats").mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
+        path = RESEARCH / "stats" / f"{args.period}-{stamp}.json"
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        for item in report["candidates"]:
+            print(
+                f"#{item['trial_id']} {item['name']}：月超額平均 {item['bootstrap']['mean']:+.3%}"
+                f"（95% 區間 {item['bootstrap']['low']:+.3%}～{item['bootstrap']['high']:+.3%}），"
+                f"DSR {item['dsr']['deflated_sharpe']:.2f}（試驗數 {item['dsr']['trials']}）"
+            )
+        if report.get("pbo"):
+            print(f"PBO {report['pbo']['pbo']:.2f}（{report['pbo']['combinations']} 種切分）")
+        print(f"報告：{path}")
         return 0
 
     plan = ContributionPlan(monthly_amount=args.monthly, day_of_month=args.day)
     costs = CostModel().scaled(args.cost_scale) if args.cost_scale != 1 else CostModel()
     windows = tuple(int(item) for item in args.windows.split(",") if item)
-    benchmark = load_spec(args.benchmark)
-    specs = (
-        [spec for name, spec in BASELINES.items() if name != "benchmark_dca"]
-        if args.command == "baselines" else [load_spec(args.spec)]
-    )
+    benchmark = BASELINES["benchmark_dca"]
+    if args.command == "baselines":
+        runs = [("baseline", spec) for name, spec in BASELINES.items() if name != "benchmark_dca"]
+    else:
+        if not args.spec:
+            raise SystemExit("trial 需要 --spec")
+        runs = [("candidate", load_spec(args.spec))]
     stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
-    for spec in specs:
+    for kind, spec in runs:
         assets = sorted(set(spec.assets) | {spec.signal} | set(benchmark.assets))
         market = load_market(assets, args.base)
-        report = compare_to_benchmark(
-            spec, market, plan, costs, benchmark, _date(args.start), _date(args.end), windows,
-            args.dividend_lag,
+        try:
+            outcome = run_trial(
+                kind=kind, spec=spec, period=args.period, market=market, plan=plan,
+                registry=registry, reports_dir=RESEARCH / "reports", costs=costs, benchmark=benchmark,
+                window_months=windows, dividend_lag_days=args.dividend_lag,
+                execution_lag=args.execution_lag, generated_at=stamp,
+            )
+        except ResearchGateError as exc:
+            print(f"{spec.name}：研究規則不允許 — {exc}", file=sys.stderr)
+            return 3
+        print(_line(outcome.report), flush=True)
+        print(
+            f"  試驗 #{outcome.record.trial_id}{'（沿用既有紀錄）' if outcome.reused else ''}；報告：{outcome.report_path}",
+            flush=True,
         )
-        report["generated_at"] = stamp
-        path = _save(report, f"{stamp}-{spec.spec_hash[:8]}")
-        print(_line(report), flush=True)
-        print(f"  報告：{path}", flush=True)
+    print(f"已登錄試驗 {registry.count()} 筆（候選 {registry.count('candidate')} 筆）")
     return 0
 
 

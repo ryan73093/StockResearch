@@ -35,6 +35,7 @@ def rolling_windows(
     end: date,
     months: int,
     dividend_lag_days: int = 25,
+    execution_lag: int = 0,
 ) -> dict[str, object]:
     windows = []
     window_start = date(start.year, start.month, 1)
@@ -42,7 +43,9 @@ def rolling_windows(
         window_end = _add_months(window_start, months)
         if window_end > end:
             break
-        strategy = simulate(spec, market, plan, costs, max(window_start, start), window_end, dividend_lag_days)
+        strategy = simulate(
+            spec, market, plan, costs, max(window_start, start), window_end, dividend_lag_days, execution_lag
+        )
         base = simulate(benchmark, market, plan, costs, max(window_start, start), window_end, dividend_lag_days)
         contributed = strategy.total_contributed or 1.0
         windows.append({
@@ -84,14 +87,23 @@ def compare_to_benchmark(
     end: date | None = None,
     window_months: tuple[int, ...] = (36, 60),
     dividend_lag_days: int = 25,
+    execution_lag: int = 0,
 ) -> dict[str, object]:
     costs = costs or CostModel()
     benchmark = benchmark or BASELINES["benchmark_dca"]
     first = max(common_start(spec, market), common_start(benchmark, market))
     start = max(start or first, first)
-    strategy_run = simulate(spec, market, plan, costs, start, end, dividend_lag_days)
+    strategy_run = simulate(spec, market, plan, costs, start, end, dividend_lag_days, execution_lag)
     benchmark_run = simulate(benchmark, market, plan, costs, strategy_run.start, strategy_run.end, dividend_lag_days)
+    strategy_months = strategy_run.monthly_returns()
+    benchmark_months = benchmark_run.monthly_returns()
     report = {
+        # Monthly unit-value return of the strategy minus the benchmark; the
+        # input of the significance tests (research/statistics.py).
+        "monthly_active_returns": {
+            month: round(strategy_months[month] - benchmark_months[month], 10)
+            for month in strategy_months if month in benchmark_months
+        },
         "strategy": strategy_run.summary(),
         "benchmark": benchmark_run.summary(),
         "full_period_excess": round(
@@ -100,7 +112,7 @@ def compare_to_benchmark(
         "windows": {
             f"{months // 12}y": rolling_windows(
                 spec, benchmark, market, plan, costs, strategy_run.start, strategy_run.end,
-                months, dividend_lag_days,
+                months, dividend_lag_days, execution_lag,
             )
             for months in window_months
         },
@@ -108,6 +120,7 @@ def compare_to_benchmark(
         "costs": costs.as_dict(),
         "data_fingerprint": market.fingerprint,
         "dividend_lag_days": dividend_lag_days,
+        "execution_lag": execution_lag,
         "strategy_output_hash": strategy_run.output_hash,
         "benchmark_output_hash": benchmark_run.output_hash,
     }

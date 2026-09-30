@@ -6,16 +6,19 @@ import json
 from pathlib import Path
 
 
+PERIOD_LABELS = {"full": "全期間", "development": "開發期", "validation": "驗證期", "holdout": "保留期"}
+
+
 def latest_reports(directory: str | Path, limit: int = 10) -> list[dict[str, object]]:
-    """Newest report per strategy spec, newest first; unreadable files are skipped."""
+    """Newest report per strategy spec and period, newest first; unreadable files are skipped."""
     folder = Path(directory)
     if not folder.is_dir():
         return []
-    latest: dict[str, dict[str, object]] = {}
+    latest: dict[tuple[str, str], dict[str, object]] = {}
     for path in folder.glob("*.json"):
         try:
             report = json.loads(path.read_text(encoding="utf-8"))
-            key = report["strategy"]["spec_hash"]
+            key = (report["strategy"]["spec_hash"], str(report.get("period", "full")))
             stamp = str(report.get("generated_at", ""))
         except (OSError, ValueError, KeyError, TypeError):
             continue
@@ -38,6 +41,8 @@ def report_rows(reports: list[dict[str, object]]) -> list[dict[str, object]]:
 
         rows.append({
             "name": strategy["spec"],
+            "period_label": PERIOD_LABELS.get(str(report.get("period", "full")), str(report.get("period"))),
+            "kind": report.get("kind", "baseline"),
             "period": f"{strategy['start']}～{strategy['end']}",
             "contributed": strategy["total_contributed"],
             "final": strategy["final_value"],

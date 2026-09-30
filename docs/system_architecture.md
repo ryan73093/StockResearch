@@ -21,6 +21,7 @@
 | D9 | 交易日以證交所官方開休市日期判斷，資料隨程式發布並每日更新快取；臨時休市人工補登 | 休市日不誤報缺資料；證交所 API 不可用時仍有離線資料 |
 | D10 | 介面一套 HTML、三種版面：電腦完整側邊欄、iPad 圖示側欄、手機底部分頁；深色預設、可切換淺色（cookie，由伺服器直接輸出 `data-theme`，不閃爍） | 使用者會用電腦、iPad、手機開啟（2026-09-30）；不另做 App |
 | D11 | 資料庫每天 03:00 以 SQLite backup API 單一步驟線上備份，轉獨立檔後 `quick_check`、記錄各表筆數，保留 7 份；還原演練在暫存路徑核對筆數 | 9.6 GiB 複製約 20 秒，不需停機；WAL 模式下讀取快照不擋寫入 |
+| D12 | 研究資料集（長歷史日線、公司行動、總報酬）與研究報告放在 `instance/research/`，以 Parquet／JSON 保存並附 SHA-256；回測引擎只讀這些檔案，不讀寫 SQLite，也不經過 worker | 研究可重現（資料指紋＋設定檔雜湊＋引擎版本 → 報告雜湊），且研究工作不會拖慢或干擾每日流程 |
 
 ## 圖 1：目標架構總覽
 
@@ -165,6 +166,8 @@ flowchart TB
       RUNS[排程與資料品質紀錄]
     end
     subgraph FILES["Parquet 研究檔（instance/research/）"]
+      HIST["長歷史日線：history/daily/＜序列＞.parquet<br/>公司行動 actions.json、總報酬 total_return/"]
+      REPORTS[回測報告：reports/＜時間＞-＜雜湊＞.json]
       PRED[模型預測：每個實驗一個檔]
       FEAT[特徵快照：每個版本一個檔]
       CURVE[試驗逐日資產曲線]
@@ -239,7 +242,7 @@ flowchart LR
 | 位置 | 內容 |
 |---|---|
 | `market_calendar/` | 官方交易日曆與臨時休市（已建立；CLI：`python -m quant_platform.market_calendar`） |
-| `research/` | 策略設定檔 schema、現金流對照回測引擎、盤後成交模型、試驗登錄、統計檢定、AI 研究員 |
+| `research/` | 研究地基（S3，已建立）：`history/`（官方長歷史抓取、快取、Parquet 資料集、公司行動與總報酬、Yahoo 交叉核對、盤後零股成交分布；CLI `python -m quant_platform.research.history`）、`costs.py`（手續費、證交稅、盤後零股成交價）、`cashflow.py`（投入計畫）、`spec.py`（策略設定檔 v1 與四個基準）、`engine.py`（現金流回測）、`compare.py`（對定期定額的滾動視窗比較）、`metrics.py`、`reports.py`；CLI `python -m quant_platform.research backtest|baselines|schema`。後續：試驗登錄、統計檢定、AI 研究員（S4） |
 | `decision/` | 投資計畫、決策引擎、委託單、帳務與影子帳戶 |
 | `dashboard/v2.py`、`dashboard/templates/v2/`、`static/css/v2.css` | 新介面：今日、持倉、計畫、研究、系統（含專案資訊，直接讀 docs 原始檔）；電腦／iPad／手機三種版面、深色預設（S2-W03 第二版） |
 | `application/database_backup.py`、`scripts/database_backup.py` | 每日線上備份、保留 7 份、狀態與還原演練（S2-W05） |

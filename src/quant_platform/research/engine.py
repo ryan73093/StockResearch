@@ -100,6 +100,19 @@ class SimulationResult:
             "drawdown_trough": self.drawdown_trough.isoformat() if self.drawdown_trough else None,
         }
 
+    def monthly_returns(self) -> dict[str, float]:
+        """Unit-value return per calendar month (YYYY-MM), month-end to month-end."""
+        units = unit_values(self.values, self.flows)
+        month_end: dict[str, float] = {}
+        for day, unit in zip(self.days, units):
+            month_end[f"{day:%Y-%m}"] = unit
+        output: dict[str, float] = {}
+        previous = units[0]
+        for month, unit in month_end.items():
+            output[month] = unit / previous - 1 if previous else 0.0
+            previous = unit
+        return output
+
     @property
     def output_hash(self) -> str:
         payload = {
@@ -115,7 +128,7 @@ class SimulationResult:
 
 def input_hash(
     spec: StrategySpec, plan: ContributionPlan, costs: CostModel, market: MarketData,
-    start: date, end: date, dividend_lag_days: int,
+    start: date, end: date, dividend_lag_days: int, execution_lag: int = 0,
 ) -> str:
     payload = {
         "engine": ENGINE_VERSION,
@@ -127,6 +140,8 @@ def input_hash(
         "end": end.isoformat(),
         "dividend_lag_days": dividend_lag_days,
     }
+    if execution_lag:
+        payload["execution_lag"] = execution_lag
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -172,7 +187,10 @@ def simulate(
     start: date | None = None,
     end: date | None = None,
     dividend_lag_days: int = 25,
+    execution_lag: int = 0,
 ) -> SimulationResult:
+    """``execution_lag`` > 0 decides on the invest day's close but fills that
+    many sessions later (robustness check "晚一天執行")."""
     costs = costs or CostModel()
     first = common_start(spec, market)
     start = max(start or first, first)
@@ -184,7 +202,13 @@ def simulate(
     by_day: dict[date, float] = {}
     for day, amount in contributions:
         by_day[day] = by_day.get(day, 0.0) + amount
-    invest_days = _invest_days(spec, sessions, contributions)
+    decision_days = sorted(_invest_days(spec, sessions, contributions))
+    position = {day: index for index, day in enumerate(sessions)}
+    # execution day → decision day (signals read closes up to the decision day)
+    invest_days = {
+        sessions[position[day] + execution_lag]: day
+        for day in decision_days if position[day] + execution_lag < len(sessions)
+    }
 
     account = Account(shares={asset: 0 for asset in spec.assets})
     trades: list[Trade] = []
@@ -234,7 +258,7 @@ def simulate(
 
         # 3. orders in the after-hours window
         if day in invest_days and all(market.close(asset, day) for asset in spec.assets):
-            _invest(spec, market, costs, account, day, new_money, execute)
+            _invest(spec, market, costs, account, day, new_money, execute, invest_days[day])
             new_money = 0.0
 
         # 4. valuation at the close
@@ -252,7 +276,7 @@ def simulate(
     return SimulationResult(
         spec_name=spec.name,
         spec_hash=spec.spec_hash,
-        input_hash=input_hash(spec, plan, costs, market, start, end, dividend_lag_days),
+        input_hash=input_hash(spec, plan, costs, market, start, end, dividend_lag_days, execution_lag),
         start=sessions[0],
         end=sessions[-1],
         days=sessions,
@@ -274,12 +298,12 @@ def simulate(
     )
 
 
-def _invest(spec, market, costs, account, day, new_money, execute) -> None:
+def _invest(spec, market, costs, account, day, new_money, execute, signal_day) -> None:
     sizing = spec.sizing
     if sizing.type == "all_cash":
         budget = account.cash
     else:
-        budget = min(account.cash, new_money * _multiplier(spec, market, day))
+        budget = min(account.cash, new_money * _multiplier(spec, market, signal_day))
         reserve_cap = new_money * sizing.max_reserve_months
         if account.cash - budget > reserve_cap:
             budget = account.cash - reserve_cap

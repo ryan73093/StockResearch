@@ -40,7 +40,7 @@
         {% set excess_class = 'up' if (row.excess or 0) > 0 else ('down' if (row.excess or 0) < 0 else '') %}
         <tr>
           <td data-primary><strong>{{ row.name }}</strong><span class="stack-only num {{ excess_class }}">{{ '{:+.1%}'.format(row.excess or 0) }}</span></td>
-          <td class="small" data-label="期間" data-wide>{{ row.period }}</td>
+          <td class="small" data-label="期間" data-wide>{{ row.period_label }} {{ row.period }}</td>
           <td class="num {{ excess_class }}" data-label="期末">{{ '{:,.0f}'.format(row.final) }}</td>
           <td class="num" data-label="定期定額">{{ '{:,.0f}'.format(row.benchmark_final) }}</td>
           <td class="num" data-label="XIRR">{{ '{:.2%}'.format(row.xirr) if row.xirr is not none else '—' }}<span class="muted small"> / {{ '{:.2%}'.format(row.benchmark_xirr) if row.benchmark_xirr is not none else '—' }}</span></td>
