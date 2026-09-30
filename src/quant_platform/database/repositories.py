@@ -2124,6 +2124,26 @@ class SqlAlchemyFeatureLabelStoreRepository:
             for row in rows
         ]
 
+    def feature_series_coverage(
+        self, feature_names: list[str]
+    ) -> dict[tuple[str, str], tuple[int, datetime]]:
+        """Row count and latest event time per (symbol, feature) for ``feature_names``."""
+        if not feature_names:
+            return {}
+        statement = (
+            select(
+                FeatureValueModel.symbol,
+                FeatureValueModel.feature_name,
+                func.count(),
+                func.max(FeatureValueModel.event_time),
+            )
+            .where(FeatureValueModel.feature_name.in_(feature_names))
+            .group_by(FeatureValueModel.symbol, FeatureValueModel.feature_name)
+        )
+        with self._session_factory() as session:
+            rows = session.execute(statement).all()
+        return {(row[0], row[1]): (int(row[2]), row[3]) for row in rows}
+
     def list_recent_features(
         self, symbols: list[str], feature_names: list[str], start: datetime
     ) -> list[FeatureValue]:

@@ -42,10 +42,29 @@ class MacroPipelineResult:
     feature_values: int
     failed: int
     failures: dict[str, str]
+    changed_points: int = 0
+    rebuilt_symbols: int = 0
+
+
+# (event_time, available_time, value) of one macro feature observation.
+MacroPoint = tuple[datetime, datetime, float]
+
+
+def _stored(value: datetime) -> datetime:
+    # SQLite keeps the wall-clock fields and drops tzinfo; compare the same way.
+    return value.replace(tzinfo=None)
 
 
 class MacroDataPipeline:
-    """Downloads macro series, preserves revisions and materializes point-in-time features."""
+    """Downloads macro series, preserves revisions and materializes point-in-time features.
+
+    Every active equity and ETF keeps its own copy of each macro feature (the
+    readers join them per symbol). Since S1-W07 a run writes only what changed:
+    points that are new or revised compared with the stored series of a fully
+    covered symbol, plus the full series for symbols that are missing it. The
+    stored rows end up identical to a full rewrite; only ``computed_at`` of
+    unchanged rows keeps its earlier value.
+    """
 
     def __init__(
         self,
@@ -93,7 +112,9 @@ class MacroDataPipeline:
             for series, name in MACRO_FEATURES.items()
         ]
         self._features.register_definitions(definitions)
-        materialized = self._materialize(started, symbols=symbols)
+        materialized, changed_points, rebuilt_symbols = self._materialize(
+            started, symbols=symbols
+        )
         feature_count = self._features.upsert_features(materialized)
         status = (
             JobRunStatus.SUCCEEDED
@@ -103,7 +124,8 @@ class MacroDataPipeline:
             else JobRunStatus.FAILED
         )
         result = MacroPipelineResult(
-            run_id, status.value, received, inserted, feature_count, len(failures), failures
+            run_id, status.value, received, inserted, feature_count, len(failures), failures,
+            changed_points, rebuilt_symbols,
         )
         self._runs.finish(
             run_id,
@@ -114,19 +136,12 @@ class MacroDataPipeline:
         )
         return result
 
-    def _materialize(
-        self, computed_at: datetime, symbols: list[str] | None = None
-    ) -> list[FeatureValue]:
-        requested = {item.strip().upper() for item in symbols or []}
-        assets = [
-            item.symbol
-            for item in self._universe.list_active()
-            if item.asset_type in {"EQUITY", "ETF"}
-            and (not requested or item.symbol in requested)
-        ]
-        output: list[FeatureValue] = []
-        for series in MACRO_SERIES:
+    def desired_series(self) -> dict[str, list[MacroPoint]]:
+        """Feature points per macro feature, derived from the latest revisions."""
+        output: dict[str, list[MacroPoint]] = {}
+        for series, name in MACRO_FEATURES.items():
             rows = sorted(self._repository.list_latest(series), key=lambda x: x.event_time)
+            points: list[MacroPoint] = []
             for index, row in enumerate(rows):
                 if series in {"CPIAUCSL", "GDP"}:
                     lag = 12 if series == "CPIAUCSL" else 4
@@ -135,19 +150,65 @@ class MacroDataPipeline:
                     value = row.value / rows[index - lag].value - 1
                 else:
                     value = row.value
-                for symbol in assets:
-                    output.append(
-                        FeatureValue(
-                            symbol,
-                            MACRO_FEATURES[series],
-                            "1.0.0",
-                            row.event_time,
-                            row.available_time,
-                            computed_at,
-                            float(value),
-                        )
-                    )
+                points.append((row.event_time, row.available_time, float(value)))
+            output[name] = points
         return output
+
+    def _materialize(
+        self, computed_at: datetime, symbols: list[str] | None = None
+    ) -> tuple[list[FeatureValue], int, int]:
+        """Rows to upsert, number of changed points, number of fully rebuilt symbols."""
+        requested = {item.strip().upper() for item in symbols or []}
+        assets = [
+            item.symbol
+            for item in self._universe.list_active()
+            if item.asset_type in {"EQUITY", "ETF"}
+            and (not requested or item.symbol in requested)
+        ]
+        if not assets:
+            return [], 0, 0
+        desired = self.desired_series()
+        names = list(MACRO_FEATURES.values())
+        coverage = self._features.feature_series_coverage(names)
+        signatures = {
+            symbol: tuple(coverage.get((symbol, name)) for name in names) for symbol in assets
+        }
+        complete = [
+            signature for signature in signatures.values()
+            if all(item is not None for item in signature)
+        ]
+        reference = None
+        if complete:
+            # The most common complete signature is the series every up-to-date
+            # symbol shares; symbols that differ get the full series again.
+            common = max(set(complete), key=complete.count)
+            reference = next(symbol for symbol in assets if signatures[symbol] == common)
+        stored: dict[tuple[str, datetime], tuple[datetime, float]] = {}
+        if reference is not None:
+            for item in self._features.list_features([reference], names):
+                stored[(item.feature_name, _stored(item.event_time))] = (
+                    _stored(item.available_time), float(item.value)
+                )
+        changed = {
+            name: [
+                point for point in points
+                if stored.get((name, _stored(point[0]))) != (_stored(point[1]), point[2])
+            ]
+            for name, points in desired.items()
+        }
+        output: list[FeatureValue] = []
+        rebuilt = 0
+        for symbol in assets:
+            up_to_date = reference is not None and signatures[symbol] == signatures[reference]
+            if not up_to_date:
+                rebuilt += 1
+            source = changed if up_to_date else desired
+            for name, points in source.items():
+                output.extend(
+                    FeatureValue(symbol, name, "1.0.0", event_time, available_time, computed_at, value)
+                    for event_time, available_time, value in points
+                )
+        return output, sum(len(points) for points in changed.values()), rebuilt
 
 
 class MacroDataOverviewService:

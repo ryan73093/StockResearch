@@ -332,6 +332,10 @@ class FeatureLabelStoreRepository(Protocol):
         self, symbols: list[str], feature_names: list[str], as_of: datetime
     ) -> list[FeatureValue]: ...
 
+    def feature_series_coverage(
+        self, feature_names: list[str]
+    ) -> dict[tuple[str, str], tuple[int, datetime]]: ...
+
     def list_labels(
         self, symbols: list[str], label_names: list[str] | None = None
     ) -> list[LabelValue]: ...
