@@ -6,6 +6,33 @@ from functools import lru_cache
 from pathlib import Path
 
 
+# Daily-workflow steps paused by REQUIREMENTS §13 (S1-W06). Code and data stay;
+# PAUSED_MODULES in .env overrides the set ("none" resumes everything).
+PAUSABLE_MODULES = {
+    "point_in_time": "盤中／衍生品收集",
+    "intraday_features": "盤中衍生特徵",
+    "earnings_calls": "法說會收集",
+    "model_governance": "模型治理全量預測載入",
+    "shadow_trading": "影子交易",
+    "promotions": "晉級複驗",
+    "rag_index": "報告 RAG 索引",
+}
+DEFAULT_PAUSED_MODULES = frozenset(PAUSABLE_MODULES)
+
+
+def parse_paused_modules(value: str | None) -> frozenset[str]:
+    if value is None:
+        return DEFAULT_PAUSED_MODULES
+    text = value.strip().lower()
+    if text in {"", "none"}:
+        return frozenset()
+    names = {part.strip() for part in text.split(",") if part.strip()}
+    unknown = names - set(PAUSABLE_MODULES)
+    if unknown:
+        raise ValueError(f"PAUSED_MODULES 含未知項目：{', '.join(sorted(unknown))}")
+    return frozenset(names)
+
+
 def _load_dotenv(path: Path) -> None:
     """Load a small .env file without making configuration depend on a library."""
     if not path.exists():
@@ -42,6 +69,7 @@ class Settings:
     pit_auto_ingestion_enabled: bool = False
     pit_default_entities: str = "tw_futures_daily:TX,tw_options_daily:TXO"
     pit_lookback_days: int = 7
+    paused_modules: frozenset[str] = DEFAULT_PAUSED_MODULES
     email_enabled: bool = False
     smtp_host: str = ""
     smtp_port: int = 587
@@ -83,6 +111,9 @@ class Settings:
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
 
+    def is_paused(self, module: str) -> bool:
+        return module in self.paused_modules
+
     @classmethod
     def from_env(cls) -> "Settings":
         _load_dotenv(Path.cwd() / ".env")
@@ -114,6 +145,7 @@ class Settings:
                 "PIT_DEFAULT_ENTITIES", "tw_futures_daily:TX,tw_options_daily:TXO"
             ),
             pit_lookback_days=max(1, min(31, int(os.getenv("PIT_LOOKBACK_DAYS", "7")))),
+            paused_modules=parse_paused_modules(os.getenv("PAUSED_MODULES")),
             email_enabled=os.getenv("EMAIL_ENABLED", "false").lower() in {"1", "true", "yes"},
             smtp_host=os.getenv("SMTP_HOST", ""),
             smtp_port=int(os.getenv("SMTP_PORT", "587")),

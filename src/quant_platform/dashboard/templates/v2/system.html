@@ -53,8 +53,32 @@
       {% endfor %}
     </ul>
     <p class="note">{{ background_jobs }}</p>
+    {% if paused_modules %}
+      <p class="note">每日流程已暫停（需求 §13）：{{ paused_modules|join('、') }}。</p>
+    {% endif %}
   </section>
 </div>
+
+<section class="card">
+  <div class="card__head"><h2>收盤資料時效</h2><span class="muted small">首次看到當日資料的時間（13:30 後幾分）</span></div>
+  {% if close_rows %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>交易日</th>{% for key, label in close_sources.items() %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in close_rows %}
+        <tr>
+          <td data-primary><strong>{{ row.day }}</strong></td>
+          {% for key, label in close_sources.items() %}<td data-label="{{ label }}">{{ row.sources[key] }}</td>{% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="muted" style="margin:0">尚無紀錄；交易日 13:30 起每分鐘記錄證交所、櫃買、Yahoo 與盤後零股的公布時間，連續 5 個交易日後決定決策快照最早可開始的時間。</p>
+  {% endif %}
+</section>
 
 <section class="card" id="project">
   <div class="card__head"><h2>專案資訊</h2></div>

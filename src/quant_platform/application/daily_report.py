@@ -117,8 +117,10 @@ class DailyReportKnowledgeService:
         self._answer_provider = answer_provider
 
     def generate(
-        self, market: str = "TW", report_date: date | None = None
+        self, market: str = "TW", report_date: date | None = None, index: bool = True
     ) -> DailyResearchReport:
+        """Save the daily report; ``index=False`` skips the RAG document and
+        vector sync (paused module, REQUIREMENTS §13)."""
         normalized = market.upper()
         if normalized not in {"TW", "US"}:
             raise ValueError("market must be TW or US")
@@ -185,8 +187,9 @@ class DailyReportKnowledgeService:
         )
         report_id = self._repository.save_report(report)
         saved = DailyResearchReport(**{**asdict(report), "id": report_id})
-        self._sync_documents(saved, factors, backtests, models, portfolios, now)
-        self.sync_index()
+        if index:
+            self._sync_documents(saved, factors, backtests, models, portfolios, now)
+            self.sync_index()
         return saved
 
     def overview(self, question: str | None = None) -> ReportOverview:

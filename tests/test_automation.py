@@ -2,7 +2,14 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from quant_platform.config import Settings
+from quant_platform.config.settings import (
+    DEFAULT_PAUSED_MODULES,
+    PAUSABLE_MODULES,
+    parse_paused_modules,
+)
 from quant_platform.container import build_container
 from quant_platform.dashboard.app import create_app
 from quant_platform.runtime.locks import LocalExecutionLockManager
@@ -74,17 +81,13 @@ def test_scheduler_startup_closes_stale_running_audits(tmp_path):
     assert "自動關閉" in (recovered.error or "")
 
 
-def test_tw_daily_automation_runs_paper_and_shadow_evaluation(tmp_path):
-    container = build_container(Settings(
-        database_url=f"sqlite:///{tmp_path / 'tw-daily.db'}",
-        email_enabled=False,
-    ))
-    service = container.automation_service
+def _mock_tw_workflow(service):
     service._daily_pipeline = MagicMock()
     service._paper_trading = MagicMock()
     service._shadow_trading = MagicMock()
     service._promotions = MagicMock()
     service._model_governance = MagicMock()
+    service._point_in_time_data = MagicMock()
     service._intraday_features = MagicMock()
     service._earnings_calls = MagicMock()
     service._after_hours_ai = MagicMock()
@@ -102,6 +105,53 @@ def test_tw_daily_automation_runs_paper_and_shadow_evaluation(tmp_path):
         body_markdown="研究結果",
     )
 
+
+def test_paused_modules_default_to_requirements_section_13():
+    assert parse_paused_modules(None) == DEFAULT_PAUSED_MODULES
+    assert DEFAULT_PAUSED_MODULES == set(PAUSABLE_MODULES)
+    assert parse_paused_modules("none") == frozenset()
+    assert parse_paused_modules(" Shadow_Trading, promotions ") == {"shadow_trading", "promotions"}
+    with pytest.raises(ValueError):
+        parse_paused_modules("shadow_trading,daily_decision")
+
+
+def test_tw_daily_automation_skips_paused_modules_by_default(tmp_path):
+    container = build_container(Settings(
+        database_url=f"sqlite:///{tmp_path / 'tw-paused.db'}",
+        email_enabled=False,
+        pit_auto_ingestion_enabled=True,
+    ))
+    service = container.automation_service
+    _mock_tw_workflow(service)
+
+    result = service.execute("tw_daily_market_data")
+
+    assert result.status == "succeeded"
+    for paused in (
+        service._point_in_time_data.run_scheduled,
+        service._intraday_features.run,
+        service._earnings_calls.refresh,
+        service._model_governance.refresh,
+        service._shadow_trading.run_daily,
+        service._promotions.revalidate_all,
+    ):
+        paused.assert_not_called()
+    service._paper_trading.process_pending.assert_called_once_with()
+    service._universe_expansion.run_batch.assert_called_once_with()
+    assert service._after_hours_ai.generate.call_count == 2
+    assert service._after_hours_ai.submit_to_paper.call_count == 2
+    service._reports.generate.assert_called_once_with("TW", index=False)
+
+
+def test_tw_daily_automation_runs_every_module_when_nothing_is_paused(tmp_path):
+    container = build_container(Settings(
+        database_url=f"sqlite:///{tmp_path / 'tw-daily.db'}",
+        email_enabled=False,
+        paused_modules=frozenset(),
+    ))
+    service = container.automation_service
+    _mock_tw_workflow(service)
+
     result = service.execute("tw_daily_market_data")
 
     assert result.status == "succeeded"
@@ -116,6 +166,7 @@ def test_tw_daily_automation_runs_paper_and_shadow_evaluation(tmp_path):
     assert service._after_hours_ai.generate.call_count == 2
     assert service._after_hours_ai.submit_to_paper.call_count == 2
     service._universe_expansion.run_batch.assert_called_once_with()
+    service._reports.generate.assert_called_once_with("TW", index=True)
 
 
 def test_tw_daily_automation_refreshes_existing_prices_before_universe_expansion(tmp_path):
@@ -175,6 +226,7 @@ def test_tw_daily_automation_can_run_point_in_time_ingestion(tmp_path):
         pit_auto_ingestion_enabled=True,
         pit_default_entities="tw_futures_daily:TX",
         pit_lookback_days=3,
+        paused_modules=frozenset(),
     ))
     service = container.automation_service
     service._daily_pipeline = MagicMock()

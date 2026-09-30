@@ -254,26 +254,46 @@ class AutomationService:
                                 "Daily TW universe expansion batch failed; "
                                 "continuing after today's market refresh"
                             )
+                    # Modules paused by REQUIREMENTS §13 (settings.paused_modules)
+                    # keep their code and data but no longer run every day.
+                    paused = self._settings.is_paused
                     if (
                         schedule.market == "TW"
                         and self._settings.pit_auto_ingestion_enabled
                         and self._point_in_time_data is not None
+                        and not paused("point_in_time")
                     ):
                         self._point_in_time_data.run_scheduled(
                             self._settings.pit_default_entities,
                             self._settings.pit_lookback_days,
                         )
-                    if schedule.market == "TW" and self._intraday_features is not None:
+                    if (
+                        schedule.market == "TW"
+                        and self._intraday_features is not None
+                        and not paused("intraday_features")
+                    ):
                         self._intraday_features.run(lookback_days=14)
-                    if schedule.market == "TW" and self._earnings_calls is not None:
+                    if (
+                        schedule.market == "TW"
+                        and self._earnings_calls is not None
+                        and not paused("earnings_calls")
+                    ):
                         self._earnings_calls.refresh("ALL")
-                    if self._model_governance is not None:
+                    if self._model_governance is not None and not paused("model_governance"):
                         self._model_governance.refresh()
                     if schedule.market == "TW" and self._paper_trading is not None:
                         self._paper_trading.process_pending()
-                    if schedule.market == "TW" and self._shadow_trading is not None:
+                    if (
+                        schedule.market == "TW"
+                        and self._shadow_trading is not None
+                        and not paused("shadow_trading")
+                    ):
                         self._shadow_trading.run_daily()
-                    if schedule.market == "TW" and self._promotions is not None:
+                    if (
+                        schedule.market == "TW"
+                        and self._promotions is not None
+                        and not paused("promotions")
+                    ):
                         self._promotions.revalidate_all()
                     plan = (
                         self._after_hours_ai.generate()
@@ -282,7 +302,9 @@ class AutomationService:
                     )
                     if plan is not None:
                         self._after_hours_ai.submit_to_paper(plan=plan)
-                    report = self._reports.generate(schedule.market)
+                    report = self._reports.generate(
+                        schedule.market, index=not paused("rag_index")
+                    )
                     subject = f"[Quant OS] {report.title}"
                     body = (
                         f"{report.body_markdown}\n\n{plan.to_markdown()}"

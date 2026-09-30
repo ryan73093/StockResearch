@@ -2,6 +2,17 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-01 — S1-W06 暫停非核心收集，S1-W05 收盤時效量測上線
+
+- 盤點每日台股流程（`AutomationService.execute`）：研究流程之後依序執行盤中／衍生品收集、盤中特徵、法說會、模型治理 `refresh()`（台股、美股都跑，載入全量預測）、模擬交易處理、影子交易、晉級複驗、盤後 AI、報告；報告 `generate()` 每次都同步 RAG 文件與向量索引。每日決策（`DailyDecisionPipeline`）與盤後 AI 只讀取模型、特徵、市場狀態、策略整合、組合研究與各研究結果的 `promotion_gate`，不讀取上述暫停模組。
+- 設定 `PAUSED_MODULES`（`config/settings.py`；未設定＝七項全部暫停，`none`＝全部恢復，未知名稱拒絕啟動）：`point_in_time`、`intraday_features`、`earnings_calls`、`model_governance`、`shadow_trading`、`promotions`、`rag_index`。報告本文與 Email 照常，只略過 RAG 索引（`generate(..., index=False)`）。系統頁「每日排程」列出暫停清單。
+- 需求 §13 補充：新聞資料集仍隨籌碼資料收集（`news_sentiment_daily` 是現行綜合模型候選特徵），九種組合配置仍在每日流程（現行決策讀取其結果），分別在 S4、S5 處理。
+- 量測基準：09/21–09/30 的台股流程都在原始資料品質閘門停止（S1-W02 處理的下市個股），因此暫停步驟這段期間實際上沒有執行，沒有變更前的完整流程可比較；10/01 13:50 會是第一次完整台股流程，以它記錄耗時。現有數字（09/20 起中位數）：台股行情 293 秒、特徵 200 秒、模型 111 秒、決策 44 秒；總經 `fred_macro_data` 787 秒（最長 1,638 秒），每次重寫 7,198,905 筆特徵——列為 S1-W07 的主要對象。
+- S1-W05 量測：`application/close_availability.py` `CloseAvailabilityProbe`，worker 工作 `close_availability_probe`（週一至週五 13–14 時每分鐘觸發，程式只在交易日 13:30–14:45 動作）。每個來源當天第一次看到資料就寫一筆到 `instance/close_availability.jsonl`，之後不再查詢該來源：證交所 MI_INDEX 收盤表、櫃買 OpenAPI 收盤（日期＝當日）、Yahoo 0050 日 K 收盤與官方一致、證交所盤後零股 TWT53U（當日）。系統頁新增「收盤資料時效」（最近 5 個交易日，13:30 後幾分鐘）。以 09/30 資料實測四個解析器：證交所 1,382 筆（0050 收盤 112.05）、櫃買 11,772 筆、Yahoo 112.05 與官方一致、盤後零股 1,368 筆。
+- 測試：`test_automation.py` 新增預設暫停 1 項、設定解析 1 項（原「全部執行」測試改為 `paused_modules=frozenset()`）；新增 `test_close_availability.py` 4 項；排程清單加 `close_availability_probe`。全部測試 258 通過、1 略過。
+- 部署：2026-09-30 23:55（S1-W06）、10-01 00:00（S1-W05 量測）；本機與外網系統頁都顯示暫停清單、13:30 量測排程與「收盤資料時效」卡。
+- 回復：`.env` 設 `PAUSED_MODULES=none` 後重啟即恢復全部步驟；量測工作可在 `_add_maintenance_jobs` 移除，紀錄檔可保留。
+
 ## 2026-09-30 — S2-W05 每日備份與還原演練
 
 - `application/database_backup.py` `DatabaseBackupService`：SQLite backup API 單一步驟（`pages=-1`）取得一致快照，其他連線照常寫入 WAL；副本先寫 `.partial`，改為 `journal_mode=DELETE` 成為獨立檔，`quick_check` 通過後記錄全部 50 個資料表筆數，改名並寫入 `instance/backups/daily/manifest.jsonl`；保留最新 7 份（只輪替本目錄 `quant_platform-*.db`）；寫入 `database_backup`／`SYSTEM` 執行紀錄；超過 26 小時無新備份視為逾期。

@@ -7,6 +7,7 @@ from typing import Callable
 from quant_platform import __version__
 from quant_platform.market_calendar import MarketCalendarStore, TwseHolidayScheduleClient
 from quant_platform.application.listing_reconciliation import TaiwanListingReconciliationService
+from quant_platform.application.close_availability import CloseAvailabilityProbe
 from quant_platform.application.database_backup import DatabaseBackupService
 from quant_platform.application.prediction_archive import (
     PredictionArchiveService,
@@ -166,6 +167,7 @@ class Container:
     market_calendar: MarketCalendarStore
     prediction_archive: PredictionArchiveService
     database_backup: DatabaseBackupService | None
+    close_availability: CloseAvailabilityProbe
 
 
 def _sqlite_path(database_url: str) -> Path | None:
@@ -548,5 +550,8 @@ def build_container(settings: Settings | None = None) -> Container:
                 runs=job_run_repository,
             )
             if _sqlite_path(resolved.database_url) is not None else None
+        ),
+        close_availability=CloseAvailabilityProbe(
+            _instance_dir(resolved.database_url), market_calendar
         ),
     )

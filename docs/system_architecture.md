@@ -219,7 +219,7 @@ flowchart LR
 | 時點一致觀測與修訂 | 可用 | 沿用 | — |
 | 交易日曆 `market_calendar/` | 完成（S1-W01）：證交所 2021–2026、每日更新快取、人工補登臨時休市 | 沿用；2020 年以前由 S3-W01 以實際成交資料推算 | S1、S3 |
 | 資料品質閘門 | 可用；交易日判斷已改用官方日曆 | 保留阻擋邏輯；S1-W02 處理停牌與下市規則 | S1 |
-| 排程與通知 | 可用；補抓守門員重跑問題已修正，啟停腳本與單一監督程序完成（S1-W04） | 重新分配時段（決策 13:30–13:40、研究夜間） | S1 |
+| 排程與通知 | 可用；補抓守門員重跑問題已修正，啟停腳本與單一監督程序完成（S1-W04）；需求 §13 的模組以 `PAUSED_MODULES` 暫停（S1-W06） | 依 S1-W05 量測重新分配時段（決策 13:30–13:40、研究夜間） | S1 |
 | 特徵與標籤資料庫 | 可用；佔 8.6 GiB | 只保留使用中版本，其餘轉 Parquet | S1 |
 | 模型研究（Model Zoo、AutoML） | 可用；預測佔 10.2 GiB | 預測改存 Parquet；ML 只作為挑戰者 | S1、S4 |
 | 走動式回測、因子、Regime | 可用 | 保留作參考；主要評估改用現金流對照引擎 | S3 |
@@ -243,6 +243,7 @@ flowchart LR
 | `decision/` | 投資計畫、決策引擎、委託單、帳務與影子帳戶 |
 | `dashboard/v2.py`、`dashboard/templates/v2/`、`static/css/v2.css` | 新介面：今日、持倉、計畫、研究、系統（含專案資訊，直接讀 docs 原始檔）；電腦／iPad／手機三種版面、深色預設（S2-W03 第二版） |
 | `application/database_backup.py`、`scripts/database_backup.py` | 每日線上備份、保留 7 份、狀態與還原演練（S2-W05） |
+| `application/close_availability.py` | 收盤資料各來源公布時間量測（S1-W05，`instance/close_availability.jsonl`） |
 | `dashboard/cloudflare_access.py` | Cloudflare Access JWT 驗證、擁有者允許清單、本機 loopback 例外、安全標頭（S2-W01） |
 | `application/prediction_archive.py` | 預測保留政策與 Parquet 封存（S1-W03） |
 | `application/listing_reconciliation.py` | 官方名冊比對與下市處理（S1-W02） |

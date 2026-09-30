@@ -190,8 +190,14 @@ def backup_database(container: "Container") -> object | None:
     return container.database_backup.run()
 
 
+def probe_close_availability(container: "Container") -> object:
+    """S1-W05 measurement tick; the probe itself limits to 13:30–14:45 on trading days."""
+    return container.close_availability.run()
+
+
 def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") -> None:
-    """Nightly prediction archive (02:30) and database backup (03:00), plus the
+    """Nightly prediction archive (02:30) and database backup (03:00), the
+    close-availability probe (trading days 13:30–14:45, S1-W05), plus the
     TWSE calendar refresh shortly after start and then at most once per day.
 
     The archive needs the same exclusive database lock as the daily workflows;
@@ -222,6 +228,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=2 * 60 * 60,
+    )
+    scheduler.add_job(
+        probe_close_availability,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour="13-14", minute="*", timezone=timezone),
+        id="close_availability_probe",
+        name="收盤資料時效實測（交易日 13:30–14:45 每分鐘）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=30,
     )
     scheduler.add_job(
         refresh_market_calendar,

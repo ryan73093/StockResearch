@@ -13,6 +13,10 @@ from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, jsonify, render_template, request
 
+from quant_platform.application.close_availability import SOURCES as CLOSE_SOURCES
+from quant_platform.application.close_availability import recent_table
+from quant_platform.config.settings import PAUSABLE_MODULES
+
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
 ASSET_VERSION = "2.1.0"
@@ -51,6 +55,7 @@ WEEKDAY_RULES = {
 MAINTENANCE_JOBS = (
     (time(2, 30), "預測封存", "每日；舊實驗預測移到 Parquet"),
     (time(3, 0), "資料庫備份", "每日；保留最近 7 份"),
+    (time(13, 30), "收盤資料時效實測", "交易日每分鐘到 14:45；記錄各來源公布時間"),
 )
 BACKGROUND_JOBS = "背景工作：每 15 分鐘檢查漏跑、每 10 分鐘補台股研究池資料、每小時檢查證交所休市日。"
 STATUS_BADGES = {
@@ -393,6 +398,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             recent_runs=runs,
             schedule=schedule,
             background_jobs=BACKGROUND_JOBS,
+            paused_modules=[
+                label for name, label in PAUSABLE_MODULES.items()
+                if dependencies.settings.is_paused(name)
+            ],
+            close_sources=CLOSE_SOURCES,
+            close_rows=recent_table(dependencies.close_availability),
             checked_at=_taipei_text(now),
             doc_tabs=[(key, label) for key, (label, _) in DOCS.items()],
         )
