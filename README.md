@@ -1,12 +1,21 @@
-# Quant Research Platform
+# 盤後決策台（StockResearch）
 
-目前版本：v3.9.0。新增 Google Trends 官方 CSV 的 point-in-time 匯入，保存實際取得時間、抽樣修訂、地區、資料粒度與部分資料標記；回測只能看見當時已匯入的版本。既有法說會事件、26 項盤中／衍生品／零股特徵與所有明確單位維持可用。沒有 Docker 或付費 Token 仍可使用 SQLite 與公開官方來源。真實交易維持硬性關閉，Google 登入與 Docker 延後至發布前。
+單人使用的台股盤後決策台：每個交易日 13:40 前告訴你「今天要不要操作、操作什麼、限價多少、為什麼」，14:30 撮合後記錄結果，並持續和相同現金流的定期定額比較。策略由 AI 研究員在歷史資料上提出與淘汰，通過統計門檻與前向模擬的規則才會進入每日建議。真實下單永久關閉。
 
-Google Trends 官方 API 仍為限量 alpha，因此目前採官方網頁 CSV 匯入，不呼叫非官方端點。Dashboard 位於 `http://127.0.0.1:5000/google-trends`，API 為 `GET /api/v1/google-trends` 與 `POST /api/v1/google-trends/imports`；操作與研究限制請見 [Google Trends point-in-time 匯入](docs/google-trends.md)。
+2026-09-30 起依新方向重新規劃，開發文件：
 
-一套以 Clean Architecture 建構的 AI 量化研究平台。Flask 提供研究 Dashboard，FastAPI 提供資料與模型服務 API；兩者共用 domain、application 與 infrastructure，避免商業邏輯綁死在 Web framework。
+| 文件 | 用途 |
+|---|---|
+| [`AGENTS.md`](AGENTS.md) | 開發代理人規則（接手流程、服務與資料庫安全、驗收） |
+| [`REQUIREMENTS.md`](REQUIREMENTS.md) | 需求（唯一來源） |
+| [開發路線圖](docs/development_roadmap.md) | 階段 S0–S8、工作包、狀態與工時 |
+| [系統架構](docs/system_architecture.md) | 架構決策、流程圖、部署拓撲、模組處置 |
+| [當前交接](docs/development_handoff.md) | 目前工作包與環境現況 |
+| [`DEVELOPMENT_HISTORY.md`](DEVELOPMENT_HISTORY.md) | 每輪交付與證據 |
 
-## 已完成功能
+以下是 v3.9 研究平台的既有能力與操作說明；其中多數研究模組依路線圖 S1 暫停收集、S8 退場或整併（見 `REQUIREMENTS.md` §13）。
+
+## 已完成功能（v3.9 研究平台）
 
 - Flask 市場研究入口頁與系統狀態頁
 - FastAPI 健康檢查端點
@@ -108,7 +117,7 @@ Data Vault 位於 `http://127.0.0.1:5000/data`，可輸入 `SPY`、`0050.TW` 等
 
 盤中與衍生特徵位於 `http://127.0.0.1:5000/intraday-features`。先在資料頁下載來源，再按「建立／更新特徵」；輸入 `2330`、`TX` 或 `TXO` 可查看最新修訂、模型可用時間、來源與明確單位。API 為 `GET /api/v1/intraday-features` 與 `POST /api/v1/pipelines/intraday-features`；計算規則見 [盤中與衍生特徵說明](docs/intraday-derivative-features.md)。
 
-法說會與重大事件位於 `http://127.0.0.1:5000/corporate-events`。輸入 `ALL` 取得當日上市／上櫃法說會公告；輸入 `2330` 等單一代號可補充最新官方簡報與影音。API 為 `GET /api/v1/corporate-events` 與 `POST /api/v1/pipelines/corporate-events`；限制與操作見 [法說會事件說明](docs/corporate-events.md)。完整模組進度與投資研究效益見 [平台進度與效益](docs/platform-progress-and-benefits.md)。
+法說會與重大事件位於 `http://127.0.0.1:5000/corporate-events`。輸入 `ALL` 取得當日上市／上櫃法說會公告；輸入 `2330` 等單一代號可補充最新官方簡報與影音。API 為 `GET /api/v1/corporate-events` 與 `POST /api/v1/pipelines/corporate-events`；限制與操作見 [法說會事件說明](docs/corporate-events.md)。v3.8 模組進度與效益的歷史紀錄見 [docs/archive/platform-progress-v3.8.md](docs/archive/platform-progress-v3.8.md)。
 
 Universe Manager 位於 `http://127.0.0.1:5000/universe`。新增標的後會自動加入 Dashboard 與排程；停用不刪除歷史資料。手動執行可使用：
 
@@ -156,4 +165,4 @@ PPO／DQN 使用統一 Agent Adapter 與相同 walk-forward 分段。PPO 輸出 
 
 ## 原則
 
-研究結果不代表未來績效。平台目標是建立可重現、可審計、能正確處理偏誤的研究流程，而非保證超越大盤。詳細架構與路線圖見 `docs/architecture.md`。
+研究結果不代表未來績效。平台目標是建立可重現、可審計、能正確處理偏誤的研究流程，而非保證超越大盤。目前架構與路線圖見 [系統架構](docs/system_architecture.md) 與 [開發路線圖](docs/development_roadmap.md)。
