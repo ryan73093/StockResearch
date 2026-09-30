@@ -6,7 +6,7 @@
 
 1. `AGENTS.md`：開發規則。部署一律 `scripts\deploy.ps1`；只停服務用 `scripts\stop-services.ps1`，只啟動用 `scripts\start-services.ps1`；還原資料庫步驟在「資料庫安全」。
 2. `docs/development_roadmap.md`：S1 剩 W05（量測到 10/07）、W06（待 10/01 量測）；S3、S4-W01～W03、S5-W01 進行中。
-3. `DEVELOPMENT_HISTORY.md` 最上方：S5-W01／S4-W01～W03、S1-W07、S1-W06／W05。研究模組說明在 `docs/system_architecture.md` 目標程式結構 `research/` 一列與決策 D12。
+3. `DEVELOPMENT_HISTORY.md` 最上方：S5-W02～W04（今日建議、實際帳戶、影子帳戶）、S5-W01／S4-W01～W03、S1-W07。研究模組說明在 `docs/system_architecture.md` 目標程式結構 `research/` 一列與決策 D12。
 4. 使用者要求：所有回覆與進度說明用繁體中文。
 
 ## 當前工作包：S3 長歷史資料驗收與第一批研究
@@ -41,11 +41,11 @@
 | 項目 | 狀態 |
 |---|---|
 | 監督程序 | 排程工作 `StockResearchLocalServices`（使用者登入時觸發），含 Tunnel；紀錄 `instance\supervisor.log` |
-| 網站 | Waitress 127.0.0.1:5000；`AUTH_MODE=cloudflare-access`；CSS `v2.css?v=2.2.0`；00:54 部署（計畫頁、研究頁對照卡） |
+| 網站 | Waitress 127.0.0.1:5000；`AUTH_MODE=cloudflare-access`；CSS `v2.css?v=2.3.0`；01:22 部署（計畫、實際帳戶、依計畫的今日建議、研究排行） |
 | Cloudflare | Access application `c49fc706-9f0e-4080-82ef-79f6ebfa5490`、規則 `ec4e2109-b2f2-491e-9ae9-229a3ef876ac`；內建瀏覽器已登入 |
-| 資料庫 | `instance\quant_platform.db` 9.62 GiB；新增空資料表 `investment_plans`；每日備份 `instance\backups\daily\`（1 份）；兩個 22.29 GiB 暫存備份待刪 |
+| 資料庫 | `instance\quant_platform.db` 9.62 GiB；新增空資料表 `investment_plans`、`actual_cash_flows`、`actual_trades`；每日備份 `instance\backups\daily\`（1 份）；兩個 22.29 GiB 暫存備份待刪 |
 | 研究資料 | `instance\research\`：history（下載中）、reports、trials.jsonl（尚無試驗） |
-| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；299 通過、1 略過 |
+| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；315 通過、1 略過 |
 | 同主機其他服務 | VectorDB 5001 與其 Tunnel、PimiServices 共用 cloudflared 服務（YtSummary／AutoLayout）。一律不操作 |
 
 ## 待使用者確認
