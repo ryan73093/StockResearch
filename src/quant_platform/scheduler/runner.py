@@ -80,6 +80,33 @@ def _is_scheduled_weekday(value: str, weekday: int) -> bool:
     return False
 
 
+def _exchange_closure(container: "Container", market: str, local_now: datetime) -> str | None:
+    """Name of today's exchange closure for holiday-aware markets, else ``None``."""
+    calendar = container.market_calendar.calendar(market)
+    if not calendar.holiday_aware:
+        return None
+    closure = calendar.closure(local_now.date())
+    return closure.name if closure is not None else None
+
+
+def run_scheduled_workflow(
+    container: "Container", job_key: str, market: str, timezone: str,
+    now: datetime | None = None,
+) -> object | None:
+    """Cron entry point: skip exchange holidays instead of re-running old data."""
+    zone = ZoneInfo(timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    closure = _exchange_closure(container, market, local_now)
+    if closure is not None:
+        logger.info("Skipping %s: %s market closed (%s)", job_key, market, closure)
+        return None
+    return container.automation_service.execute(job_key)
+
+
+def refresh_market_calendar(container: "Container") -> object | None:
+    return container.market_calendar.refresh_if_due()
+
+
 def run_startup_catch_up(
     container: "Container", now: datetime | None = None
 ) -> tuple[str, ...]:
@@ -93,6 +120,8 @@ def run_startup_catch_up(
         zone = ZoneInfo(schedule.timezone)
         local_now = (now or datetime.now(zone)).astimezone(zone)
         if not _is_scheduled_weekday(schedule.weekdays, local_now.weekday()):
+            continue
+        if _exchange_closure(container, schedule.market, local_now) is not None:
             continue
         due_at = local_now.replace(
             hour=schedule.hour, minute=schedule.minute, second=0, microsecond=0
@@ -134,8 +163,8 @@ def configure_scheduler(scheduler: "BaseScheduler", container: "Container") -> i
         if not schedule.enabled:
             continue
         scheduler.add_job(
-            container.automation_service.execute,
-            args=[schedule.job_key],
+            run_scheduled_workflow,
+            args=[container, schedule.job_key, schedule.market, schedule.timezone],
             trigger=CronTrigger(
                 day_of_week=schedule.weekdays, hour=schedule.hour, minute=schedule.minute,
                 timezone=schedule.timezone,
@@ -150,6 +179,28 @@ def configure_scheduler(scheduler: "BaseScheduler", container: "Container") -> i
     return len(scheduler.get_jobs())
 
 
+def _add_calendar_refresh_job(scheduler: "BaseScheduler", container: "Container") -> None:
+    """Refresh the TWSE schedule shortly after start and then at most once per day."""
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    timezone = container.settings.scheduler_timezone
+    scheduler.add_job(
+        refresh_market_calendar,
+        args=[container],
+        trigger=IntervalTrigger(
+            hours=1,
+            start_date=datetime.now(ZoneInfo(timezone)) + timedelta(seconds=20),
+            timezone=timezone,
+        ),
+        id="market_calendar_refresh",
+        name="證交所開休市日期更新（每日一次）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+    )
+
+
 def start_background_scheduler(container: "Container") -> "BackgroundScheduler | None":
     if not container.settings.scheduler_enabled:
         logger.info("Background scheduler disabled by configuration")
@@ -162,6 +213,7 @@ def start_background_scheduler(container: "Container") -> "BackgroundScheduler |
     timezone = container.settings.scheduler_timezone
     scheduler = BackgroundScheduler(timezone=timezone)
     job_count = configure_scheduler(scheduler, container)
+    _add_calendar_refresh_job(scheduler, container)
     scheduler.add_job(
         run_startup_catch_up,
         args=[container],
@@ -224,6 +276,7 @@ def run_scheduler_worker(container: "Container | None" = None) -> None:
     dependencies.automation_service.recover_stale_runs()
     scheduler = BlockingScheduler(timezone=dependencies.settings.scheduler_timezone)
     job_count = configure_scheduler(scheduler, dependencies)
+    _add_calendar_refresh_job(scheduler, dependencies)
     timezone = dependencies.settings.scheduler_timezone
     scheduler.add_job(
         run_startup_catch_up,

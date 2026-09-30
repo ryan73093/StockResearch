@@ -203,6 +203,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "startup_data_catch_up",
             "daily_data_freshness_guard",
             "tw_universe_continuous_backfill",
+            "market_calendar_refresh",
         }
     finally:
         scheduler.shutdown(wait=False)

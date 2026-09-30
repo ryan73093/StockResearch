@@ -15,6 +15,11 @@ from quant_platform.application.ports import (
 )
 from quant_platform.application.services import MarketBarValidator, MarketDataIngestionService
 from quant_platform.domain.entities import JobRunStatus, ResearchAsset, SchedulerJobRun
+from quant_platform.market_calendar import (
+    MarketCalendarStore,
+    TradingCalendar,
+    default_market_calendar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -249,12 +254,14 @@ class DailyMarketDataPipeline:
         ingestion_service: MarketDataIngestionService,
         run_repository: SchedulerJobRunRepository,
         official_tw_provider: object | None = None,
+        calendar_store: MarketCalendarStore | None = None,
     ) -> None:
         self._universe_repository = universe_repository
         self._market_bar_repository = market_bar_repository
         self._ingestion_service = ingestion_service
         self._run_repository = run_repository
         self._official_tw_provider = official_tw_provider
+        self._calendar_store = calendar_store
         self._validator = MarketBarValidator()
 
     @staticmethod
@@ -263,13 +270,18 @@ class DailyMarketDataPipeline:
             return ZoneInfo("Asia/Taipei"), time(13, 45)
         return ZoneInfo("America/New_York"), time(16, 15)
 
+    def _calendar(self, market: str) -> TradingCalendar:
+        return (self._calendar_store or default_market_calendar()).calendar(market)
+
     @classmethod
-    def expected_session_date(cls, market: str, now: datetime) -> date:
-        """Return the weekday session whose daily candle should be available.
+    def expected_session_date(
+        cls, market: str, now: datetime, calendar: TradingCalendar | None = None
+    ) -> date:
+        """Return the latest exchange session whose daily candle should be available.
 
         The cutoff matches the Yahoo adapter's close-plus-15-minute
-        ``available_time``. On an exchange holiday the freshness guard keeps
-        the workflow pending instead of silently publishing old signals.
+        ``available_time``. Weekends and listed exchange holidays roll back to
+        the previous session, so a holiday is not reported as missing data.
         """
         if now.tzinfo is None:
             raise ValueError("now must be timezone-aware")
@@ -278,9 +290,8 @@ class DailyMarketDataPipeline:
         candidate = local_now.date()
         if local_now.time() < available_after:
             candidate -= timedelta(days=1)
-        while candidate.weekday() >= 5:
-            candidate -= timedelta(days=1)
-        return candidate
+        sessions = calendar or default_market_calendar().calendar(market)
+        return sessions.previous_trading_day(candidate)
 
     def latest_market_date(
         self, market: str, now: datetime | None = None
@@ -324,7 +335,7 @@ class DailyMarketDataPipeline:
     def is_fresh(self, market: str, now: datetime | None = None) -> bool:
         checked_at = now or datetime.now(UTC)
         return self.latest_market_date(market, checked_at) == self.expected_session_date(
-            market, checked_at
+            market, checked_at, self._calendar(market)
         )
 
     def run(
@@ -351,7 +362,9 @@ class DailyMarketDataPipeline:
         received = 0
         inserted = 0
         failures: dict[str, str] = {}
-        expected_date = self.expected_session_date(normalized_market, started)
+        expected_date = self.expected_session_date(
+            normalized_market, started, self._calendar(normalized_market)
+        )
         latest_before = self.latest_market_date(normalized_market, started)
         official_target_symbols: set[str] = set()
 
@@ -443,6 +456,12 @@ class DailyMarketDataPipeline:
                 f"{normalized_market} 最新行情日 {data_date or '尚無'}，"
                 f"預期 {expected_date}；禁止用舊行情產生新決策"
             )
+            if normalized_market == "TW":
+                failures["__market_freshness__"] += (
+                    "。若當日為颱風等臨時休市，執行 "
+                    "`python -m quant_platform.market_calendar add-closure "
+                    f"{expected_date} 颱風休市` 後重跑"
+                )
         failed = len(failures)
         if not fresh:
             status = JobRunStatus.FAILED

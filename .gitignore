@@ -11,7 +11,7 @@ htmlcov/
 build/
 *.egg-info/
 instance/
-data/
+/data/
 artifacts/
 mlruns/
 logs/

@@ -16,6 +16,7 @@ from quant_platform.application.ports import (
     PortfolioResearchRepository,
     ResearchUniverseRepository,
 )
+from quant_platform.market_calendar import MarketCalendarStore, default_market_calendar
 
 
 ZERO = Decimal("0")
@@ -248,6 +249,7 @@ class AfterHoursAiService:
         universe_history_service: object | None = None,
         portfolio_repository: PortfolioResearchRepository | None = None,
         model_repository: object | None = None,
+        calendar_store: MarketCalendarStore | None = None,
     ) -> None:
         self._decisions = decisions
         self._bars = bars
@@ -256,6 +258,7 @@ class AfterHoursAiService:
         self._universe_history = universe_history_service
         self._portfolios = portfolio_repository
         self._models = model_repository
+        self._calendar_store = calendar_store
         self._validation_cache: tuple[float, AfterHoursValidation] | None = None
         self._validation_lock = threading.Lock()
         self._validation_job: threading.Thread | None = None
@@ -2219,18 +2222,21 @@ class AfterHoursAiService:
             and decision_date == generated_date
             and market_date == generated_date
         )
-        # People who can only review the system on weekends still need the
-        # latest Friday-close plan for the next trading session. Keep the
-        # window narrow so an old snapshot can never silently become current.
+        calendar = (self._calendar_store or default_market_calendar()).calendar("TW")
+        is_trading_day = calendar.is_trading_day(generated_date)
+        # People who can only review the system on weekends or holidays still
+        # need the latest pre-holiday plan for the next trading session. Only
+        # the session immediately before today qualifies, so an old snapshot
+        # can never silently become current.
         weekend_preview = bool(
-            generated_date.weekday() >= 5
+            not is_trading_day
             and market_date is not None
             and decision_date is not None
             and 0 <= (decision_date - market_date).days <= 1
-            and 1 <= (generated_date - market_date).days <= 3
+            and market_date == calendar.previous_trading_day(generated_date)
         )
         historical_preview = bool(
-            generated_date.weekday() < 5
+            is_trading_day
             and not decision_is_fresh
             and market_date is not None
             and decision_date is not None
@@ -2249,7 +2255,7 @@ class AfterHoursAiService:
         expired_same_day = decision_is_fresh and not in_submission_window
         submission_allowed = (
             decision_is_fresh
-            and generated_date.weekday() < 5
+            and is_trading_day
             and in_submission_window
         )
         execution_note = (
@@ -2463,8 +2469,13 @@ class AfterHoursAiService:
             )
         elif orders:
             headline = f"產生 {sum(item.side == 'BUY' for item in orders)} 筆買進、{sum(item.side == 'SELL' for item in orders)} 筆賣出草稿"
-        elif generated_date.weekday() >= 5:
-            headline = "今日休市：不交易"
+        elif not is_trading_day:
+            closure = calendar.closure(generated_date)
+            headline = (
+                f"今日休市（{closure.name}）：不交易"
+                if closure is not None and closure.source != "weekday"
+                else "今日休市：不交易"
+            )
         elif decisions and not decision_is_fresh:
             headline = "今日不交易：決策資料不是今日盤後快照"
         elif decisions:
@@ -2498,7 +2509,7 @@ class AfterHoursAiService:
             hard_rules=(
                 "正式候選必須通過全部閘門；未晉級標的只能進入小部位研究模擬。",
                 "13:30 收盤資料完成後產生訊號；13:40～14:30 只建立盤後零股限價草稿，14:30 集合競價一次撮合。",
-                "交易日只接受當日 13:30 收盤快照；週末僅預覽下一交易日清單，禁止把舊訊號當成當日委託。",
+                "交易日只接受當日 13:30 收盤快照；週末與證交所休市日僅預覽下一交易日清單，禁止把舊訊號當成當日委託。",
                 "錯過交易時段後仍保留最近盤後決策供回看，但只標示為事後補算，禁止補送或冒充當時成交。",
                 "每日最多 3 個買賣動作；風險賣出優先，其餘名額只保留分數最高的買進。",
                 "尚未晉級的模型只准建立最多 2 檔、單檔 5% 的研究模擬，不代表可實盤候選。",

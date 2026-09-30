@@ -44,7 +44,7 @@ quant-worker = "quant_platform.scheduler.runner:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-quant_platform = ["dashboard/templates/*.html", "dashboard/static/css/*.css", "dashboard/static/js/*.js", "dashboard/static/*.svg"]
+quant_platform = ["dashboard/templates/*.html", "dashboard/static/css/*.css", "dashboard/static/js/*.js", "dashboard/static/*.svg", "market_calendar/data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

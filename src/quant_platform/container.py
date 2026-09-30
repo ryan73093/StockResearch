@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from quant_platform import __version__
+from quant_platform.market_calendar import MarketCalendarStore, TwseHolidayScheduleClient
 from quant_platform.application.services import (
     HealthService,
     MarketDataIngestionService,
@@ -155,6 +157,15 @@ class Container:
     intraday_derivative_feature_pipeline: IntradayDerivativeFeaturePipeline
     earnings_call_service: EarningsCallService
     research_failure_memory_service: ResearchFailureMemoryService
+    market_calendar: MarketCalendarStore
+
+
+def _instance_dir(database_url: str) -> Path:
+    """Runtime files live next to the SQLite database (``instance/`` by default)."""
+    prefix = "sqlite:///"
+    if database_url.startswith(prefix) and ":memory:" not in database_url:
+        return Path(database_url[len(prefix):]).parent
+    return Path("instance")
 
 
 def build_container(settings: Settings | None = None) -> Container:
@@ -217,12 +228,16 @@ def build_container(settings: Settings | None = None) -> Container:
     )
     universe_history_service.ensure_seed_memberships()
     ingestion_service = MarketDataIngestionService(YahooFinanceProvider(), market_bar_repository)
+    market_calendar = MarketCalendarStore(
+        _instance_dir(resolved.database_url), client=TwseHolidayScheduleClient()
+    )
     market_data_pipeline = DailyMarketDataPipeline(
         universe_repository,
         market_bar_repository,
         ingestion_service,
         job_run_repository,
-        TaiwanOfficialDailyBarProvider(),
+        TaiwanOfficialDailyBarProvider(calendar_store=market_calendar),
+        calendar_store=market_calendar,
     )
     taiwan_data_pipeline = TaiwanDataPipeline(
         universe_repository,
@@ -304,6 +319,7 @@ def build_container(settings: Settings | None = None) -> Container:
         data_quality_repository, market_bar_repository, universe_repository,
         feature_store_repository, taiwan_data_repository, macro_data_repository,
         point_in_time_repository,
+        calendar_store=market_calendar,
     )
     daily_research_pipeline = DailyResearchPipeline(
         market_data_pipeline, taiwan_data_pipeline, macro_data_pipeline, data_quality_service,
@@ -391,6 +407,7 @@ def build_container(settings: Settings | None = None) -> Container:
         universe_history_service,
         portfolio_repository,
         model_repository,
+        calendar_store=market_calendar,
     )
     universe_expansion_service = UniverseExpansionService(
         universe_service,
@@ -497,4 +514,5 @@ def build_container(settings: Settings | None = None) -> Container:
         research_failure_memory_service=ResearchFailureMemoryService(
             failure_case_repository
         ),
+        market_calendar=market_calendar,
     )

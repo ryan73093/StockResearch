@@ -23,6 +23,11 @@ from quant_platform.domain.entities import (
     FeatureValue,
     MarketBar,
 )
+from quant_platform.market_calendar import (
+    MarketCalendarStore,
+    TradingCalendar,
+    default_market_calendar,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +114,7 @@ class DataQualityService:
         macro: MacroDataRepository,
         point_in_time: PointInTimeDataRepository | None = None,
         policy: DataQualityPolicy | None = None,
+        calendar_store: MarketCalendarStore | None = None,
     ) -> None:
         self._repository = repository
         self._bars = bars
@@ -118,22 +124,14 @@ class DataQualityService:
         self._macro = macro
         self._point_in_time = point_in_time
         self._policy = policy or DataQualityPolicy()
+        self._calendar_store = calendar_store
 
     @staticmethod
     def _aware(value: datetime) -> datetime:
         return value if value.tzinfo else value.replace(tzinfo=UTC)
 
-    @staticmethod
-    def _business_days_after(start: date, end: date) -> int:
-        if end <= start:
-            return 0
-        count = 0
-        cursor = start + timedelta(days=1)
-        while cursor <= end:
-            if cursor.weekday() < 5:
-                count += 1
-            cursor += timedelta(days=1)
-        return count
+    def _calendar(self, market: str) -> TradingCalendar:
+        return (self._calendar_store or default_market_calendar()).calendar(market)
 
     @staticmethod
     def _finite_price(bar: MarketBar) -> bool:
@@ -186,13 +184,21 @@ class DataQualityService:
             issue("MISSING_BARS", "完整性", DataQualitySeverity.CRITICAL, symbol,
                   "啟用標的完全沒有日線資料。", 0, "> 0", "筆")
 
+        calendar = self._calendar(normalized)
+        if not calendar.covers(computed_at.date()):
+            issue(
+                "CALENDAR_COVERAGE", "時效性", DataQualitySeverity.WARNING, None,
+                "交易日曆缺少今年的官方休市資料，暫以週一至週五判斷；"
+                "執行 python -m quant_platform.market_calendar refresh 更新。",
+                computed_at.year, "已收錄年度", "年",
+            )
         if data_as_of is not None:
-            market_lag = self._business_days_after(data_as_of.date(), computed_at.date())
+            market_lag = calendar.sessions_after(data_as_of.date(), computed_at.date())
             if market_lag > self._policy.maximum_market_business_day_lag:
                 issue(
                     "MARKET_STALE", "時效性", DataQualitySeverity.CRITICAL, None,
                     "整體市場行情距離檢查時間過久。", market_lag,
-                    self._policy.maximum_market_business_day_lag, "個工作日",
+                    self._policy.maximum_market_business_day_lag, "個交易日",
                 )
 
         bars_by_symbol: dict[str, list[MarketBar]] = {}

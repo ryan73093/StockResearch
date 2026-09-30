@@ -10,6 +10,11 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from quant_platform.domain.entities import MarketBar
+from quant_platform.market_calendar import (
+    MarketCalendarStore,
+    TradingCalendar,
+    default_market_calendar,
+)
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 
@@ -33,25 +38,31 @@ class TaiwanOfficialDailyBarProvider:
         "stk_quote_result.php"
     )
 
-    def __init__(self, timeout: int = 30, cache_minutes: int = 15) -> None:
+    def __init__(
+        self,
+        timeout: int = 30,
+        cache_minutes: int = 15,
+        calendar_store: MarketCalendarStore | None = None,
+    ) -> None:
         self._timeout = timeout
         self._cache_for = cache_minutes * 60
+        self._calendar_store = calendar_store
         self._lock = threading.Lock()
         self._cached_at = 0.0
         self._cached_date: date | None = None
         self._cached: dict[str, MarketBar] = {}
 
-    @staticmethod
-    def expected_session_date(now: datetime) -> date:
+    def _calendar(self) -> TradingCalendar:
+        return (self._calendar_store or default_market_calendar()).calendar("TW")
+
+    def expected_session_date(self, now: datetime) -> date:
         if now.tzinfo is None:
             raise ValueError("now must be timezone-aware")
         local_now = now.astimezone(TAIPEI)
         candidate = local_now.date()
         if local_now.time() < time(13, 45):
             candidate -= timedelta(days=1)
-        while candidate.weekday() >= 5:
-            candidate -= timedelta(days=1)
-        return candidate
+        return self._calendar().previous_trading_day(candidate)
 
     def fetch_snapshot(
         self, symbols: list[str], now: datetime | None = None
@@ -88,9 +99,10 @@ class TaiwanOfficialDailyBarProvider:
         ingested_at = (now or datetime.now(UTC)).astimezone(UTC)
         requested = {symbol.upper() for symbol in symbols}
         bars: dict[tuple[str, datetime], MarketBar] = {}
+        calendar = self._calendar()
         target = start_date
         while target <= end_date:
-            if target.weekday() < 5:
+            if calendar.is_trading_day(target):
                 daily = (*self._fetch_twse(target, ingested_at), *self._fetch_tpex(target, ingested_at))
                 for item in daily:
                     if item.symbol in requested:

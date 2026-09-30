@@ -2,7 +2,7 @@
 
 本檔記錄系統**現在要滿足的需求**，依功能領域整理，是需求的唯一來源。需求變更時直接修改對應章節，並在 [`DEVELOPMENT_HISTORY.md`](DEVELOPMENT_HISTORY.md) 記一筆變更原因。交付狀態與排程在 [開發路線圖](docs/development_roadmap.md)，架構在 [系統架構](docs/system_architecture.md)。
 
-最後更新：2026-09-30（使用者確認：單人使用、Flask + Jinja + HTML、發布到 Cloudflare、AI 研究方向、資料庫由開發者決定優化方式）。
+最後更新：2026-09-30（使用者確認：單人使用、Flask + Jinja + HTML、發布到 Cloudflare 子網域 stockresearch、AI 研究方向、資料庫由開發者決定優化方式；S1-W01 交易日曆規則）。
 
 ## 1. 產品定位
 
@@ -50,7 +50,7 @@
 ## 6. 資料
 
 - 每筆資料保存 `event_time`、`available_time`、`ingested_at`；回測只能讀取當時已可得的資料。行情遵守事件 ≤ 公開 ≤ 匯入；預先公告的排程事件允許公開 ≤ 事件，但仍須公開 ≤ 匯入。
-- 交易日判斷使用證交所官方開休市日期，並可人工補登臨時休市；日曆缺年度資料時告警。
+- 交易日判斷使用證交所官方開休市日期（2021 年起；隨程式發布並每日自動更新），「市場無交易，僅辦理結算交割」的日期視為休市；颱風等臨時休市以 `python -m quant_platform.market_calendar add-closure` 人工補登；日曆缺當年資料時資料品質發出警告並暫以週一至週五判斷。休市日排程略過每日流程。2020 年以前的交易日以官方實際成交資料推算。
 - 盤後時段決策只能使用當日行情與前一交易日（含）以前已公布的籌碼資料；三大法人、融資融券等當日資料在公布後才可用於下一交易日。
 - 長歷史：研究用資料至少涵蓋 0050（2003-06 起）、加權指數與報酬指數，以及研究所需 ETF 的上市以來資料；股利與公司行動時點一致保存，並產生總報酬序列。
 - 來源優先序：證交所／櫃買官方為主，Yahoo 與 FinMind 交叉核對；各來源實際可取得時間需實測並記錄。
@@ -93,7 +93,7 @@
 
 - 主機：使用者的 Windows 電腦，長時間開機，與 VectorDB（5001）、AutoLayout（4173）、YtSummary（8001）共用。
 - 本專案 Web 綁 `127.0.0.1:5000`（Waitress）；FastAPI 只限本機 `127.0.0.1:8000`；排程 Worker 為獨立程序。
-- Cloudflare：本專案專屬 Tunnel `stockresearch-pimi-sunsun`，憑證放本專案 `.runtime/cloudflared/`；網域 `pimi-sunsun.com`，子網域待確認。
+- Cloudflare：本專案專屬 Tunnel `stockresearch-pimi-sunsun`，憑證放本專案 `.runtime/cloudflared/`；公開網址 `https://stockresearch.pimi-sunsun.com`。
 - 啟停腳本只操作核對過 PID、執行檔、命令列與 port 的本專案程序；不影響其他專案的程序與 Tunnel。
 - 開機後 App、Worker、Tunnel 自動恢復。
 - 每輪交付在本機與 Cloudflare 兩端以瀏覽器驗收同一版內容（S2 完成後適用）。
@@ -120,7 +120,6 @@
 
 | 項目 | 需要的決定 | 影響階段 |
 |---|---|---|
-| Cloudflare 子網域 | 建議 `stock.pimi-sunsun.com` | S2 |
 | Access application | 由使用者在 Zero Trust 建立，或授權開發者以 API 建立 | S2 |
 | AI 研究員的 LLM Provider 與每月預算 | Anthropic Claude 或既有 OpenAI 設定；費用上限 | S4 |
 | 通知管道 | Email 之外是否加 Telegram 或 LINE Messaging API | S1／S6 |

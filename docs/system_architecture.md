@@ -17,7 +17,8 @@
 | D5 | 回測、前向模擬與每日建議共用同一套盤後成交模型 | 避免回測與實際執行假設不同 |
 | D6 | 真實下單永久關閉；系統產生委託單內容，由使用者在券商自行下單並回報成交 | 安全邊界；也不需保存券商憑證 |
 | D7 | 主要評估指標是「相同現金流下相對定期定額」，勝率只作參考 | 勝率高但偶爾大虧的策略會輸給定期定額 |
-| D8 | 發布使用本專案專屬 Cloudflare Tunnel，origin 只綁 `127.0.0.1:5000` | 與 VectorDB、AutoLayout、YtSummary 同一台主機，各專案 Tunnel 與程序互不影響 |
+| D8 | 發布使用本專案專屬 Cloudflare Tunnel，公開網址 `https://stockresearch.pimi-sunsun.com`，origin 只綁 `127.0.0.1:5000` | 與 VectorDB、AutoLayout、YtSummary 同一台主機，各專案 Tunnel 與程序互不影響 |
+| D9 | 交易日以證交所官方開休市日期判斷，資料隨程式發布並每日更新快取；臨時休市人工補登 | 休市日不誤報缺資料；證交所 API 不可用時仍有離線資料 |
 
 ## 圖 1：目標架構總覽
 
@@ -197,7 +198,7 @@ flowchart LR
     APIAPP --- DB
     TUN_SR -->|只轉送到 127.0.0.1:5000| WEBAPP
     TUN_SR <-->|主動外連，不開路由器 port| EDGE
-    PHONE -->|https 子網域（待確認）| EDGE
+    PHONE -->|"stockresearch.pimi-sunsun.com（HTTPS）"| EDGE
 ```
 
 網站在每個請求驗證 `Cf-Access-Jwt-Assertion`（簽章、audience、issuer、email）；本機 loopback 請求可免登入以便開發。Tunnel、憑證與啟動器位於本專案 `.runtime/`，只操作核對過 PID 與命令列的本專案程序。
@@ -208,7 +209,8 @@ flowchart LR
 |---|---|---|---|
 | 來源 Adapter（證交所、櫃買、Yahoo、FinMind、MOPS） | 可用 | 沿用；補官方交易日曆、2003 年起長歷史、股利事件、盤後零股成交資訊 | S1、S3 |
 | 時點一致觀測與修訂 | 可用 | 沿用 | — |
-| 資料品質閘門 | 可用；休市日誤報 | 修正交易日判斷，保留阻擋邏輯 | S1 |
+| 交易日曆 `market_calendar/` | 完成（S1-W01）：證交所 2021–2026、每日更新快取、人工補登臨時休市 | 沿用；2020 年以前由 S3-W01 以實際成交資料推算 | S1、S3 |
+| 資料品質閘門 | 可用；交易日判斷已改用官方日曆 | 保留阻擋邏輯；S1-W02 處理停牌與下市規則 | S1 |
 | 排程與通知 | 可用；worker 長時間高 CPU | 重新分配時段（決策 13:30–13:40、研究夜間）；補服務啟停腳本 | S1 |
 | 特徵與標籤資料庫 | 可用；佔 8.6 GiB | 只保留使用中版本，其餘轉 Parquet | S1 |
 | 模型研究（Model Zoo、AutoML） | 可用；預測佔 10.2 GiB | 預測改存 Parquet；ML 只作為挑戰者 | S1、S4 |
@@ -228,7 +230,7 @@ flowchart LR
 
 | 位置 | 內容 |
 |---|---|
-| `calendar/` | 官方交易日曆與臨時休市 |
+| `market_calendar/` | 官方交易日曆與臨時休市（已建立；CLI：`python -m quant_platform.market_calendar`） |
 | `research/` | 策略設定檔 schema、現金流對照回測引擎、盤後成交模型、試驗登錄、統計檢定、AI 研究員 |
 | `decision/` | 投資計畫、決策引擎、委託單、帳務與影子帳戶 |
 | `web/` 或 `dashboard/` 新模板 | 今日、持倉、計畫、研究、系統、專案資訊 |
