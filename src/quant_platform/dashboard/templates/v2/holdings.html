@@ -1,81 +1,180 @@
 {% extends "v2/base.html" %}
+{% from "v2/_icons.html" import icon %}
 {% block title %}持倉 · 盤後決策台{% endblock %}
 {% block heading %}
 <header class="page-head">
   <div>
     <h1>持倉</h1>
-    <p class="page-head__sub">模擬帳戶　·　真實帳戶與定期定額對照列入 S5</p>
+    <p class="page-head__sub">實際帳戶，以及同一筆入金改買 0050 的定期定額影子帳戶</p>
   </div>
 </header>
 {% endblock %}
 {% block content %}
-<section class="kpis kpis--four kpis--page" aria-label="模擬帳戶">
-  <div class="kpi"><div class="kpi__label">權益</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.equity) }}<small>元</small></div></div>
-  <div class="kpi"><div class="kpi__label">現金</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.account.cash) }}<small>元</small></div></div>
-  <div class="kpi"><div class="kpi__label">累計報酬</div><div class="kpi__value {{ 'up' if overview.total_return > 0 else ('down' if overview.total_return < 0 else '') }}">{{ '{:+.2%}'.format(overview.total_return) }}</div></div>
-  <div class="kpi"><div class="kpi__label">持股曝險</div><div class="kpi__value">{{ '{:.1%}'.format(overview.gross_exposure) }}</div></div>
+{% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+
+{% set has_actual = actual.flows or actual.trades %}
+{% if has_actual %}
+{% set profit = actual.total_value - actual.net_deposits %}
+<section class="kpis kpis--four kpis--page" aria-label="實際帳戶">
+  <div class="kpi"><div class="kpi__label">總資產</div><div class="kpi__value">{{ '{:,.0f}'.format(actual.total_value) }}<small>元</small></div></div>
+  <div class="kpi"><div class="kpi__label">淨投入</div><div class="kpi__value">{{ '{:,.0f}'.format(actual.net_deposits) }}<small>元</small></div></div>
+  <div class="kpi"><div class="kpi__label">損益</div><div class="kpi__value {{ 'up' if profit > 0 else ('down' if profit < 0 else '') }}">{{ '{:+,.0f}'.format(profit) }}<small>元</small></div></div>
+  <div class="kpi"><div class="kpi__label">現金</div><div class="kpi__value">{{ '{:,.0f}'.format(actual.cash) }}<small>元</small></div></div>
 </section>
 
-<section class="card">
-  <div class="card__head">
-    <h2>持股 <span class="badge">{{ overview.positions|length }} 檔</span></h2>
-    <span class="muted small">損益顏色依台股慣例：紅漲綠跌</span>
-  </div>
-  {% if overview.positions %}
+<div class="grid grid--main-side">
+  <section class="card order-2">
+    <div class="card__head"><h2>持股 <span class="badge">{{ actual.holdings|length }} 檔</span></h2><span class="muted small">平均成本法；紅漲綠跌</span></div>
+    {% if actual.holdings %}
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>標的</th><th class="num">股數</th><th class="num">平均成本（元）</th><th class="num">現價（元）</th><th class="num">市值（元）</th><th class="num">未實現（元）</th><th class="num">權重</th></tr></thead>
+        <tbody>
+        {% for item in actual.holdings %}
+          {% set pnl_class = 'up' if (item.unrealized or 0) > 0 else ('down' if (item.unrealized or 0) < 0 else '') %}
+          <tr>
+            <td data-primary><span class="symbol"><strong>{{ item.symbol }}</strong><span>{{ code_names.get(item.symbol, '') }}</span></span>{% if item.unrealized is not none %}<span class="stack-only num {{ pnl_class }}">{{ '{:+,.0f}'.format(item.unrealized) }} 元</span>{% endif %}</td>
+            <td class="num" data-label="股數">{{ '{:,}'.format(item.shares) }}</td>
+            <td class="num" data-label="平均成本">{{ '{:,.2f}'.format(item.average_cost) }}</td>
+            <td class="num" data-label="現價">{{ '{:,.2f}'.format(item.price) if item.price is not none else '—' }}</td>
+            <td class="num" data-label="市值">{{ '{:,.0f}'.format(item.value) }}</td>
+            <td class="num table-only {{ pnl_class }}" data-label="未實現">{{ '{:+,.0f}'.format(item.unrealized) if item.unrealized is not none else '—' }}</td>
+            <td class="num" data-label="權重"><span class="weight"><span class="weight__bar"><i style="width: {{ [[item.weight * 100, 0]|max, 100]|min }}%"></i></span>{{ '{:.1%}'.format(item.weight) }}</span></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="muted" style="margin:0">目前沒有持股。</p>
+    {% endif %}
+    <p class="note">已實現損益 {{ '{:+,.0f}'.format(actual.realized) }} 元・股利 {{ '{:,.0f}'.format(actual.dividends) }} 元・手續費 {{ '{:,}'.format(actual.fees) }} 元・證交稅 {{ '{:,}'.format(actual.taxes) }} 元</p>
+  </section>
+
+  <section class="card order-1{% if actual.shadow and actual.shadow.difference > 0 %} card--highlight{% endif %}">
+    <div class="card__head"><h2>與定期定額比較</h2></div>
+    {% if actual.shadow %}
+      {% set diff = actual.shadow.difference %}
+      <p style="margin:0 0 12px">同樣的入金若都在當天買進 0050，現在約 <strong>{{ '{:,.0f}'.format(actual.shadow.value) }} 元</strong>；你的帳戶<strong class="{{ 'up' if diff > 0 else ('down' if diff < 0 else '') }}">{{ '多' if diff >= 0 else '少' }} {{ '{:,.0f}'.format(diff|abs) }} 元</strong>。</p>
+      <dl class="facts">
+        <div><dt>你的 XIRR</dt><dd>{{ '{:.2%}'.format(actual.xirr) if actual.xirr is not none else '—' }}</dd></div>
+        <div><dt>定期定額 XIRR</dt><dd>{{ '{:.2%}'.format(actual.shadow.xirr) if actual.shadow.xirr is not none else '—' }}</dd></div>
+        <div><dt>影子帳戶最大回撤</dt><dd>{{ '{:.1%}'.format(actual.shadow.max_drawdown) }}</dd></div>
+        <div><dt>影子帳戶計算至</dt><dd>{{ actual.shadow.as_of }}</dd></div>
+      </dl>
+    {% else %}
+      <p class="muted" style="margin:0">記錄入金後，這裡會用相同日期與金額模擬「當天買進 0050」，和你的實際帳戶比較。</p>
+    {% endif %}
+    {% for note in actual.notes %}<p class="note">{{ note }}</p>{% endfor %}
+  </section>
+</div>
+{% else %}
+<section class="card empty">
+  <div class="empty__icon">{{ icon('holdings') }}</div>
+  <h2>開始記錄實際帳戶</h2>
+  <p class="muted">每次入金與券商成交回報後記在這裡：系統會算出持股、平均成本、XIRR，並和「同一筆錢當天買 0050」的定期定額影子帳戶比較。</p>
+</section>
+{% endif %}
+
+<div class="grid grid--half">
+  <section class="card">
+    <div class="card__head"><h2>記錄資金</h2><span class="muted small">入金、出金、現金股利</span></div>
+    {% set f = form if form.get('form') == 'cash' else {} %}
+    <form method="post" action="/holdings/cash" class="form">
+      <div class="form__row">
+        <label>類型<select name="kind">{% for key, label in flow_kinds.items() %}<option value="{{ key }}" {{ 'selected' if f.get('kind') == key else '' }}>{{ label }}</option>{% endfor %}</select></label>
+        <label>日期<input name="day" type="date" value="{{ f.get('day', today_iso) }}" max="{{ today_iso }}" required></label>
+      </div>
+      <div class="form__row">
+        <label>金額（元）<input name="amount" inputmode="decimal" value="{{ f.get('amount', '') }}" required></label>
+        <label>股利來源代號（選填）<input name="symbol" value="{{ f.get('symbol', '') }}" placeholder="0050"></label>
+      </div>
+      <label>備註（選填）<input name="note" maxlength="500" value="{{ f.get('note', '') }}"></label>
+      <div class="actions-row"><button class="btn btn--primary" type="submit">記錄</button></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card__head"><h2>回報成交</h2><span class="muted small">依券商成交回報填寫</span></div>
+    {% set t = form if form.get('form') == 'trade' else {} %}
+    <form method="post" action="/holdings/trade" class="form">
+      <div class="form__row">
+        <label>成交日<input name="day" type="date" value="{{ t.get('day', today_iso) }}" max="{{ today_iso }}" required></label>
+        <label>代號<input name="symbol" value="{{ t.get('symbol', '0050') }}" required></label>
+        <label>買賣<select name="side"><option value="BUY" {{ 'selected' if t.get('side', 'BUY') == 'BUY' else '' }}>買進</option><option value="SELL" {{ 'selected' if t.get('side') == 'SELL' else '' }}>賣出</option></select></label>
+      </div>
+      <div class="form__row">
+        <label>股數<input name="shares" inputmode="numeric" value="{{ t.get('shares', '') }}" required></label>
+        <label>成交價（元）<input name="price" inputmode="decimal" value="{{ t.get('price', '') }}" required></label>
+      </div>
+      <div class="form__row">
+        <label>手續費（元，空白自動估）<input name="fee" inputmode="numeric" value="{{ t.get('fee', '') }}"></label>
+        <label>證交稅（元，空白自動估）<input name="tax" inputmode="numeric" value="{{ t.get('tax', '') }}"></label>
+      </div>
+      <label>備註（選填）<input name="note" maxlength="500" value="{{ t.get('note', '') }}"></label>
+      <div class="actions-row"><button class="btn btn--primary" type="submit">記錄成交</button><span class="muted small">賣出不能超過當時持股</span></div>
+    </form>
+  </section>
+</div>
+
+{% if has_actual %}
+<details class="card">
+  <summary><h2>帳務明細 <span class="badge">{{ actual.flows|length + actual.trades|length }} 筆</span></h2></summary>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr>
-        <th>標的</th><th class="num">股數</th><th class="num">平均成本（元）</th><th class="num">現價（元）</th>
-        <th class="num">市值（元）</th><th class="num">未實現損益（元）</th><th class="num">權重</th>
-      </tr></thead>
+      <thead><tr><th>日期</th><th>項目</th><th class="num">金額（元）</th><th>作廢</th></tr></thead>
+      <tbody>
+      {% for flow in actual.flows|reverse %}
+        <tr>
+          <td data-primary><strong>{{ flow.day }}</strong><span class="muted small">{{ flow_kinds[flow.kind] }}{% if flow.symbol %} {{ flow.symbol }}{% endif %}</span></td>
+          <td class="table-only">{{ flow_kinds[flow.kind] }}{% if flow.symbol %} {{ flow.symbol }}{% endif %}{% if flow.note %}・{{ flow.note }}{% endif %}</td>
+          <td class="num" data-label="金額">{{ '{:+,.0f}'.format(-flow.amount if flow.kind == 'withdrawal' else flow.amount) }}</td>
+          <td data-label="作廢" data-wide><form method="post" action="/holdings/void" class="void-form"><input type="hidden" name="kind" value="cash"><input type="hidden" name="id" value="{{ flow.id }}"><input name="reason" placeholder="作廢原因" required><button class="btn" type="submit">作廢</button></form></td>
+        </tr>
+      {% endfor %}
+      {% for trade in actual.trades|reverse %}
+        <tr>
+          <td data-primary><strong>{{ trade.day }}</strong><span class="badge {{ 'badge--buy' if trade.side == 'BUY' else 'badge--sell' }}">{{ '買進' if trade.side == 'BUY' else '賣出' }}</span></td>
+          <td class="table-only">{{ trade.symbol }} {{ '{:,}'.format(trade.shares) }} 股 × {{ '{:,.2f}'.format(trade.price) }}（費 {{ trade.fee }}、稅 {{ trade.tax }}）</td>
+          <td class="num" data-label="金額">{{ '{:+,.0f}'.format(-(trade.shares * trade.price) - trade.fee if trade.side == 'BUY' else trade.shares * trade.price - trade.fee - trade.tax) }}</td>
+          <td data-label="作廢" data-wide><form method="post" action="/holdings/void" class="void-form"><input type="hidden" name="kind" value="trade"><input type="hidden" name="id" value="{{ trade.id }}"><input name="reason" placeholder="作廢原因" required><button class="btn" type="submit">作廢</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">作廢的紀錄會保留在資料庫（含原因），只是不再計入帳務。</p>
+</details>
+{% endif %}
+
+<details class="card card--quiet">
+  <summary><h2>模擬帳戶 <span class="badge">研究用</span></h2></summary>
+  <div class="kpis kpis--four">
+    <div class="kpi"><div class="kpi__label">權益</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.equity) }}<small>元</small></div></div>
+    <div class="kpi"><div class="kpi__label">現金</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.account.cash) }}<small>元</small></div></div>
+    <div class="kpi"><div class="kpi__label">累計報酬</div><div class="kpi__value {{ 'up' if overview.total_return > 0 else ('down' if overview.total_return < 0 else '') }}">{{ '{:+.2%}'.format(overview.total_return) }}</div></div>
+    <div class="kpi"><div class="kpi__label">持股曝險</div><div class="kpi__value">{{ '{:.1%}'.format(overview.gross_exposure) }}</div></div>
+  </div>
+  {% if overview.positions %}
+  <div class="table-wrap table-wrap--stack" style="margin-top:12px">
+    <table class="table--stack">
+      <thead><tr><th>標的</th><th class="num">股數</th><th class="num">平均成本（元）</th><th class="num">現價（元）</th><th class="num">市值（元）</th><th class="num">未實現損益（元）</th></tr></thead>
       <tbody>
       {% for item in overview.positions %}
         {% set pnl_class = 'up' if item.unrealized_pnl > 0 else ('down' if item.unrealized_pnl < 0 else '') %}
         <tr>
-          <td data-primary>
-            <span class="symbol"><strong>{{ item.position.symbol.split('.')[0] }}</strong><span>{{ names.get(item.position.symbol, '') }}</span></span>
-            <span class="stack-only num {{ pnl_class }}">{{ '{:+,.0f}'.format(item.unrealized_pnl) }} 元</span>
-          </td>
+          <td data-primary><span class="symbol"><strong>{{ item.position.symbol.split('.')[0] }}</strong><span>{{ names.get(item.position.symbol, '') }}</span></span></td>
           <td class="num" data-label="股數">{{ '{:,}'.format(item.position.quantity) }}</td>
           <td class="num" data-label="平均成本">{{ '{:,.2f}'.format(item.position.average_cost) }}</td>
           <td class="num" data-label="現價">{{ '{:,.2f}'.format(item.mark_price) }}</td>
           <td class="num" data-label="市值">{{ '{:,.0f}'.format(item.market_value) }}</td>
-          <td class="num table-only {{ pnl_class }}" data-label="未實現損益">{{ '{:+,.0f}'.format(item.unrealized_pnl) }}</td>
-          <td class="num" data-label="權重">
-            <span class="weight"><span class="weight__bar"><i style="width: {{ [[item.portfolio_weight * 100, 0]|max, 100]|min }}%"></i></span>{{ '{:.1%}'.format(item.portfolio_weight) }}</span>
-          </td>
+          <td class="num {{ pnl_class }}" data-label="未實現損益">{{ '{:+,.0f}'.format(item.unrealized_pnl) }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  {% else %}
-    <p class="muted">目前沒有持股。</p>
   {% endif %}
-</section>
-
-{% if overview.orders %}
-<details class="card">
-  <summary><h2>最近委託 <span class="badge">{{ [overview.orders|length, 10]|min }} 筆</span></h2></summary>
-  <div class="table-wrap table-wrap--stack">
-    <table class="table--stack">
-      <thead><tr><th>標的</th><th>時間</th><th>買賣</th><th class="num">股數</th><th>狀態</th></tr></thead>
-      <tbody>
-      {% for order in overview.orders[:10] %}
-        <tr>
-          <td data-primary>
-            <span class="symbol"><strong>{{ order.symbol.split('.')[0] }}</strong><span class="stack-only">{{ order.submitted_at.strftime('%m/%d %H:%M') }}</span></span>
-            <span class="badge {{ 'badge--buy' if order.side == 'BUY' else 'badge--sell' }} stack-only">{{ '買進' if order.side == 'BUY' else '賣出' }}</span>
-          </td>
-          <td class="table-only small num" data-label="時間">{{ order.submitted_at.strftime('%m/%d %H:%M') }}</td>
-          <td class="table-only" data-label="買賣"><span class="badge {{ 'badge--buy' if order.side == 'BUY' else 'badge--sell' }}">{{ '買進' if order.side == 'BUY' else '賣出' }}</span></td>
-          <td class="num" data-label="股數">{{ '{:,}'.format(order.quantity) }}</td>
-          <td data-label="狀態">{{ order.status.value }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <p class="note">模擬帳戶由舊版盤後 AI 自動下單，只作研究對照，不代表你的實際持股。</p>
 </details>
-{% endif %}
 {% endblock %}

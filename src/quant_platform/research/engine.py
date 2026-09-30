@@ -129,11 +129,13 @@ class SimulationResult:
 def input_hash(
     spec: StrategySpec, plan: ContributionPlan, costs: CostModel, market: MarketData,
     start: date, end: date, dividend_lag_days: int, execution_lag: int = 0,
+    contributions: list[tuple[date, float]] | None = None,
 ) -> str:
     payload = {
         "engine": ENGINE_VERSION,
         "spec": spec.spec_hash,
         "plan": plan.as_dict(),
+        "contributions": [[day.isoformat(), amount] for day, amount in contributions or []],
         "costs": costs.as_dict(),
         "data": market.fingerprint,
         "start": start.isoformat(),
@@ -188,9 +190,12 @@ def simulate(
     end: date | None = None,
     dividend_lag_days: int = 25,
     execution_lag: int = 0,
+    contributions: list[tuple[date, float]] | None = None,
 ) -> SimulationResult:
     """``execution_lag`` > 0 decides on the invest day's close but fills that
-    many sessions later (robustness check "晚一天執行")."""
+    many sessions later (robustness check "晚一天執行"). ``contributions``
+    replaces the plan's schedule with actual deposits (the DCA shadow account);
+    each moves to the next session when its date is closed."""
     costs = costs or CostModel()
     first = common_start(spec, market)
     start = max(start or first, first)
@@ -198,7 +203,15 @@ def simulate(
     sessions = [day for day in market.sessions if start <= day <= end]
     if not sessions:
         raise ValueError(f"{start}～{end} 沒有交易日")
-    contributions = plan.schedule(sessions, start, end)
+    if contributions is None:
+        contributions = plan.schedule(sessions, start, end)
+    else:
+        moved: dict[date, float] = {}
+        for day, amount in contributions:
+            position = bisect.bisect_left(sessions, day)
+            if position < len(sessions) and amount:
+                moved[sessions[position]] = moved.get(sessions[position], 0.0) + float(amount)
+        contributions = sorted(moved.items())
     by_day: dict[date, float] = {}
     for day, amount in contributions:
         by_day[day] = by_day.get(day, 0.0) + amount
@@ -276,7 +289,9 @@ def simulate(
     return SimulationResult(
         spec_name=spec.name,
         spec_hash=spec.spec_hash,
-        input_hash=input_hash(spec, plan, costs, market, start, end, dividend_lag_days, execution_lag),
+        input_hash=input_hash(
+            spec, plan, costs, market, start, end, dividend_lag_days, execution_lag, contributions
+        ),
         start=sessions[0],
         end=sessions[-1],
         days=sessions,

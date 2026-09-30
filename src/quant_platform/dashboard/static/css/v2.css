@@ -441,6 +441,13 @@ td.wrap { white-space: normal; min-width: 180px; }
 .choice small { color: var(--muted); font-size: 12.5px; font-weight: 400; }
 .choice__stat { color: var(--accent) !important; }
 .form-error { color: var(--bad); background: var(--bad-bg); border-radius: 10px; padding: 10px 12px; margin: 0 0 4px; }
+.form select { appearance: auto; }
+.void-form { display: flex; gap: 6px; align-items: center; }
+.void-form input {
+  font: 13px var(--font); color: var(--text); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; min-width: 0; width: 120px;
+}
+.void-form .btn { padding: 5px 10px; font-size: 13px; }
 .status-line { color: var(--muted); font-size: 13px; }
 .flash { display: flex; align-items: center; gap: 10px; }
 

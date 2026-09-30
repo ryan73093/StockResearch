@@ -9,6 +9,8 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import sessionmaker
 
 from quant_platform.database.models import (
+    ActualCashFlowModel,
+    ActualTradeModel,
     InvestmentPlanModel,
     FeatureDefinitionModel,
     FeatureValueModel,
@@ -61,6 +63,8 @@ from quant_platform.database.models import (
     MacroObservationModel,
 )
 from quant_platform.domain.entities import (
+    ActualCashFlow,
+    ActualTrade,
     InvestmentPlan,
     DataCoverage,
     ExperimentStatus,
@@ -3621,3 +3625,71 @@ class SqlAlchemyInvestmentPlanRepository:
             session.commit()
             session.refresh(row)
             return self._entity(row)
+
+class SqlAlchemyActualAccountRepository:
+    """The investor's real account ledger (S5-W03); entries are voided, never deleted."""
+
+    def __init__(self, session_factory: sessionmaker) -> None:
+        self._session_factory = session_factory
+
+    @staticmethod
+    def _flow(row: ActualCashFlowModel) -> ActualCashFlow:
+        return ActualCashFlow(
+            id=row.id, day=row.day, kind=row.kind, amount=Decimal(row.amount), symbol=row.symbol or "",
+            note=row.note or "", voided=row.voided_at is not None,
+        )
+
+    @staticmethod
+    def _trade(row: ActualTradeModel) -> ActualTrade:
+        return ActualTrade(
+            id=row.id, day=row.day, symbol=row.symbol, side=row.side, shares=int(row.shares),
+            price=Decimal(row.price), fee=int(row.fee), tax=int(row.tax), note=row.note or "",
+            voided=row.voided_at is not None,
+        )
+
+    def add_cash_flow(self, value: ActualCashFlow, created_at: datetime) -> ActualCashFlow:
+        with self._session_factory() as session:
+            row = ActualCashFlowModel(
+                day=value.day, kind=value.kind, amount=value.amount, symbol=value.symbol,
+                note=value.note, created_at=created_at,
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return self._flow(row)
+
+    def add_trade(self, value: ActualTrade, created_at: datetime) -> ActualTrade:
+        with self._session_factory() as session:
+            row = ActualTradeModel(
+                day=value.day, symbol=value.symbol, side=value.side, shares=value.shares,
+                price=value.price, fee=value.fee, tax=value.tax, note=value.note, created_at=created_at,
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return self._trade(row)
+
+    def list_cash_flows(self, include_voided: bool = False) -> list[ActualCashFlow]:
+        statement = select(ActualCashFlowModel).order_by(ActualCashFlowModel.day, ActualCashFlowModel.id)
+        if not include_voided:
+            statement = statement.where(ActualCashFlowModel.voided_at.is_(None))
+        with self._session_factory() as session:
+            return [self._flow(row) for row in session.scalars(statement).all()]
+
+    def list_trades(self, include_voided: bool = False) -> list[ActualTrade]:
+        statement = select(ActualTradeModel).order_by(ActualTradeModel.day, ActualTradeModel.id)
+        if not include_voided:
+            statement = statement.where(ActualTradeModel.voided_at.is_(None))
+        with self._session_factory() as session:
+            return [self._trade(row) for row in session.scalars(statement).all()]
+
+    def void(self, kind: str, entry_id: int, reason: str, voided_at: datetime) -> bool:
+        model = ActualTradeModel if kind == "trade" else ActualCashFlowModel
+        with self._session_factory() as session:
+            row = session.get(model, entry_id)
+            if row is None or row.voided_at is not None:
+                return False
+            row.voided_at = voided_at
+            row.void_reason = reason
+            session.commit()
+            return True

@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
 from quant_platform.application.close_availability import SOURCES as CLOSE_SOURCES
+from quant_platform.application.actual_account import FLOW_KINDS, ActualAccountError
 from quant_platform.application.investment_plan import InvestmentPlanError, strategy_name
 from quant_platform.research.spec import BASELINES
 from quant_platform.application.close_availability import recent_table
@@ -334,15 +335,59 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             },
         )
 
-    @blueprint.get("/holdings")
-    def holdings():
+    def render_holdings(error: str | None = None, form: dict | None = None, status: int = 200):
         overview = dependencies.paper_trading_service.overview()
+        actual = dependencies.actual_account_service.overview()
+        symbols = [item.position.symbol for item in overview.positions]
+        symbols += [f"{item.symbol}.{suffix}" for item in actual.holdings for suffix in ("TW", "TWO")]
+        names = names_for(symbols)
         return render_template(
             "v2/holdings.html",
             active_nav="holdings",
             overview=overview,
-            names=names_for(item.position.symbol for item in overview.positions),
-        )
+            actual=actual,
+            names=names,
+            code_names={symbol.split(".")[0]: name for symbol, name in names.items()},
+            flow_kinds=FLOW_KINDS,
+            error=error,
+            form=form or {},
+            today_iso=datetime.now(TAIPEI).date().isoformat(),
+        ), status
+
+    @blueprint.get("/holdings")
+    def holdings():
+        return render_holdings()
+
+    @blueprint.post("/holdings/cash")
+    def holdings_cash():
+        try:
+            saved = dependencies.actual_account_service.record_cash_flow(dict(request.form))
+        except ActualAccountError as exc:
+            return render_holdings(str(exc), {**dict(request.form), "form": "cash"}, 400)
+        flash(f"已記錄{FLOW_KINDS[saved.kind]} {saved.amount:,.0f} 元（{saved.day}）。", "success")
+        return redirect(url_for("v2.holdings"))
+
+    @blueprint.post("/holdings/trade")
+    def holdings_trade():
+        try:
+            saved = dependencies.actual_account_service.record_trade(dict(request.form))
+        except ActualAccountError as exc:
+            return render_holdings(str(exc), {**dict(request.form), "form": "trade"}, 400)
+        side = "買進" if saved.side == "BUY" else "賣出"
+        flash(f"已記錄 {saved.day} {side} {saved.symbol} {saved.shares:,} 股（手續費 {saved.fee} 元、證交稅 {saved.tax} 元）。", "success")
+        return redirect(url_for("v2.holdings"))
+
+    @blueprint.post("/holdings/void")
+    def holdings_void():
+        try:
+            done = dependencies.actual_account_service.void(
+                str(request.form.get("kind", "")), int(request.form.get("id", "0")),
+                str(request.form.get("reason", "")),
+            )
+        except (ActualAccountError, ValueError) as exc:
+            return render_holdings(str(exc), {}, 400)
+        flash("已作廢該筆紀錄。" if done else "找不到該筆紀錄或已作廢。", "success" if done else "error")
+        return redirect(url_for("v2.holdings"))
 
     @blueprint.route("/plan", methods=["GET", "POST"])
     def plan():

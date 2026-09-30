@@ -983,3 +983,27 @@ class InvestmentPlan:
     goal: str = ""
     horizon_years: int | None = None
     note: str = ""
+
+@dataclass(frozen=True, slots=True)
+class ActualCashFlow:
+    id: int | None
+    day: date
+    kind: str  # deposit | withdrawal | dividend
+    amount: Decimal
+    symbol: str = ""
+    note: str = ""
+    voided: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ActualTrade:
+    id: int | None
+    day: date
+    symbol: str
+    side: str  # BUY | SELL
+    shares: int
+    price: Decimal
+    fee: int
+    tax: int
+    note: str = ""
+    voided: bool = False

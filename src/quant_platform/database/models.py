@@ -1044,3 +1044,37 @@ class InvestmentPlanModel(Base):
     goal: Mapped[str] = mapped_column(String(200), default="")
     horizon_years: Mapped[int | None] = mapped_column(nullable=True)
     note: Mapped[str] = mapped_column(String(1000), default="")
+
+class ActualCashFlowModel(Base):
+    """Money moved into or out of the investor's real brokerage account (S5-W03)."""
+
+    __tablename__ = "actual_cash_flows"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # deposit | withdrawal | dividend
+    amount: Mapped[Decimal] = mapped_column(Numeric(20, 2))
+    symbol: Mapped[str] = mapped_column(String(20), default="")
+    note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    void_reason: Mapped[str] = mapped_column(String(500), default="")
+
+
+class ActualTradeModel(Base):
+    """A fill the investor reports from their broker (S5-W03)."""
+
+    __tablename__ = "actual_trades"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    symbol: Mapped[str] = mapped_column(String(20), index=True)
+    side: Mapped[str] = mapped_column(String(4))
+    shares: Mapped[int] = mapped_column(BigInteger)
+    price: Mapped[Decimal] = mapped_column(Numeric(20, 4))
+    fee: Mapped[int]
+    tax: Mapped[int]
+    note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    void_reason: Mapped[str] = mapped_column(String(500), default="")
