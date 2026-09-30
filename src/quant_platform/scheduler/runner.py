@@ -110,9 +110,13 @@ def refresh_market_calendar(container: "Container") -> object | None:
 def run_startup_catch_up(
     container: "Container", now: datetime | None = None
 ) -> tuple[str, ...]:
-    """Run today's enabled workflows when the server missed their scheduled time."""
+    """Run today's enabled workflows when the server missed their scheduled time.
+
+    Success is looked up directly in the run table in UTC. A window of recent
+    runs is not enough: one workflow writes several sub-job rows, which pushed
+    the day's success out of view and re-ran the full workflow every 15 minutes.
+    """
     overview = container.automation_service.overview()
-    recent_runs = overview.recent_runs
     executed: list[str] = []
     for schedule in overview.schedules:
         if not schedule.enabled:
@@ -128,16 +132,8 @@ def run_startup_catch_up(
         )
         if local_now < due_at:
             continue
-        already_succeeded = any(
-            run.job_name == "daily_market_data"
-            and run.market.upper() == schedule.market.upper()
-            and run.status.value == "succeeded"
-            and (
-                run.started_at
-                if run.started_at.tzinfo
-                else run.started_at.replace(tzinfo=zone)
-            ).astimezone(zone) >= due_at
-            for run in recent_runs
+        already_succeeded = container.automation_service.succeeded_since(
+            "daily_market_data", schedule.market, due_at
         )
         market_is_fresh = container.daily_market_data_pipeline.is_fresh(
             schedule.market, local_now

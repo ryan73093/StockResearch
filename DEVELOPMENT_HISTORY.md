@@ -2,6 +2,32 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-09-30 — S1-W04 服務啟停與效能
+
+- 使用者同意重啟服務（2026-09-30）；GitHub push 由使用者完成，`origin/main` = `cd436d2`。
+- 現況盤點（停機前，20:02）：三個服務的監督程序（PID 9988）已不存在，服務處於無人監督狀態；排程工作 `StockResearchLocalServices`（登入時執行）上次 9/26 21:27 啟動，結束代碼 `0xC000013A`（被中斷）。Worker 自 9/26 起累計 CPU 93,411 秒；停機前 20 秒內用掉 13.6 秒（約 68% 單核），正卡在 17:43 開始的美股補跑。
+- CPU 根因（以排程紀錄查證）：
+  1. 補抓守門員 `run_startup_catch_up` 只看最近 30 筆執行紀錄判斷「今天是否成功」，一次完整流程會寫 7–9 筆子紀錄，成功紀錄很快被擠出，於是每 15 分鐘重跑整套流程。9/28 起美股完整流程跑了 13 次（每次總經資料約 13 分鐘）。
+  2. 同一段程式把資料庫的 naive UTC 時間當成台北時間，差 8 小時；台股 14:00 的成功紀錄被當成 06:00，早於 13:50 的排定時間。
+  3. 9/28 休市誤報造成台股流程失敗 82 次（S1-W01 已修正）。
+  - 更正：S1-W01 紀錄中懷疑的 `run_universe_backfill` 經查證只在「跨過目標的那一批」觸發一次全套研究，不是 CPU 元凶。
+- 修正：`SchedulerJobRunRepository.latest_succeeded(job_name, market, since)`（以 UTC 查詢）、`AutomationService.succeeded_since`；守門員改用資料庫直接查詢。
+- Web 改用 Waitress（8 threads，`channel_timeout=120`）；未安裝時退回 Flask 開發伺服器並記錄警告。`pyproject.toml` 新增 `waitress>=3,<4`。
+- 服務腳本：
+  - `scripts/run_local_services.ps1`：單一執行個體、PID 檔（`.runtime\services\`）、停止旗標、`instance\supervisor.log`、子程序 UTF-8 日誌（先前日誌為 Big5 亂碼）、新程序 120 秒後才開始健康檢查。
+  - `scripts/stop-services.ps1`：停止旗標 → 以完整執行檔路徑核對並結束殘留程序樹 → 驗證 5000／8000 已釋放；13:30–14:40 預設拒絕。
+  - `scripts/start-services.ps1`：觸發排程工作啟動（脫離工具工作階段），等待健康檢查並列出 PID。
+  - `.gitignore` 加入 `.runtime/`。
+- 部署（20:05–20:09）：`stop-services.ps1` 結束三個程序樹 → `pip install .`（含 Waitress）→ `start-services.ps1`。新 PID：監督 278120、web 279180（Python 278916）、api 268716（Python 189652）、worker 274600（Python 23104）。VectorDB 5001 回應 200，`cloudflared` PID 5508、10704 未受影響。
+- 驗收：
+  - `/health` 13 ms；`/data-quality` 111 ms；`/ai-trading` 冷啟 11.9 秒、熱快取 1.9–2.0 秒；首頁 `/` 冷啟 6.6 秒、熱快取 4.8 秒（輸出約 1.98 MB 的舊版市場總覽）。
+  - 10 分鐘 CPU：worker 0.9 秒、api 0.8 秒、web 15.2 秒（含量測頁面請求）。
+  - 重啟後 12 分鐘內排程紀錄 0 筆（守門員正確判定兩市場今日已完成、補資料已達標）。
+  - S1-W01 生效：worker 啟動 23 秒後自動更新日曆快取（`fetched_at` 12:09:14 UTC）。
+- 未達項目：首頁 < 2 秒。舊首頁會在 S2-W03 由輕量「今日」頁取代，效能目標移到該工作包。
+- 測試：`test_universe_scheduler.py` 新增「今日成功紀錄被 40 筆新紀錄覆蓋、且以 UTC 儲存」情境；全部測試 206 通過、1 略過。
+- 回復：`stop-services.ps1` → `git revert` 本工作包 commit → `pip install .` → `start-services.ps1`。
+
 ## 2026-09-30 — S1-W01 官方交易日曆
 
 - 使用者決定（2026-09-30）：可以 push；公開網址用 `stockresearch.pimi-sunsun.com`；繼續開發。

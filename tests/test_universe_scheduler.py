@@ -237,3 +237,39 @@ def test_startup_catch_up_runs_only_due_missing_market(tmp_path):
 
     assert executed == ("tw_daily_market_data", "us_daily_market_data")
     assert calls == ["tw_daily_market_data", "us_daily_market_data"]
+
+
+def test_startup_catch_up_sees_todays_success_behind_many_later_runs(tmp_path):
+    container = build_container(
+        Settings(
+            database_url=f"sqlite:///{tmp_path / 'catch-up-success.db'}",
+            scheduler_enabled=True,
+            scheduler_timezone="Asia/Taipei",
+            tw_data_schedule="13:35",
+            us_data_schedule="06:30",
+        )
+    )
+    runs = SqlAlchemySchedulerJobRunRepository(container.database.session_factory)
+    # 14:00 Taipei is stored as naive 06:00 UTC; it must still count as after
+    # the 13:35 Taipei due time, even with 40 newer sub-job rows on top.
+    succeeded_at = datetime(2026, 7, 24, 6, 0, tzinfo=UTC)
+    run_id = runs.start("daily_market_data", "TW", succeeded_at)
+    runs.finish(run_id, "succeeded", succeeded_at + timedelta(minutes=1), "{}", None)
+    for index in range(40):
+        started = succeeded_at + timedelta(minutes=2, seconds=index)
+        sub_id = runs.start("feature_label_build", "TW", started)
+        runs.finish(sub_id, "succeeded", started, "{}", None)
+    container.daily_market_data_pipeline.is_fresh = lambda market, now=None: True
+    calls: list[str] = []
+
+    def record(job_key):
+        calls.append(job_key)
+        return type("Result", (), {"status": "succeeded"})()
+
+    container.automation_service.execute = record
+    run_startup_catch_up(
+        container, datetime(2026, 7, 24, 15, 0, tzinfo=timezone(timedelta(hours=8)))
+    )
+
+    assert "tw_daily_market_data" not in calls
+    assert calls == ["us_daily_market_data"]

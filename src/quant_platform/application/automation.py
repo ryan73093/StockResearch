@@ -155,6 +155,10 @@ class AutomationService:
             lock_backend=self._locks.backend,
         )
 
+    def succeeded_since(self, job_name: str, market: str, since: datetime) -> bool:
+        """Whether ``job_name`` succeeded for ``market`` at or after ``since``."""
+        return self._runs.latest_succeeded(job_name, market, since) is not None
+
     def recover_stale_runs(
         self, now: datetime | None = None, max_age: timedelta = timedelta(hours=6)
     ) -> int:

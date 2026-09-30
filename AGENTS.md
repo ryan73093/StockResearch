@@ -34,9 +34,11 @@
 
 - 主機同時執行其他專案：VectorDB（5001 與其 Tunnel）、AutoLayout（4173）、YtSummary（8001）及其他 `cloudflared` 程序。只操作核對過的本專案程序。
 - 操作本專案服務前核對：PID、執行檔完整路徑（`.venv\Scripts\quant-web.exe`、`quant-api.exe`、`quant-worker.exe`）、命令列、port（5000、8000）。無法確認身分時先蒐集證據，不要停止程序。
-- 目前以 `scripts/run_local_services.ps1` 監督三個服務（失敗三次會重啟）；S1-W04 會改為有 PID 檔的啟停腳本。
-- 服務從 `.venv\Lib\site-packages` 執行已安裝的套件；修改程式後需重新安裝（`.\.venv\Scripts\python.exe -m pip install .`，中文路徑不要用 editable 安裝）並重啟服務才會生效。
-- 從 AI 工具啟動長期服務時，以脫離工作階段的方式啟動，避免工具關閉時連帶結束服務。
+- 啟停一律用腳本，不要直接結束程序：
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\stop-services.ps1`：先以停止旗標請監督程序關閉服務，再以完整執行檔路徑核對並結束殘留程序樹，最後確認 5000／8000 已釋放。13:30–14:40（台北）預設拒絕執行。
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start-services.ps1`：觸發 Windows 排程工作 `StockResearchLocalServices`（登入時也會自動執行），服務因此脫離終端機與 AI 工具工作階段；等待 web、api 健康檢查通過並列出 PID。
+- 監督程序 `scripts/run_local_services.ps1` 同時只允許一個；PID 檔在 `.runtime\services\`，紀錄在 `instance\supervisor.log`，服務日誌為 UTF-8（`instance\*.stderr.log`）。
+- 服務從 `.venv\Lib\site-packages` 執行已安裝的套件。部署程式變更：`stop-services.ps1` → `.\.venv\Scripts\python.exe -m pip install .`（中文路徑不要用 editable 安裝）→ `start-services.ps1`。服務執行中安裝可能因執行檔被鎖定而中斷。
 
 ## 資料庫安全
 

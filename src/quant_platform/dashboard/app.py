@@ -4,6 +4,7 @@ from dataclasses import asdict
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 import json
+import logging
 import secrets
 import statistics
 from zoneinfo import ZoneInfo
@@ -2988,12 +2989,29 @@ def main() -> None:
     )
     app = create_app(dependencies)
     try:
-        app.run(
-            host=dependencies.settings.web_host,
-            port=dependencies.settings.web_port,
-            debug=False,
-            use_reloader=False,
-        )
+        try:
+            from waitress import serve
+        except ImportError:
+            logging.getLogger(__name__).warning(
+                "waitress is not installed; falling back to the Flask development server"
+            )
+            app.run(
+                host=dependencies.settings.web_host,
+                port=dependencies.settings.web_port,
+                debug=False,
+                use_reloader=False,
+            )
+        else:
+            # Several threads keep /health and light pages responsive while a
+            # slow research page is still querying the database.
+            serve(
+                app,
+                host=dependencies.settings.web_host,
+                port=dependencies.settings.web_port,
+                threads=8,
+                channel_timeout=120,
+                ident="stockresearch",
+            )
     finally:
         if scheduler is not None:
             scheduler.shutdown(wait=False)

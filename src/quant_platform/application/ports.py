@@ -228,6 +228,10 @@ class SchedulerJobRunRepository(Protocol):
 
     def list_recent(self, limit: int = 20) -> list[SchedulerJobRun]: ...
 
+    def latest_succeeded(
+        self, job_name: str, market: str, since: datetime
+    ) -> SchedulerJobRun | None: ...
+
 
 class AutomationRepository(Protocol):
     def upsert_schedule(self, value: AutomationSchedule) -> None: ...

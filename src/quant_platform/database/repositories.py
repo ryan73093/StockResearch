@@ -1549,25 +1549,45 @@ class SqlAlchemySchedulerJobRunRepository:
             session.commit()
             return int(result.rowcount or 0)
 
+    @staticmethod
+    def _job_run(row: SchedulerJobRunModel) -> SchedulerJobRun:
+        return SchedulerJobRun(
+            id=row.id,
+            job_name=row.job_name,
+            market=row.market,
+            status=JobRunStatus(row.status),
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+            metrics_json=row.metrics_json,
+            error=row.error,
+        )
+
     def list_recent(self, limit: int = 20) -> list[SchedulerJobRun]:
         statement = select(SchedulerJobRunModel).order_by(
             SchedulerJobRunModel.started_at.desc()
         ).limit(limit)
         with self._session_factory() as session:
             rows = session.scalars(statement).all()
-        return [
-            SchedulerJobRun(
-                id=row.id,
-                job_name=row.job_name,
-                market=row.market,
-                status=JobRunStatus(row.status),
-                started_at=row.started_at,
-                completed_at=row.completed_at,
-                metrics_json=row.metrics_json,
-                error=row.error,
+        return [self._job_run(row) for row in rows]
+
+    def latest_succeeded(
+        self, job_name: str, market: str, since: datetime
+    ) -> SchedulerJobRun | None:
+        """Latest successful run started at or after ``since`` (stored as naive UTC)."""
+        statement = (
+            select(SchedulerJobRunModel)
+            .where(
+                SchedulerJobRunModel.job_name == job_name,
+                SchedulerJobRunModel.market == market.upper(),
+                SchedulerJobRunModel.status == JobRunStatus.SUCCEEDED.value,
+                SchedulerJobRunModel.started_at >= _utc_naive(since),
             )
-            for row in rows
-        ]
+            .order_by(SchedulerJobRunModel.started_at.desc())
+            .limit(1)
+        )
+        with self._session_factory() as session:
+            row = session.scalars(statement).first()
+        return self._job_run(row) if row is not None else None
 
 
 class SqlAlchemyAutomationRepository:
