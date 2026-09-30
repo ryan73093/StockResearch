@@ -111,6 +111,17 @@ def test_significance_counts_every_candidate_trial(tmp_path):
     assert report["pbo"]["months"] == 60 and 0 <= report["pbo"]["pbo"] <= 1
 
 
+def test_first_batch_is_a_fixed_list_of_distinct_valid_specs():
+    from quant_platform.research.batches import first_batch
+
+    specs = first_batch()
+
+    assert len(specs) == 68
+    assert len({spec.spec_hash for spec in specs}) == 68 and len({spec.name for spec in specs}) == 68
+    assert {spec.spec_hash for spec in specs} == {spec.spec_hash for spec in first_batch()}
+    assert all(set(spec.assets) <= {"0050", "0056", "006208"} for spec in specs)
+
+
 def test_rerunning_a_trial_reuses_the_record_and_baselines_may_use_full(tmp_path):
     registry = TrialRegistry(tmp_path / "trials.jsonl")
     kwargs = dict(kind="baseline", spec=BASELINES["ma_value"], period="full", market=MARKET, plan=PLAN,

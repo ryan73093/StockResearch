@@ -107,9 +107,14 @@ def test_build_actions_writes_total_return_files(tmp_path):
             tmp_path / "daily" / f"{key}.parquet",
         )
 
-    def exchange(url):
-        assert "TWT49U" in url
-        return {"stat": "OK", "data": [EX_RIGHTS_ROW] if "2005" in url else []}
+    tpex_row = ["94/05/19", "00679B", "元大美債20年", "46.69", "46.19", "0.000000", "0.500000",
+                "0.500000", "除息", "", "", "", "", "0.5", "0", "0", "0", "0", "0", "0", "0"]
+
+    def exchange(url, data=None):
+        if "TWT49U" in url:
+            return {"stat": "OK", "data": [EX_RIGHTS_ROW] if "2005" in url else []}
+        assert url.endswith("/bulletin/exDailyQ") and b"startDate=2005" in data or b"2006" in data
+        return {"stat": "ok", "tables": [{"data": [tpex_row] if b"2005" in data else []}]}
 
     def yahoo(url):
         stamp = int(datetime(2005, 5, 19, 9, 0, tzinfo=TAIPEI).timestamp())
@@ -123,7 +128,9 @@ def test_build_actions_writes_total_return_files(tmp_path):
 
     assert report["series"]["0050"]["cash_dividends"] == 1
     assert report["series"]["0050"]["sources"] == ["twse_ex_rights"]
-    assert report["series"]["00679B"]["sources"] == ["yahoo_dividends"]
+    assert report["series"]["00679B"]["sources"] == ["tpex_ex_rights"]
+    assert report["series"]["00679B"]["yahoo_dividend_check"]["amount_mismatches"] == []
+    assert report["series"]["0050"]["yahoo_dividend_check"]["amount_mismatches"] == ["2005-05-19"]
     tr = read_series(tmp_path / "total_return" / "0050.parquet")
     assert tr[1]["total_return_index"] == pytest.approx(100 * (45.00 + 1.85) / 46.69)
     assert (tmp_path / "actions.json").is_file()

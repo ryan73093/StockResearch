@@ -366,7 +366,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "v2/research.html",
             active_nav="research",
             tool_groups=TOOL_GROUPS,
-            baseline_rows=report_rows(latest_reports(reports_dir)),
+            baseline_rows=[
+                row for row in report_rows(latest_reports(reports_dir, limit=200))
+                if row["kind"] == "baseline"
+            ],
         )
 
     @blueprint.get("/system")

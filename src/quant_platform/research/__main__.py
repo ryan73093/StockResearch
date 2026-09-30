@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from quant_platform.research.batches import BATCHES
 from quant_platform.research.cashflow import ContributionPlan
 from quant_platform.research.costs import CostModel
 from quant_platform.research.market import DEFAULT_BASE, load_market
@@ -48,7 +49,8 @@ def _line(report: dict) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
-    parser.add_argument("command", choices=("baselines", "trial", "trials", "stats", "schema"))
+    parser.add_argument("command", choices=("baselines", "trial", "batch", "trials", "stats", "schema"))
+    parser.add_argument("--name", default="first", help="batch：批次名稱")
     parser.add_argument("--spec")
     parser.add_argument("--period", default="full", choices=tuple(PERIODS))
     parser.add_argument("--monthly", type=float, default=10_000)
@@ -101,6 +103,10 @@ def main() -> int:
     benchmark = BASELINES["benchmark_dca"]
     if args.command == "baselines":
         runs = [("baseline", spec) for name, spec in BASELINES.items() if name != "benchmark_dca"]
+    elif args.command == "batch":
+        if args.name not in BATCHES:
+            raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(BATCHES)}")
+        runs = [("candidate", spec) for spec in BATCHES[args.name]()]
     else:
         if not args.spec:
             raise SystemExit("trial 需要 --spec")

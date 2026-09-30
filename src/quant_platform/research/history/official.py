@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 
 TWSE = "https://www.twse.com.tw/rwd/zh"
 TPEX = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
+TPEX_BULLETIN = "https://www.tpex.org.tw/www/zh-tw/bulletin"
 EMPTY_MARKERS = ("沒有符合條件", "查詢日期小於", "查無資料")
 
 
@@ -42,11 +43,11 @@ class DailyRow:
     source: str = ""
 
 
-def _get_json(url: str, timeout: int = 30) -> object:
-    request = Request(
-        url,
-        headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0 StockResearch/1.0"},
-    )
+def _get_json(url: str, timeout: int = 30, data: bytes | None = None) -> object:
+    headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0 StockResearch/1.0"}
+    if data is not None:
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    request = Request(url, data=data, headers=headers)
     try:
         with urlopen(request, timeout=timeout) as response:
             body = response.read().decode("utf-8-sig")
@@ -120,6 +121,14 @@ class OfficialHistoryClient:
             final=day < self._today(),
         )
 
+    def tpex_ex_rights_year(self, year: int) -> object:
+        """TPEx 除權除息計算結果表 (the website's own POST query)."""
+        body = urlencode({"startDate": f"{year}/01/01", "endDate": f"{year}/12/31", "response": "json"})
+        return self._cached(
+            f"tpex_ex_rights/{year}", f"{TPEX_BULLETIN}/exDailyQ",
+            final=year < self._today().year, data=body.encode("ascii"),
+        )
+
     def twse_ex_rights_year(self, year: int) -> object:
         """TWT49U 除權除息計算結果表 (data from 2003-05-05)."""
         query = urlencode({"startDate": f"{year}0101", "endDate": f"{year}1231", "response": "json"})
@@ -140,7 +149,7 @@ class OfficialHistoryClient:
         today = self._today()
         return (month.year, month.month) < (today.year, today.month)
 
-    def _cached(self, key: str, url: str, final: bool) -> object:
+    def _cached(self, key: str, url: str, final: bool, data: bytes | None = None) -> object:
         """Final periods come from the cache once stored; the current period is
         re-requested but still cached, so an offline rebuild sees the latest copy."""
         path = self._raw / f"{key}.json"
@@ -149,14 +158,14 @@ class OfficialHistoryClient:
             return json.loads(path.read_text(encoding="utf-8"))
         if self._offline:
             return None
-        payload = self._request(url)
+        payload = self._request(url, data)
         path.parent.mkdir(parents=True, exist_ok=True)
         partial = path.with_suffix(".json.partial")
         partial.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         partial.replace(path)
         return payload
 
-    def _request(self, url: str) -> object:
+    def _request(self, url: str, data: bytes | None = None) -> object:
         last_error: Exception | None = None
         for attempt in range(self._retries):
             wait = self._min_interval - (time.monotonic() - self._last_request)
@@ -165,7 +174,7 @@ class OfficialHistoryClient:
             self._last_request = time.monotonic()
             self.requests += 1
             try:
-                return self._fetch(url)
+                return self._fetch(url) if data is None else self._fetch(url, data=data)
             except SourceRefused:
                 raise
             except Exception as exc:  # noqa: BLE001 - network errors are retried with backoff
@@ -292,17 +301,31 @@ def parse_twse_ex_rights(payload: object, codes: set[str]) -> list[ExRightsEvent
     """TWT49U: 資料日期, 代號, 名稱, 前收, 參考價, 權值, 息值, 權值+息值, 權/息, …"""
     if not isinstance(payload, dict) or payload.get("stat") != "OK":
         return []
+    return _ex_rights_rows(payload.get("data") or [], codes, "twse_ex_rights")
+
+
+def parse_tpex_ex_rights(payload: object, codes: set[str]) -> list[ExRightsEvent]:
+    """TPEx exDailyQ: same columns as TWT49U, dates as 112/01/30."""
+    if not isinstance(payload, dict) or str(payload.get("stat", "")).lower() != "ok":
+        return []
+    rows = [row for table in payload.get("tables") or [] for row in (table or {}).get("data") or []]
+    return _ex_rights_rows(rows, codes, "tpex_ex_rights")
+
+
+def _ex_rights_rows(rows: list, codes: set[str], source: str) -> list[ExRightsEvent]:
     events = []
-    for item in payload.get("data") or []:
+    for item in rows:
         if not isinstance(item, list) or len(item) < 9:
             continue
         code = str(item[1]).strip()
         if code not in codes:
             continue
+        text = str(item[0])
         events.append(ExRightsEvent(
-            day=roc_long_date(item[0]), code=code, pre_close=number(item[3]),
-            reference=number(item[4]), rights_value=number(item[5]) or 0.0,
-            cash=number(item[6]) or 0.0, kind=str(item[8]).strip(),
+            day=roc_long_date(text) if "年" in text else roc_date(text), code=code,
+            pre_close=number(item[3]), reference=number(item[4]),
+            rights_value=number(item[5]) or 0.0, cash=number(item[6]) or 0.0,
+            kind=str(item[8]).strip(), source=source,
         ))
     return events
 

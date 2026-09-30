@@ -1,13 +1,13 @@
 """Dividends, splits and total-return series (S3-W02).
 
-Sources:
+Sources (all official):
 - TWSE-listed ETFs: TWT49U 除權除息計算結果表 (ex-date, pre-ex close, reference
-  price, cash and stock value), official, from 2003-05-05.
+  price, cash and stock value), from 2003-05-05.
+- TPEx-listed ETFs: the TPEx 除權除息計算結果表 query (exDailyQ), same columns.
 - Splits: the first trading day after a TWSE split carries ``**`` in the
   STOCK_DAY note; the ratio comes from the close before the halt and that
   day's open, rounded to a whole or reciprocal ratio.
-- TPEx-listed ETFs: Yahoo dividend events until an official TPEx source is
-  added (flagged ``yahoo_dividends``).
+Yahoo dividends are only used by the cross-check.
 
 Total return: r_t = (close_t × ratio_t + cash_t) / close_{t-1}, i.e. the cash
 dividend is reinvested at the ex-date close and a split or stock dividend
@@ -30,6 +30,7 @@ from quant_platform.research.history.catalog import SERIES, HistorySeries
 from quant_platform.research.history.dataset import read_series, sha256
 from quant_platform.research.history.official import (
     OfficialHistoryClient,
+    parse_tpex_ex_rights,
     parse_twse_ex_rights,
 )
 
@@ -159,13 +160,20 @@ def build_actions(
     say = progress or (lambda _message: None)
     now = (today or (lambda: datetime.now(TAIPEI).date()))()
     etfs = [item for item in catalog if item.kind in {"twse_etf", "tpex_etf"}]
-    twse_codes = {item.key for item in etfs if item.kind == "twse_etf"}
     ex_rights = []
-    if twse_codes:
-        first_year = max(EX_RIGHTS_START_YEAR, min(item.first_month.year for item in etfs))
+    for kind, fetch, parse in (
+        ("twse_etf", client.twse_ex_rights_year, parse_twse_ex_rights),
+        ("tpex_etf", client.tpex_ex_rights_year, parse_tpex_ex_rights),
+    ):
+        codes = {item.key for item in etfs if item.kind == kind}
+        if not codes:
+            continue
+        first_year = max(
+            EX_RIGHTS_START_YEAR, min(item.first_month.year for item in etfs if item.kind == kind)
+        )
         for year in range(first_year, now.year + 1):
-            say(f"除權息 {year}")
-            ex_rights.extend(parse_twse_ex_rights(client.twse_ex_rights_year(year), twse_codes))
+            say(f"除權息 {kind} {year}")
+            ex_rights.extend(parse(fetch(year), codes))
     official_actions = actions_from_ex_rights(ex_rights)
     report: dict[str, object] = {
         "generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"),
@@ -181,15 +189,24 @@ def build_actions(
         actions = [action for action in official_actions if action.key == item.key]
         if item.kind == "twse_etf":
             actions += splits_from_markers(item.key, rows)
-        elif item.yahoo and yahoo_fetch is not None:
-            say(f"{item.key} 股利（Yahoo）")
-            actions += [
-                CorporateAction(day, item.key, "cash_dividend", cash=amount, source="yahoo_dividends")
-                for day, amount in yahoo_dividends(
-                    item.yahoo, rows[0]["date"], rows[-1]["date"] + timedelta(days=1), yahoo_fetch
-                )
-            ]
         actions.sort(key=lambda action: (action.day, action.kind))
+        yahoo_check = None
+        if item.yahoo and yahoo_fetch is not None:
+            # Cross-check only: official and Yahoo cash dividends by ex-date.
+            yahoo = dict(yahoo_dividends(
+                item.yahoo, rows[0]["date"], rows[-1]["date"] + timedelta(days=1), yahoo_fetch
+            ))
+            official = {action.day: action.cash for action in actions if action.kind == "cash_dividend"}
+            yahoo_check = {
+                "official_events": len(official),
+                "yahoo_events": len(yahoo),
+                "missing_in_yahoo": sorted(day.isoformat() for day in set(official) - set(yahoo)),
+                "missing_in_official": sorted(day.isoformat() for day in set(yahoo) - set(official)),
+                "amount_mismatches": sorted(
+                    day.isoformat() for day in set(official) & set(yahoo)
+                    if abs(official[day] - yahoo[day]) > 0.011
+                ),
+            }
         series = total_return(rows, actions)
         tr_path = base / "total_return" / f"{item.key}.parquet"
         tr_path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,6 +232,7 @@ def build_actions(
             "price_only_cagr_unadjusted": round(price_growth ** (1 / years) - 1, 6) if years > 0 else None,
             "file": str(tr_path.relative_to(base)).replace("\\", "/"),
             "sha256": sha256(tr_path),
+            "yahoo_dividend_check": yahoo_check,
             "actions": [
                 {**asdict(action), "day": action.day.isoformat()} for action in actions
             ],
