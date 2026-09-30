@@ -36,6 +36,17 @@ class ModelReplayPolicy:
 
     name: str = "AI 模型排序＋0050 核心"
     normal_gross_weight: float = 0.80
+    rebalance_every_sessions: int = 5
+    active_count: int = 3
+    minimum_predicted_return: float = 0.007
+    minimum_rank: float = 0.75
+    breadth_threshold: float = 0.50
+    strong_breadth_core_weight: float = 0.40
+    weak_breadth_core_weight: float = 0.60
+    maximum_active_weight: float = 0.20
+    active_weighting: str = "equal"
+    minimum_trade_weight: float = 0.0
+    evaluation_start: date | None = None
     trend_lookback_sessions: int = 0
     trend_threshold: float = 0.0
     defensive_gross_weight: float = 0.80
@@ -57,6 +68,19 @@ DEFENSIVE_TREND_MODEL_REPLAY_POLICY = ModelReplayPolicy(
 )
 AFTER_HOURS_CLOSE_PROXY_MODEL_REPLAY_POLICY = ModelReplayPolicy(
     name="AI 模型排序＋盤後零股收盤價代理",
+    execution_mode="after_hours_close_proxy",
+)
+BENCHMARK_AWARE_LOW_TURNOVER_MODEL_REPLAY_POLICY = ModelReplayPolicy(
+    name="0050 核心＋超額報酬 GPU 低週轉衛星",
+    normal_gross_weight=1.0,
+    rebalance_every_sessions=20,
+    active_count=5,
+    minimum_predicted_return=0.007,
+    minimum_rank=0.90,
+    strong_breadth_core_weight=0.80,
+    weak_breadth_core_weight=0.80,
+    maximum_active_weight=0.10,
+    minimum_trade_weight=0.02,
     execution_mode="after_hours_close_proxy",
 )
 
@@ -99,6 +123,8 @@ class AfterHoursPlan:
     headline: str
     mode: str
     hard_rules: tuple[str, ...]
+    submission_allowed: bool = True
+    snapshot_kind: str = "current"
 
     @property
     def buy_count(self) -> int:
@@ -114,7 +140,10 @@ class AfterHoursPlan:
 
     def to_markdown(self) -> str:
         lines = [
-            "## 盤後 AI 零股決策",
+            (
+                "## 盤後 AI 零股決策（只讀回看）"
+                if not self.submission_allowed else "## 盤後 AI 零股決策"
+            ),
             f"- 結論：{self.headline}",
             f"- 買進 {self.buy_count} 檔；賣出 {self.sell_count} 檔",
             f"- 模擬資產：NT$ {self.equity:,.0f}；現金：NT$ {self.cash:,.0f}",
@@ -835,27 +864,16 @@ class AfterHoursAiService:
         experiments = tuple(self._models.list_runs("TW"))
         if not experiments:
             return None
-        latest_by_model: dict[str, object] = {}
-        for experiment in experiments:
-            if experiment.id is None:
-                continue
-            current = latest_by_model.get(experiment.model_name)
-            if current is None or self._aware(experiment.computed_at) > self._aware(
-                current.computed_at
-            ):
-                latest_by_model[experiment.model_name] = experiment
-        coverage_loader = getattr(self._models, "prediction_coverage", None)
-        selected_experiments = tuple(
-            experiment
-            for experiment in latest_by_model.values()
-            if experiment.model_name != "historical_mean"
-            and experiment.model_name in (model_names or {"ridge_linear"})
-            and (experiment.rank_ic or 0) > 0
-            and (
-                not callable(coverage_loader)
-                or coverage_loader(int(experiment.id))[1] >= 20
+        if model_names is None:
+            selected_experiments = self._select_replay_experiments(
+                experiments, {"torch_cuda_mlp"}
+            ) or self._select_replay_experiments(
+                experiments, {"ridge_linear"}
             )
-        )
+        else:
+            selected_experiments = self._select_replay_experiments(
+                experiments, model_names
+            )
         if not selected_experiments:
             return None
         experiment_ids = [int(item.id) for item in selected_experiments if item.id is not None]
@@ -896,13 +914,17 @@ class AfterHoursAiService:
             event_time
             for event_time, values in sorted(grouped.items())
             if len(values) >= 10
+            and (
+                replay_policy.evaluation_start is None
+                or event_time.date() >= replay_policy.evaluation_start
+            )
         ]
         if len(signal_dates) < 20:
             return None
 
         schedules: list[tuple[datetime, dict[str, float], dict[str, str]]] = []
         for sequence, signal_time in enumerate(signal_dates):
-            if sequence % 5 != 0:
+            if sequence % max(1, replay_policy.rebalance_every_sessions) != 0:
                 continue
             day = grouped[signal_time]
             listed_symbols: set[str] | None = None
@@ -930,15 +952,20 @@ class AfterHoursAiService:
                 score = predicted - 0.5 * dispersion
                 if (
                     symbol != "0050.TW"
-                    and predicted > 0.007
-                    and rank >= 0.75
+                    and predicted > replay_policy.minimum_predicted_return
+                    and rank >= replay_policy.minimum_rank
                 ):
                     scored.append((score, symbol, predicted, rank, dispersion))
             scored.sort(reverse=True)
             breadth = positive_count / max(len(day), 1)
-            core_weight = 0.40 if breadth >= 0.50 else 0.60
-            active_budget = 0.80 - core_weight
-            selected = scored[:3]
+            core_weight = (
+                replay_policy.strong_breadth_core_weight
+                if breadth >= replay_policy.breadth_threshold
+                else replay_policy.weak_breadth_core_weight
+            )
+            core_weight = min(max(core_weight, 0.0), replay_policy.normal_gross_weight)
+            active_budget = max(replay_policy.normal_gross_weight - core_weight, 0.0)
+            selected = scored[:max(0, replay_policy.active_count)]
             weights = {"0050.TW": core_weight}
             reasons = {
                 "0050.TW": (
@@ -946,8 +973,18 @@ class AfterHoursAiService:
                 )
             }
             if selected:
-                active_weight = min(0.20, active_budget / len(selected))
-                for _, symbol, predicted, rank, dispersion in selected:
+                if replay_policy.active_weighting == "score":
+                    preferences = [max(item[0], 1e-8) for item in selected]
+                else:
+                    preferences = [1.0] * len(selected)
+                preference_total = sum(preferences)
+                for preference, (_, symbol, predicted, rank, dispersion) in zip(
+                    preferences, selected, strict=True
+                ):
+                    active_weight = min(
+                        replay_policy.maximum_active_weight,
+                        active_budget * preference / max(preference_total, 1e-8),
+                    )
                     weights[symbol] = active_weight
                     reasons[symbol] = (
                         f"樣本外五日預測 {predicted:+.2%}；"
@@ -1070,20 +1107,6 @@ class AfterHoursAiService:
                     (signal_time, managed_weights, managed_reasons)
                 )
             schedules = risk_managed_schedules
-        elif replay_policy.normal_gross_weight != 0.80:
-            scaled_schedules = []
-            for signal_time, weights, reasons in schedules:
-                original_gross = sum(weights.values())
-                scale = (
-                    replay_policy.normal_gross_weight / original_gross
-                    if original_gross > 0 else 0.0
-                )
-                scaled_schedules.append((
-                    signal_time,
-                    {symbol: weight * scale for symbol, weight in weights.items()},
-                    reasons,
-                ))
-            schedules = scaled_schedules
         final_signal = schedules[-1][0]
         same_session_execution = (
             replay_policy.execution_mode == "after_hours_close_proxy"
@@ -1227,6 +1250,22 @@ class AfterHoursAiService:
                     for symbol, weight in weights.items()
                     if symbol in execution_prices and weight > 0
                 }
+                if replay_policy.minimum_trade_weight > 0 and equity_at_execution > ZERO:
+                    for symbol in set(positions) | set(targets):
+                        price = execution_prices.get(symbol)
+                        if price is None or price <= ZERO:
+                            continue
+                        current_quantity = positions.get(symbol, 0)
+                        target_quantity = targets.get(symbol, 0)
+                        trade_weight = float(
+                            price * abs(target_quantity - current_quantity)
+                            / equity_at_execution
+                        )
+                        if trade_weight < replay_policy.minimum_trade_weight:
+                            if current_quantity > 0:
+                                targets[symbol] = current_quantity
+                            else:
+                                targets.pop(symbol, None)
                 for symbol in sorted(set(positions) | set(targets)):
                     current = positions.get(symbol, 0)
                     target = targets.get(symbol, 0)
@@ -1411,6 +1450,38 @@ class AfterHoursAiService:
             ),
         )
 
+    def _select_replay_experiments(
+        self,
+        experiments: tuple[object, ...] | list[object],
+        model_names: set[str],
+    ) -> tuple[object, ...]:
+        """Select the newest replayable version without hiding valid history.
+
+        A newly saved challenger with negative rank IC is still important audit
+        evidence, but it must not replace an older positive, sufficiently covered
+        experiment and make the historical-replay page appear empty.
+        """
+        coverage_loader = getattr(self._models, "prediction_coverage", None)
+        latest_by_model: dict[str, object] = {}
+        for experiment in experiments:
+            if (
+                experiment.id is None
+                or experiment.model_name == "historical_mean"
+                or experiment.model_name not in model_names
+                or (experiment.rank_ic or 0) <= 0
+                or (
+                    callable(coverage_loader)
+                    and coverage_loader(int(experiment.id))[1] < 20
+                )
+            ):
+                continue
+            current = latest_by_model.get(experiment.model_name)
+            if current is None or self._aware(experiment.computed_at) > self._aware(
+                current.computed_at
+            ):
+                latest_by_model[experiment.model_name] = experiment
+        return tuple(latest_by_model.values())
+
     def model_oos_validation(
         self,
         now: datetime | None = None,
@@ -1430,11 +1501,19 @@ class AfterHoursAiService:
             return None
         experiments = [
             item for item in self._models.list_runs("TW")
-            if item.id is not None and item.model_name == "ridge_linear"
+            if item.id is not None
+            and item.model_name in {"torch_cuda_mlp", "ridge_linear"}
         ]
         if not experiments:
             return None
-        model = max(experiments, key=lambda item: self._aware(item.computed_at))
+        model = max(
+            experiments,
+            key=lambda item: (
+                item.promotion_gate == "CANDIDATE",
+                item.model_name == "torch_cuda_mlp",
+                self._aware(item.computed_at),
+            ),
+        )
         completed_at = self._aware(model.computed_at)
         taipei = ZoneInfo("Asia/Taipei")
         tracked_sessions = {
@@ -1454,6 +1533,7 @@ class AfterHoursAiService:
         return {
             "id": int(model.id),
             "name": model.model_name,
+            "label_name": model.label_name,
             "version": model.model_version,
             "completed_at": completed_at,
             "tracking_started_at": completed_at,
@@ -1539,7 +1619,7 @@ class AfterHoursAiService:
         try:
             value = self._model_prediction_validation(
                 datetime.now(UTC),
-                policy=AFTER_HOURS_CLOSE_PROXY_MODEL_REPLAY_POLICY,
+                policy=BENCHMARK_AWARE_LOW_TURNOVER_MODEL_REPLAY_POLICY,
             )
         except Exception as exc:  # background work must never take down the web app
             with self._validation_lock:
@@ -2073,6 +2153,8 @@ class AfterHoursAiService:
         submitted_at = self._aware(now or datetime.now(UTC))
         self.invalidate_validation_cache()
         value = plan or self.generate(submitted_at)
+        if not value.submission_allowed:
+            return AfterHoursPaperSubmission(submitted=0, reused=0, rejected=0)
         taipei = ZoneInfo("Asia/Taipei")
         today = submitted_at.astimezone(taipei).date()
         overview = self._paper.overview(now=submitted_at)
@@ -2147,7 +2229,38 @@ class AfterHoursAiService:
             and 0 <= (decision_date - market_date).days <= 1
             and 1 <= (generated_date - market_date).days <= 3
         )
-        decision_is_actionable = decision_is_fresh or weekend_preview
+        historical_preview = bool(
+            generated_date.weekday() < 5
+            and not decision_is_fresh
+            and market_date is not None
+            and decision_date is not None
+            and market_date == decision_date
+            and 1 <= (generated_date - decision_date).days <= 4
+        )
+        decision_is_viewable = (
+            decision_is_fresh or weekend_preview or historical_preview
+        )
+        local_time = generated_at.astimezone(taipei).time()
+        in_submission_window = (
+            datetime.min.replace(hour=13, minute=40).time()
+            <= local_time
+            < datetime.min.replace(hour=14, minute=30).time()
+        )
+        expired_same_day = decision_is_fresh and not in_submission_window
+        submission_allowed = (
+            decision_is_fresh
+            and generated_date.weekday() < 5
+            and in_submission_window
+        )
+        execution_note = (
+            "回看：依當日 13:30 收盤資料重建原本應在 13:40～14:30 "
+            "建立的盤後零股草稿；現在禁止補送"
+            if historical_preview or expired_same_day
+            else (
+                "執行：13:40～14:30 盤後零股限價草稿，14:30 集合競價，"
+                "參考價為 13:30 收盤價且不保證成交"
+            )
+        )
         account = self._paper.overview(now=generated_at)
         positions = {
             item.position.symbol: item
@@ -2178,7 +2291,7 @@ class AfterHoursAiService:
             blocker = "；".join(blockers)
             if price is None:
                 blocker = "缺少可用收盤價" if not blocker else f"{blocker}；缺少可用收盤價"
-            if not decision_is_actionable:
+            if not decision_is_viewable:
                 blocker = (
                     "決策不是今日盤後快照"
                     if not blocker else f"{blocker}；決策不是今日盤後快照"
@@ -2197,7 +2310,7 @@ class AfterHoursAiService:
         for symbol, position_view in positions.items():
             if len(orders) >= MAX_DAILY_ACTIONS:
                 break
-            if not decision_is_actionable:
+            if not decision_is_viewable:
                 break
             decision = decision_by_symbol.get(symbol)
             status = self._status(decision.status) if decision else "資料不足"
@@ -2215,10 +2328,7 @@ class AfterHoursAiService:
                 if status == "避免"
                 else "訊號：缺少有效決策；部位：全部退出；風險：禁止持有無法驗證的標的；"
             )
-            reason += (
-                "執行：13:40～14:30 盤後零股限價草稿，14:30 集合競價，"
-                "參考價為 13:30 收盤價且不保證成交"
-            )
+            reason += execution_note
             orders.append(AfterHoursOrderDraft(
                 symbol=symbol,
                 side="SELL",
@@ -2242,7 +2352,7 @@ class AfterHoursAiService:
             (
                 item for item in decisions
                 if self._status(item.status) in {"候選", "觀察"}
-                and decision_is_actionable
+                and decision_is_viewable
                 and not self._execution_blockers(item)
                 and (item.predicted_return_5d or 0) > 0
                 and (
@@ -2291,6 +2401,11 @@ class AfterHoursAiService:
             cost = self._estimated_cost("BUY", gross)
             available_cash -= gross + cost
             buy_count += 1
+            signal_label = (
+                "五日相對 0050 預估超額"
+                if "相對 0050" in (decision.reasons_json or "")
+                else "五日預估報酬"
+            )
             orders.append(AfterHoursOrderDraft(
                 symbol=decision.symbol,
                 side="BUY",
@@ -2305,7 +2420,7 @@ class AfterHoursAiService:
                 predicted_return_5d=decision.predicted_return_5d,
                 score=float(decision.score),
                 reason=(
-                    f"訊號：五日預估 {(decision.predicted_return_5d or 0):+.2%}、"
+                    f"訊號：{signal_label} {(decision.predicted_return_5d or 0):+.2%}、"
                     f"模型排名 {(decision.model_rank or 0):.0%}、"
                     f"綜合分數 {float(decision.score):.2f}；"
                     f"部位：目標 {target_weight:.1%}、買進 {quantity} 股；"
@@ -2314,12 +2429,33 @@ class AfterHoursAiService:
                         if research_only
                         else "風險：已通過候選與資料閘門，仍受單股 20% 上限；"
                     )
-                    + "執行：13:40～14:30 盤後零股限價草稿，14:30 集合競價，"
-                    + "參考價為 13:30 收盤價且不保證成交"
+                    + execution_note
                 ),
             ))
 
-        if orders and weekend_preview:
+        if historical_preview:
+            snapshot_date = decision_date.isoformat() if decision_date else "最近交易日"
+            if orders:
+                headline = (
+                    f"事後補算：{snapshot_date} 盤後模擬會買進 "
+                    f"{sum(item.side == 'BUY' for item in orders)} 筆、賣出 "
+                    f"{sum(item.side == 'SELL' for item in orders)} 筆（當時未送單）"
+                )
+            else:
+                headline = (
+                    f"事後補算：{snapshot_date} 盤後沒有符合條件的模擬委託"
+                )
+        elif expired_same_day:
+            if orders:
+                headline = (
+                    f"今日盤後回看：原清單買進 "
+                    f"{sum(item.side == 'BUY' for item in orders)} 筆、賣出 "
+                    f"{sum(item.side == 'SELL' for item in orders)} 筆"
+                    "（委託時段已結束，禁止補送）"
+                )
+            else:
+                headline = "今日盤後回看：沒有符合條件的模擬委託"
+        elif orders and weekend_preview:
             headline = (
                 "休市預覽：下個交易日模擬買進 "
                 f"{sum(item.side == 'BUY' for item in orders)} 筆、賣出 "
@@ -2347,19 +2483,35 @@ class AfterHoursAiService:
             )[:12],
             headline=headline,
             mode=(
-                "休市預覽／下個交易日模擬委託／真實交易關閉"
-                if weekend_preview
-                else "模擬委託草稿／真實交易關閉"
+                "歷史盤後決策／只讀回看／禁止補送委託"
+                if historical_preview
+                else (
+                    "今日盤後決策／時段已結束／禁止補送委託"
+                    if expired_same_day
+                    else (
+                        "休市預覽／下個交易日模擬委託／禁止送出委託"
+                        if weekend_preview
+                        else "模擬委託草稿／真實交易關閉"
+                    )
+                )
             ),
             hard_rules=(
                 "正式候選必須通過全部閘門；未晉級標的只能進入小部位研究模擬。",
                 "13:30 收盤資料完成後產生訊號；13:40～14:30 只建立盤後零股限價草稿，14:30 集合競價一次撮合。",
                 "交易日只接受當日 13:30 收盤快照；週末僅預覽下一交易日清單，禁止把舊訊號當成當日委託。",
+                "錯過交易時段後仍保留最近盤後決策供回看，但只標示為事後補算，禁止補送或冒充當時成交。",
                 "每日最多 3 個買賣動作；風險賣出優先，其餘名額只保留分數最高的買進。",
                 "尚未晉級的模型只准建立最多 2 檔、單檔 5% 的研究模擬，不代表可實盤候選。",
                 "單一股票目標權重上限 20%，總曝險沿用模擬帳戶風險限制。",
                 "盤後零股每筆最多 999 股；超過時必須拆單。",
                 "參考價是 13:30 收盤價；14:30 盤後零股成交價尚未產生，限價、排隊與未成交都必須另外追蹤。",
                 "系統只建立草稿，不會連接券商或自動送出真實委託。",
+            ),
+            submission_allowed=submission_allowed,
+            snapshot_kind=(
+                "historical" if historical_preview
+                else "expired" if expired_same_day
+                else "weekend" if weekend_preview
+                else "current"
             ),
         )

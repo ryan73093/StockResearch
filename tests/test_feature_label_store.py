@@ -6,7 +6,11 @@ import pytest
 
 from quant_platform.config import Settings
 from quant_platform.container import build_container
-from quant_platform.database.repositories import SqlAlchemyFeatureLabelStoreRepository
+from quant_platform.database.repositories import (
+    SqlAlchemyFeatureLabelStoreRepository,
+    SqlAlchemyMarketBarRepository,
+    SqlAlchemyResearchUniverseRepository,
+)
 from quant_platform.domain.entities import MarketBar
 from quant_platform.feature_engineering import CrossAssetFeatureEngine, FeatureEngine
 from quant_platform.feature_engineering.intraday_derivatives import (
@@ -80,6 +84,29 @@ def test_feature_store_upsert_is_idempotent(tmp_path):
     assert first_count == len(features)
     assert second_count == first_count
     assert len(repository.list_definitions()) == 21 + len(INTRADAY_DERIVATIVE_DEFINITIONS)
+
+
+def test_daily_feature_pipeline_only_rewrites_latest_feature_rows(tmp_path):
+    container = build_container(
+        Settings(database_url=f"sqlite:///{tmp_path / 'incremental-features.db'}")
+    )
+    universe = SqlAlchemyResearchUniverseRepository(container.database.session_factory)
+    for asset in universe.list_all():
+        universe.set_active(asset.symbol, False)
+    container.research_universe_service.add_asset("AAPL", "US")
+    bars = make_bars("AAPL", count=30)
+    SqlAlchemyMarketBarRepository(container.database.session_factory).add_missing(bars)
+    as_of = bars[-1].available_time + timedelta(hours=1)
+
+    first = container.feature_label_pipeline.run("US", now=as_of)
+    second = container.feature_label_pipeline.run(
+        "US", now=as_of + timedelta(minutes=1)
+    )
+
+    assert first.feature_values > 100
+    assert first.label_values > 0
+    assert second.feature_values <= len(FeatureEngine.definitions)
+    assert second.label_values == 0
 
 
 def test_cross_asset_features_respect_indicator_available_time():

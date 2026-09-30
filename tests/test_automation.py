@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -14,6 +15,8 @@ def test_automation_defaults_persist_and_can_be_updated(tmp_path):
     assert {item.job_key for item in overview.schedules} == {
         "tw_daily_market_data", "us_daily_market_data"
     }
+    default_tw = next(item for item in overview.schedules if item.market == "TW")
+    assert (default_tw.hour, default_tw.minute) == (13, 50)
     updated = container.automation_service.update_schedule(
         "tw_daily_market_data", hour=15, minute=5, max_retries=2, enabled=False
     )
@@ -51,6 +54,24 @@ def test_health_reports_local_runtime_when_redis_is_disabled(tmp_path):
     assert snapshot.status == "healthy"
     assert snapshot.redis == "disabled"
     assert snapshot.lock_backend == "local"
+
+
+def test_scheduler_startup_closes_stale_running_audits(tmp_path):
+    container = build_container(Settings(
+        database_url=f"sqlite:///{tmp_path / 'stale-runs.db'}"
+    ))
+    now = datetime(2026, 8, 22, 1, 0, tzinfo=UTC)
+    run_id = container.automation_service._runs.start(
+        "model_zoo_research", "TW", now - timedelta(hours=7)
+    )
+
+    assert container.automation_service.recover_stale_runs(now=now) == 1
+    recovered = next(
+        item for item in container.automation_service.overview().recent_runs
+        if item.id == run_id
+    )
+    assert recovered.status.value == "failed"
+    assert "自動關閉" in (recovered.error or "")
 
 
 def test_tw_daily_automation_runs_paper_and_shadow_evaluation(tmp_path):

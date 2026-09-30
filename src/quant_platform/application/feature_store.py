@@ -12,8 +12,8 @@ from quant_platform.application.ports import (
     SchedulerJobRunRepository,
 )
 from quant_platform.domain.entities import JobRunStatus, StoreCoverage
-from quant_platform.feature_engineering.engine import FeatureEngine
 from quant_platform.feature_engineering.cross_asset import CrossAssetFeatureEngine
+from quant_platform.feature_engineering.engine import FeatureEngine
 from quant_platform.labels.engine import LABEL_DEFINITIONS, LabelEngine
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,32 @@ class FeatureLabelPipeline:
             for asset in self._universe_repository.list_active(normalized_market)
             if not requested or asset.symbol in requested
         ]
+        def aware(value: datetime) -> datetime:
+            return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+        asset_symbols = [asset.symbol for asset in assets]
+        feature_names = [
+            item.name
+            for item in (
+                *self._feature_engine.definitions,
+                *self._cross_asset_engine.definitions,
+            )
+        ]
+        latest_feature_times = {
+            (item.symbol, item.feature_name): aware(item.event_time)
+            for item in self._store_repository.list_latest_features(
+                asset_symbols, feature_names, started
+            )
+        }
+        label_names = [
+            str(item["name"]) for item in self._label_engine.definitions
+        ]
+        latest_label_times = {
+            (item.symbol, item.label_name): aware(item.event_time)
+            for item in self._store_repository.list_latest_labels(
+                asset_symbols, label_names
+            )
+        }
         run_id = self._run_repository.start("feature_label_build", normalized_market, started)
         succeeded = 0
         feature_values = 0
@@ -134,6 +160,18 @@ class FeatureLabelPipeline:
                 features = self._feature_engine.compute(bars, computed_at=started)
                 features.extend(self._cross_asset_engine.compute(bars, context_bars, computed_at=started))
                 labels = self._label_engine.compute(bars, benchmark_bars, computed_at=started)
+                features = [
+                    item for item in features
+                    if item.event_time >= latest_feature_times.get(
+                        (item.symbol, item.feature_name), item.event_time
+                    )
+                ]
+                labels = [
+                    item for item in labels
+                    if item.event_time > latest_label_times.get(
+                        (item.symbol, item.label_name), datetime.min.replace(tzinfo=UTC)
+                    )
+                ]
                 feature_values += self._store_repository.upsert_features(features)
                 label_values += self._store_repository.upsert_labels(labels)
                 succeeded += 1

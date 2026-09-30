@@ -1629,6 +1629,7 @@ def create_app(container: Container | None = None) -> Flask:
                 "r2": view.experiment.r2,
                 "direction": view.experiment.directional_accuracy,
                 "rank_ic": view.experiment.rank_ic,
+                "label_name": view.experiment.label_name,
                 "updated_at": view.experiment.computed_at,
             }
             for view in model_overview.runs
@@ -1637,11 +1638,15 @@ def create_app(container: Container | None = None) -> Flask:
         paper_overview = dependencies.paper_trading_service.overview()
         model_tracking = dependencies.after_hours_ai_service.model_forward_tracking()
         if model_tracking is not None:
+            history_outperformed = bool(
+                model_validation is not None
+                and model_validation.excess_return is not None
+                and model_validation.excess_return > 0
+            )
             history_ready = bool(
                 model_validation is not None
                 and model_validation.decision_sessions >= 756
-                and model_validation.excess_return is not None
-                and model_validation.excess_return > 0
+                and history_outperformed
                 and model_validation.max_drawdown >= -0.25
                 and len(model_validation.regime_results) == 4
                 and all(item.passed for item in model_validation.regime_results)
@@ -1651,6 +1656,7 @@ def create_app(container: Container | None = None) -> Flask:
                 and model_tracking["paper_fills"] >= model_tracking["target_fills"]
             )
             model_tracking.update({
+                "history_outperformed": history_outperformed,
                 "history_ready": history_ready,
                 "forward_ready": forward_ready,
                 "usable": history_ready and forward_ready,
@@ -1703,14 +1709,21 @@ def create_app(container: Container | None = None) -> Flask:
             "time": None,
         }
         if latest_gpu_model is not None:
+            gpu_is_candidate = latest_gpu_model.promotion_gate == "CANDIDATE"
             gpu_research = {
                 "state": "ready",
-                "headline": "已完成並保存深度學習結果",
+                "headline": (
+                    "GPU 模型已通過預測門檻並納入決策"
+                    if gpu_is_candidate else "已完成並保存深度學習結果"
+                ),
                 "detail": (
                     f"方向答對率 {latest_gpu_model.directional_accuracy:.1%}；"
                     f"排名 IC {latest_gpu_model.rank_ic or 0:+.3f}；"
-                    "模型已保存為挑戰版本；因組合重播跑輸研究主線，"
-                    "目前不納入盤後選股。"
+                    + (
+                        "預測模型狀態為候選，最新盤後清單已使用這批預測。"
+                        if gpu_is_candidate else
+                        "模型保留為挑戰版本，繼續累積向前驗證。"
+                    )
                 ),
                 "time": latest_gpu_model.computed_at,
             }
@@ -2053,6 +2066,57 @@ def create_app(container: Container | None = None) -> Flask:
         return redirect(url_for(
             "point_in_time_data_overview", dataset=dataset_key, entity=entity_id
         ))
+
+    @app.get("/google-trends")
+    def google_trends_overview() -> str:
+        keyword = request.args.get("keyword", "").strip()
+        as_of_text = request.args.get("as_of", "").strip()
+        as_of = None
+        if as_of_text:
+            try:
+                as_of = datetime.fromisoformat(as_of_text).replace(
+                    tzinfo=taipei
+                ).astimezone(UTC)
+            except ValueError:
+                flash("歷史可見時間格式錯誤，已改為查詢目前可見版本。", "error")
+        return render_template(
+            "google_trends.html",
+            overview=dependencies.google_trends_service.overview(
+                keyword, as_of=as_of
+            ),
+            as_of_text=as_of_text,
+        )
+
+    @app.post("/google-trends/import")
+    def import_google_trends():
+        upload = request.files.get("csv_file")
+        keyword = request.form.get("keyword", "").strip()
+        downloaded_at_text = request.form.get("downloaded_at", "").strip()
+        try:
+            if upload is None or not upload.filename:
+                raise ValueError("請選擇 Google Trends 匯出的 CSV 檔案")
+            downloaded_at = (
+                datetime.fromisoformat(downloaded_at_text)
+                .replace(tzinfo=taipei)
+                .astimezone(UTC)
+                if downloaded_at_text
+                else datetime.now(UTC)
+            )
+            content = upload.stream.read(5_000_001)
+            result = dependencies.google_trends_service.import_csv(
+                content,
+                downloaded_at=downloaded_at,
+                source_uri=f"browser-upload:{upload.filename}",
+            )
+            flash(
+                f"Google Trends 匯入完成：{result.series_count} 個序列、"
+                f"收到 {result.received:,} 筆、新增 {result.inserted:,} 個版本。",
+                "success",
+            )
+        except Exception as exc:
+            app.logger.exception("Google Trends CSV import failed")
+            flash(f"Google Trends 匯入失敗：{exc}", "error")
+        return redirect(url_for("google_trends_overview", keyword=keyword))
 
     @app.get("/intraday-features")
     def intraday_feature_overview() -> str:
@@ -2524,8 +2588,36 @@ def create_app(container: Container | None = None) -> Flask:
         tw_symbols = 0
         earliest_bar = None
         latest_bar = None
+        data_domains: list[dict[str, object]] = []
         with engine.connect() as connection:
             available = set(inspect(engine).get_table_names())
+
+            def coverage_row(
+                table_name: str,
+                entity_column: str,
+                where_sql: str = "",
+                parameters: dict[str, object] | None = None,
+            ) -> dict[str, object]:
+                if table_name not in available:
+                    return {"rows": 0, "entities": 0, "first": "—", "last": "—"}
+                quoted_table = engine.dialect.identifier_preparer.quote(table_name)
+                quoted_entity = engine.dialect.identifier_preparer.quote(entity_column)
+                row = connection.execute(
+                    text(
+                        f"SELECT COUNT(*) AS rows, "
+                        f"COUNT(DISTINCT {quoted_entity}) AS entities, "
+                        f"MIN(event_time) AS first, MAX(event_time) AS last "
+                        f"FROM {quoted_table} {where_sql}"
+                    ),
+                    parameters or {},
+                ).mappings().one()
+                return {
+                    "rows": int(row["rows"] or 0),
+                    "entities": int(row["entities"] or 0),
+                    "first": str(row["first"] or "—")[:10],
+                    "last": str(row["last"] or "—")[:10],
+                }
+
             for table_name in counts:
                 if table_name not in available:
                     continue
@@ -2544,6 +2636,92 @@ def create_app(container: Container | None = None) -> Flask:
                 tw_symbols = int(row["symbol_count"] or 0)
                 earliest_bar = row["earliest"]
                 latest_bar = row["latest"]
+
+            prices = coverage_row(
+                "market_bars", "symbol", "WHERE market = :market", {"market": "TW"}
+            )
+            news = coverage_row(
+                "taiwan_data_records", "symbol", "WHERE dataset = :dataset",
+                {"dataset": "TaiwanStockNews"},
+            )
+            sentiment = coverage_row(
+                "feature_values", "symbol", "WHERE feature_name = :feature",
+                {"feature": "news_sentiment_daily"},
+            )
+            institutional = coverage_row(
+                "taiwan_data_records", "symbol", "WHERE dataset = :dataset",
+                {"dataset": "TaiwanStockInstitutionalInvestorsBuySell"},
+            )
+            margin = coverage_row(
+                "taiwan_data_records", "symbol", "WHERE dataset = :dataset",
+                {"dataset": "TaiwanStockMarginPurchaseShortSale"},
+            )
+            lending = coverage_row(
+                "taiwan_data_records", "symbol", "WHERE dataset = :dataset",
+                {"dataset": "TaiwanStockSecuritiesLending"},
+            )
+            derivatives = coverage_row(
+                "point_in_time_observations", "entity_id",
+                "WHERE dataset_key IN ('tw_futures_daily', 'tw_options_daily', 'tw_odd_lot_daily')",
+            )
+            trends = coverage_row(
+                "point_in_time_observations", "entity_id",
+                "WHERE dataset_key = :dataset", {"dataset": "google_trends"},
+            )
+            active_count = expansion.registered_assets
+            data_domains = [
+                {
+                    "name": "日線價格與成交量", "status": "ready", "label": "已建置",
+                    **prices,
+                    "note": f"目前 {active_count} 檔研究標的；另含大盤指數基準。",
+                },
+                {
+                    "name": "新聞", "status": "partial", "label": "短歷史",
+                    **news,
+                    "note": "有標題、來源、網址與可用時間；目前只累積最近約 7 天。",
+                },
+                {
+                    "name": "新聞／輿論情緒", "status": "partial", "label": "基線可用",
+                    **sentiment,
+                    "note": "詞典情緒基線，含部分公開論壇新聞；尚非完整社群輿情模型。",
+                },
+                {
+                    "name": "三大法人買賣", "status": "partial", "label": "部分標的",
+                    **institutional,
+                    "note": f"外資、投信、自營商原始買賣；目前 {institutional['entities']}／{active_count} 檔。",
+                },
+                {
+                    "name": "融資融券", "status": "partial", "label": "部分標的",
+                    **margin,
+                    "note": f"融資餘額、融券餘額；目前 {margin['entities']}／{active_count} 檔。",
+                },
+                {
+                    "name": "借券", "status": "partial", "label": "部分標的",
+                    **lending,
+                    "note": f"借券成交與放空需求代理；目前 {lending['entities']}／{active_count} 檔。",
+                },
+                {
+                    "name": "大盤期貨／選擇權／零股", "status": "ready", "label": "已建置",
+                    **derivatives,
+                    "note": "TX、TXO 與官方零股快照，可觀察大盤風險與小額成交。",
+                },
+                {
+                    "name": "整體市場法人買賣", "status": "missing", "label": "未建置",
+                    "rows": 0, "entities": 0, "first": "—", "last": "—",
+                    "note": "目前只有研究標的逐檔法人資料，尚無全市場彙總序列。",
+                },
+                {
+                    "name": "大戶持股集中度", "status": "missing", "label": "未建置",
+                    "rows": 0, "entities": 0, "first": "—", "last": "—",
+                    "note": "集保持股分級尚未匯入；現用資料源的歷史端點需要會員權限。",
+                },
+                {
+                    "name": "Google 搜尋趨勢", "status": "ready" if trends["rows"] else "missing",
+                    "label": "已匯入" if trends["rows"] else "等待匯入",
+                    **trends,
+                    "note": "只接受官方匯出 CSV，未提供檔案前保持空白，不偽造熱度。",
+                },
+            ]
 
         job_labels = {
             "tw_universe_expansion": "下載下一批台股歷史行情",
@@ -2637,6 +2815,7 @@ def create_app(container: Container | None = None) -> Flask:
             "earliest_bar": str(earliest_bar or "—"),
             "latest_bar": str(latest_bar or "—"),
             "counts": counts,
+            "data_domains": data_domains,
             "runs": runs[:30],
             "blockers": blockers,
         }

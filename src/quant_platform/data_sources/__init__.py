@@ -7,10 +7,12 @@ from quant_platform.data_sources.twse_pit import PointInTimeProviderRouter, Twse
 from quant_platform.data_sources.mops_events import MopsEarningsCallProvider
 from quant_platform.data_sources.taiwan_market_rank import TaiwanOfficialMarketRankingProvider
 from quant_platform.data_sources.taiwan_official import TaiwanOfficialFallbackProvider
+from quant_platform.data_sources.taiwan_daily_bars import TaiwanOfficialDailyBarProvider
 
 __all__ = [
     "YahooFinanceProvider", "FinMindProvider", "FinMindPointInTimeProvider",
     "FredCsvProvider", "TwseCompanyProvider", "TwsePointInTimeProvider",
     "PointInTimeProviderRouter", "MopsEarningsCallProvider",
     "TaiwanOfficialMarketRankingProvider", "TaiwanOfficialFallbackProvider",
+    "TaiwanOfficialDailyBarProvider",
 ]

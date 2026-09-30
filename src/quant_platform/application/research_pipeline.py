@@ -10,7 +10,11 @@ from quant_platform.application.universe import DailyMarketDataPipeline, DailyPi
 from quant_platform.application.backtest_research import BacktestResearchPipeline, BacktestResearchPipelineResult
 from quant_platform.application.ensemble_research import EnsemblePipelineResult, EnsembleResearchPipeline
 from quant_platform.application.portfolio_research import PortfolioPipelineResult, PortfolioResearchPipeline
-from quant_platform.application.model_research import ModelPipelineResult, ModelResearchPipeline
+from quant_platform.application.model_research import (
+    AVAILABLE_MODELS,
+    ModelPipelineResult,
+    ModelResearchPipeline,
+)
 from quant_platform.application.decision_support import DecisionPipelineResult, DailyDecisionPipeline
 from quant_platform.application.taiwan_data import TaiwanDataPipeline, TaiwanDataPipelineResult
 from quant_platform.application.macro_data import MacroDataPipeline, MacroPipelineResult
@@ -80,7 +84,13 @@ class DailyResearchPipeline:
         market_result = self._market_data_pipeline.run(
             market, now=now, full_refresh=full_refresh, symbols=symbols
         )
+        if market_result is not None and not getattr(market_result, "fresh", True):
+            raise RuntimeError(
+                f"{market.upper()} 行情尚未更新到 {market_result.expected_date}；"
+                f"目前只有 {market_result.data_date or '無資料'}，停止建立過期決策"
+            )
         feature_result: FeatureLabelPipelineResult | None = None
+        model_result: ModelPipelineResult | None = None
         if early_decision_callback is not None:
             # The after-hours order window is time-limited. Today's price
             # features and preliminary decision must not wait for slower
@@ -91,6 +101,14 @@ class DailyResearchPipeline:
             else:
                 feature_result = self._feature_label_pipeline.run(
                     market, now=now, symbols=symbols
+                )
+            if market.upper() == "TW" and "torch_cuda_mlp" in AVAILABLE_MODELS:
+                progress("使用 GPU 更新今日模型預測", 16)
+                model_result = self._model_research_pipeline.run(
+                    market,
+                    now=now,
+                    model_names=("torch_cuda_mlp",),
+                    feature_profile="price_core",
                 )
             progress("產生盤後零股初步決策", 20)
             early_decision_callback(
@@ -122,7 +140,8 @@ class DailyResearchPipeline:
         quality = self._data_quality.evaluate(market, as_of=now, stage="full")
         self._data_quality.ensure_research_ready(quality)
         progress("訓練與預測模型", 58)
-        model_result = self._model_research_pipeline.run(market, now=now)
+        if model_result is None:
+            model_result = self._model_research_pipeline.run(market, now=now)
         progress("研究市場狀態與因子", 72)
         factor_result = self._factor_research_pipeline.run(market, now=now)
         progress("執行樣本外回測", 82)

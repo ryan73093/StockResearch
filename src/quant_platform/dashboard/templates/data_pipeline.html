@@ -36,6 +36,13 @@
     <article><span>歷史模擬交易</span><b id="backtestTrades">{{ '{:,}'.format(pipeline.counts.backtest_trades) }}</b><small>回測實際買進與賣出紀錄</small></article>
   </section>
 
+  <section class="tech-section">
+    <div class="section-head"><div><span>ACTUAL DATA COVERAGE</span><h2>現在到底有哪些資料</h2></div><p>「部分」就是沒有覆蓋全部研究池；未建置的資料不會冒充可用。</p></div>
+    <div class="paper-table-v26 pipeline-domain-table-v39"><table><thead><tr><th>資料</th><th>狀態</th><th>標的數</th><th>筆數</th><th>最早</th><th>最新</th><th>目前限制</th></tr></thead><tbody>
+      {% for item in pipeline.data_domains %}<tr><td><b>{{ item.name }}</b></td><td><span class="pipeline-domain-state-v39 {{ item.status }}">{{ item.label }}</span></td><td>{{ '{:,}'.format(item.entities) }}</td><td>{{ '{:,}'.format(item.rows) }}</td><td>{{ item.first }}</td><td>{{ item.last }}</td><td>{{ item.note }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+
   <section class="tech-section pipeline-grid-v1">
     <article>
       <div class="section-head"><div><span>NEXT BATCH</span><h2>下一批候選股票</h2></div></div>

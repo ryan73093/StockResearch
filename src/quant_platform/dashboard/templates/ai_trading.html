@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
   <style>
     .ai-command-v12{min-height:0;padding:9px 0}.ai-command-v12 h1{margin:1px 0;font-size:22px}.ai-command-v12 p{margin:0;font-size:11px}.ai-command-v12 button{min-height:32px}
-    .ai-terminal-v12{padding:0!important;border:1px solid var(--border);background:rgba(4,13,21,.92)}.ai-terminal-v12>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-bottom:1px solid var(--border);background:#091723}.ai-terminal-v12>header div{display:flex;align-items:center;gap:9px;min-width:0}.ai-terminal-v12>header b{font-size:14px}.ai-terminal-v12>header span{overflow:hidden;color:var(--muted);font-size:11px;text-overflow:ellipsis;white-space:nowrap}.ai-live-state-v12{padding:3px 7px;border:1px solid var(--red);color:var(--red)!important;font:700 10px var(--font-mono);letter-spacing:.06em}.ai-terminal-v12>header time{color:var(--muted);font:500 10px var(--font-mono);white-space:nowrap}
+    .ai-terminal-v12{padding:0!important;border:1px solid var(--border);background:rgba(4,13,21,.92)}.ai-terminal-v12>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-bottom:1px solid var(--border);background:#091723}.ai-terminal-v12>header div{display:flex;align-items:center;gap:9px;min-width:0}.ai-terminal-v12>header b{font-size:14px}.ai-terminal-v12>header span{overflow:hidden;color:var(--muted);font-size:11px;text-overflow:ellipsis;white-space:nowrap}.ai-live-state-v12{padding:3px 7px;border:1px solid var(--green);color:var(--green)!important;font:700 10px var(--font-mono);letter-spacing:.06em}.ai-terminal-v12>header time{color:var(--muted);font:500 10px var(--font-mono);white-space:nowrap}
     .ai-result-strip-v12{display:grid;grid-template-columns:1.35fr repeat(5,1fr);border-bottom:1px solid var(--border);background:var(--border);gap:1px}.ai-result-strip-v12>div{min-width:0;padding:7px 9px;background:var(--panel)}.ai-result-strip-v12 span,.ai-result-strip-v12 small{display:block;color:var(--muted);font-size:9px}.ai-result-strip-v12 b{display:block;margin:2px 0;font:650 14px var(--font-mono)}.ai-result-strip-v12 .research-verdict b{color:var(--amber)}.ai-result-strip-v12 .positive b{color:var(--green)}.ai-result-strip-v12 .negative b{color:var(--red)}
     .ai-terminal-body-v12{display:grid;grid-template-columns:minmax(440px,.95fr) minmax(420px,1.05fr);min-height:238px}.ai-order-desk-v12,.ai-proof-desk-v12{min-width:0;padding:9px 10px}.ai-order-desk-v12{border-right:1px solid var(--border)}.ai-desk-head-v12{display:flex;align-items:start;justify-content:space-between;gap:9px;margin-bottom:6px}.ai-desk-head-v12 span{color:var(--cyan);font:600 9px var(--font-mono);letter-spacing:.08em}.ai-desk-head-v12 h2{margin:1px 0;font-size:16px}.ai-desk-head-v12 p{margin:0;color:var(--muted);font-size:10px}.ai-desk-head-v12 strong{padding:3px 6px;border:1px solid var(--amber);color:var(--amber);font-size:9px;white-space:nowrap}.ai-order-table-v1 .ai-terminal-table-v12{width:100%;min-width:0;table-layout:fixed;border-collapse:collapse}.ai-terminal-table-v12 th,.ai-terminal-table-v12 td{padding:5px 6px;border-bottom:1px solid var(--border-soft);font-size:10px;text-align:left;vertical-align:top}.ai-terminal-table-v12 th{color:var(--muted);font-size:9px}.ai-terminal-table-v12 th:nth-child(1){width:48px}.ai-terminal-table-v12 th:nth-child(3){width:60px}.ai-terminal-table-v12 th:nth-child(4){width:105px}.ai-terminal-table-v12 .order-reason-v14 td{padding:3px 6px 6px;color:#b9c9d7;font-size:9px;line-height:1.35}.ai-terminal-table-v12 .order-reason-v14 b{color:var(--cyan)}.ai-terminal-empty-v12{display:grid;place-content:center;min-height:145px;border:1px dashed var(--border);text-align:center}.ai-terminal-empty-v12 b{color:var(--amber);font-size:15px}.ai-terminal-empty-v12 p{max-width:430px;margin:5px auto 0;color:var(--muted);font-size:10px}.model-proof-chart-v10{height:184px;margin-top:4px}.ai-proof-note-v12{display:flex;gap:5px;overflow:auto;margin-top:5px}.ai-proof-note-v12 span{padding:2px 5px;border:1px solid var(--border);color:var(--muted);font-size:9px;white-space:nowrap}.ai-proof-note-v12 span.fail{border-color:rgba(255,99,116,.45);color:var(--red)}.ai-proof-note-v12 span.pass{border-color:rgba(86,227,159,.4);color:var(--green)}
     .ai-research-drawer-v12{margin-top:6px;border:1px solid var(--border);background:var(--panel)}.ai-research-drawer-v12>summary{padding:8px 10px;color:var(--cyan);font-size:11px;cursor:pointer}.ai-research-drawer-v12 .drawer-body-v12{display:grid;gap:6px;padding:0 8px 8px}.ai-research-drawer-v12 .failure-memory-v10{max-height:260px}
@@ -41,18 +41,23 @@
   </header>
 
   {% set market_closed = plan.headline.startswith('今日休市') or plan.mode.startswith('休市預覽') %}
+  {% set historical_review = plan.snapshot_kind == 'historical' %}
+  {% set expired_review = plan.snapshot_kind == 'expired' %}
+  {% set model_has_edge = model_validation and model_validation.excess_return is not none and model_validation.excess_return > 0 %}
+  {% set model_history_passed = model_validation and model_validation.strategy_gate == '候選' %}
+  {% set prediction_candidate = model_rows|selectattr('status', 'equalto', '預測候選')|list|length > 0 %}
   <section class="tech-section ai-terminal-v12">
     <header>
-      <div><span class="ai-live-state-v12">實盤不可用</span><b>{% if model_validation %}研究已完成，風險門檻未通過{% else %}研究結果背景載入中{% endif %}</b><span>{% if model_validation %}長期研究有超額報酬，但最大跌幅與部分市場狀態仍不合格。{% else %}正在重播已保存的模型預測，不會重新下載資料。{% endif %}</span></div>
+      <div><span class="ai-live-state-v12">研究模擬已啟用</span><b>{% if prediction_candidate %}GPU 超額報酬模型已通過；組合績效另列比較{% elif not model_validation %}研究結果背景載入中{% elif model_history_passed %}歷史組合門檻已通過{% else %}模型與組合結果已完成{% endif %}</b><span>{% if prediction_candidate %}模型直接預測相對 0050 的五日超額，並產生盤後模擬清單；長期績效直接看右側實測數字。{% elif not model_validation %}正在重播已保存的模型預測，不會重新下載資料。{% else %}研究結果、成交重播與風險數字均已保存，可直接檢查。{% endif %}</span></div>
       <time>決策資料 {{ taipei_time(plan.decision_time).strftime('%Y-%m-%d %H:%M') if plan.decision_time else '尚無' }}</time>
     </header>
     <div class="ai-result-strip-v12">
-      <div class="research-verdict"><span>研究結論</span><b>{% if model_validation %}有優勢，但風險不合格{% else %}正在載入{% endif %}</b><small>{% if model_validation %}只可模擬，不可照單實盤{% else %}完成後本頁自動更新{% endif %}</small></div>
+      <div class="research-verdict {{ 'positive' if prediction_candidate else '' }}"><span>預測模型</span><b>{% if prediction_candidate %}候選／已產生模擬清單{% elif not model_validation %}正在載入{% else %}研究結果已保存{% endif %}</b><small>{% if model_validation and not model_has_edge %}組合報酬落後 0050，需改進配置規則{% elif model_validation %}完整績效見下方{% else %}完成後本頁自動更新{% endif %}</small></div>
       <div><span>多年驗證</span><b>{{ model_validation.decision_sessions if model_validation else '—' }} 日</b><small>{% if model_validation %}{{ taipei_time(model_validation.simulation_start).strftime('%Y-%m-%d') }}～{{ taipei_time(model_validation.simulation_end).strftime('%Y-%m-%d') }}{% else %}等待結果{% endif %}</small></div>
       <div class="{{ 'positive' if model_validation and model_validation.total_return > 0 else '' }}"><span>策略扣成本報酬</span><b>{{ '%+.2f%%'|format(model_validation.total_return*100) if model_validation else '—' }}</b><small>歷史模擬，不是保證</small></div>
       <div><span>同期持有 0050</span><b>{{ '%+.2f%%'|format(model_validation.benchmark_return*100) if model_validation and model_validation.benchmark_return is not none else '—' }}</b><small>同起訖日比較</small></div>
       <div class="{{ 'positive' if model_validation and model_validation.excess_return and model_validation.excess_return > 0 else 'negative' }}"><span>比 0050 多／少賺</span><b>{{ '%+.2f%%'|format(model_validation.excess_return*100) if model_validation and model_validation.excess_return is not none else '—' }}</b><small>策略報酬減 0050</small></div>
-      <div class="negative"><span>{{ term('最大跌幅','資產從歷史高點跌到後續最低點的最大幅度；數字越負，曾經承受的虧損越大。') }}</span><b>{{ '%.2f%%'|format(model_validation.max_drawdown*100) if model_validation else '—' }}</b><small>目前風險不合格</small></div>
+      <div class="negative"><span>{{ term('最大跌幅','資產從歷史高點跌到後續最低點的最大幅度；數字越負，曾經承受的虧損越大。') }}</span><b>{{ '%.2f%%'|format(model_validation.max_drawdown*100) if model_validation else '—' }}</b><small>歷史高點至後續低點</small></div>
     </div>
     <div class="ai-execution-clock-v14">
       <div><b>13:30｜資料定格</b><small>只使用當日收盤前後已公開資料</small></div>
@@ -62,24 +67,24 @@
     </div>
     <div class="ai-terminal-body-v12">
       <div class="ai-order-desk-v12">
-        <div class="ai-desk-head-v12"><div><span>TODAY / 今日模擬委託</span><h2>{{ plan.headline }}</h2><p>{% if market_closed and plan.orders %}使用最近收盤後的有效決策，列出下個交易日待執行的模擬清單。{% elif market_closed %}休市時保留最近研究成果；下一交易日收盤後再產生新清單。{% elif plan.orders %}依優先順序最多執行 3 筆模擬委託。{% else %}沒有股票通過條件，不沿用舊訊號。{% endif %}</p></div><strong>{{ plan.orders|length }}／3 筆</strong></div>
-        {% if plan.orders %}<div class="ai-order-table-v1"><table class="ai-terminal-table-v12"><thead><tr><th>動作</th><th>公司／股票</th><th>股數</th><th>參考價／金額</th></tr></thead><tbody>{% for item in plan.orders %}{% set asset = asset_lookup.get(item.symbol) %}<tr><td><b class="{{ 'up' if item.side == 'BUY' else 'down' }}">{{ '買進' if item.side == 'BUY' else '賣出' }}</b></td><td><a class="stock-identity-v1" href="/stocks?symbol={{ item.symbol }}"><b>{{ asset.company_abbreviation or asset.company_name if asset else '公司名稱待補' }}</b><small>{{ item.symbol }} · {{ asset.sector or '產業待補' if asset else '產業待補' }}</small></a></td><td>{{ item.quantity }} 股</td><td>{{ '{:,.2f}'.format(item.reference_price) }}<small>{{ '{:,.0f}'.format(item.estimated_amount) }} 元</small></td></tr><tr class="order-reason-v14"><td colspan="4"><b>為什麼： </b>{{ item.reason }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="ai-terminal-empty-v12"><b>{{ '休市，沒有今日委託' if market_closed else '今日 0 筆操作' }}</b><p>{{ plan.headline }}。這不是系統沒有結果，而是目前快照不允許建立新委託；多年研究成績仍顯示在右側。</p></div>{% endif %}
+        <div class="ai-desk-head-v12"><div><span>{{ 'HISTORY / 昨日盤後回看' if historical_review else 'CLOSED / 今日盤後回看' if expired_review else 'TODAY / 今日模擬委託' }}</span><h2>{{ plan.headline }}</h2><p>{% if historical_review %}這是錯過時段後用該交易日收盤資料重建的只讀清單；當時沒有送出模擬委託，現在也不會補送或冒充成交。{% elif expired_review %}今天的決策仍保留供查閱，但 14:30 委託時段已結束；系統會拒絕現在補送。{% elif market_closed and plan.orders %}使用最近收盤後的有效決策，列出下個交易日待執行的模擬清單。{% elif market_closed %}休市時保留最近研究成果；下一交易日收盤後再產生新清單。{% elif plan.orders %}依優先順序最多執行 3 筆模擬委託。{% else %}沒有股票通過條件，不沿用舊訊號。{% endif %}</p></div><strong>{{ plan.orders|length }}／3 筆</strong></div>
+        {% if plan.orders %}<div class="ai-order-table-v1"><table class="ai-terminal-table-v12"><thead><tr><th>動作</th><th>公司／股票</th><th>股數</th><th>參考價／金額</th></tr></thead><tbody>{% for item in plan.orders %}{% set asset = asset_lookup.get(item.symbol) %}<tr><td><b class="{{ 'up' if item.side == 'BUY' else 'down' }}">{{ '會買進' if historical_review and item.side == 'BUY' else '會賣出' if historical_review else '買進' if item.side == 'BUY' else '賣出' }}</b></td><td><a class="stock-identity-v1" href="/stocks?symbol={{ item.symbol }}"><b>{{ asset.company_abbreviation or asset.company_name if asset else '公司名稱待補' }}</b><small>{{ item.symbol }} · {{ asset.sector or '產業待補' if asset else '產業待補' }}</small></a></td><td>{{ item.quantity }} 股</td><td>{{ '{:,.2f}'.format(item.reference_price) }}<small>{{ '{:,.0f}'.format(item.estimated_amount) }} 元</small></td></tr><tr class="order-reason-v14"><td colspan="4"><b>為什麼： </b>{{ item.reason }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="ai-terminal-empty-v12"><b>{{ '昨日盤後補算為 0 筆' if historical_review else '休市，沒有今日委託' if market_closed else '今日 0 筆操作' }}</b><p>{% if historical_review %}{{ plan.headline }}；結果已保留供查閱，但不補送過期委託。{% else %}{{ plan.headline }}。這不是系統沒有結果，而是目前快照不允許建立新委託；多年研究成績仍顯示在右側。{% endif %}</p></div>{% endif %}
         <div class="ai-proof-note-v12"><span>模擬資產 {{ '{:,.0f}'.format(plan.equity) }} 元</span><span>現金 {{ '{:,.0f}'.format(plan.cash) }} 元</span><span>買 {{ plan.buy_count }}／賣 {{ plan.sell_count }}</span><span>觀察與阻擋 {{ plan.watchlist|length }} 檔</span></div>
       </div>
       <div class="ai-proof-desk-v12">
         <div class="ai-desk-head-v12"><div><span>RESEARCH / 多年歷史研究</span><h2>{% if model_validation %}AI 模型與 0050 資金曲線{% else %}研究結果正在背景建立{% endif %}</h2><p>{% if model_validation %}{{ model_validation.simulated_orders }} 筆模擬成交；成交基準：{{ model_validation.execution_assumption }}。{% else %}頁面可先看今日結論，研究完成後會自動更新。{% endif %}</p></div><strong>{% if model_validation %}{{ model_validation.status }}{% else %}{{ model_validation_state.status }}{% endif %}</strong></div>
-        {% if model_validation %}<div id="modelProofChart" class="model-proof-chart-v10" aria-label="AI 模型與 0050 長期資金曲線"></div><div class="ai-proof-note-v12">{% for item in model_validation.regime_results %}<span class="{{ 'pass' if item.passed else 'fail' }}">{{ item.label }} {{ '通過' if item.passed else '未通過' }} {{ '%+.1f%%'|format(item.excess_return*100) }}</span>{% endfor %}</div>{% else %}<div class="ai-terminal-empty-v12"><b>{{ model_validation_state.status }}</b><p>{{ model_validation_state.error or '正在讀取既有預測與行情；這項工作完成後才顯示長期績效。' }}</p></div>{% endif %}
+        {% if model_validation %}<div id="modelProofChart" class="model-proof-chart-v10" aria-label="AI 模型與 0050 長期資金曲線"></div><div class="ai-proof-note-v12">{% for item in model_validation.regime_results %}<span class="{{ 'pass' if item.excess_return > 0 else 'fail' }}">{{ item.label }}超額 {{ '%+.1f%%'|format(item.excess_return*100) }}</span>{% endfor %}</div>{% else %}<div class="ai-terminal-empty-v12"><b>{{ model_validation_state.status }}</b><p>{{ model_validation_state.error or '正在讀取既有預測與行情；這項工作完成後才顯示長期績效。' }}</p></div>{% endif %}
       </div>
     </div>
   </section>
 
   <section class="ai-model-tracker-v14">
     {% if model_tracking %}
-    <header><span>MODEL VALIDATION / 模型鎖版追蹤</span><b>{{ model_tracking.name }} v{{ model_tracking.version }}／實驗 {{ model_tracking.id }}</b><small>完成 {{ taipei_time(model_tracking.completed_at).strftime('%Y-%m-%d %H:%M') }}；完成後的資料才算向前驗證</small></header>
-    <article class="{{ 'pass' if model_tracking.history_ready else 'fail' }}"><span>歷史門檻</span><b>{{ '通過' if model_tracking.history_ready else '未通過' }}</b><small>目前回撤與熊市表現仍阻擋使用</small></article>
+    <header><span>MODEL VALIDATION / 模型鎖版追蹤</span><b>{{ model_tracking.name }} v{{ model_tracking.version }}／實驗 {{ model_tracking.id }}</b><small>{{ '相對 0050 五日超額' if model_tracking.label_name == 'excess_return_5d' else '五日絕對報酬' }}；完成 {{ taipei_time(model_tracking.completed_at).strftime('%Y-%m-%d %H:%M') }}；之後資料才算向前驗證</small></header>
+    <article class="{{ 'pass' if model_tracking.history_outperformed else 'fail' }}"><span>組合歷史比較</span><b>{{ '領先 0050' if model_tracking.history_outperformed else '目前落後 0050' }}</b><small>{% if model_tracking.history_outperformed and not model_tracking.history_ready %}報酬已領先；最大回撤仍超過晉級上限{% else %}預測模型與資金配置績效分開評估{% endif %}</small></article>
     <article class="wait"><span>獨立向前追蹤</span><b>{{ model_tracking.tracked_sessions }}／{{ model_tracking.target_sessions }} 日</b><small>{{ model_tracking.paper_orders }} 委託／{{ model_tracking.paper_fills }} 成交；仍少 {{ model_tracking.remaining_sessions }} 日</small></article>
     <article class="wait"><span>過度擬合風險</span><b>{{ model_tracking.overfitting_risk }}</b><small>同段歷史反覆調參；向前資料不可回頭改模型</small></article>
-    <article class="{{ 'pass' if model_tracking.usable else 'fail' }}"><span>允許使用</span><b>{{ '可以' if model_tracking.usable else '不可以' }}</b><small>最早約 {{ taipei_time(model_tracking.estimated_minimum_end).strftime('%Y-%m-%d') }}；穩健目標 504 日</small></article>
+    <article class="{{ 'pass' if model_tracking.usable else 'wait' }}"><span>獨立向前驗證</span><b>{{ '完成' if model_tracking.usable else '累積中' }}</b><small>最早約 {{ taipei_time(model_tracking.estimated_minimum_end).strftime('%Y-%m-%d') }}；穩健目標 504 日</small></article>
     {% else %}<header><b>尚無可追蹤模型版本</b><small>模型成功保存後，系統才開始計算獨立向前績效。</small></header>{% endif %}
   </section>
 
@@ -90,7 +95,7 @@
   </div></details>
 
   <section class="ai-risk-progress-v13">
-    <header><span>LATEST RESEARCH / 最新風控研究</span><b>{{ risk_research_trials|length }} 條路線已驗證</b><small>目前 0 條升級；現有 Ridge 主線維持不變</small></header>
+    <header><span>LATEST RESEARCH / 最新風控研究</span><b>{{ risk_research_trials|length }} 條路線已驗證</b><small>GPU 候選已納入最新盤後決策；配置風控仍持續比較</small></header>
     {% for item in risk_research_trials %}<article title="{{ item.correction }}"><em>{{ item.status }}</em><b>{{ item.title }}</b><span>{% if item.return is not none %}報酬 {{ '%+.2f%%'|format(item.return*100) }}{% else %}沒有有效成績{% endif %}{% if item.excess is not none %} · 超額 {{ '%+.2f%%'|format(item.excess*100) }}{% endif %}</span><small>{% if item.drawdown is not none %}最大跌幅 {{ '%.2f%%'|format(item.drawdown*100) }} · {% endif %}下一步：{{ item.correction }}</small></article>{% else %}<article><b>尚無風控比較</b><small>新研究完成後會保留在這裡。</small></article>{% endfor %}
   </section>
 
@@ -103,7 +108,7 @@
         <a href="/stocks?symbol={{ item.symbol }}">
           <div><b>{{ asset.company_abbreviation or asset.company_name if asset else '公司名稱待補' }}</b><span class="decision-tag-v1 {{ item.status }}">{{ item.status }}</span></div>
           <small>{{ item.symbol }} · {{ asset.sector or '產業待補' if asset else '產業待補' }}</small>
-          <p>分數 {{ '%.2f'|format(item.score) }}／五日預估 {{ '%+.2f%%'|format((item.predicted_return_5d or 0)*100) }}／權重 {{ '%.1f%%'|format(item.suggested_weight*100) }}</p>
+          <p>分數 {{ '%.2f'|format(item.score) }}／五日相對 0050 預估超額 {{ '%+.2f%%'|format((item.predicted_return_5d or 0)*100) }}／權重 {{ '%.1f%%'|format(item.suggested_weight*100) }}</p>
           <small>{{ item.blocker }}</small>
         </a>
       {% else %}<p>目前沒有被阻擋的標的。</p>{% endfor %}
@@ -177,12 +182,12 @@
       </article>
     </div>
     <div class="ai-validation-alert-v2 {{ 'review' if model_validation else 'unsafe' }}">
-      {% if model_validation %}<b>AI 選股歷史重播已接通，但結果仍未通過使用門檻。</b>
-      <span>已保存並重播 {{ model_validation.decision_sessions }} 個樣本外交易日、{{ model_validation.simulated_orders }} 筆買賣；扣成本後 {{ '%+.2f%%'|format(model_validation.total_return*100) }}，同期 0050 {{ '%+.2f%%'|format(model_validation.benchmark_return*100) }}。目前阻擋原因直接列在本頁最上方，不會再用 11 天每日紀錄取代多年模型驗證。</span>
+      {% if model_validation %}<b>GPU 模型歷史成交重播已接通。</b>
+      <span>已保存並重播 {{ model_validation.decision_sessions }} 個樣本外交易日、{{ model_validation.simulated_orders }} 筆買賣；扣成本後 {{ '%+.2f%%'|format(model_validation.total_return*100) }}，同期 0050 {{ '%+.2f%%'|format(model_validation.benchmark_return*100) }}。預測模型已可產生模擬清單；組合配置的優劣以這組多年數字為準。</span>
       {% else %}<b>AI 選股歷史重播正在背景計算。</b><span>歷史樣本外預測已保存；完成後會以後一交易日價格、滑價、手續費與交易稅重播，並和每日向前紀錄分開顯示。</span>{% endif %}
     </div>
     <div class="ai-model-methods-v5">
-      {% for item in model_rows %}<a href="/models?run={{ item.id }}"><b>{{ item.name }}</b><span>{{ item.method }}</span><small>{{ item.status }} · 完成 {{ taipei_time(item.updated_at).strftime('%Y-%m-%d %H:%M') }} · 方向答對 {{ '%.1f%%'|format(item.direction*100) }} · {{ term('排名 IC','Rank Information Coefficient；模型預測排名與後來實際報酬排名的相關性。接近 0 代表幾乎沒有排序能力，正值越大越好。') }} {{ '%.3f'|format(item.rank_ic or 0) }}</small></a>{% endfor %}
+      {% for item in model_rows %}<a href="/models?run={{ item.id }}"><b>{{ item.name }}</b><span>{{ item.method }}</span><small>{{ item.status }} · {{ '預測相對 0050 五日超額' if item.label_name == 'excess_return_5d' else '預測五日絕對報酬' }} · 完成 {{ taipei_time(item.updated_at).strftime('%Y-%m-%d %H:%M') }} · 方向答對 {{ '%.1f%%'|format(item.direction*100) }} · {{ term('排名 IC','Rank Information Coefficient；模型預測排名與後來實際報酬排名的相關性。接近 0 代表幾乎沒有排序能力，正值越大越好。') }} {{ '%.3f'|format(item.rank_ic or 0) }}</small></a>{% endfor %}
     </div>
     <div class="ai-funding-explainer-v6">
       <div>
@@ -253,7 +258,7 @@
       <p>不是請語言模型臨場猜股票，而是把每日模型訊號轉成受限的組合委託。</p>
     </div>
     <div class="ai-strategy-grid-v2">
-      <article><i>01</i><h3>股票橫向排序</h3><p>只選「候選」、五日預估報酬為正且資料品質無阻擋的股票。排序分數＝五日預估報酬－0.5×預測分歧＋0.05×綜合分數。</p></article>
+      <article><i>01</i><h3>股票橫向排序</h3><p>只選「候選」、五日相對 0050 預估超額為正且資料品質無阻擋的股票。排序分數＝預估超額－0.5×預測分歧＋0.05×綜合分數。</p></article>
       <article><i>02</i><h3>目標股數</h3><p>模型建議權重換算成股數；單股最多 20%，全帳戶總曝險最多 80%，不能超過可用現金。</p></article>
       <article><i>03</i><h3>成交假設</h3><p>正式目標是 13:40～14:30 盤後零股限價委託、14:30 一次撮合。沒有實際 14:30 歷史價時，只能用 13:30 收盤價加 10 bps 滑價做代理，並明確標示為代理結果。</p></article>
       <article><i>04</i><h3>退出規則</h3><p>持股決策變成「避免」或「資料不足」時，在當日盤後零股時段提出退出草稿；未取得 14:30 成交回報就維持待成交，不假裝已賣出。</p></article>

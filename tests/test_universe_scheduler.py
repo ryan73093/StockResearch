@@ -76,7 +76,7 @@ def test_daily_pipeline_is_audited_and_idempotent(tmp_path):
     )
 
     first = pipeline.run("US", now=datetime(2025, 1, 3, tzinfo=UTC))
-    second = pipeline.run("US", now=datetime(2025, 1, 4, tzinfo=UTC))
+    second = pipeline.run("US", now=datetime(2025, 1, 3, 1, tzinfo=UTC))
 
     assert first.status == "succeeded"
     assert first.inserted == 1
@@ -84,6 +84,104 @@ def test_daily_pipeline_is_audited_and_idempotent(tmp_path):
     runs = pipeline.list_recent_runs()
     assert len(runs) == 2
     assert all(run.status.value == "succeeded" for run in runs)
+
+
+def test_daily_pipeline_fails_closed_when_latest_session_is_stale(tmp_path):
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'stale.db'}"))
+    universe_repository = SqlAlchemyResearchUniverseRepository(container.database.session_factory)
+    for asset in universe_repository.list_all():
+        universe_repository.set_active(asset.symbol, False)
+    container.research_universe_service.add_asset(
+        "0050.TW", "TW", asset_type="ETF", data_start=date(2020, 1, 1)
+    )
+    market_repository = SqlAlchemyMarketBarRepository(container.database.session_factory)
+    run_repository = SqlAlchemySchedulerJobRunRepository(container.database.session_factory)
+    class StaleTwProvider(DynamicFakeProvider):
+        def fetch_daily_bars(self, symbol, market, start, end):
+            values = super().fetch_daily_bars(symbol, market, start, end)
+            stale_close = datetime(2025, 1, 2, 5, 30, tzinfo=UTC)
+            return [
+                MarketBar(
+                    symbol=item.symbol,
+                    market=item.market,
+                    interval=item.interval,
+                    event_time=stale_close,
+                    available_time=stale_close + timedelta(minutes=15),
+                    ingested_at=item.ingested_at,
+                    open=item.open,
+                    high=item.high,
+                    low=item.low,
+                    close=item.close,
+                    adjusted_close=item.adjusted_close,
+                    volume=item.volume,
+                    source=item.source,
+                )
+                for item in values
+            ]
+
+    pipeline = DailyMarketDataPipeline(
+        universe_repository,
+        market_repository,
+        MarketDataIngestionService(StaleTwProvider(), market_repository),
+        run_repository,
+    )
+
+    result = pipeline.run(
+        "TW",
+        now=datetime(2025, 1, 3, 6, 0, tzinfo=UTC),  # 14:00 Taipei
+    )
+
+    assert result.status == "failed"
+    assert result.fresh is False
+    assert result.expected_date == "2025-01-03"
+    assert "__market_freshness__" in result.failures
+
+
+def test_tw_daily_pipeline_uses_bulk_official_close_without_yahoo(tmp_path):
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'bulk.db'}"))
+    universe_repository = SqlAlchemyResearchUniverseRepository(container.database.session_factory)
+    for asset in universe_repository.list_all():
+        universe_repository.set_active(asset.symbol, False)
+    container.research_universe_service.add_asset(
+        "0050.TW", "TW", asset_type="ETF", data_start=date(2020, 1, 1)
+    )
+    market_repository = SqlAlchemyMarketBarRepository(container.database.session_factory)
+    run_repository = SqlAlchemySchedulerJobRunRepository(container.database.session_factory)
+
+    class NoYahooProvider:
+        name = "yahoo_finance"
+
+        def fetch_daily_bars(self, *_args, **_kwargs):
+            raise AssertionError("official-covered symbol must not call Yahoo")
+
+    class BulkOfficialProvider:
+        def fetch_snapshot(self, symbols, now):
+            close = datetime(2025, 1, 3, 13, 30, tzinfo=timezone(timedelta(hours=8)))
+            return [
+                MarketBar(
+                    symbol=symbols[0], market="TW", interval="1d",
+                    event_time=close, available_time=close + timedelta(minutes=15),
+                    ingested_at=now, open=Decimal("100"), high=Decimal("101"),
+                    low=Decimal("99"), close=Decimal("100"),
+                    adjusted_close=Decimal("100"), volume=1_000,
+                    source="twse_tpex_official",
+                )
+            ]
+
+    pipeline = DailyMarketDataPipeline(
+        universe_repository,
+        market_repository,
+        MarketDataIngestionService(NoYahooProvider(), market_repository),
+        run_repository,
+        BulkOfficialProvider(),
+    )
+
+    result = pipeline.run("TW", now=datetime(2025, 1, 3, 6, 0, tzinfo=UTC))
+
+    assert result.status == "succeeded"
+    assert result.inserted == 1
+    assert result.succeeded == 1
+    assert result.failed == 0
 
 
 def test_background_scheduler_registers_market_specific_jobs(tmp_path):

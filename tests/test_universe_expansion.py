@@ -8,7 +8,6 @@ from quant_platform.data_sources.taiwan_market_rank import (
 )
 from quant_platform.domain.entities import MarketBar, ResearchAsset, UniverseMembership
 
-
 NOW = datetime(2026, 7, 27, 5, 30, tzinfo=UTC)
 
 
@@ -67,6 +66,20 @@ class History:
                 ["2330.TW", "2317.TW", "6488.TWO", "006208.TW"], 1
             )
         ]
+
+
+class LazyHistory(History):
+    def __init__(self):
+        self.synced = False
+
+    def members_on(self, effective_date, market=None):
+        if not self.synced:
+            return []
+        return super().members_on(effective_date, market)
+
+    def sync_taiwan(self):
+        self.synced = True
+        return SimpleNamespace(current_received=4)
 
 
 def bar(symbol, sequence):
@@ -129,6 +142,40 @@ def test_expansion_prioritizes_large_cross_industry_names_and_keeps_ready_assets
     assert result.deactivated == 0
     assert after.data_ready_assets == 2
     assert after.remaining_assets == 1
+
+
+def test_expansion_syncs_current_universe_before_selecting_first_batch():
+    repository = UniverseRepo()
+    universe = UniverseService(repository)
+    bars = Bars()
+    history = LazyHistory()
+    service = UniverseExpansionService(
+        universe, repository, history, MarketPipeline(bars),
+        TaiwanPipeline(), bars, Decisions(), daily_batch_size=2,
+    )
+
+    result = service.run_batch(now=NOW)
+
+    assert history.synced is True
+    assert result.symbols == ("2317.TW", "2330.TW")
+    assert result.kept_active == 2
+
+
+def test_expansion_invalidates_empty_overview_after_external_membership_sync():
+    repository = UniverseRepo()
+    universe = UniverseService(repository)
+    bars = Bars()
+    history = LazyHistory()
+    service = UniverseExpansionService(
+        universe, repository, history, MarketPipeline(bars),
+        TaiwanPipeline(), bars, Decisions(), daily_batch_size=2,
+    )
+    assert service.overview().remaining_assets == 0
+    history.synced = True
+
+    result = service.run_batch(now=NOW)
+
+    assert result.symbols == ("2317.TW", "2330.TW")
 
 
 def test_official_market_rank_combines_twse_and_tpex_values():

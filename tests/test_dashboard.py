@@ -25,7 +25,7 @@ def test_dashboard_and_health(tmp_path):
     assert portfolios.status_code == 200
     assert "Portfolio & Risk Lab" in portfolios.get_data(as_text=True)
 
-    for path in ("/", "/guide", "/progress", "/account", "/decisions", "/stocks", "/data", "/data-quality", "/macro-data", "/odd-lot", "/paper-trading", "/rl-lab", "/shadow-trading", "/promotions", "/model-governance", "/news", "/reports", "/automation", "/universe", "/features", "/factors", "/strategies", "/backtests", "/ensembles", "/portfolios", "/models"):
+    for path in ("/", "/guide", "/progress", "/account", "/decisions", "/stocks", "/data", "/data-pipeline", "/data-quality", "/macro-data", "/odd-lot", "/paper-trading", "/rl-lab", "/shadow-trading", "/promotions", "/model-governance", "/news", "/reports", "/automation", "/universe", "/features", "/factors", "/strategies", "/backtests", "/ensembles", "/portfolios", "/models"):
         response = client.get(path)
         body = response.get_data(as_text=True)
         assert response.status_code == 200
@@ -75,6 +75,10 @@ def test_dashboard_and_health(tmp_path):
     assert "資料品質與缺漏監控" in quality_page
     assert "Point-in-time" in quality_page
     assert "研究閘門" in quality_page
+    pipeline_page = client.get("/data-pipeline").get_data(as_text=True)
+    assert "現在到底有哪些資料" in pipeline_page
+    assert "大戶持股集中度" in pipeline_page
+    assert "未建置" in pipeline_page
 
 
 def test_dashboard_keeps_expanded_stock_pool_out_of_homepage_analytics(tmp_path):

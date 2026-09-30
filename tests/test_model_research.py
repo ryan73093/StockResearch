@@ -6,6 +6,8 @@ from time import monotonic, sleep
 
 import numpy as np
 
+from quant_platform.application.model_research import BASE_FEATURES, TW_RESEARCH_FEATURES
+from quant_platform.application.model_training import ModelTrainingCoordinator
 from quant_platform.config import Settings
 from quant_platform.container import build_container
 from quant_platform.database.repositories import (
@@ -13,8 +15,6 @@ from quant_platform.database.repositories import (
     SqlAlchemyModelResearchRepository,
 )
 from quant_platform.domain.entities import FeatureValue, ModelExperiment, ModelExplanation
-from quant_platform.application.model_research import BASE_FEATURES, TW_RESEARCH_FEATURES
-from quant_platform.application.model_training import ModelTrainingCoordinator
 from quant_platform.machine_learning import build_model
 from quant_platform.machine_learning.automl import AutoMLSearch
 
@@ -84,9 +84,11 @@ def test_model_evaluation_keeps_each_out_of_sample_prediction(tmp_path) -> None:
         asset_count=5,
         computed_at=datetime(2026, 1, 1, tzinfo=UTC),
         feature_names=("f1", "f2"),
+        label_name="excess_return_5d",
         historical_predictions=historical,
     )
 
+    assert experiment.label_name == "excess_return_5d"
     assert experiment.fold_count == 3
     assert len(historical) == experiment.observation_count
     assert len({item[0] for item in historical}) > 20
@@ -192,6 +194,65 @@ def test_taiwan_slow_features_are_joined_only_after_available_time(tmp_path) -> 
     assert len(rows) == 1
     assert rows[0][1] == second_event.replace(tzinfo=None)
     assert rows[0][3][-1] == 2.0
+
+
+def test_comprehensive_feature_selection_keeps_a_common_research_cohort(tmp_path) -> None:
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'cohort.db'}"))
+    repository = SqlAlchemyFeatureLabelStoreRepository(container.database.session_factory)
+    symbols = [f"{2300 + index}.TW" for index in range(10)]
+    event_time = datetime(2026, 1, 2, 13, 30, tzinfo=UTC)
+    values = []
+    for symbol in symbols:
+        values.append(FeatureValue(
+            symbol=symbol,
+            feature_name="return_1d",
+            feature_version="1.0.0",
+            event_time=event_time,
+            available_time=event_time,
+            computed_at=event_time,
+            value=1.0,
+        ))
+    for symbol in symbols[:5]:
+        for offset in range(12):
+            historical_time = event_time - timedelta(days=offset)
+            for name in ("pe_ratio", "pb_ratio"):
+                values.append(FeatureValue(
+                    symbol=symbol,
+                    feature_name=name,
+                    feature_version="1.0.0",
+                    event_time=historical_time,
+                    available_time=historical_time,
+                    computed_at=event_time,
+                    value=1.0,
+                ))
+        values.append(FeatureValue(
+            symbol=symbol,
+            feature_name="dividend_yield",
+            feature_version="1.0.0",
+            event_time=event_time,
+            available_time=event_time + timedelta(days=1),
+            computed_at=event_time + timedelta(days=1),
+            value=1.0,
+        ))
+    for symbol in symbols[5:]:
+        values.append(FeatureValue(
+            symbol=symbol,
+            feature_name="monthly_revenue",
+            feature_version="1.0.0",
+            event_time=event_time,
+            available_time=event_time,
+            computed_at=event_time,
+            value=1.0,
+        ))
+    repository.upsert_features(values)
+
+    selected = container.model_research_pipeline._select_research_features(
+        symbols, ("pe_ratio", "pb_ratio", "monthly_revenue", "dividend_yield")
+    )
+
+    assert selected[-2:] == ("pe_ratio", "pb_ratio")
+    assert "monthly_revenue" not in selected
+    assert "dividend_yield" not in selected
 
 
 def test_model_explanation_registry_is_idempotent(tmp_path) -> None:

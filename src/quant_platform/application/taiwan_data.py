@@ -22,7 +22,6 @@ from quant_platform.domain.entities import (
     TaiwanDataRecord,
 )
 
-
 logger = logging.getLogger(__name__)
 
 TAIWAN_DATASETS = {
@@ -35,6 +34,7 @@ TAIWAN_DATASETS = {
     "TaiwanStockBalanceSheet": "資產負債表",
     "TaiwanStockCashFlowsStatement": "現金流量表",
     "TaiwanStockNews": "個股新聞",
+    "TaiwanStockShareholdingDistribution": "集保戶股權分散",
 }
 QUARTERLY_DATASETS = {
     "TaiwanStockFinancialStatements",
@@ -44,6 +44,9 @@ QUARTERLY_DATASETS = {
 
 TAIWAN_FEATURES = (
     FeatureDefinition("institutional_net_buy", "1.0.0", "籌碼", "三大法人買賣超股數", 1, "{}"),
+    FeatureDefinition("foreign_net_buy", "1.0.0", "籌碼", "外資買賣超股數", 1, "{}"),
+    FeatureDefinition("investment_trust_net_buy", "1.0.0", "籌碼", "投信買賣超股數", 1, "{}"),
+    FeatureDefinition("dealer_net_buy", "1.0.0", "籌碼", "自營商買賣超股數", 1, "{}"),
     FeatureDefinition("margin_purchase_balance", "1.0.0", "籌碼", "融資今日餘額", 1, "{}"),
     FeatureDefinition("short_sale_balance", "1.0.0", "籌碼", "融券今日餘額", 1, "{}"),
     FeatureDefinition("securities_lending_quantity", "1.0.0", "籌碼", "借券交易數量", 1, "{}"),
@@ -58,6 +61,10 @@ TAIWAN_FEATURES = (
     FeatureDefinition("free_cash_flow", "1.0.0", "基本面", "自由現金流", 1, "{}"),
     FeatureDefinition("free_cash_flow_margin", "1.0.0", "基本面", "自由現金流率", 1, "{}"),
     FeatureDefinition("news_sentiment_daily", "1.0.0", "市場情緒", "當日個股新聞文字情緒分數", 1, "{}"),
+    FeatureDefinition("large_holder_ratio_1000_lots", "1.0.0", "籌碼", "持股一千張以上占集保庫存比例", 1, "{}"),
+    FeatureDefinition("retail_holder_ratio_under_1_lot", "1.0.0", "籌碼", "持股未滿一張占集保庫存比例", 1, "{}"),
+    FeatureDefinition("large_holder_count_1000_lots", "1.0.0", "籌碼", "持股一千張以上人數", 1, "{}"),
+    FeatureDefinition("shareholder_count", "1.0.0", "籌碼", "集保戶總人數", 1, "{}"),
 )
 
 
@@ -122,6 +129,52 @@ class TaiwanDataPipeline:
         status = getattr(self._provider, "status", None)
         return status() if callable(status) else {}
 
+    def rebuild_features(self, now: datetime | None = None) -> int:
+        """Rebuild derived Taiwan features from raw records already in storage.
+
+        A download can be interrupted after its raw revisions were committed but
+        before feature materialization finishes.  Requiring another full network
+        download makes recovery slow and leaves a populated database looking
+        empty to the research layer, so recovery is intentionally local-only.
+        """
+        started = now or datetime.now(UTC)
+        if started.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        run_id = self._run_repository.start("taiwan_feature_rebuild", "TW", started)
+        try:
+            assets = [
+                item.symbol
+                for item in self._universe_repository.list_active("TW")
+                if item.symbol.endswith((".TW", ".TWO"))
+            ]
+            self._feature_repository.register_definitions(list(TAIWAN_FEATURES))
+            features = self._materialize_features(
+                assets=assets,
+                computed_at=started,
+                records=None,
+            )
+            feature_count = self._feature_repository.upsert_features(features)
+        except Exception as exc:
+            self._run_repository.finish(
+                run_id,
+                JobRunStatus.FAILED.value,
+                datetime.now(UTC),
+                json.dumps({"feature_values": 0}, ensure_ascii=False),
+                str(exc),
+            )
+            raise
+        self._run_repository.finish(
+            run_id,
+            JobRunStatus.SUCCEEDED.value,
+            datetime.now(UTC),
+            json.dumps(
+                {"asset_count": len(assets), "feature_values": feature_count},
+                ensure_ascii=False,
+            ),
+            None,
+        )
+        return feature_count
+
     def run(
         self,
         market: str = "TW",
@@ -154,29 +207,40 @@ class TaiwanDataPipeline:
             *(name for name in TAIWAN_DATASETS if name != "TaiwanStockPER"),
         )
         fetch_many = getattr(self._provider, "fetch_many", None)
+        batch_datasets = set(getattr(
+            self._provider, "batch_datasets", {"TaiwanStockPER"}
+        ))
         if callable(fetch_many) and assets:
-            try:
-                values = fetch_many(
-                    "TaiwanStockPER",
-                    [item.symbol for item in assets],
-                    min(
-                        datetime.combine(item.data_start, time.min, tzinfo=UTC)
-                        for item in assets
-                    ),
-                    started,
-                )
-                self._validate(values)
-                received += len(values)
-                inserted += self._data_repository.add_revisions(values)
-                materialized_records.extend(values)
-                successful_calls += 1
-                successful_datasets.add("TaiwanStockPER")
-                ordered_datasets = tuple(
-                    item for item in ordered_datasets if item != "TaiwanStockPER"
-                )
-            except Exception as exc:
-                logger.exception("Official Taiwan market-wide valuation ingestion failed")
-                failures["market/TaiwanStockPER"] = str(exc)
+            for dataset in tuple(
+                item for item in ordered_datasets if item in batch_datasets
+            ):
+                try:
+                    values = fetch_many(
+                        dataset,
+                        [item.symbol for item in assets],
+                        min(
+                            datetime.combine(item.data_start, time.min, tzinfo=UTC)
+                            for item in assets
+                        ),
+                        started,
+                    )
+                    self._validate(values)
+                    received += len(values)
+                    inserted += self._data_repository.add_revisions(values)
+                    materialized_records.extend(values)
+                    successful_calls += 1
+                    successful_datasets.add(dataset)
+                except Exception as exc:
+                    logger.exception(
+                        "Official Taiwan market-wide %s ingestion failed", dataset
+                    )
+                    failures[f"market/{dataset}"] = str(exc)
+                finally:
+                    # A failed market-wide endpoint must not be retried once per
+                    # security; that was the source of hour-long partial runs.
+                    ordered_datasets = tuple(
+                        item for item in ordered_datasets if item != dataset
+                    )
         for asset in assets:
             for dataset in ordered_datasets:
                 if (
@@ -263,11 +327,13 @@ class TaiwanDataPipeline:
         if records is None:
             records = []
             selected_datasets = datasets or set(TAIWAN_DATASETS)
+            selected_assets = set(assets)
             for dataset in selected_datasets:
-                for symbol in assets:
-                    records.extend(
-                        self._data_repository.list_records(dataset=dataset, symbol=symbol)
-                    )
+                records.extend(
+                    item
+                    for item in self._data_repository.list_records(dataset=dataset)
+                    if item.symbol in selected_assets
+                )
         latest: dict[tuple[str, str, datetime, str], TaiwanDataRecord] = {}
         for item in records:
             key = (item.dataset, item.symbol, item.event_time, item.record_key)
@@ -388,6 +454,16 @@ class TaiwanDataPipeline:
 
     def _extract(self, dataset: str, raws: list[dict[str, Any]]) -> dict[str, float | None]:
         if dataset == "TaiwanStockInstitutionalInvestorsBuySell":
+            if any("institutional_net_buy" in item for item in raws):
+                return {
+                    name: sum(
+                        self._optional_number(item, name) or 0.0 for item in raws
+                    )
+                    for name in (
+                        "institutional_net_buy", "foreign_net_buy",
+                        "investment_trust_net_buy", "dealer_net_buy",
+                    )
+                }
             return {
                 "institutional_net_buy": sum(
                     self._number(item, "buy") - self._number(item, "sell") for item in raws
@@ -424,6 +500,27 @@ class TaiwanDataPipeline:
             ).lower()
             score = sum(text.count(word) for word in positive) - sum(text.count(word) for word in negative)
             return {"news_sentiment_daily": max(-1.0, min(1.0, score / 3))}
+        if dataset == "TaiwanStockShareholdingDistribution":
+            levels = {
+                int(value): item
+                for item in raws
+                if (value := self._optional_number(item, "holding_level")) is not None
+            }
+            large = levels.get(15, {})
+            retail = levels.get(1, {})
+            total = levels.get(17, {})
+            return {
+                "large_holder_ratio_1000_lots": self._optional_number(
+                    large, "ratio_pct"
+                ),
+                "retail_holder_ratio_under_1_lot": self._optional_number(
+                    retail, "ratio_pct"
+                ),
+                "large_holder_count_1000_lots": self._optional_number(
+                    large, "holders"
+                ),
+                "shareholder_count": self._optional_number(total, "holders"),
+            }
         return {}
 
     @staticmethod

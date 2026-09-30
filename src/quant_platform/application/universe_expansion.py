@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import threading
 import time
@@ -12,6 +13,8 @@ from quant_platform.application.ports import (
     MarketBarRepository,
     ResearchUniverseRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # Liquid, cross-industry names are attempted first. Membership history still
@@ -87,6 +90,7 @@ class UniverseExpansionService:
         self._target = target_ready_assets
         self._runs = run_repository
         self._overview_cache: tuple[float, UniverseExpansionOverview] | None = None
+        self._membership_refresh_attempted_at = 0.0
         self._overview_lock = threading.Lock()
         self._batch_lock = threading.Lock()
 
@@ -142,6 +146,40 @@ class UniverseExpansionService:
     def invalidate_overview_cache(self) -> None:
         with self._overview_lock:
             self._overview_cache = None
+
+    def _refresh_eligible_universe_if_needed(self) -> None:
+        """Populate the current TWSE/TPEx candidate pool before expansion.
+
+        The original worker only consumed persisted lifecycle rows.  A fresh
+        installation therefore saw only the small built-in research seed and
+        incorrectly concluded that there was nothing left to expand.
+        """
+        eligible_count = len(self._eligible())
+        if eligible_count >= self._target:
+            # Another worker or a manual sync may have populated memberships
+            # after this process cached an empty overview.
+            with self._overview_lock:
+                cached_count = (
+                    self._overview_cache[1].eligible_common_stocks
+                    if self._overview_cache is not None
+                    else eligible_count
+                )
+                if cached_count != eligible_count:
+                    self._overview_cache = None
+            return
+        now = time.monotonic()
+        if now - self._membership_refresh_attempted_at < 3600:
+            return
+        self._membership_refresh_attempted_at = now
+        sync = getattr(self._history, "sync_taiwan", None)
+        if not callable(sync):
+            return
+        try:
+            sync()
+        except Exception as exc:
+            logger.warning("Taiwan universe membership refresh failed: %s", exc)
+            return
+        self.invalidate_overview_cache()
 
     def _history_tier(self, symbol: str, now: datetime | None = None) -> str:
         count = len(self._bars.list_bars(symbol, as_of=now))
@@ -270,6 +308,7 @@ class UniverseExpansionService:
         fetch_auxiliary: bool = True,
     ) -> UniverseExpansionResult:
         started_at = now or datetime.now(UTC)
+        self._refresh_eligible_universe_if_needed()
         overview = self.overview()
         if overview.data_ready_assets >= self._target:
             return UniverseExpansionResult(

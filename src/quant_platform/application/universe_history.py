@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
@@ -7,6 +8,8 @@ from quant_platform.application.ports import ResearchUniverseRepository
 from quant_platform.data_sources.finmind import FinMindProvider
 from quant_platform.data_sources.twse import TwseCompanyProvider
 from quant_platform.domain.entities import UniverseMembership
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,8 +64,30 @@ class UniverseHistoryService:
         return self._repository.upsert_memberships(seeds)
 
     def sync_taiwan(self) -> UniverseSyncResult:
-        current = self._finmind.fetch_dataset("TaiwanStockInfo")
-        delisted = self._finmind.fetch_dataset("TaiwanStockDelisting")
+        # The current listed-company universe must not disappear just because
+        # the optional FinMind lifecycle endpoint is unavailable.  TWSE/TPEx
+        # company OpenAPI data is sufficient to seed today's candidate pool;
+        # FinMind is still used when available for delisting history.
+        official_profiles = self._twse.fetch_company_profiles()
+        official_symbols = {
+            item.symbol.split(".", 1)[0]: item.symbol for item in official_profiles
+        }
+        current: list[dict[str, object]] = []
+        delisted: list[dict[str, object]] = []
+        try:
+            current = self._finmind.fetch_dataset("TaiwanStockInfo")
+        except Exception as exc:
+            logger.warning(
+                "FinMind current Taiwan universe unavailable; using official TWSE/TPEx profiles: %s",
+                exc,
+            )
+        try:
+            delisted = self._finmind.fetch_dataset("TaiwanStockDelisting")
+        except Exception as exc:
+            logger.warning(
+                "FinMind delisting history unavailable; current universe sync will continue: %s",
+                exc,
+            )
         official_rows = self._twse.fetch_listed_companies()
         official_dates = {
             self._twse.company_code(row): self._twse.listing_date(row)
@@ -80,25 +105,46 @@ class UniverseHistoryService:
         }
         now = datetime.now(UTC)
         values: list[UniverseMembership] = []
-        for row in current:
-            code = str(row.get("stock_id") or "").strip()
-            if not code:
-                continue
+        current_by_code = {
+            str(row.get("stock_id") or "").strip(): row
+            for row in current
+            if str(row.get("stock_id") or "").strip()
+        }
+        current_codes = set(current_by_code) | set(official_symbols)
+        for code in sorted(current_codes):
+            row = current_by_code.get(code, {})
+            # Prefer the official suffix because it distinguishes TWSE and
+            # TPEx even when FinMind is unavailable or returns a sparse row.
+            official_symbol = official_symbols.get(code)
             market_type = str(row.get("type") or "twse").lower()
-            suffix = ".TWO" if market_type == "tpex" else ".TW"
+            suffix = (
+                ".TWO" if official_symbol and official_symbol.endswith(".TWO")
+                else ".TW" if official_symbol
+                else ".TWO" if market_type == "tpex"
+                else ".TW"
+            )
             listing_date = official_dates.get(code)
             inferred_start = asset_starts.get(code, date(2001, 1, 1))
+            lifecycle_source = (
+                "twse-finmind-lifecycle"
+                if code in current_by_code
+                else "twse-tpex-current-universe"
+            )
+            lifecycle_reason = (
+                "證交所上市日＋FinMind 現行股票清單／下市櫃日期"
+                if code in current_by_code
+                else "證交所／櫃買中心現行公司名冊；歷史下市櫃仍待補齊"
+            )
             values.append(UniverseMembership(
                 id=None, symbol=f"{code}{suffix}", market="TW",
                 valid_from=listing_date or inferred_start,
                 valid_to=delisted_dates.get(code),
                 start_is_exact=listing_date is not None,
                 end_is_exact=True,
-                source="twse-finmind-lifecycle",
-                reason="證交所上市日＋FinMind 現行股票清單／下市櫃日期",
+                source=lifecycle_source,
+                reason=lifecycle_reason,
                 recorded_at=now,
             ))
-        current_codes = {str(row.get("stock_id") or "").strip() for row in current}
         for row in delisted:
             code = str(row.get("stock_id") or "").strip()
             end = self._parse_date(row.get("date"))
@@ -113,7 +159,7 @@ class UniverseHistoryService:
             ))
         changed = self._repository.upsert_memberships(values)
         return UniverseSyncResult(
-            current_received=len(current), delisted_received=len(delisted),
+            current_received=len(current_codes), delisted_received=len(delisted),
             official_listing_dates=sum(value is not None for value in official_dates.values()),
             changed=changed,
         )

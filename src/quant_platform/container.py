@@ -42,6 +42,7 @@ from quant_platform.application.promotion import PromotionService
 from quant_platform.application.model_governance import ModelGovernanceService
 from quant_platform.application.data_quality import DataQualityService
 from quant_platform.application.point_in_time_data import PointInTimeDataService
+from quant_platform.application.google_trends import GoogleTrendsCsvImportService
 from quant_platform.application.intraday_features import IntradayDerivativeFeaturePipeline
 from quant_platform.application.corporate_events import EarningsCallService
 from quant_platform.application.failure_memory import ResearchFailureMemoryService
@@ -53,6 +54,7 @@ from quant_platform.data_sources import (
     FinMindProvider, FinMindPointInTimeProvider, FredCsvProvider,
     MopsEarningsCallProvider, PointInTimeProviderRouter, TwseCompanyProvider,
     TwsePointInTimeProvider,
+    TaiwanOfficialDailyBarProvider,
     TaiwanOfficialMarketRankingProvider,
     TaiwanOfficialFallbackProvider,
     YahooFinanceProvider,
@@ -149,6 +151,7 @@ class Container:
     model_governance_service: ModelGovernanceService
     data_quality_service: DataQualityService
     point_in_time_data_service: PointInTimeDataService
+    google_trends_service: GoogleTrendsCsvImportService
     intraday_derivative_feature_pipeline: IntradayDerivativeFeaturePipeline
     earnings_call_service: EarningsCallService
     research_failure_memory_service: ResearchFailureMemoryService
@@ -201,6 +204,7 @@ def build_container(settings: Settings | None = None) -> Container:
             finmind_pit_provider, TwsePointInTimeProvider(), MopsEarningsCallProvider(),
         ]),
     )
+    google_trends_service = GoogleTrendsCsvImportService(point_in_time_repository)
     intraday_derivative_feature_pipeline = IntradayDerivativeFeaturePipeline(
         point_in_time_repository, feature_store_repository, universe_repository,
         job_run_repository, IntradayDerivativeFeatureEngine(),
@@ -218,6 +222,7 @@ def build_container(settings: Settings | None = None) -> Container:
         market_bar_repository,
         ingestion_service,
         job_run_repository,
+        TaiwanOfficialDailyBarProvider(),
     )
     taiwan_data_pipeline = TaiwanDataPipeline(
         universe_repository,
@@ -486,6 +491,7 @@ def build_container(settings: Settings | None = None) -> Container:
         model_governance_service=model_governance_service,
         data_quality_service=data_quality_service,
         point_in_time_data_service=point_in_time_data_service,
+        google_trends_service=google_trends_service,
         intraday_derivative_feature_pipeline=intraday_derivative_feature_pipeline,
         earnings_call_service=earnings_call_service,
         research_failure_memory_service=ResearchFailureMemoryService(

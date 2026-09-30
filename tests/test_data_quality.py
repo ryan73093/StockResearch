@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, call
 import pytest
 
 from quant_platform.application.data_quality import DataQualityGateError
+from quant_platform.application.model_research import AVAILABLE_MODELS
 from quant_platform.application.research_pipeline import DailyResearchPipeline
 from quant_platform.config import Settings
 from quant_platform.container import build_container
@@ -181,7 +182,17 @@ def test_after_hours_preview_is_built_before_slower_auxiliary_sources() -> None:
         early_decision_callback=lambda _result: calls.append("plan"),
     )
 
-    assert calls[:5] == ["market", "features", "decision", "plan", "taiwan"]
+    assert calls[:6] == [
+        "market", "features", "decision", "plan", "taiwan", "macro"
+    ]
+    models = components[-2]
+    if "torch_cuda_mlp" in AVAILABLE_MODELS:
+        models.run.assert_called_once_with(
+            "TW",
+            now=datetime(2026, 8, 5, 6, tzinfo=UTC),
+            model_names=("torch_cuda_mlp",),
+            feature_profile="price_core",
+        )
 
 
 def test_quality_dashboard_shows_explicit_units(tmp_path) -> None:

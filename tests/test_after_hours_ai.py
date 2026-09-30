@@ -13,7 +13,7 @@ from quant_platform.domain.entities import (
 )
 
 
-NOW = datetime(2026, 7, 27, 5, 30, tzinfo=UTC)
+NOW = datetime(2026, 7, 27, 5, 50, tzinfo=UTC)
 
 
 def _decision(
@@ -130,6 +130,20 @@ def test_after_hours_ai_submits_to_paper_idempotently():
     assert len(paper.orders) == 1
 
 
+def test_after_hours_ai_refuses_to_submit_after_odd_lot_window():
+    paper = PaperService()
+    service = AfterHoursAiService(DecisionRepo(_decision()), BarRepo(), paper)
+    after_window = datetime(2026, 7, 27, 6, 31, tzinfo=UTC)
+    plan = service.generate(after_window)
+
+    assert plan.buy_count == 1
+    assert plan.snapshot_kind == "expired"
+    assert plan.submission_allowed is False
+    assert "禁止補送" in plan.headline
+    assert service.submit_to_paper(plan=plan, now=after_window).submitted == 0
+    assert paper.orders == []
+
+
 def test_after_hours_ai_refuses_blocked_candidate():
     plan = AfterHoursAiService(
         DecisionRepo(_decision(gates='["股票池少於 30 檔"]')),
@@ -142,10 +156,27 @@ def test_after_hours_ai_refuses_blocked_candidate():
     assert plan.watchlist[0].blocker == "股票池少於 30 檔"
 
 
-def test_after_hours_ai_refuses_stale_decision():
+def test_after_hours_ai_keeps_yesterday_plan_as_read_only_history():
+    paper = PaperService()
+    service = AfterHoursAiService(DecisionRepo(_decision()), BarRepo(), paper)
+    plan = service.generate(datetime(2026, 7, 28, 5, 30, tzinfo=UTC))
+
+    assert plan.buy_count == 1
+    assert plan.snapshot_kind == "historical"
+    assert plan.submission_allowed is False
+    assert "事後補算：2026-07-27" in plan.headline
+    assert "當時未送單" in plan.headline
+    submission = service.submit_to_paper(
+        plan=plan, now=datetime(2026, 7, 28, 5, 30, tzinfo=UTC)
+    )
+    assert submission.submitted == 0
+    assert paper.orders == []
+
+
+def test_after_hours_ai_refuses_old_snapshot_outside_history_window():
     plan = AfterHoursAiService(
         DecisionRepo(_decision()), BarRepo(), PaperService()
-    ).generate(datetime(2026, 7, 28, 5, 30, tzinfo=UTC))
+    ).generate(datetime(2026, 8, 3, 5, 30, tzinfo=UTC))
 
     assert plan.orders == ()
     assert plan.headline == "今日不交易：決策資料不是今日盤後快照"
@@ -172,6 +203,7 @@ def test_after_hours_ai_shows_latest_close_plan_on_weekend():
     assert plan.buy_count == 1
     assert "休市預覽：下個交易日模擬買進 1 筆" in plan.headline
     assert plan.mode.startswith("休市預覽")
+    assert plan.submission_allowed is False
 
 
 def test_after_hours_ai_limits_daily_actions_and_buys():
@@ -385,3 +417,36 @@ def test_after_hours_ai_replays_historical_oos_model_predictions():
     assert tracker["id"] == 1
     assert tracker["tracked_sessions"] == 0
     assert tracker["target_sessions"] == 252
+
+
+def test_new_negative_challenger_does_not_hide_replayable_model():
+    start = datetime(2024, 1, 1, tzinfo=UTC)
+    replayable = ModelExperiment(
+        id=1, market="TW", model_name="ridge_linear", model_version="1",
+        label_name="future_return_5d", experiment_version="1.4.0",
+        promotion_gate="RESEARCH", data_start=start, data_end=start + timedelta(days=79),
+        observation_count=800, fold_count=3, feature_count=2,
+        rmse=.02, mae=.01, r2=.01, directional_accuracy=.55,
+        rank_ic=.03, long_short_spread=.01, feature_names_json='["a","b"]',
+        parameters_json="{}", fold_metrics_json="[]", feature_importance_json="{}",
+        limitations_json="[]", computed_at=start + timedelta(days=100),
+    )
+    negative_challenger = replace(
+        replayable,
+        id=2,
+        experiment_version="1.5.0",
+        rank_ic=-.01,
+        computed_at=start + timedelta(days=101),
+    )
+    model_repository = SimpleNamespace(
+        prediction_coverage=lambda experiment_id: (800, 80),
+    )
+    service = AfterHoursAiService(
+        DecisionRepo(None), BarRepo(), PaperService(), model_repository=model_repository
+    )
+
+    selected = service._select_replay_experiments(
+        [replayable, negative_challenger], {"ridge_linear"}
+    )
+
+    assert selected == (replayable,)

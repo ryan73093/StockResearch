@@ -13,7 +13,7 @@ from quant_platform.application.ports import (
     ResearchUniverseRepository,
     SchedulerJobRunRepository,
 )
-from quant_platform.application.services import MarketDataIngestionService
+from quant_platform.application.services import MarketBarValidator, MarketDataIngestionService
 from quant_platform.domain.entities import JobRunStatus, ResearchAsset, SchedulerJobRun
 
 logger = logging.getLogger(__name__)
@@ -73,15 +73,22 @@ class ResearchUniverseService:
     def ensure_default_universe(self) -> None:
         now = datetime.now(UTC)
         for symbol in DEFAULT_UNIVERSE:
-            if self._repository.get(symbol) is not None:
+            existing = self._repository.get(symbol)
+            if existing is not None:
                 if symbol in DEFAULT_ASSET_NAMES:
-                    self._repository.update_metadata(
-                        symbol,
-                        company_name=DEFAULT_ASSET_NAMES[symbol],
-                        company_abbreviation=DEFAULT_ASSET_NAMES[symbol],
-                        metadata_source="built-in-index-etf-identity",
-                        metadata_updated_at=now,
-                    )
+                    default_name = DEFAULT_ASSET_NAMES[symbol]
+                    if (
+                        existing.company_name != default_name
+                        or existing.company_abbreviation != default_name
+                        or existing.metadata_source != "built-in-index-etf-identity"
+                    ):
+                        self._repository.update_metadata(
+                            symbol,
+                            company_name=default_name,
+                            company_abbreviation=default_name,
+                            metadata_source="built-in-index-etf-identity",
+                            metadata_updated_at=now,
+                        )
                 continue
             market, asset_type, sector, benchmark = DEFAULT_ASSET_METADATA[symbol]
             self._repository.add(
@@ -227,6 +234,9 @@ class DailyPipelineResult:
     failures: dict[str, str]
     started_at: str
     completed_at: str
+    data_date: str | None = None
+    expected_date: str | None = None
+    fresh: bool = True
 
 
 class DailyMarketDataPipeline:
@@ -238,11 +248,84 @@ class DailyMarketDataPipeline:
         market_bar_repository: MarketBarRepository,
         ingestion_service: MarketDataIngestionService,
         run_repository: SchedulerJobRunRepository,
+        official_tw_provider: object | None = None,
     ) -> None:
         self._universe_repository = universe_repository
         self._market_bar_repository = market_bar_repository
         self._ingestion_service = ingestion_service
         self._run_repository = run_repository
+        self._official_tw_provider = official_tw_provider
+        self._validator = MarketBarValidator()
+
+    @staticmethod
+    def _market_clock(market: str) -> tuple[ZoneInfo, time]:
+        if market.upper() == "TW":
+            return ZoneInfo("Asia/Taipei"), time(13, 45)
+        return ZoneInfo("America/New_York"), time(16, 15)
+
+    @classmethod
+    def expected_session_date(cls, market: str, now: datetime) -> date:
+        """Return the weekday session whose daily candle should be available.
+
+        The cutoff matches the Yahoo adapter's close-plus-15-minute
+        ``available_time``. On an exchange holiday the freshness guard keeps
+        the workflow pending instead of silently publishing old signals.
+        """
+        if now.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        zone, available_after = cls._market_clock(market)
+        local_now = now.astimezone(zone)
+        candidate = local_now.date()
+        if local_now.time() < available_after:
+            candidate -= timedelta(days=1)
+        while candidate.weekday() >= 5:
+            candidate -= timedelta(days=1)
+        return candidate
+
+    def latest_market_date(
+        self, market: str, now: datetime | None = None
+    ) -> date | None:
+        normalized_market = market.upper()
+        benchmark = "0050.TW" if normalized_market == "TW" else "SPY"
+        latest = max(
+            (
+                value
+                for source in ("yahoo_finance", "twse_tpex_official")
+                if (
+                    value := self._market_bar_repository.latest_event_time(
+                        benchmark, "1d", source
+                    )
+                ) is not None
+            ),
+            default=None,
+        )
+        if latest is None:
+            latest = max(
+                (
+                    value
+                    for asset in self._universe_repository.list_active(
+                        normalized_market
+                    )
+                    if (
+                        value := self._market_bar_repository.latest_event_time(
+                            asset.symbol, "1d", "yahoo_finance"
+                        )
+                    ) is not None
+                ),
+                default=None,
+            )
+        if latest is None:
+            return None
+        if latest.tzinfo is None:
+            latest = latest.replace(tzinfo=UTC)
+        zone, _ = self._market_clock(normalized_market)
+        return latest.astimezone(zone).date()
+
+    def is_fresh(self, market: str, now: datetime | None = None) -> bool:
+        checked_at = now or datetime.now(UTC)
+        return self.latest_market_date(market, checked_at) == self.expected_session_date(
+            market, checked_at
+        )
 
     def run(
         self,
@@ -268,9 +351,58 @@ class DailyMarketDataPipeline:
         received = 0
         inserted = 0
         failures: dict[str, str] = {}
+        expected_date = self.expected_session_date(normalized_market, started)
+        latest_before = self.latest_market_date(normalized_market, started)
+        official_target_symbols: set[str] = set()
+
+        if normalized_market == "TW" and self._official_tw_provider is not None:
+            try:
+                active_symbols = [asset.symbol for asset in assets]
+                fetch_range = getattr(self._official_tw_provider, "fetch_range", None)
+                if latest_before is not None and callable(fetch_range):
+                    official_start = max(
+                        latest_before + timedelta(days=1),
+                        expected_date - timedelta(days=31),
+                    )
+                    official_bars = fetch_range(
+                        active_symbols, official_start, expected_date, started
+                    )
+                elif latest_before != expected_date:
+                    official_bars = self._official_tw_provider.fetch_snapshot(
+                        active_symbols, started
+                    )
+                else:
+                    official_bars = []
+                self._validator.validate(official_bars)
+                received += len(official_bars)
+                inserted += self._market_bar_repository.add_missing(official_bars)
+                official_target_symbols = {
+                    item.symbol
+                    for item in official_bars
+                    if item.event_time.astimezone(ZoneInfo("Asia/Taipei")).date()
+                    == expected_date
+                }
+            except Exception as exc:
+                logger.exception("Official TW close snapshot ingestion failed")
+                failures["__official_tw_snapshot__"] = str(exc)
 
         for asset in assets:
             try:
+                if not full_refresh and normalized_market == "TW":
+                    official_latest = self._market_bar_repository.latest_event_time(
+                        asset.symbol, "1d", "twse_tpex_official"
+                    )
+                    if official_latest is not None:
+                        if official_latest.tzinfo is None:
+                            official_latest = official_latest.replace(tzinfo=UTC)
+                        if (
+                            official_latest.astimezone(ZoneInfo("Asia/Taipei")).date()
+                            >= expected_date
+                        ):
+                            official_target_symbols.add(asset.symbol)
+                    if asset.symbol in official_target_symbols:
+                        succeeded += 1
+                        continue
                 latest = self._market_bar_repository.latest_event_time(
                     asset.symbol, "1d", "yahoo_finance"
                 )
@@ -304,8 +436,17 @@ class DailyMarketDataPipeline:
                 failures[asset.symbol] = str(exc)
 
         completed = datetime.now(UTC)
+        data_date = self.latest_market_date(normalized_market, started)
+        fresh = data_date == expected_date
+        if not fresh:
+            failures["__market_freshness__"] = (
+                f"{normalized_market} 最新行情日 {data_date or '尚無'}，"
+                f"預期 {expected_date}；禁止用舊行情產生新決策"
+            )
         failed = len(failures)
-        if failed == 0:
+        if not fresh:
+            status = JobRunStatus.FAILED
+        elif failed == 0:
             status = JobRunStatus.SUCCEEDED
         elif succeeded == 0:
             status = JobRunStatus.FAILED
@@ -323,6 +464,9 @@ class DailyMarketDataPipeline:
             failures=failures,
             started_at=started.isoformat(),
             completed_at=completed.isoformat(),
+            data_date=data_date.isoformat() if data_date else None,
+            expected_date=expected_date.isoformat(),
+            fresh=fresh,
         )
         self._run_repository.finish(
             run_id=run_id,

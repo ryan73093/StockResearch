@@ -24,12 +24,13 @@
       </div>
     </details>
 
-    <details class="sidebar-group-v2" {% if request.path.startswith('/data-pipeline') or request.path.startswith('/database') or request.path.startswith('/data-quality') or request.path.startswith('/reports') or request.path.startswith('/news') %}open{% endif %}>
+    <details class="sidebar-group-v2" {% if request.path.startswith('/data-pipeline') or request.path.startswith('/database') or request.path.startswith('/data-quality') or request.path.startswith('/reports') or request.path.startswith('/news') or request.path.startswith('/google-trends') %}open{% endif %}>
       <summary><span>資料與記憶</span><small>資料是否完整</small></summary>
       <div>
         <a class="priority {{ 'active' if request.path.startswith('/data-pipeline') else '' }}" href="/data-pipeline" title="背景補資料、特徵與研究進度"><i>07</i><span>資料建置進度</span><b>重要</b></a>
         <a class="priority {{ 'active' if request.path.startswith('/reports') or request.path.startswith('/news') else '' }}" href="/reports" title="財經新聞、向量記憶與OpenAI研究問答"><i>08</i><span>財經記憶與問答</span><b>新</b></a>
         <a class="priority {{ 'active' if request.path.startswith('/data-quality') else '' }}" href="/data-quality" title="資料品質與缺漏"><i>09</i><span>資料品質與缺漏</span><b>閘門</b></a>
+        <a class="{{ 'active' if request.path.startswith('/google-trends') else '' }}" href="/google-trends" title="Google 搜尋趨勢 point-in-time 匯入"><i>GT</i><span>Google 搜尋趨勢</span></a>
         <a class="{{ 'active' if request.path.startswith('/database') else '' }}" href="/database" title="查看資料表筆數、行情範圍與補抓歷程"><i>DB</i><span>資料庫檢視</span></a>
       </div>
     </details>
@@ -54,7 +55,7 @@
 
   <div class="system-box account-box">
     <span><i></i> 系統運行中</span>
-    {% if current_user %}<small>{{ current_user.display_name }}<br>{{ current_user.email }}<br>v3.8.1／真實交易關閉</small>{% else %}<small>本機研究模式<br>SQLite／免 Docker<br>v3.8.1／真實交易關閉</small>{% endif %}
+    {% if current_user %}<small>{{ current_user.display_name }}<br>{{ current_user.email }}<br>v3.9.0／真實交易關閉</small>{% else %}<small>本機研究模式<br>SQLite／免 Docker<br>v3.9.0／真實交易關閉</small>{% endif %}
   </div>
 </aside>
 <script>

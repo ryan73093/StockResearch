@@ -165,7 +165,11 @@ class DailyDecisionPipeline:
                 risks.append("缺少最新模型預測")
             elif predicted_return is not None and predicted_return < 0:
                 status = "避免"
-                risks.append("模型平均預估未來五日報酬為負")
+                risks.append(
+                    "模型平均預估未來五日相對 0050 超額為負"
+                    if evidence[4] == "excess_return_5d"
+                    else "模型平均預估未來五日報酬為負"
+                )
             elif model_rank is not None and model_rank < 0.35:
                 status = "避免"
                 risks.append("模型橫斷面排名位於後段")
@@ -177,7 +181,15 @@ class DailyDecisionPipeline:
             else:
                 status = "觀察"
             if predicted_return is not None:
-                reasons.append(f"多模型平均五日預估報酬 {predicted_return:+.2%}")
+                reasons.append(
+                    (
+                        "候選模型平均五日相對 0050 預估超額 "
+                        if evidence is not None
+                        and evidence[4] == "excess_return_5d"
+                        else "候選模型平均五日預估報酬 "
+                    )
+                    + f"{predicted_return:+.2%}"
+                )
             reasons.append(f"模型排名 {((model_rank or 0) * 100):.0f} 百分位")
             reasons.append(f"市場狀態：{regime}")
             reasons.append(f"特徵綜合分數 {factor_score:.2f}")
@@ -234,11 +246,53 @@ class DailyDecisionPipeline:
 
     def _prediction_evidence(
         self, market: str
-    ) -> dict[str, tuple[float, float, float, datetime]]:
+    ) -> dict[str, tuple[float, float, float, datetime, str]]:
+        experiments = self._model_repository.list_runs(market)
+        preferred_label = (
+            "excess_return_5d"
+            if any(
+                item.label_name == "excess_return_5d"
+                and item.promotion_gate == "CANDIDATE"
+                for item in experiments
+            )
+            else "future_return_5d"
+        )
+        eligible = [
+            experiment
+            for experiment in experiments
+            if experiment.id is not None
+            and experiment.label_name == preferred_label
+            and experiment.promotion_gate == "CANDIDATE"
+        ]
+        selected_experiment = max(
+            eligible,
+            key=lambda item: (
+                item.rank_ic or -1.0,
+                item.long_short_spread or -1.0,
+                item.computed_at,
+            ),
+            default=None,
+        )
+        loader = getattr(
+            self._model_repository, "list_predictions_for_experiments", None
+        )
+        selected_ids = (
+            [int(selected_experiment.id)]
+            if selected_experiment is not None
+            and selected_experiment.id is not None
+            else []
+        )
+        prediction_rows = (
+            loader(selected_ids)
+            if callable(loader) and selected_ids
+            else self._model_repository.list_predictions(market)
+        )
         grouped: dict[str, list] = {}
-        for item in self._model_repository.list_predictions(market):
+        for item in prediction_rows:
+            if item.label_name != preferred_label:
+                continue
             grouped.setdefault(item.symbol, []).append(item)
-        output: dict[str, tuple[float, float, float, datetime]] = {}
+        output: dict[str, tuple[float, float, float, datetime, str]] = {}
         for symbol, values in grouped.items():
             latest_time = max(item.event_time for item in values)
             latest = [item for item in values if item.event_time == latest_time]
@@ -246,7 +300,7 @@ class DailyDecisionPipeline:
             ranks = np.array([item.rank_score for item in latest])
             output[symbol] = (
                 float(predicted.mean()), float(predicted.std()),
-                float(ranks.mean()), latest_time,
+                float(ranks.mean()), latest_time, preferred_label,
             )
         return output
 

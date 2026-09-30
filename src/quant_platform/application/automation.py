@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import smtplib
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from typing import Callable
 
@@ -136,13 +136,13 @@ class AutomationService:
                 ))
             elif (
                 key == "tw_daily_market_data"
-                and self._settings.tw_data_schedule == "13:35"
-                and (current.hour, current.minute) == (14, 30)
+                and self._settings.tw_data_schedule == "13:50"
+                and (current.hour, current.minute) in {(13, 35), (14, 30)}
             ):
-                # Migrate the former default; 14:30 is too late for a 13:40–14:30
-                # after-hours odd-lot draft.
+                # Migrate former defaults. Yahoo daily candles are deliberately
+                # unavailable until 13:45, while 14:30 misses the odd-lot window.
                 self._repository.upsert_schedule(
-                    replace(current, hour=13, minute=35, updated_at=now)
+                    replace(current, hour=13, minute=50, updated_at=now)
                 )
 
     def overview(self) -> AutomationOverview:
@@ -154,6 +154,17 @@ class AutomationService:
             scheduler_enabled=self._settings.scheduler_enabled,
             lock_backend=self._locks.backend,
         )
+
+    def recover_stale_runs(
+        self, now: datetime | None = None, max_age: timedelta = timedelta(hours=6)
+    ) -> int:
+        checked_at = now or datetime.now(UTC)
+        recovered = self._runs.fail_stale_running(
+            checked_at - max_age, checked_at
+        )
+        if recovered:
+            logger.warning("Marked %s stale scheduler runs as failed", recovered)
+        return recovered
 
     def update_schedule(self, job_key: str, **changes: object) -> AutomationSchedule:
         current = self._repository.get_schedule(job_key)

@@ -1,6 +1,8 @@
 # Quant Research Platform
 
-目前版本：v3.8.0。新增上市／上櫃法說會與重大訊息，保存公司發言時間、法說會時間、官方簡報、影音、內容指紋與修訂版本；事件可以先公告後舉行，回測只從公告可用時間開始使用。既有 26 項盤中／衍生品／零股特徵與所有明確單位維持可用。沒有 Docker 或付費 Token 仍可使用 SQLite 與公開官方來源。真實交易維持硬性關閉，Google 登入與 Docker 延後至發布前。
+目前版本：v3.9.0。新增 Google Trends 官方 CSV 的 point-in-time 匯入，保存實際取得時間、抽樣修訂、地區、資料粒度與部分資料標記；回測只能看見當時已匯入的版本。既有法說會事件、26 項盤中／衍生品／零股特徵與所有明確單位維持可用。沒有 Docker 或付費 Token 仍可使用 SQLite 與公開官方來源。真實交易維持硬性關閉，Google 登入與 Docker 延後至發布前。
+
+Google Trends 官方 API 仍為限量 alpha，因此目前採官方網頁 CSV 匯入，不呼叫非官方端點。Dashboard 位於 `http://127.0.0.1:5000/google-trends`，API 為 `GET /api/v1/google-trends` 與 `POST /api/v1/google-trends/imports`；操作與研究限制請見 [Google Trends point-in-time 匯入](docs/google-trends.md)。
 
 一套以 Clean Architecture 建構的 AI 量化研究平台。Flask 提供研究 Dashboard，FastAPI 提供資料與模型服務 API；兩者共用 domain、application 與 infrastructure，避免商業邏輯綁死在 Web framework。
 
@@ -23,7 +25,7 @@
 - 16 個美台 ETF、兩年日線、跨資產熱圖、因子橫斷面排名與策略排名
 - 深色科技終端介面，統一 label／正文／標題／KPI 四級字體尺度
 - 資料庫驅動的 Research Universe，可新增、啟用與軟停用標的
-- 台股 13:35、美股 06:30（台北時間）自動增量更新與 Scheduler Audit Log；台股決策日期不符當日收盤快照時，盤後 AI 強制不交易
+- 台股 13:50、美股 06:30（台北時間）自動增量更新與 Scheduler Audit Log；台股以證交所／櫃買官方收盤資料補足 Yahoo 延遲，行情日期不符預期交易日時整條研究流程失敗並由 15 分鐘守門員重試
 - 版本化 Point-in-time Feature Store：14 個報酬、趨勢、動能、波動、量價、風險與日曆特徵
 - Leakage-safe Label Store：未來 5/20 日報酬、5 日方向與相對 benchmark 超額報酬
 - 每日流程已串接「行情更新 → Feature/Label materialization」，兩階段各自保留 audit run
@@ -88,6 +90,12 @@ Copy-Item .env.example .env
 
 ```powershell
 .\.venv\Scripts\python.exe -m quant_platform.api.app
+```
+
+每日行情與研究排程使用獨立 Worker，避免 Web 與 Worker 重複執行同一批工作：
+
+```powershell
+.\.venv\Scripts\python.exe -m quant_platform.scheduler.runner
 ```
 
 API 文件位於 `http://127.0.0.1:8000/docs`。

@@ -195,6 +195,7 @@ class TorchCudaMlpRegressor:
         labels = target.astype(np.float32).reshape(-1, 1)
         torch.manual_seed(42)
         torch.cuda.manual_seed_all(42)
+        torch.set_float32_matmul_precision("high")
         self._model = torch.nn.Sequential(
             torch.nn.Linear(matrix.shape[1], 64),
             torch.nn.SiLU(),
@@ -207,14 +208,18 @@ class TorchCudaMlpRegressor:
             self._model.parameters(), lr=self._learning_rate, weight_decay=1e-4
         )
         loss_function = torch.nn.SmoothL1Loss(beta=0.01)
-        generator = torch.Generator(device="cpu").manual_seed(42)
-        order = torch.randperm(len(matrix), generator=generator)
+        matrix_tensor = torch.from_numpy(matrix).to(self._device)
+        labels_tensor = torch.from_numpy(labels).to(self._device)
+        generator = torch.Generator(device=self._device).manual_seed(42)
+        order = torch.randperm(
+            len(matrix), generator=generator, device=self._device
+        )
         self._model.train()
         for _ in range(self._epochs):
             for start in range(0, len(order), self._batch_size):
-                indexes = order[start:start + self._batch_size].numpy()
-                batch_x = torch.from_numpy(matrix[indexes]).to(self._device)
-                batch_y = torch.from_numpy(labels[indexes]).to(self._device)
+                indexes = order[start:start + self._batch_size]
+                batch_x = matrix_tensor[indexes]
+                batch_y = labels_tensor[indexes]
                 optimizer.zero_grad(set_to_none=True)
                 loss = loss_function(self._model(batch_x), batch_y)
                 loss.backward()

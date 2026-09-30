@@ -949,24 +949,29 @@ class SqlAlchemyPointInTimeDataRepository:
                 source=source,
                 row_count=len(logical),
                 revision_count=len(values) - len(logical),
-                first_event_time=min(item.event_time for item in values),
-                last_event_time=max(item.event_time for item in values),
-                last_available_time=max(item.available_time for item in values),
-                last_ingested_at=max(item.ingested_at for item in values),
+                first_event_time=_utc_aware(min(item.event_time for item in values)),
+                last_event_time=_utc_aware(max(item.event_time for item in values)),
+                last_available_time=_utc_aware(max(item.available_time for item in values)),
+                last_ingested_at=_utc_aware(max(item.ingested_at for item in values)),
             ))
         return output
 
     @staticmethod
     def _dataset_entity(row: PointInTimeDatasetModel) -> PointInTimeDataset:
-        return PointInTimeDataset(**{
+        values = {
             key: getattr(row, key) for key in PointInTimeDataset.__dataclass_fields__
-        })
+        }
+        values["updated_at"] = _utc_aware(values["updated_at"])
+        return PointInTimeDataset(**values)
 
     @staticmethod
     def _observation_entity(row: PointInTimeObservationModel) -> PointInTimeObservation:
-        return PointInTimeObservation(**{
+        values = {
             key: getattr(row, key) for key in PointInTimeObservation.__dataclass_fields__
-        })
+        }
+        for key in ("event_time", "available_time", "ingested_at"):
+            values[key] = _utc_aware(values[key])
+        return PointInTimeObservation(**values)
 
 
 class SqlAlchemyTaiwanDataRepository:
@@ -1195,7 +1200,7 @@ class SqlAlchemyResearchUniverseRepository:
             if row is None:
                 return False
             row.active = active
-            row.updated_at = datetime.now(row.updated_at.tzinfo) if row.updated_at.tzinfo else datetime.utcnow()
+            row.updated_at = datetime.now(UTC)
             session.commit()
             return True
 
@@ -1214,9 +1219,7 @@ class SqlAlchemyResearchUniverseRepository:
             for name, value in values.items():
                 if name in allowed and value is not None:
                     setattr(row, name, value)
-            row.updated_at = datetime.now(
-                row.updated_at.tzinfo
-            ) if row.updated_at.tzinfo else datetime.utcnow()
+            row.updated_at = datetime.now(UTC)
             session.commit()
             return True
 
@@ -1526,6 +1529,25 @@ class SqlAlchemySchedulerJobRunRepository:
                 return
             row.metrics_json = metrics_json
             session.commit()
+
+    def fail_stale_running(
+        self, cutoff: datetime, completed_at: datetime
+    ) -> int:
+        with self._session_factory() as session:
+            result = session.execute(
+                update(SchedulerJobRunModel)
+                .where(
+                    SchedulerJobRunModel.status == JobRunStatus.RUNNING.value,
+                    SchedulerJobRunModel.started_at < _utc_naive(cutoff),
+                )
+                .values(
+                    status=JobRunStatus.FAILED.value,
+                    completed_at=_utc_naive(completed_at),
+                    error="工作程序已中止；啟動時自動關閉逾時的執行紀錄",
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
 
     def list_recent(self, limit: int = 20) -> list[SchedulerJobRun]:
         statement = select(SchedulerJobRunModel).order_by(
@@ -2054,21 +2076,29 @@ class SqlAlchemyFeatureLabelStoreRepository:
     ) -> list[FeatureValue]:
         if not symbols:
             return []
-        statement = select(FeatureValueModel).where(FeatureValueModel.symbol.in_(symbols))
+        statement = select(
+            FeatureValueModel.symbol,
+            FeatureValueModel.feature_name,
+            FeatureValueModel.feature_version,
+            FeatureValueModel.event_time,
+            FeatureValueModel.available_time,
+            FeatureValueModel.computed_at,
+            FeatureValueModel.value,
+        ).where(FeatureValueModel.symbol.in_(symbols))
         if feature_names:
             statement = statement.where(FeatureValueModel.feature_name.in_(feature_names))
         statement = statement.order_by(FeatureValueModel.event_time, FeatureValueModel.symbol)
         with self._session_factory() as session:
-            rows = session.scalars(statement).all()
+            rows = session.execute(statement).all()
         return [
             FeatureValue(
-                symbol=row.symbol,
-                feature_name=row.feature_name,
-                feature_version=row.feature_version,
-                event_time=row.event_time,
-                available_time=row.available_time,
-                computed_at=row.computed_at,
-                value=row.value,
+                symbol=row[0],
+                feature_name=row[1],
+                feature_version=row[2],
+                event_time=row[3],
+                available_time=row[4],
+                computed_at=row[5],
+                value=row[6],
             )
             for row in rows
         ]
@@ -2141,10 +2171,57 @@ class SqlAlchemyFeatureLabelStoreRepository:
     ) -> list[LabelValue]:
         if not symbols:
             return []
-        statement = select(LabelValueModel).where(LabelValueModel.symbol.in_(symbols))
+        statement = select(
+            LabelValueModel.symbol,
+            LabelValueModel.label_name,
+            LabelValueModel.label_version,
+            LabelValueModel.event_time,
+            LabelValueModel.available_time,
+            LabelValueModel.computed_at,
+            LabelValueModel.value,
+        ).where(LabelValueModel.symbol.in_(symbols))
         if label_names:
             statement = statement.where(LabelValueModel.label_name.in_(label_names))
         statement = statement.order_by(LabelValueModel.event_time, LabelValueModel.symbol)
+        with self._session_factory() as session:
+            rows = session.execute(statement).all()
+        return [
+            LabelValue(
+                symbol=row[0],
+                label_name=row[1],
+                label_version=row[2],
+                event_time=row[3],
+                available_time=row[4],
+                computed_at=row[5],
+                value=row[6],
+            )
+            for row in rows
+        ]
+
+    def list_latest_labels(
+        self, symbols: list[str], label_names: list[str]
+    ) -> list[LabelValue]:
+        if not symbols or not label_names:
+            return []
+        latest_events = (
+            select(
+                LabelValueModel.symbol.label("symbol"),
+                LabelValueModel.label_name.label("label_name"),
+                func.max(LabelValueModel.event_time).label("event_time"),
+            )
+            .where(
+                LabelValueModel.symbol.in_(symbols),
+                LabelValueModel.label_name.in_(label_names),
+            )
+            .group_by(LabelValueModel.symbol, LabelValueModel.label_name)
+            .subquery()
+        )
+        statement = select(LabelValueModel).join(
+            latest_events,
+            (LabelValueModel.symbol == latest_events.c.symbol)
+            & (LabelValueModel.label_name == latest_events.c.label_name)
+            & (LabelValueModel.event_time == latest_events.c.event_time),
+        )
         with self._session_factory() as session:
             rows = session.scalars(statement).all()
         return [

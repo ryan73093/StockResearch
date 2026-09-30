@@ -24,7 +24,7 @@
     {% endwith %}
 
     <section class="ingest-panel">
-      <div><p class="eyebrow">MANUAL INGESTION</p><h2>更新日線資料</h2><p>Yahoo 日線暫以收盤後 15 分鐘作為保守的 available time。正式研究會再接交易所日曆與供應商時間戳。</p></div>
+      <div><p class="eyebrow">MANUAL INGESTION</p><h2>更新日線資料</h2><p>Yahoo 日線以收盤後 15 分鐘作為保守的 available time；台股另用證交所／櫃買官方收盤資料補足供應商尚未換日時的缺口，並保留各自來源。</p></div>
       <form method="post" action="/data/ingest">
         <label>SYMBOL<input name="symbol" placeholder="SPY / 0050.TW" required></label>
         <label>MARKET<select name="market"><option value="US">US</option><option value="TW">TW</option></select></label>

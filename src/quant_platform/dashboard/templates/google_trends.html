@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Google 搜尋趨勢／量化研究平台</title>
+  <link rel="icon" href="{{ url_for('static',filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static',filename='css/app.css',v='5.0.0') }}">
+</head>
+<body class="tech-body">{% include '_sidebar.html' %}<main class="tech-main trends-main-v39">
+  <header class="tech-header"><div><span class="tech-kicker">GOOGLE TRENDS／POINT-IN-TIME／替代資料</span><h1>Google 搜尋趨勢</h1><p>匯入官方網頁 CSV，保留實際取得時間與歷史修訂；0～100 是相對熱度，不是搜尋次數，也不是已驗證的交易訊號。</p></div><div class="trends-status-v39"><span>官方 API 狀態</span><b>{{ overview.official_api_status }}</b><small>不呼叫非官方端點</small></div></header>
+  {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+
+  <section class="tech-section"><div class="trends-kpis-v39">
+    <article><span>關鍵字</span><b>{{ overview.keyword_count }} 個</b><small>目前篩選涵蓋</small></article>
+    <article><span>期間觀測</span><b>{{ '{:,}'.format(overview.observation_count) }} 筆</b><small>不含修訂版本</small></article>
+    <article><span>歷史修訂</span><b>{{ '{:,}'.format(overview.revision_count) }} 個</b><small>重新下載後的變化</small></article>
+    <article><span>最近取得</span><b>{{ taipei_time(overview.latest_available_time).strftime('%Y-%m-%d %H:%M') if overview.latest_available_time else '尚無資料' }}</b><small>台北時間</small></article>
+  </div></section>
+
+  <section class="tech-section trends-actions-v39">
+    <article><div class="section-head compact"><div><span>匯入官方 CSV</span><h2>保存實際取得版本</h2></div></div><form method="post" action="/google-trends/import" enctype="multipart/form-data">
+      <label>CSV 檔案<input type="file" name="csv_file" accept=".csv,text/csv" required></label>
+      <label>實際下載時間<input type="datetime-local" name="downloaded_at"><small>留空採匯入當下；舊檔請填真實下載時間。</small></label>
+      <input type="hidden" name="keyword" value="{{ overview.keyword }}">
+      <button>匯入並保存修訂</button>
+    </form></article>
+    <article><div class="section-head compact"><div><span>AS-OF 查詢</span><h2>當時已看得到的版本</h2></div></div><form method="get">
+      <label>關鍵字<input name="keyword" value="{{ overview.keyword }}" placeholder="台積電或 TSMC"></label>
+      <label>回測當時時間<input type="datetime-local" name="as_of" value="{{ as_of_text }}"></label>
+      <button>查詢歷史可見資料</button>
+    </form></article>
+  </section>
+
+  <section class="tech-section"><div class="section-head"><div><span>可見資料</span><h2>搜尋熱度時間序列</h2></div><p>部分資料代表該期間尚未完成；研究時應排除或明確標記。</p></div><div class="paper-table-v26"><table><thead><tr><th>期間</th><th>關鍵字</th><th>地區</th><th>粒度</th><th>查詢設定</th><th>相對熱度</th><th>狀態</th><th>實際取得時間</th></tr></thead><tbody>
+    {% for item in overview.observations %}<tr><td>{{ item.event_time.strftime('%Y-%m-%d') }}</td><td>{{ item.keyword }}</td><td>{{ item.geography }}</td><td>{{ item.granularity }}</td><td>{{ item.query_context }}</td><td>{{ item.interest_label }}／100</td><td>{{ '部分資料' if item.is_partial else '完整期間' }}</td><td>{{ taipei_time(item.available_time).strftime('%Y-%m-%d %H:%M') }}</td></tr>{% else %}<tr><td colspan="8">尚無資料。請先從 Google Trends 網頁下載「搜尋熱度隨時間變化」CSV；匯入後才能建立 point-in-time 研究證據。</td></tr>{% endfor %}
+  </tbody></table></div></section>
+
+  <section class="tech-section"><div class="trends-notes-v39"><article><b>研究限制</b><p>網頁資料會依查詢時間與地區正規化至 0～100，低流量字詞也可能含統計雜訊。不同查詢產生的序列不可直接當絕對量比較。</p></article><article><b>防止偷看未來</b><p>期間起點只代表搜尋發生期間；模型可用時間採 CSV 的實際取得時間。後續重新下載的歷史變化只在新取得時間後可見。</p></article><article><b>尚未完成</b><p>目前只有資料覆蓋層，尚未建立 OOS 事件研究與 forward/shadow 證據，因此不會送入正式選股權重或 Promotion gate。</p></article></div></section>
+</main></body></html>

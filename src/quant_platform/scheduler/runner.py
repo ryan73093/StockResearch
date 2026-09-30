@@ -110,7 +110,10 @@ def run_startup_catch_up(
             ).astimezone(zone) >= due_at
             for run in recent_runs
         )
-        if already_succeeded:
+        market_is_fresh = container.daily_market_data_pipeline.is_fresh(
+            schedule.market, local_now
+        )
+        if already_succeeded and market_is_fresh:
             continue
         logger.warning(
             "Startup catch-up is running missed workflow %s (due %s)",
@@ -209,6 +212,7 @@ def start_background_scheduler(container: "Container") -> "BackgroundScheduler |
 
 
 def run_scheduler_worker(container: "Container | None" = None) -> None:
+    from apscheduler.triggers.date import DateTrigger
     from apscheduler.schedulers.blocking import BlockingScheduler
     from apscheduler.triggers.interval import IntervalTrigger
     from quant_platform.container import build_container
@@ -217,9 +221,37 @@ def run_scheduler_worker(container: "Container | None" = None) -> None:
     if not dependencies.settings.scheduler_enabled:
         logger.warning("Scheduler worker stopped because SCHEDULER_ENABLED=false")
         return
+    dependencies.automation_service.recover_stale_runs()
     scheduler = BlockingScheduler(timezone=dependencies.settings.scheduler_timezone)
     job_count = configure_scheduler(scheduler, dependencies)
     timezone = dependencies.settings.scheduler_timezone
+    scheduler.add_job(
+        run_startup_catch_up,
+        args=[dependencies],
+        trigger=DateTrigger(
+            run_date=datetime.now(ZoneInfo(timezone)) + timedelta(seconds=15),
+            timezone=timezone,
+        ),
+        id="startup_data_catch_up",
+        name="啟動後補跑今日漏失資料",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        run_startup_catch_up,
+        args=[dependencies],
+        trigger=IntervalTrigger(
+            minutes=15,
+            start_date=datetime.now(ZoneInfo(timezone)) + timedelta(seconds=30),
+            timezone=timezone,
+        ),
+        id="daily_data_freshness_guard",
+        name="盤後資料漏跑自動補抓",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+    )
     scheduler.add_job(
         run_universe_backfill,
         args=[dependencies],

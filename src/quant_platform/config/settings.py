@@ -35,7 +35,7 @@ class Settings:
     scheduler_enabled: bool = True
     scheduler_in_web: bool = True
     scheduler_timezone: str = "Asia/Taipei"
-    tw_data_schedule: str = "13:35"
+    tw_data_schedule: str = "13:50"
     us_data_schedule: str = "06:30"
     finmind_base_url: str = "https://api.finmindtrade.com/api/v4/data"
     finmind_token: str = ""
@@ -95,7 +95,7 @@ class Settings:
             scheduler_enabled=os.getenv("SCHEDULER_ENABLED", "true").lower() in {"1", "true", "yes"},
             scheduler_in_web=os.getenv("SCHEDULER_IN_WEB", "true").lower() in {"1", "true", "yes"},
             scheduler_timezone=os.getenv("SCHEDULER_TIMEZONE", "Asia/Taipei"),
-            tw_data_schedule=os.getenv("TW_DATA_SCHEDULE", "13:35"),
+            tw_data_schedule=os.getenv("TW_DATA_SCHEDULE", "13:50"),
             us_data_schedule=os.getenv("US_DATA_SCHEDULE", "06:30"),
             finmind_base_url=os.getenv(
                 "FINMIND_BASE_URL", "https://api.finmindtrade.com/api/v4/data"

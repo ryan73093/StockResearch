@@ -3,6 +3,7 @@ from datetime import date
 from quant_platform.application.universe_history import UniverseHistoryService
 from quant_platform.config import Settings
 from quant_platform.container import build_container
+from quant_platform.data_sources.twse import TaiwanCompanyProfile
 from quant_platform.database.repositories import SqlAlchemyResearchUniverseRepository
 
 
@@ -17,6 +18,22 @@ class _FinMindLifecycleStub:
 
 
 class _TwseLifecycleStub:
+    def fetch_company_profiles(self):
+        return (
+            TaiwanCompanyProfile(
+                symbol="2330.TW", company_name="台積電",
+                company_abbreviation="台積電", industry_code="24",
+                sector="半導體業", paid_in_capital=1, issued_shares=1,
+                source="test",
+            ),
+            TaiwanCompanyProfile(
+                symbol="6488.TWO", company_name="環球晶",
+                company_abbreviation="環球晶", industry_code="24",
+                sector="半導體業", paid_in_capital=1, issued_shares=1,
+                source="test",
+            ),
+        )
+
     def fetch_listed_companies(self):
         return [{"公司代號": "2330", "上市日期": "83/09/05"}]
 
@@ -27,6 +44,11 @@ class _TwseLifecycleStub:
     @staticmethod
     def listing_date(row):
         return date(1994, 9, 5)
+
+
+class _UnavailableFinMindStub:
+    def fetch_dataset(self, dataset: str):
+        raise RuntimeError(f"{dataset} unavailable")
 
 
 def test_point_in_time_universe_sync_and_query(tmp_path) -> None:
@@ -48,10 +70,23 @@ def test_point_in_time_universe_sync_and_query(tmp_path) -> None:
     assert audit.survivorship_safe is False
 
 
+def test_current_universe_sync_falls_back_to_official_company_profiles(tmp_path) -> None:
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'fallback.db'}"))
+    repository = SqlAlchemyResearchUniverseRepository(container.database.session_factory)
+    service = UniverseHistoryService(repository, _UnavailableFinMindStub(), _TwseLifecycleStub())
+
+    result = service.sync_taiwan()
+    current = service.members_on(date(2026, 8, 16), "TW")
+
+    assert result.current_received == 2
+    assert {item.symbol for item in current} >= {"2330.TW", "6488.TWO"}
+    assert any(item.source == "twse-tpex-current-universe" for item in current)
+
+
 def test_universe_history_page_and_api(tmp_path) -> None:
     container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'history-page.db'}"))
-    from quant_platform.dashboard.app import create_app
     from quant_platform.api.app import create_api
+    from quant_platform.dashboard.app import create_app
 
     body = create_app(container).test_client().get(
         "/universe?effective_date=2024-01-02"

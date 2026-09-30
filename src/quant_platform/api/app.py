@@ -28,6 +28,15 @@ class PointInTimeIngestionRequest(BaseModel):
     end: datetime
 
 
+class GoogleTrendsCsvImportRequest(BaseModel):
+    csv_text: str = Field(min_length=1, max_length=5_000_000)
+    downloaded_at: datetime | None = None
+    source_uri: str = Field(
+        default="https://trends.google.com/trends/", max_length=500
+    )
+    entity_ids: list[str] | None = Field(default=None, max_length=25)
+
+
 class AutomationScheduleRequest(BaseModel):
     hour: int = Field(ge=0, le=23)
     minute: int = Field(ge=0, le=59)
@@ -108,6 +117,27 @@ def create_api(container: Container | None = None) -> FastAPI:
     def ingest_point_in_time(payload: PointInTimeIngestionRequest) -> dict[str, object]:
         return jsonable_encoder(dependencies.point_in_time_data_service.ingest(
             payload.dataset_key, payload.entity_id, payload.start, payload.end
+        ))
+
+    @app.get("/api/v1/google-trends", tags=["alternative-data"])
+    def google_trends(
+        keyword: str = "",
+        as_of: datetime | None = None,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        return jsonable_encoder(dependencies.google_trends_service.overview(
+            keyword, as_of=as_of, limit=limit
+        ))
+
+    @app.post("/api/v1/google-trends/imports", tags=["alternative-data"])
+    def import_google_trends(
+        payload: GoogleTrendsCsvImportRequest,
+    ) -> dict[str, object]:
+        return jsonable_encoder(dependencies.google_trends_service.import_csv(
+            payload.csv_text,
+            downloaded_at=payload.downloaded_at,
+            source_uri=payload.source_uri,
+            entity_ids=tuple(payload.entity_ids) if payload.entity_ids else None,
         ))
 
     @app.get("/api/v1/intraday-features", tags=["feature-store"])

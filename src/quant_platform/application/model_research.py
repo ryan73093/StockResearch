@@ -1,28 +1,33 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
-import hashlib
 from bisect import bisect_right
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 import numpy as np
 
+from quant_platform.application.macro_data import MACRO_FEATURES
 from quant_platform.application.ports import (
     FeatureLabelStoreRepository,
     ModelResearchRepository,
     ResearchUniverseRepository,
     SchedulerJobRunRepository,
 )
-from quant_platform.domain.entities import JobRunStatus, ModelExperiment, ModelExplanation, ModelPrediction
-from quant_platform.machine_learning import AutoMLSearch, MODEL_CATALOG, MODEL_VERSION, build_model
+from quant_platform.domain.entities import (
+    JobRunStatus,
+    ModelExperiment,
+    ModelExplanation,
+    ModelPrediction,
+)
 from quant_platform.feature_engineering.cross_asset import CROSS_ASSET_SYMBOLS
-from quant_platform.application.macro_data import MACRO_FEATURES
+from quant_platform.machine_learning import MODEL_CATALOG, MODEL_VERSION, AutoMLSearch, build_model
 
-
-EXPERIMENT_VERSION = "1.4.0"
+EXPERIMENT_VERSION = "1.5.0"
 DEFAULT_LABEL = "future_return_5d"
+SUPPORTED_LABELS = (DEFAULT_LABEL, "excess_return_5d")
 BASE_FEATURES = (
     "return_1d",
     "return_5d",
@@ -38,6 +43,9 @@ BASE_FEATURES = (
 )
 TW_RESEARCH_FEATURES = (
     "institutional_net_buy",
+    "foreign_net_buy",
+    "investment_trust_net_buy",
+    "dealer_net_buy",
     "margin_purchase_balance",
     "short_sale_balance",
     "securities_lending_quantity",
@@ -51,6 +59,10 @@ TW_RESEARCH_FEATURES = (
     "gross_margin",
     "free_cash_flow",
     "free_cash_flow_margin",
+    "large_holder_ratio_1000_lots",
+    "retail_holder_ratio_under_1_lot",
+    "large_holder_count_1000_lots",
+    "shareholder_count",
 )
 CROSS_ASSET_RESEARCH_FEATURES = tuple(CROSS_ASSET_SYMBOLS)
 MACRO_RESEARCH_FEATURES = tuple(MACRO_FEATURES.values())
@@ -180,10 +192,15 @@ class ModelResearchPipeline:
         model_names: tuple[str, ...] | None = None,
         feature_profile: str = "auto",
         max_assets: int | None = None,
+        label_name: str = DEFAULT_LABEL,
     ) -> ModelPipelineResult:
         normalized_market = market.upper()
         if normalized_market not in {"US", "TW"}:
             raise ValueError("market must be US or TW")
+        if label_name not in SUPPORTED_LABELS:
+            raise ValueError(
+                "label_name must be future_return_5d or excess_return_5d"
+            )
         started = now or datetime.now(UTC)
         assets = sorted(
             self._universe_repository.list_active(normalized_market),
@@ -215,6 +232,7 @@ class ModelResearchPipeline:
                     "progress": percent,
                     "updated_at": datetime.now(UTC).isoformat(),
                     "requested_models": list(requested_models),
+                    "label_name": label_name,
                     "feature_profile": feature_profile,
                     "max_assets": max_assets,
                     **metrics,
@@ -237,11 +255,11 @@ class ModelResearchPipeline:
                 feature_profile == "auto"
                 and set(requested_models) == {"torch_cuda_mlp"}
             )
-            feature_names = BASE_FEATURES if price_core else (
-                BASE_FEATURES
-                + CROSS_ASSET_RESEARCH_FEATURES
+            feature_names = BASE_FEATURES if price_core else self._select_research_features(
+                symbols,
+                CROSS_ASSET_RESEARCH_FEATURES
                 + MACRO_RESEARCH_FEATURES
-                + (TW_RESEARCH_FEATURES if normalized_market == "TW" else ())
+                + (TW_RESEARCH_FEATURES if normalized_market == "TW" else ()),
             )
             feature_rows = self._point_in_time_feature_rows(symbols, feature_names)
             progress(
@@ -252,7 +270,9 @@ class ModelResearchPipeline:
                 features=len(feature_names),
             )
             latest_rows = self._latest_feature_rows_from_rows(feature_rows)
-            dataset = self._dataset(symbols, feature_names, feature_rows)
+            dataset = self._dataset(
+                symbols, feature_names, feature_rows, label_name=label_name
+            )
             feature_available = {
                 (symbol, event_time): available_time
                 for symbol, event_time, available_time, _ in feature_rows
@@ -281,7 +301,8 @@ class ModelResearchPipeline:
                         dates=unique_dates,
                     )
                     existing = self._reusable_experiment(
-                        normalized_market, model_name, expected_end, dataset_fingerprint
+                        normalized_market, model_name, label_name, expected_end,
+                        dataset_fingerprint,
                     )
                     if existing is not None:
                         experiments.append(existing)
@@ -291,9 +312,14 @@ class ModelResearchPipeline:
                     automl_trials += search.trial_count
                     historical_drafts: list[tuple[datetime, str, float, float]] = []
                     experiment = self._evaluate(
-                        normalized_market, model_name, dataset, len(symbols), started, feature_names,
+                        normalized_market,
+                        model_name,
+                        dataset,
+                        len(set(dataset[3].tolist())),
+                        started,
+                        feature_names,
                         search.parameters, search.engine, search.trial_count, search.best_score,
-                        dataset_fingerprint,
+                        dataset_fingerprint, label_name,
                         historical_drafts,
                     )
                     experiment_id = self._model_repository.save(experiment)
@@ -307,7 +333,7 @@ class ModelResearchPipeline:
                             market=normalized_market,
                             symbol=symbol,
                             model_name=model_name,
-                            label_name=DEFAULT_LABEL,
+                            label_name=label_name,
                             horizon=5,
                             event_time=event_time,
                             available_time=feature_available.get(
@@ -323,7 +349,7 @@ class ModelResearchPipeline:
                         self._model_repository.save_predictions(predictions)
                     latest_predictions = self._latest_predictions(
                         experiment_id, normalized_market, model_name, dataset, latest_rows, started,
-                        search.parameters,
+                        search.parameters, label_name,
                     )
                     self._model_repository.save_predictions(latest_predictions)
                     self._model_repository.save_explanations(
@@ -351,9 +377,9 @@ class ModelResearchPipeline:
                         dates=unique_dates,
                         saved_oos_predictions=len(historical_drafts),
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - preserve other model results
                     failures[model_name] = str(exc)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - persist dataset-stage audit failure
             failures["dataset"] = str(exc)
 
         completed = datetime.now(UTC)
@@ -388,11 +414,13 @@ class ModelResearchPipeline:
         return result
 
     def _reusable_experiment(
-        self, market: str, model_name: str, expected_end: datetime, dataset_fingerprint: str
+        self, market: str, model_name: str, label_name: str,
+        expected_end: datetime, dataset_fingerprint: str
     ) -> ModelExperiment | None:
         for item in self._model_repository.list_runs(market):
             if (
                 item.model_name == model_name
+                and item.label_name == label_name
                 and item.model_version == MODEL_VERSION
                 and item.experiment_version == EXPERIMENT_VERSION
                 and self._timestamp(item.data_end) == self._timestamp(expected_end)
@@ -432,6 +460,7 @@ class ModelResearchPipeline:
         symbols: list[str],
         feature_names: tuple[str, ...] = DEFAULT_FEATURES,
         feature_rows: list[tuple[str, datetime, datetime, np.ndarray]] | None = None,
+        label_name: str = DEFAULT_LABEL,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         if not symbols:
             raise ValueError("no active research assets")
@@ -439,7 +468,7 @@ class ModelResearchPipeline:
         for start in range(0, len(symbols), 25):
             label_values.extend(
                 self._feature_store_repository.list_labels(
-                    symbols[start:start + 25], [DEFAULT_LABEL]
+                    symbols[start:start + 25], [label_name]
                 )
             )
         labels_by_key = {(item.symbol, item.event_time): item for item in label_values}
@@ -547,6 +576,67 @@ class ModelResearchPipeline:
                 output.append((symbol, event_time, cutoff, vector))
         return output
 
+    def _select_research_features(
+        self,
+        symbols: list[str],
+        candidates: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """Choose a causally joinable slow-feature set with honest coverage.
+
+        Requiring every ETF and equity to have every financial statement field
+        makes a populated comprehensive store collapse to zero rows.  Features
+        are added only while their common symbol coverage remains large enough
+        for a research challenger; unsupported fields are omitted instead of
+        being rewritten as economic zeros.
+        """
+        if not symbols:
+            return BASE_FEATURES
+        values = self._feature_store_repository.list_features(
+            symbols, list(BASE_FEATURES + candidates)
+        )
+        latest_base_cutoff: dict[str, datetime] = {}
+        for item in values:
+            if item.feature_name not in BASE_FEATURES:
+                continue
+            current = latest_base_cutoff.get(item.symbol)
+            if current is None or self._timestamp(item.available_time) > self._timestamp(
+                current
+            ):
+                latest_base_cutoff[item.symbol] = item.available_time
+        support: dict[str, set[str]] = {}
+        release_history: dict[str, dict[str, set[datetime]]] = {}
+        for item in values:
+            cutoff = latest_base_cutoff.get(item.symbol)
+            if (
+                item.feature_name in candidates
+                and cutoff is not None
+                and self._timestamp(item.available_time) <= self._timestamp(cutoff)
+                and math.isfinite(item.value)
+            ):
+                support.setdefault(item.feature_name, set()).add(item.symbol)
+                release_history.setdefault(item.feature_name, {}).setdefault(
+                    item.symbol, set()
+                ).add(item.event_time)
+        minimum_assets = min(len(symbols), max(5, math.ceil(len(symbols) * 0.4)))
+        common_symbols = set(symbols)
+        selected: list[str] = []
+        for name in candidates:
+            # A broad current snapshot is useful for today's decision, but it is
+            # not a historical training feature. Require repeated point-in-time
+            # releases so one fresh valuation/TDCC download cannot collapse a
+            # five-year training matrix to one or two dates.
+            repeated_symbols = {
+                symbol
+                for symbol, releases in release_history.get(name, {}).items()
+                if len(releases) >= 12
+            }
+            narrowed = common_symbols & support.get(name, set()) & repeated_symbols
+            if len(narrowed) < minimum_assets:
+                continue
+            selected.append(name)
+            common_symbols = narrowed
+        return BASE_FEATURES + tuple(selected)
+
     @staticmethod
     def _timestamp(value: datetime) -> datetime:
         return value.replace(tzinfo=None) if value.tzinfo else value
@@ -560,6 +650,7 @@ class ModelResearchPipeline:
         latest_rows: list[tuple[str, datetime, datetime, np.ndarray]],
         computed_at: datetime,
         parameters: dict[str, object] | None = None,
+        label_name: str = DEFAULT_LABEL,
     ) -> list[ModelPrediction]:
         if not latest_rows:
             return []
@@ -587,7 +678,7 @@ class ModelResearchPipeline:
                 market=market,
                 symbol=item[0],
                 model_name=model_name,
-                label_name=DEFAULT_LABEL,
+                label_name=label_name,
                 horizon=5,
                 event_time=item[1],
                 available_time=item[2],
@@ -669,6 +760,7 @@ class ModelResearchPipeline:
         automl_trials: int = 0,
         automl_best_score: float | None = None,
         dataset_fingerprint: str = "",
+        label_name: str = DEFAULT_LABEL,
         historical_predictions: list[tuple[datetime, str, float, float]] | None = None,
     ) -> ModelExperiment:
         features, target, event_times, symbols, label_available = dataset
@@ -711,14 +803,13 @@ class ModelResearchPipeline:
                 continue
             test_start = unique_dates[start_index]
             test_end = unique_dates[end_index - 1]
-            train_mask = np.array(
-                [event < test_start and available <= test_start for event, available in zip(event_times, label_available)]
-            )
-            test_mask = np.array([test_start <= event <= test_end for event in event_times])
+            train_mask = (event_times < test_start) & (label_available <= test_start)
+            test_mask = (event_times >= test_start) & (event_times <= test_end)
             if train_mask.sum() < 80 or test_mask.sum() < 20:
                 continue
             model = build_model(model_name, parameters).fit(features[train_mask], target[train_mask])
-            fold_predictions = model.predict(features[test_mask])
+            test_features = features[test_mask]
+            fold_predictions = model.predict(test_features)
             fold_actuals = target[test_mask]
             metrics = self._metrics(fold_actuals, fold_predictions)
             folds.append(
@@ -740,7 +831,7 @@ class ModelResearchPipeline:
             permutation = np.zeros(features.shape[1], dtype=float)
             rng = np.random.default_rng(1000 + sequence)
             for feature_index in range(features.shape[1]):
-                permuted = features[test_mask].copy()
+                permuted = test_features.copy()
                 rng.shuffle(permuted[:, feature_index])
                 shuffled_mse = float(np.mean((fold_actuals - model.predict(permuted)) ** 2))
                 permutation[feature_index] = max(shuffled_mse - baseline_mse, 0.0)
@@ -751,14 +842,10 @@ class ModelResearchPipeline:
         predicted = np.array(predictions)
         observed = np.array(actuals)
         if historical_predictions is not None:
-            for event_time in sorted(set(prediction_dates)):
-                indexes = [
-                    index
-                    for index, value in enumerate(prediction_dates)
-                    if value == event_time
-                ]
-                if not indexes:
-                    continue
+            indexes_by_date: dict[datetime, list[int]] = {}
+            for index, event_time in enumerate(prediction_dates):
+                indexes_by_date.setdefault(event_time, []).append(index)
+            for event_time, indexes in sorted(indexes_by_date.items()):
                 day_predictions = predicted[indexes]
                 order = np.argsort(np.argsort(day_predictions)).astype(float)
                 ranks = order / max(len(order) - 1, 1)
@@ -798,7 +885,7 @@ class ModelResearchPipeline:
             market=market,
             model_name=model_name,
             model_version=MODEL_VERSION,
-            label_name=DEFAULT_LABEL,
+            label_name=label_name,
             experiment_version=EXPERIMENT_VERSION,
             promotion_gate=promotion_gate,
             data_start=min(prediction_dates),
@@ -865,8 +952,10 @@ class ModelResearchPipeline:
         actual: np.ndarray, predicted: np.ndarray, dates: list[datetime]
     ) -> float | None:
         spreads: list[float] = []
-        for event_time in sorted(set(dates)):
-            indexes = [index for index, value in enumerate(dates) if value == event_time]
+        indexes_by_date: dict[datetime, list[int]] = {}
+        for index, event_time in enumerate(dates):
+            indexes_by_date.setdefault(event_time, []).append(index)
+        for indexes in indexes_by_date.values():
             if len(indexes) < 4:
                 continue
             ordered = sorted(indexes, key=lambda index: predicted[index])

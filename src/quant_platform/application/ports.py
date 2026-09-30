@@ -222,6 +222,10 @@ class SchedulerJobRunRepository(Protocol):
 
     def update_progress(self, run_id: int, metrics_json: str) -> None: ...
 
+    def fail_stale_running(
+        self, cutoff: datetime, completed_at: datetime
+    ) -> int: ...
+
     def list_recent(self, limit: int = 20) -> list[SchedulerJobRun]: ...
 
 
@@ -320,8 +324,16 @@ class FeatureLabelStoreRepository(Protocol):
         self, symbols: list[str], feature_names: list[str] | None = None
     ) -> list[FeatureValue]: ...
 
+    def list_latest_features(
+        self, symbols: list[str], feature_names: list[str], as_of: datetime
+    ) -> list[FeatureValue]: ...
+
     def list_labels(
         self, symbols: list[str], label_names: list[str] | None = None
+    ) -> list[LabelValue]: ...
+
+    def list_latest_labels(
+        self, symbols: list[str], label_names: list[str]
     ) -> list[LabelValue]: ...
 
 
