@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import sessionmaker
 
 from quant_platform.database.models import (
+    InvestmentPlanModel,
     FeatureDefinitionModel,
     FeatureValueModel,
     FeatureRevisionModel,
@@ -60,6 +61,7 @@ from quant_platform.database.models import (
     MacroObservationModel,
 )
 from quant_platform.domain.entities import (
+    InvestmentPlan,
     DataCoverage,
     ExperimentStatus,
     JobRunStatus,
@@ -3581,3 +3583,41 @@ class SqlAlchemyDailyDecisionRepository:
             gate_checks_json=row.gate_checks_json,
             computed_at=row.computed_at,
         )
+
+class SqlAlchemyInvestmentPlanRepository:
+    """Append-only plan versions (S5-W01)."""
+
+    def __init__(self, session_factory: sessionmaker) -> None:
+        self._session_factory = session_factory
+
+    @staticmethod
+    def _entity(row: InvestmentPlanModel) -> InvestmentPlan:
+        return InvestmentPlan(
+            version=row.version, created_at=_utc_aware(row.created_at),
+            monthly_amount=Decimal(row.monthly_amount), salary_day=row.salary_day,
+            strategy_key=row.strategy_key, max_drawdown_tolerance=row.max_drawdown_tolerance,
+            goal=row.goal or "", horizon_years=row.horizon_years, note=row.note or "",
+        )
+
+    def latest(self) -> InvestmentPlan | None:
+        with self._session_factory() as session:
+            row = session.scalars(
+                select(InvestmentPlanModel).order_by(InvestmentPlanModel.version.desc()).limit(1)
+            ).first()
+        return self._entity(row) if row else None
+
+    def list_versions(self, limit: int = 20) -> list[InvestmentPlan]:
+        with self._session_factory() as session:
+            rows = session.scalars(
+                select(InvestmentPlanModel).order_by(InvestmentPlanModel.version.desc()).limit(limit)
+            ).all()
+        return [self._entity(row) for row in rows]
+
+    def add_version(self, values: dict[str, object], created_at: datetime) -> InvestmentPlan:
+        with self._session_factory() as session:
+            latest = session.scalar(select(func.max(InvestmentPlanModel.version))) or 0
+            row = InvestmentPlanModel(version=latest + 1, created_at=created_at, **values)
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return self._entity(row)

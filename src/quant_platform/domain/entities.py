@@ -969,3 +969,17 @@ class ResearchFailureCase:
     repeat_count: int
     first_occurred_at: datetime
     last_occurred_at: datetime
+
+@dataclass(frozen=True, slots=True)
+class InvestmentPlan:
+    """One saved version of the investor's plan (S5-W01)."""
+
+    version: int
+    created_at: datetime
+    monthly_amount: Decimal
+    salary_day: int
+    strategy_key: str
+    max_drawdown_tolerance: float
+    goal: str = ""
+    horizon_years: int | None = None
+    note: str = ""

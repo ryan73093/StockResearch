@@ -417,6 +417,29 @@ td.wrap { white-space: normal; min-width: 180px; }
 .actions-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
 
 .note { color: var(--muted); font-size: 13px; margin: 12px 0 0; }
+
+/* ---------- forms ---------- */
+.form { display: grid; gap: 14px; }
+.form label { display: grid; gap: 6px; font-size: 13.5px; color: var(--text-2); font-weight: 500; }
+.form input, .form textarea, .form select {
+  font: 15px/1.4 var(--font); color: var(--text); background: var(--surface-2);
+  border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; width: 100%;
+}
+.form input:focus, .form textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+.form__row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.form__choices { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
+.form__choices legend { font-size: 13.5px; color: var(--text-2); font-weight: 500; margin-bottom: 6px; }
+.choice {
+  display: flex !important; grid-template-columns: none; align-items: flex-start; gap: 10px !important;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); cursor: pointer;
+}
+.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-bg); }
+.choice input { width: auto; margin-top: 4px; accent-color: var(--accent); }
+.choice span { display: grid; gap: 2px; }
+.choice strong { color: var(--text); font-size: 14.5px; }
+.choice small { color: var(--muted); font-size: 12.5px; font-weight: 400; }
+.choice__stat { color: var(--accent) !important; }
+.form-error { color: var(--bad); background: var(--bad-bg); border-radius: 10px; padding: 10px 12px; margin: 0 0 4px; }
 .status-line { color: var(--muted); font-size: 13px; }
 .flash { display: flex; align-items: center; gap: 10px; }
 

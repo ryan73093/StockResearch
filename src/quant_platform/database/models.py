@@ -1028,3 +1028,19 @@ class PortfolioEquityPointModel(Base):
     benchmark_equity: Mapped[float] = mapped_column(Float)
     drawdown: Mapped[float] = mapped_column(Float)
     daily_return: Mapped[float] = mapped_column(Float)
+
+class InvestmentPlanModel(Base):
+    """One saved version of the investor's plan (S5-W01); rows are never updated."""
+
+    __tablename__ = "investment_plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    version: Mapped[int] = mapped_column(unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    monthly_amount: Mapped[Decimal] = mapped_column(Numeric(20, 2))
+    salary_day: Mapped[int]
+    strategy_key: Mapped[str] = mapped_column(String(80))
+    max_drawdown_tolerance: Mapped[float] = mapped_column(Float)
+    goal: Mapped[str] = mapped_column(String(200), default="")
+    horizon_years: Mapped[int | None] = mapped_column(nullable=True)
+    note: Mapped[str] = mapped_column(String(1000), default="")

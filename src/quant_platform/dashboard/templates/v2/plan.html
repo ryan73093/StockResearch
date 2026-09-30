@@ -5,18 +5,94 @@
 <header class="page-head">
   <div>
     <h1>計畫</h1>
-    <p class="page-head__sub">每月投入、目標配置與風險承受度</p>
+    <p class="page-head__sub">每月投入、採用的策略與可承受回撤；每次儲存都會留下新版本</p>
   </div>
+  {% if current %}<div class="page-head__meta">目前第 {{ current.version }} 版</div>{% endif %}
 </header>
 {% endblock %}
 {% block content %}
-<section class="card empty">
-  <div class="empty__icon">{{ icon('plan') }}</div>
-  <h2>建立你的投資計畫</h2>
-  <p class="muted">每月投入金額、薪資日、允許標的、目標配置與可承受回撤會在這裡設定，每日建議會依照計畫產生。</p>
-  <p class="muted small">排在路線圖 S5（決策核心與帳務）。目前的每日建議沿用既有的研究決策與模擬帳戶。</p>
-  <div class="actions-row">
-    <a class="btn" href="/system#roadmap">查看路線圖</a>
+<div class="grid grid--main-side">
+  <div class="stack">
+    {% if current %}
+    <section class="card order-1">
+      <div class="card__head"><h2>目前的計畫 <span class="badge badge--accent">第 {{ current.version }} 版</span></h2><span class="muted small">{{ current.created_at.astimezone(taipei).strftime('%Y-%m-%d %H:%M') }}</span></div>
+      <div class="kpis kpis--four">
+        <div class="kpi"><div class="kpi__label">每月投入</div><div class="kpi__value">{{ '{:,.0f}'.format(current.monthly_amount) }}<small>元</small></div></div>
+        <div class="kpi"><div class="kpi__label">薪資日</div><div class="kpi__value">每月 {{ current.salary_day }}<small>日</small></div></div>
+        <div class="kpi"><div class="kpi__label">可承受回撤</div><div class="kpi__value">{{ '{:.0%}'.format(current.max_drawdown_tolerance) }}</div></div>
+        <div class="kpi"><div class="kpi__label">投資年數</div><div class="kpi__value">{{ current.horizon_years or '—' }}{% if current.horizon_years %}<small>年</small>{% endif %}</div></div>
+      </div>
+      <dl class="facts" style="margin-top:14px">
+        <div><dt>採用策略</dt><dd>{{ current_strategy }}</dd></div>
+        {% if current.goal %}<div><dt>目標</dt><dd>{{ current.goal }}</dd></div>{% endif %}
+        {% if current.note %}<div><dt>備註</dt><dd>{{ current.note }}</dd></div>{% endif %}
+      </dl>
+    </section>
+    {% else %}
+    <section class="card empty order-1">
+      <div class="empty__icon">{{ icon('plan') }}</div>
+      <h2>建立你的投資計畫</h2>
+      <p class="muted">填寫每月投入金額、薪資日與要採用的策略。之後的每日建議、定期定額影子帳戶與研究回測都會依照這份計畫。</p>
+    </section>
+    {% endif %}
+
+    <section class="card order-2">
+      <div class="card__head"><h2>{{ '修改計畫（存成新版本）' if current else '填寫計畫' }}</h2></div>
+      {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+      <form method="post" class="form">
+        <div class="form__row">
+          <label>每月投入金額（元）<input name="monthly_amount" inputmode="numeric" value="{{ values.monthly_amount }}" required></label>
+          <label>薪資日（1～28）<input name="salary_day" type="number" min="1" max="28" value="{{ values.salary_day }}" required></label>
+        </div>
+        <fieldset class="form__choices">
+          <legend>採用策略</legend>
+          {% for key, name, description in strategies %}
+            <label class="choice">
+              <input type="radio" name="strategy_key" value="{{ key }}" {{ 'checked' if values.strategy_key == key else '' }}>
+              <span><strong>{{ name }}</strong><small>{{ description }}</small>
+                {% if research.get(name) %}{% set row = research.get(name) %}
+                  <small class="choice__stat">全期間 XIRR {{ '{:.2%}'.format(row.xirr) if row.xirr is not none else '—' }}、最大回撤 {{ '{:.0%}'.format(row.drawdown) }}{% if row.three_year %}、3 年勝率 {{ '{:.0%}'.format(row.three_year.win_ratio) }}{% endif %}</small>
+                {% endif %}
+              </span>
+            </label>
+          {% endfor %}
+        </fieldset>
+        <div class="form__row">
+          <label>可承受的最大回撤（%）<input name="max_drawdown_tolerance" type="number" min="5" max="80" step="1" value="{{ values.max_drawdown_tolerance }}" required></label>
+          <label>預計投資年數（選填）<input name="horizon_years" type="number" min="1" max="60" value="{{ values.horizon_years }}"></label>
+        </div>
+        <label>目標（選填）<input name="goal" maxlength="200" value="{{ values.goal }}" placeholder="例如：退休金、子女教育"></label>
+        <label>這次修改的原因（選填）<textarea name="note" maxlength="1000" rows="2">{{ values.note }}</textarea></label>
+        <div class="actions-row"><button class="btn btn--primary" type="submit">儲存為新版本</button><span class="muted small">不會刪除舊版本</span></div>
+      </form>
+    </section>
   </div>
-</section>
+
+  <aside class="stack">
+    <section class="card order-3">
+      <div class="card__head"><h2>版本紀錄</h2></div>
+      {% if history %}
+      <ul class="timeline">
+        {% for item in history %}
+          <li>
+            <span class="timeline__time">v{{ item.version }}</span>
+            <span class="timeline__text"><strong>{{ '{:,.0f}'.format(item.monthly_amount) }} 元／月・每月 {{ item.salary_day }} 日</strong>
+              <span>{{ strategy_names.get(item.strategy_key, item.strategy_key) }}・回撤 {{ '{:.0%}'.format(item.max_drawdown_tolerance) }}・{{ item.created_at.astimezone(taipei).strftime('%Y-%m-%d') }}{% if item.note %}・{{ item.note }}{% endif %}</span></span>
+          </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted" style="margin:0">尚無版本。</p>
+      {% endif %}
+    </section>
+    <section class="card card--quiet order-4">
+      <div class="card__head"><h2>說明</h2></div>
+      <ul class="rules">
+        <li>策略目前只能選內建基準；AI 研究員找到並經你核准的策略，之後會出現在這裡（路線圖 S4、S5）。</li>
+        <li>可承受回撤是每日建議的風險上限：超過時會先提醒，不會自動賣出。</li>
+        <li>回測數字來自研究頁的歷史模擬，只作參考。</li>
+      </ul>
+    </section>
+  </aside>
+</div>
 {% endblock %}

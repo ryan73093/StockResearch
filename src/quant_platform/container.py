@@ -8,6 +8,7 @@ from quant_platform import __version__
 from quant_platform.market_calendar import MarketCalendarStore, TwseHolidayScheduleClient
 from quant_platform.application.listing_reconciliation import TaiwanListingReconciliationService
 from quant_platform.application.close_availability import CloseAvailabilityProbe
+from quant_platform.application.investment_plan import InvestmentPlanService
 from quant_platform.application.database_backup import DatabaseBackupService
 from quant_platform.application.prediction_archive import (
     PredictionArchiveService,
@@ -74,6 +75,7 @@ from quant_platform.database.repositories import (
     SqlAlchemyResearchUniverseRepository,
     SqlAlchemySchedulerJobRunRepository,
     SqlAlchemyFeatureLabelStoreRepository,
+    SqlAlchemyInvestmentPlanRepository,
     SqlAlchemyRegimeFactorResearchRepository,
     SqlAlchemyBacktestResearchRepository,
     SqlAlchemyEnsembleResearchRepository,
@@ -168,6 +170,7 @@ class Container:
     prediction_archive: PredictionArchiveService
     database_backup: DatabaseBackupService | None
     close_availability: CloseAvailabilityProbe
+    investment_plan_service: InvestmentPlanService
 
 
 def _sqlite_path(database_url: str) -> Path | None:
@@ -553,5 +556,8 @@ def build_container(settings: Settings | None = None) -> Container:
         ),
         close_availability=CloseAvailabilityProbe(
             _instance_dir(resolved.database_url), market_calendar
+        ),
+        investment_plan_service=InvestmentPlanService(
+            SqlAlchemyInvestmentPlanRepository(database.session_factory)
         ),
     )

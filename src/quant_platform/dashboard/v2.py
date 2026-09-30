@@ -11,9 +11,11 @@ from datetime import UTC, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, jsonify, render_template, request
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
 from quant_platform.application.close_availability import SOURCES as CLOSE_SOURCES
+from quant_platform.application.investment_plan import InvestmentPlanError, strategy_name
+from quant_platform.research.spec import BASELINES
 from quant_platform.application.close_availability import recent_table
 from quant_platform.config.settings import PAUSABLE_MODULES
 from quant_platform.container import _instance_dir
@@ -21,7 +23,7 @@ from quant_platform.research.reports import latest_reports, report_rows
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.1.0"
+ASSET_VERSION = "2.2.0"
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {
@@ -189,6 +191,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         return {
             "theme": theme if theme in THEMES else "dark",
             "asset_version": ASSET_VERSION,
+            "taipei": TAIPEI,
             "market_session": market_session(
                 datetime.now(TAIPEI), dependencies.market_calendar.calendar("TW")
             ),
@@ -315,9 +318,46 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             names=names_for(item.position.symbol for item in overview.positions),
         )
 
-    @blueprint.get("/plan")
+    @blueprint.route("/plan", methods=["GET", "POST"])
     def plan():
-        return render_template("v2/plan.html", active_nav="plan")
+        service = dependencies.investment_plan_service
+        error = None
+        form = dict(request.form) if request.method == "POST" else {}
+        if request.method == "POST":
+            try:
+                saved = service.save(form)
+            except InvestmentPlanError as exc:
+                error = str(exc)
+            else:
+                flash(f"已儲存投資計畫第 {saved.version} 版。", "success")
+                return redirect(url_for("v2.plan"))
+        current = service.current()
+        defaults = {
+            "monthly_amount": f"{current.monthly_amount:.0f}" if current else "10000",
+            "salary_day": str(current.salary_day) if current else "5",
+            "strategy_key": current.strategy_key if current else "benchmark_dca",
+            "max_drawdown_tolerance": f"{current.max_drawdown_tolerance * 100:g}" if current else "30",
+            "horizon_years": str(current.horizon_years or "") if current else "",
+            "goal": current.goal if current else "",
+            "note": "",
+        }
+        reports_dir = _instance_dir(dependencies.settings.database_url) / "research" / "reports"
+        research = {
+            row["name"]: row for row in report_rows(latest_reports(reports_dir, limit=50))
+            if row["period_label"] == "全期間"
+        }
+        return render_template(
+            "v2/plan.html",
+            active_nav="plan",
+            current=current,
+            current_strategy=strategy_name(current) if current else None,
+            history=service.history(),
+            strategies=[(key, spec.name, spec.description) for key, spec in BASELINES.items()],
+            strategy_names={key: spec.name for key, spec in BASELINES.items()},
+            values={**defaults, **form},
+            error=error,
+            research=research,
+        ), (400 if error else 200)
 
     @blueprint.get("/research")
     def research():
