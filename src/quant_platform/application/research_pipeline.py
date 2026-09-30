@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
@@ -21,6 +22,11 @@ from quant_platform.application.macro_data import MacroDataPipeline, MacroPipeli
 from quant_platform.application.data_quality import (
     DataQualityService, DataQualitySnapshotView,
 )
+from quant_platform.application.listing_reconciliation import (
+    TaiwanListingReconciliationService,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +62,9 @@ class DailyResearchPipeline:
         portfolio_research_pipeline: PortfolioResearchPipeline,
         model_research_pipeline: ModelResearchPipeline,
         daily_decision_pipeline: DailyDecisionPipeline,
+        listing_reconciliation: TaiwanListingReconciliationService | None = None,
     ) -> None:
+        self._listing_reconciliation = listing_reconciliation
         self._market_data_pipeline = market_data_pipeline
         self._taiwan_data_pipeline = taiwan_data_pipeline
         self._macro_data_pipeline = macro_data_pipeline
@@ -89,6 +97,17 @@ class DailyResearchPipeline:
                 f"{market.upper()} 行情尚未更新到 {market_result.expected_date}；"
                 f"目前只有 {market_result.data_date or '無資料'}，停止建立過期決策"
             )
+        if (
+            market.upper() == "TW"
+            and symbols is None
+            and self._listing_reconciliation is not None
+        ):
+            # Retire delisted equities before the early decision and the data
+            # quality gate, so one delisted name cannot block the whole market.
+            try:
+                self._listing_reconciliation.run(now=now)
+            except Exception:
+                logger.exception("Taiwan listing reconciliation failed; continuing")
         feature_result: FeatureLabelPipelineResult | None = None
         model_result: ModelPipelineResult | None = None
         if early_decision_callback is not None:

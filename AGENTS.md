@@ -61,7 +61,8 @@
 ## Windows 環境注意
 
 - 主要 shell 為 Windows PowerShell 5.1。Git 位於 `C:\Program Files\Git\cmd\git.exe`；若 PATH 尚未更新，用完整路徑呼叫。
-- 多行 commit 訊息寫入暫存檔後用 `git commit -F <檔案>`，不要把 here-string 當參數傳入。
+- 多行 commit 訊息寫入暫存檔（UTF-8 無 BOM；PowerShell 5.1 的 `Set-Content -Encoding utf8` 會加 BOM）後用 `git commit -F <檔案>`，不要把 here-string 當參數傳入。
+- 在 PowerShell 以 `python -c "..."` 執行含 `>`、`<` 或引號的 SQL 會被當成重導向；查詢寫成腳本檔再執行。
 
 ## 寫作風格
 

@@ -6,6 +6,7 @@ from typing import Callable
 
 from quant_platform import __version__
 from quant_platform.market_calendar import MarketCalendarStore, TwseHolidayScheduleClient
+from quant_platform.application.listing_reconciliation import TaiwanListingReconciliationService
 from quant_platform.application.services import (
     HealthService,
     MarketDataIngestionService,
@@ -321,11 +322,16 @@ def build_container(settings: Settings | None = None) -> Container:
         point_in_time_repository,
         calendar_store=market_calendar,
     )
+    listing_reconciliation = TaiwanListingReconciliationService(
+        universe_repository, market_bar_repository, TwseCompanyProvider(),
+        job_run_repository, calendar_store=market_calendar,
+    )
     daily_research_pipeline = DailyResearchPipeline(
         market_data_pipeline, taiwan_data_pipeline, macro_data_pipeline, data_quality_service,
         feature_label_pipeline, factor_research_pipeline, backtest_research_pipeline,
         ensemble_research_pipeline, portfolio_research_pipeline,
         model_research_pipeline, daily_decision_pipeline,
+        listing_reconciliation=listing_reconciliation,
     )
 
     def load_missing_stock_research(

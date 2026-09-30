@@ -2,6 +2,20 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-09-30 — S1-W02 下市個股處理
+
+- 起點：台股原始品質快照 #131 被 3 個嚴重問題阻擋——2867.TW 落後 11 個交易日；5371.TWO 落後 17 個交易日、近期缺漏 27%。
+- 查證：
+  - 資料庫：兩檔的官方行情分別停在 2026-08-19、08-21；Yahoo 之後仍有平盤、成交量 0 的資料（2867 固定 9.70 元到 9/11；5371 固定 83.5 元到 9/3），屬停止交易期間的填補值。
+  - 官方：2026-09-29 證交所 `MI_INDEX`、櫃買最新收盤、證交所 `t187ap03_L` 與櫃買 `mopsfin_t187ap03_O` 公司名冊都查無兩檔，判定已下市（或終止櫃檯買賣）。既有下市資訊依賴 FinMind `TaiwanStockDelisting`，目前 FinMind 回應 HTTP 402（額度用完），所以股票池沒有更新。
+- 新增 `application/listing_reconciliation.py` `TaiwanListingReconciliationService`：比對證交所＋櫃買現行名冊與啟用中的個股（不含 ETF、指數）；不在名冊且連續 3 個交易日以上無成交者停用，並把所有未結束的股票池區間在最後成交日關閉（`end_is_exact=False`，原因附在 reason），避免股票池擴充把它重新加回。防護：名冊少於 1,500 家不動作；單次超過 10 檔時全部暫停並要求人工確認。寫入 `tw_listing_reconciliation` 執行紀錄。
+- 接入：`DailyResearchPipeline` 在台股行情更新後、早期決策與品質閘門之前執行；失敗只記錄，不中斷流程。
+- 測試：`tests/test_listing_reconciliation.py` 5 項（停用並關閉區間、近期有成交者保留、名冊不完整不動作、超過上限要求人工確認、執行紀錄）；全部測試 211 通過、1 略過。
+- 部署（20:25）：`stop-services.ps1` → `pip install .` → `start-services.ps1`（監督 282792、web 3660、api 282688、worker 277108；web `/health` 12 ms）。
+- 正式資料執行（20:28）：名冊 1,988 家、比對 529 檔；停用 2867.TW（最後成交 8/19，28 個交易日無成交）、5371.TWO（最後成交 8/21，26 個交易日）。重跑台股原始品質快照 #132：`warning`、阻擋 0、落後標的 0、允許研究；剩 11 個不阻擋警告（少數個股缺融資融券或估值資料）。
+- 待決定：停牌但仍在名冊上的個股目前仍會觸發個股落後阻擋，建議改為只排除該檔（`REQUIREMENTS.md` §14）。
+- 回復：`git revert` 本工作包 commit 並重新部署；若要恢復兩檔，`set_active` 設回 True 並把對應股票池區間的 `valid_to` 改回空值。
+
 ## 2026-09-30 — S1-W04 服務啟停與效能
 
 - 使用者同意重啟服務（2026-09-30）；GitHub push 由使用者完成，`origin/main` = `cd436d2`。
