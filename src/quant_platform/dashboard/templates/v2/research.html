@@ -59,6 +59,35 @@
   {% endif %}
 </section>
 
+{% if round_view %}
+<section class="card{% if round_view.passing and round_view.best_dsr and round_view.best_dsr >= round_view.gates.dsr %} card--highlight{% endif %}">
+  <div class="card__head">
+    <h2>第一批研究結論 <span class="badge">開發期 2004–2016</span></h2>
+    <span class="muted small">{{ round_view.trials }} 個設定，全部計入多重檢定</span>
+  </div>
+  <p style="margin:0 0 12px"><strong>{{ round_view.verdict }}</strong></p>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>研究方向</th><th class="num">設定數</th><th class="num">通過開發期門檻</th><th>最佳設定</th><th class="num">3 年勝率</th><th class="num">3 年中位超額</th><th class="num">最差 3 年</th></tr></thead>
+      <tbody>
+      {% for row in round_view.rows %}
+        <tr>
+          <td data-primary><strong>{{ row.direction }}</strong></td>
+          <td class="num" data-label="設定數">{{ row.trials }}</td>
+          <td class="num" data-label="通過門檻">{{ row.passing }}</td>
+          <td class="small" data-label="最佳設定" data-wide>{{ row.best }}</td>
+          <td class="num" data-label="3 年勝率">{{ '{:.0%}'.format(row.best_win_ratio) if row.best_win_ratio is not none else '—' }}</td>
+          <td class="num {{ 'up' if (row.best_median or 0) > 0 else ('down' if (row.best_median or 0) < 0 else '') }}" data-label="3 年中位超額">{{ '{:+.2%}'.format(row.best_median) if row.best_median is not none else '—' }}</td>
+          <td class="num" data-label="最差 3 年">{{ '{:+.1%}'.format(row.best_worst) if row.best_worst is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">開發期門檻：3 年滾動視窗勝率 ≥ {{ '{:.0%}'.format(round_view.gates.win_ratio) }} 且中位超額 > 0；檢定門檻：DSR ≥ {{ round_view.gates.dsr }}、PBO ≤ {{ '{:.0%}'.format(round_view.gates.pbo) }}。超額以投入金額計。</p>
+</section>
+{% endif %}
+
 <section class="card">
   <div class="card__head">
     <h2>前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>

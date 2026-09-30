@@ -22,6 +22,7 @@ from quant_platform.application.close_availability import recent_table
 from quant_platform.config.settings import PAUSABLE_MODULES
 from quant_platform.container import _instance_dir
 from quant_platform.research.forward import FORWARD_START, ForwardTracker
+from quant_platform.research.summary import round_summary
 from quant_platform.research.reports import latest_reports, latest_stats, report_rows, trial_ranking
 
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -475,12 +476,14 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             best = max(stats["candidates"], key=lambda item: item["dsr"]["deflated_sharpe"] or 0)
             best_dsr = {"name": best["name"], "value": best["dsr"]["deflated_sharpe"], "trials": best["dsr"]["trials"]}
         forward_rows = ForwardTracker(research_dir).summary()
+        round_view = round_summary(research_dir / "trials.jsonl", "development", stats)
         return render_template(
             "v2/research.html",
             active_nav="research",
             tool_groups=TOOL_GROUPS,
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
+            round_view=round_view,
             ranking=ranking,
             stats=stats,
             best_dsr=best_dsr,

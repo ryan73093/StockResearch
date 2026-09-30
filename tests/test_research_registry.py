@@ -134,6 +134,29 @@ def test_research_page_ranks_candidate_trials(tmp_path):
     assert "已登錄 2 個候選試驗" in body and "回撤 5%" in body and "開發期" in body
 
 
+def test_round_summary_states_an_honest_verdict(tmp_path):
+    from quant_platform.research.summary import round_summary
+
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    for index, (name, win, median) in enumerate((
+        ("均線 60 日：弱勢 ×2、強勢 ×0.5", 0.7, 0.01), ("均線 200 日：弱勢 ×2、強勢 ×1", 0.4, -0.002),
+        ("時點：每月 16 日全數買進 0050", 0.3, -0.001),
+    )):
+        _register(registry, spec_name=name, input_hash=f"i{index}", metrics={
+            "windows": {"3y": {"win_ratio": win, "median_excess": median, "worst_excess": -0.05}},
+        })
+
+    pending = round_summary(registry.path, "development", None)
+    weak = round_summary(registry.path, "development", {"candidates": [{"dsr": {"deflated_sharpe": 0.4}}], "pbo": {"pbo": 0.6}})
+    strong = round_summary(registry.path, "development", {"candidates": [{"dsr": {"deflated_sharpe": 0.99}}], "pbo": {"pbo": 0.1}})
+
+    assert pending["verdict"].startswith("統計檢定尚未完成")
+    assert [row["direction"] for row in weak["rows"]] == ["均線", "時點"]
+    assert weak["rows"][0]["trials"] == 2 and weak["rows"][0]["passing"] == 1
+    assert "沒有設定能證明勝過定期定額" in weak["verdict"] and "DSR 0.40" in weak["verdict"]
+    assert "1 個設定通過" in strong["verdict"]
+
+
 def test_first_batch_is_a_fixed_list_of_distinct_valid_specs():
     from quant_platform.research.batches import first_batch
 
