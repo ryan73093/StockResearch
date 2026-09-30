@@ -47,6 +47,28 @@ def test_every_save_is_a_new_version(container):
     assert service.history()[1].monthly_amount == 15_000  # the old version is kept
 
 
+def test_next_contribution_day_skips_closures_and_rolls_to_next_month():
+    from datetime import date
+
+    from quant_platform.dashboard.v2 import next_contribution_day
+    from quant_platform.market_calendar import MarketClosure, TradingCalendar
+
+    calendar = TradingCalendar("TW", [MarketClosure(date(2026, 10, 9), "國慶日補假")], covered_years=[2026])
+
+    assert next_contribution_day(calendar, date(2026, 10, 1), 9) == date(2026, 10, 12)   # holiday + weekend
+    assert next_contribution_day(calendar, date(2026, 10, 12), 9) == date(2026, 10, 12)  # moved salary day is today
+    assert next_contribution_day(calendar, date(2026, 10, 13), 5) == date(2026, 11, 5)
+
+
+def test_today_page_shows_the_plan_card(container):
+    client = create_app(container).test_client()
+    assert "還沒有投資計畫" in client.get("/").get_data(as_text=True)
+
+    container.investment_plan_service.save(FORM)
+    body = client.get("/").get_data(as_text=True)
+    assert "我的計畫" in body and "15,000 元" in body and "定期不定額（200 日均線）" in body
+
+
 def test_plan_page_saves_and_shows_errors(container):
     client = create_app(container).test_client()
     assert "建立你的投資計畫" in client.get("/plan").get_data(as_text=True)

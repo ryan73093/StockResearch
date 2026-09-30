@@ -103,6 +103,22 @@ def test_rebuild_uses_the_cache_and_keeps_the_same_hash(tmp_path):
         assert first["series"][key]["sha256"] == second["series"][key]["sha256"] == third["series"][key]["sha256"]
 
 
+def test_a_copy_taken_before_the_month_closed_is_requested_again(tmp_path):
+    import os
+    from datetime import datetime
+
+    _dataset(tmp_path, FakeExchange()).build()
+    january = tmp_path / "raw" / "twse_stock_day" / "0050" / "201001.json"
+    stamp = datetime(2010, 1, 20).timestamp()   # written while January was still open
+    os.utime(january, (stamp, stamp))
+
+    again = FakeExchange()
+    _dataset(tmp_path, again).build()
+
+    assert any("stockNo=0050" in url and "20100101" in url for url in again.calls)
+    assert datetime.fromtimestamp(january.stat().st_mtime).year > 2010
+
+
 def test_refusal_stops_the_run(tmp_path):
     exchange = FakeExchange()
     exchange.refuse = True

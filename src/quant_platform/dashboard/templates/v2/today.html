@@ -72,7 +72,7 @@
     {% endif %}
 
     {% if plan.watchlist %}
-    <details class="card order-3"{% if not plan.orders %} open{% endif %}>
+    <details class="card order-4"{% if not plan.orders %} open{% endif %}>
       <summary><h2>觀察清單 <span class="badge">{{ plan.watchlist|length }} 檔</span></h2></summary>
       <div class="table-wrap table-wrap--stack">
         <table class="table--stack">
@@ -111,7 +111,25 @@
     </section>
     {% endif %}
 
-    <section class="card order-4">
+    <section class="card order-3{% if plan_card and plan_card.is_today %} card--highlight{% endif %}">
+      <div class="card__head"><h2>我的計畫</h2>{% if plan_card %}<a class="small" href="/plan">第 {{ plan_card.version }} 版</a>{% endif %}</div>
+      {% if plan_card %}
+        {% if plan_card.is_today %}
+          <p style="margin:0 0 10px"><strong>今天是投入日</strong>：依「{{ plan_card.strategy }}」投入 {{ '{:,.0f}'.format(plan_card.amount) }} 元（13:40～14:30 盤後零股）。</p>
+        {% endif %}
+        <dl class="facts">
+          <div><dt>每月投入</dt><dd>{{ '{:,.0f}'.format(plan_card.amount) }} 元</dd></div>
+          <div><dt>下次投入日</dt><dd>{{ plan_card.next.strftime('%m/%d') }}（{{ '一二三四五六日'[plan_card.next.weekday()] }}）</dd></div>
+          <div><dt>策略</dt><dd>{{ plan_card.strategy }}</dd></div>
+          <div><dt>可承受回撤</dt><dd>{{ '{:.0%}'.format(plan_card.drawdown) }}</dd></div>
+        </dl>
+      {% else %}
+        <p class="muted" style="margin:0 0 10px">還沒有投資計畫。填好每月投入金額與薪資日後，這裡會提醒每次的投入日。</p>
+        <a class="btn" href="/plan">建立計畫</a>
+      {% endif %}
+    </section>
+
+    <section class="card order-5">
       <div class="card__head"><h2>資料狀態</h2></div>
       <dl class="facts">
         <div><dt>決策資料</dt><dd>{{ status.decision_time }}</dd></div>
@@ -123,7 +141,7 @@
     </section>
 
     {% if plan.hard_rules %}
-    <details class="card order-5">
+    <details class="card order-6">
       <summary><h2>交易守則</h2></summary>
       <ol class="rules">
         {% for rule in plan.hard_rules %}<li>{{ rule }}</li>{% endfor %}

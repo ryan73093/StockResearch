@@ -59,6 +59,47 @@
   {% endif %}
 </section>
 
+{% if ranking.total %}
+<section class="card">
+  <div class="card__head">
+    <h2>試驗排行 <span class="badge">{{ ranking.period_label }}</span></h2>
+    <span class="muted small">已登錄 {{ ranking.total }} 個候選試驗（含未勝出的）{% if not ranking.chain_ok %}・<span class="badge badge--bad">紀錄雜湊鏈異常</span>{% endif %}</span>
+  </div>
+  {% if stats %}
+  <div class="kpis kpis--four" style="margin-bottom:14px">
+    <div class="kpi"><div class="kpi__label">試驗數（多重檢定）</div><div class="kpi__value">{{ stats.trials }}</div></div>
+    <div class="kpi"><div class="kpi__label">過度擬合機率 PBO</div><div class="kpi__value">{{ '{:.0%}'.format(stats.pbo.pbo) if stats.pbo else '—' }}</div></div>
+    <div class="kpi"><div class="kpi__label">最佳 DSR</div><div class="kpi__value">{{ '{:.2f}'.format(best_dsr.value) if best_dsr else '—' }}</div></div>
+    <div class="kpi"><div class="kpi__label">門檻</div><div class="kpi__value" style="font-size:14px">PBO ≤ 20%、DSR ≥ 0.95</div></div>
+  </div>
+  {% endif %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr>
+        <th>#</th><th>設定</th><th class="num">3 年勝率</th><th class="num">3 年中位超額</th><th class="num">5 年勝率</th>
+        <th class="num">全期超額</th><th class="num">XIRR</th><th class="num">最大回撤</th>
+      </tr></thead>
+      <tbody>
+      {% for row in ranking.rows %}
+        {% set median = row.three_year.median_excess if row.three_year else none %}
+        <tr>
+          <td class="table-only muted" data-label="#">{{ row.trial_id }}</td>
+          <td data-primary><strong>{{ row.name }}</strong></td>
+          <td class="num" data-label="3 年勝率">{{ '{:.0%}'.format(row.three_year.win_ratio) if row.three_year and row.three_year.win_ratio is not none else '—' }}</td>
+          <td class="num {{ 'up' if (median or 0) > 0 else ('down' if (median or 0) < 0 else '') }}" data-label="3 年中位超額">{{ '{:+.2%}'.format(median) if median is not none else '—' }}</td>
+          <td class="num" data-label="5 年勝率">{{ '{:.0%}'.format(row.five_year.win_ratio) if row.five_year and row.five_year.win_ratio is not none else '—' }}</td>
+          <td class="num" data-label="全期超額">{{ '{:+.1%}'.format(row.excess) if row.excess is not none else '—' }}</td>
+          <td class="num" data-label="XIRR">{{ '{:.2%}'.format(row.xirr) if row.xirr is not none else '—' }}</td>
+          <td class="num" data-label="最大回撤">{{ '{:.1%}'.format(row.drawdown) if row.drawdown is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">只用開發期（2004-02～2016-12）資料評估；排名第一不代表有效——要同時通過多重檢定（DSR）與過度擬合檢查（PBO），再經驗證期與一次保留期才會成為候選。</p>
+</section>
+{% endif %}
+
 <div class="grid grid--half">
   {% for group in tool_groups if not group.paused %}
   <section class="card">

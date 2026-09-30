@@ -256,7 +256,7 @@ h1, h2, h3, p, li, dd { overflow-wrap: anywhere; }
 @media (max-width: 1099px) {
   .grid--main-side > .stack { display: contents; }
   .order-1 { order: 1; } .order-2 { order: 2; } .order-3 { order: 3; }
-  .order-4 { order: 4; } .order-5 { order: 5; }
+  .order-4 { order: 4; } .order-5 { order: 5; } .order-6 { order: 6; }
 }
 
 /* ---------- cards ---------- */
@@ -271,6 +271,7 @@ h1, h2, h3, p, li, dd { overflow-wrap: anywhere; }
 .card__head h2, details.card > summary h2 { font-size: 16px; display: flex; align-items: center; gap: 8px; }
 .card__foot { margin-top: 12px; }
 .card--quiet { box-shadow: none; background: color-mix(in srgb, var(--surface) 60%, var(--bg)); }
+.card--highlight { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: linear-gradient(135deg, var(--accent-bg), transparent 70%), var(--surface); }
 
 details.card > summary {
   cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;

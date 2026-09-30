@@ -28,6 +28,51 @@ def latest_reports(directory: str | Path, limit: int = 10) -> list[dict[str, obj
     return ordered[:limit]
 
 
+def trial_ranking(registry_path: str | Path, period: str, limit: int = 10) -> dict[str, object]:
+    """Candidate trials of one period ranked by the 3-year median excess."""
+    from quant_platform.research.registry import TrialRegistry
+
+    registry = TrialRegistry(registry_path)
+    records = [record for record in registry.records() if record.kind == "candidate" and record.period == period]
+
+    def score(record) -> float:
+        window = (record.metrics.get("windows") or {}).get("3y") or {}
+        value = window.get("median_excess")
+        return float(value) if value is not None else float("-inf")
+
+    ranked = sorted(records, key=score, reverse=True)[:limit]
+    return {
+        "period": period,
+        "period_label": PERIOD_LABELS.get(period, period),
+        "total": len(records),
+        "rows": [
+            {
+                "trial_id": record.trial_id,
+                "name": record.spec_name,
+                "excess": record.metrics.get("full_period_excess"),
+                "xirr": record.metrics.get("xirr"),
+                "benchmark_xirr": record.metrics.get("benchmark_xirr"),
+                "drawdown": record.metrics.get("max_drawdown"),
+                "three_year": (record.metrics.get("windows") or {}).get("3y"),
+                "five_year": (record.metrics.get("windows") or {}).get("5y"),
+            }
+            for record in ranked
+        ],
+        "chain_ok": not registry.verify(),
+    }
+
+
+def latest_stats(stats_dir: str | Path, period: str) -> dict[str, object] | None:
+    folder = Path(stats_dir)
+    files = sorted(folder.glob(f"{period}-*.json")) if folder.is_dir() else []
+    for path in reversed(files):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 def report_rows(reports: list[dict[str, object]]) -> list[dict[str, object]]:
     """Flatten reports into the values the research page shows."""
     rows = []

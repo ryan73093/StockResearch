@@ -111,6 +111,29 @@ def test_significance_counts_every_candidate_trial(tmp_path):
     assert report["pbo"]["months"] == 60 and 0 <= report["pbo"]["pbo"] <= 1
 
 
+def test_research_page_ranks_candidate_trials(tmp_path):
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+
+    client = create_app(build_container(
+        Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False)
+    )).test_client()
+    assert "個候選試驗" not in client.get("/research").get_data(as_text=True)
+
+    registry = TrialRegistry(tmp_path / "research" / "trials.jsonl")
+    for threshold in (0.05, 0.2):
+        spec = StrategySpec(
+            name=f"回撤 {threshold:.0%}", allocation=Allocation(weights={"0050": 1.0}),
+            sizing=Sizing(type="drawdown", drawdown_threshold=threshold),
+        )
+        run_trial(kind="candidate", spec=spec, period="development", market=MARKET, plan=PLAN,
+                  registry=registry, reports_dir=tmp_path / "research" / "reports", window_months=(3,))
+
+    body = client.get("/research").get_data(as_text=True)
+    assert "已登錄 2 個候選試驗" in body and "回撤 5%" in body and "開發期" in body
+
+
 def test_first_batch_is_a_fixed_list_of_distinct_valid_specs():
     from quant_platform.research.batches import first_batch
 

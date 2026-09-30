@@ -7,7 +7,7 @@ research pages stay reachable from 研究 until S8 retires them.
 from __future__ import annotations
 
 from collections import Counter
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -19,11 +19,11 @@ from quant_platform.research.spec import BASELINES
 from quant_platform.application.close_availability import recent_table
 from quant_platform.config.settings import PAUSABLE_MODULES
 from quant_platform.container import _instance_dir
-from quant_platform.research.reports import latest_reports, report_rows
+from quant_platform.research.reports import latest_reports, latest_stats, report_rows, trial_ranking
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.2.0"
+ASSET_VERSION = "2.3.0"
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {
@@ -60,6 +60,7 @@ MAINTENANCE_JOBS = (
     (time(2, 30), "預測封存", "每日；舊實驗預測移到 Parquet"),
     (time(3, 0), "資料庫備份", "每日；保留最近 7 份"),
     (time(13, 30), "收盤資料時效實測", "交易日每分鐘到 14:45；記錄各來源公布時間"),
+    (time(15, 15), "研究資料補抓", "交易日；長歷史資料只補當月、除權息只補今年"),
 )
 BACKGROUND_JOBS = "背景工作：每 15 分鐘檢查漏跑、每 10 分鐘補台股研究池資料、每小時檢查證交所休市日。"
 STATUS_BADGES = {
@@ -147,6 +148,17 @@ def _project_root() -> Path:
 
 def _tone(badge: str) -> str:
     return badge.removeprefix("badge--") if badge else "none"
+
+
+def next_contribution_day(calendar, today, salary_day: int):
+    """First session on or after this month's salary day; next month's once it has passed."""
+    target = date(today.year, today.month, salary_day)
+    session = target if calendar.is_trading_day(target) else calendar.next_trading_day(target)
+    if session < today:
+        year, month = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+        target = date(year, month, salary_day)
+        session = target if calendar.is_trading_day(target) else calendar.next_trading_day(target)
+    return session
 
 
 def market_session(now: datetime, calendar) -> dict[str, str]:
@@ -284,10 +296,24 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             ]
         market_date = dependencies.daily_market_data_pipeline.latest_market_date("TW")
         quality = quality_status("TW")
+        investment_plan = dependencies.investment_plan_service.current()
+        plan_card = None
+        if investment_plan is not None:
+            upcoming = next_contribution_day(calendar, day, investment_plan.salary_day)
+            plan_card = {
+                "version": investment_plan.version,
+                "amount": investment_plan.monthly_amount,
+                "salary_day": investment_plan.salary_day,
+                "strategy": strategy_name(investment_plan),
+                "next": upcoming,
+                "is_today": upcoming == day,
+                "drawdown": investment_plan.max_drawdown_tolerance,
+            }
         return render_template(
             "v2/today.html",
             active_nav="today",
             plan=plan,
+            plan_card=plan_card,
             kind=kind,
             today={"label": label},
             deadline_iso=deadline,
@@ -361,11 +387,21 @@ def create_v2_blueprint(dependencies) -> Blueprint:
 
     @blueprint.get("/research")
     def research():
-        reports_dir = _instance_dir(dependencies.settings.database_url) / "research" / "reports"
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        reports_dir = research_dir / "reports"
+        ranking = trial_ranking(research_dir / "trials.jsonl", "development")
+        stats = latest_stats(research_dir / "stats", "development")
+        best_dsr = None
+        if stats and stats.get("candidates"):
+            best = max(stats["candidates"], key=lambda item: item["dsr"]["deflated_sharpe"] or 0)
+            best_dsr = {"name": best["name"], "value": best["dsr"]["deflated_sharpe"], "trials": best["dsr"]["trials"]}
         return render_template(
             "v2/research.html",
             active_nav="research",
             tool_groups=TOOL_GROUPS,
+            ranking=ranking,
+            stats=stats,
+            best_dsr=best_dsr,
             baseline_rows=[
                 row for row in report_rows(latest_reports(reports_dir, limit=200))
                 if row["kind"] == "baseline"

@@ -190,6 +190,29 @@ def backup_database(container: "Container") -> object | None:
     return container.database_backup.run()
 
 
+def refresh_research_history(container: "Container", now: datetime | None = None) -> object | None:
+    """Keep the long-history research dataset current (S3): after the close on
+    trading days, re-request only the current month and year; everything else
+    comes from the cache. Skips until the initial fetch has produced a manifest."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.history.actions import build_actions
+    from quant_platform.research.history.dataset import HistoryDataset
+    from quant_platform.research.history.official import OfficialHistoryClient
+
+    base = _instance_dir(container.settings.database_url) / "research" / "history"
+    if not (base / "manifest.json").is_file():
+        logger.info("Research history refresh skipped: run the initial fetch first")
+        return None
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if _exchange_closure(container, "TW", local_now) is not None:
+        return None
+    manifest = HistoryDataset(base, client=OfficialHistoryClient(base / "raw")).build()
+    build_actions(base, OfficialHistoryClient(base / "raw"))
+    logger.info("Research history refreshed: %s", manifest.get("requests"))
+    return manifest.get("requests")
+
+
 def probe_close_availability(container: "Container") -> object:
     """S1-W05 measurement tick; the probe itself limits to 13:30–14:45 on trading days."""
     return container.close_availability.run()
@@ -228,6 +251,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=2 * 60 * 60,
+    )
+    scheduler.add_job(
+        refresh_research_history,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=15, timezone=timezone),
+        id="research_history_refresh",
+        name="研究用長歷史資料補抓當月（交易日 15:15）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
     )
     scheduler.add_job(
         probe_close_availability,

@@ -47,6 +47,29 @@ def _line(report: dict) -> str:
     )
 
 
+def _saved_plan() -> tuple[float, int] | None:
+    """Latest plan version, read-only from the application database."""
+    import sqlite3
+    from contextlib import closing
+
+    from quant_platform.config.settings import Settings
+
+    url = Settings.from_env().database_url
+    if not url.startswith("sqlite:///"):
+        return None
+    path = Path(url.removeprefix("sqlite:///")).resolve()
+    if not path.is_file():
+        return None
+    with closing(sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)) as db:
+        try:
+            row = db.execute(
+                "SELECT monthly_amount, salary_day FROM investment_plans ORDER BY version DESC LIMIT 1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+    return (float(row[0]), int(row[1])) if row else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument("command", choices=("baselines", "trial", "batch", "trials", "stats", "schema"))
@@ -60,7 +83,14 @@ def main() -> int:
     parser.add_argument("--dividend-lag", type=int, default=25)
     parser.add_argument("--execution-lag", type=int, default=0, help="穩健性：晚幾個交易日成交")
     parser.add_argument("--base", default=str(DEFAULT_BASE))
+    parser.add_argument("--use-plan", action="store_true", help="用網站上最新版投資計畫的每月金額與薪資日")
     args = parser.parse_args()
+    if args.use_plan:
+        saved = _saved_plan()
+        if saved is None:
+            raise SystemExit("還沒有投資計畫；先在網站「計畫」頁建立")
+        args.monthly, args.day = saved
+        print(f"使用投資計畫：每月 {args.monthly:,.0f} 元、每月 {args.day} 日", flush=True)
     registry = TrialRegistry(RESEARCH / "trials.jsonl")
 
     if args.command == "schema":

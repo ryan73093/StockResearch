@@ -9,6 +9,7 @@ of retrying, so the exchange is not hammered.
 
 from __future__ import annotations
 
+import calendar
 import json
 import time
 from collections.abc import Callable
@@ -23,6 +24,10 @@ TWSE = "https://www.twse.com.tw/rwd/zh"
 TPEX = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
 TPEX_BULLETIN = "https://www.tpex.org.tw/www/zh-tw/bulletin"
 EMPTY_MARKERS = ("沒有符合條件", "查詢日期小於", "查無資料")
+
+
+def _month_end(month: date) -> date:
+    return date(month.year, month.month, calendar.monthrange(month.year, month.month)[1])
 
 
 class SourceRefused(RuntimeError):
@@ -89,28 +94,28 @@ class OfficialHistoryClient:
         query = urlencode({"date": f"{month:%Y%m}01", "stockNo": code, "response": "json"})
         return self._cached(
             f"twse_stock_day/{code}/{month:%Y%m}", f"{TWSE}/afterTrading/STOCK_DAY?{query}",
-            final=self._month_is_final(month),
+            final=self._month_is_final(month), period_end=_month_end(month),
         )
 
     def twse_etf_day(self, day: date) -> object:
         query = urlencode({"date": f"{day:%Y%m%d}", "type": "0099P", "response": "json"})
         return self._cached(
             f"twse_etf_daily/{day:%Y}/{day:%Y%m%d}", f"{TWSE}/afterTrading/MI_INDEX?{query}",
-            final=day < self._today(),
+            final=day < self._today(), period_end=day,
         )
 
     def taiex_month(self, month: date) -> object:
         query = urlencode({"date": f"{month:%Y%m}01", "response": "json"})
         return self._cached(
             f"taiex/{month:%Y%m}", f"{TWSE}/TAIEX/MI_5MINS_HIST?{query}",
-            final=self._month_is_final(month),
+            final=self._month_is_final(month), period_end=_month_end(month),
         )
 
     def taiex_total_return_month(self, month: date) -> object:
         query = urlencode({"date": f"{month:%Y%m}01", "response": "json"})
         return self._cached(
             f"taiex_tr/{month:%Y%m}", f"{TWSE}/TAIEX/MFI94U?{query}",
-            final=self._month_is_final(month),
+            final=self._month_is_final(month), period_end=_month_end(month),
         )
 
     def twse_odd_lot_day(self, day: date) -> object:
@@ -118,7 +123,7 @@ class OfficialHistoryClient:
         query = urlencode({"date": f"{day:%Y%m%d}", "response": "json"})
         return self._cached(
             f"twse_odd_lot/{day:%Y}/{day:%Y%m%d}", f"{TWSE}/afterTrading/TWT53U?{query}",
-            final=day < self._today(),
+            final=day < self._today(), period_end=day,
         )
 
     def tpex_ex_rights_year(self, year: int) -> object:
@@ -127,6 +132,7 @@ class OfficialHistoryClient:
         return self._cached(
             f"tpex_ex_rights/{year}", f"{TPEX_BULLETIN}/exDailyQ",
             final=year < self._today().year, data=body.encode("ascii"),
+            period_end=date(year, 12, 31),
         )
 
     def twse_ex_rights_year(self, year: int) -> object:
@@ -134,14 +140,14 @@ class OfficialHistoryClient:
         query = urlencode({"startDate": f"{year}0101", "endDate": f"{year}1231", "response": "json"})
         return self._cached(
             f"twse_ex_rights/{year}", f"{TWSE}/exRight/TWT49U?{query}",
-            final=year < self._today().year,
+            final=year < self._today().year, period_end=date(year, 12, 31),
         )
 
     def tpex_stock_month(self, code: str, month: date) -> object:
         query = f"code={quote(code)}&date={month:%Y}%2F{month:%m}%2F01&response=json"
         return self._cached(
             f"tpex_trading/{code}/{month:%Y%m}", f"{TPEX}?{query}",
-            final=self._month_is_final(month),
+            final=self._month_is_final(month), period_end=_month_end(month),
         )
 
     # --- cache and throttle ----------------------------------------------
@@ -149,13 +155,24 @@ class OfficialHistoryClient:
         today = self._today()
         return (month.year, month.month) < (today.year, today.month)
 
-    def _cached(self, key: str, url: str, final: bool, data: bytes | None = None) -> object:
+    def _cached(
+        self, key: str, url: str, final: bool, data: bytes | None = None,
+        period_end: date | None = None,
+    ) -> object:
         """Final periods come from the cache once stored; the current period is
-        re-requested but still cached, so an offline rebuild sees the latest copy."""
+        re-requested but still cached, so an offline rebuild sees the latest copy.
+
+        A copy written on or before ``period_end`` was taken while the period was
+        still open, so it is requested once more after the period has closed."""
         path = self._raw / f"{key}.json"
         if path.is_file() and (final or self._offline):
-            self.cache_hits += 1
-            return json.loads(path.read_text(encoding="utf-8"))
+            stale = (
+                final and not self._offline and period_end is not None
+                and date.fromtimestamp(path.stat().st_mtime) <= period_end
+            )
+            if not stale:
+                self.cache_hits += 1
+                return json.loads(path.read_text(encoding="utf-8"))
         if self._offline:
             return None
         payload = self._request(url, data)
