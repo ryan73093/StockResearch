@@ -6,6 +6,7 @@ research pages stay reachable from 研究 until S8 retires them.
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -239,6 +240,30 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                 f"最近 {_taipei_text(latest.created)}・{latest.size_bytes / 2**30:.1f} GiB・"
                 f"共 {status.count} 份（上限 {status.keep}）"
             ),
+        }
+
+    def research_tile() -> dict[str, str]:
+        base = _instance_dir(dependencies.settings.database_url) / "research" / "history"
+        manifest_path = base / "manifest.json"
+        if not manifest_path.is_file():
+            building = (base / "raw").is_dir()
+            return {
+                "label": "研究資料",
+                "state": "建立中" if building else "尚未建立",
+                "badge": "badge--accent" if building else "badge--warn",
+                "detail": "官方長歷史日線下載中（背景執行）" if building else "執行 research.history fetch",
+            }
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            series = manifest.get("series") or {}
+            last = max((entry.get("quality") or {}).get("last") or "" for entry in series.values())
+        except (OSError, ValueError):
+            return {"label": "研究資料", "state": "讀取失敗", "badge": "badge--bad", "detail": "manifest.json"}
+        return {
+            "label": "研究資料",
+            "state": "已建立",
+            "badge": "badge--ok",
+            "detail": f"{len(series)} 個序列・資料到 {last or '—'}",
         }
 
     def quality_status(market: str) -> dict[str, object]:
@@ -496,6 +521,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "detail": f"{years[0]}–{years[-1]} 年；人工休市 {manual} 筆" if years else "尚無資料",
         })
         items.append(backup_tile(now))
+        items.append(research_tile())
         access_on = dependencies.settings.auth_mode == "cloudflare-access"
         items.append({
             "label": "外網發布",

@@ -87,6 +87,14 @@ def test_dividends_are_paid_after_the_lag_on_units_held_at_the_ex_date():
     assert result.final_cash == pytest.approx(10.1 + 199.0)     # paid 03-06, after the 03-05 buy
 
 
+def test_a_session_without_a_trade_postpones_the_orders():
+    closes = {"0050": {day: 100.0 for day in SESSIONS if day != date(2020, 2, 5)}}
+
+    result = simulate(DCA, market(closes=closes), PLAN)
+
+    assert [trade.day for trade in result.trades] == [date(2020, 1, 6), date(2020, 2, 6), date(2020, 3, 5)]
+
+
 def test_splits_multiply_units():
     closes = {"0050": {day: (100.0 if day < date(2020, 2, 10) else 25.0) for day in SESSIONS}}
     data = market(closes=closes, ratios={"0050": {date(2020, 2, 10): 4.0}})

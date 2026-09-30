@@ -53,6 +53,24 @@ def test_theme_defaults_to_dark_and_follows_the_cookie(client):
     assert 'data-theme="dark"' in client.get("/system").get_data(as_text=True)
 
 
+def test_system_page_reports_the_research_dataset(tmp_path):
+    import json
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'sys.db'}", scheduler_in_web=False)
+    client = create_app(build_container(settings)).test_client()
+    assert "研究資料" in client.get("/system").get_data(as_text=True)
+    assert "尚未建立" in client.get("/system").get_data(as_text=True)
+
+    base = tmp_path / "research" / "history"
+    (base / "raw").mkdir(parents=True)
+    assert "建立中" in client.get("/system").get_data(as_text=True)
+
+    (base / "manifest.json").write_text(json.dumps({"series": {
+        "0050": {"quality": {"last": "2026-09-30"}}, "TAIEX": {"quality": {"last": "2026-09-30"}},
+    }}), encoding="utf-8")
+    assert "2 個序列・資料到 2026-09-30" in client.get("/system").get_data(as_text=True)
+
+
 def test_project_docs_are_served_from_the_repository(client):
     response = client.get("/system/docs/roadmap")
 

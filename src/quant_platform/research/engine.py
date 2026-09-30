@@ -31,7 +31,7 @@ from quant_platform.research.market import MarketData
 from quant_platform.research.metrics import annualized, max_drawdown, unit_values, xirr
 from quant_platform.research.spec import StrategySpec
 
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "1.1.0"  # 1.1.0: orders postponed past no-trade sessions; explicit contributions
 DRAWDOWN_LOOKBACK = 252
 
 
@@ -229,6 +229,7 @@ def simulate(
     flows: list[float] = []
     dividends_received = 0.0
     new_money = 0.0
+    pending_signal_day: date | None = None
 
     def execute(day: date, asset: str, side: str, shares: int, price: float) -> None:
         amount = shares * price
@@ -269,10 +270,14 @@ def simulate(
         account.cash += contribution
         new_money += contribution
 
-        # 3. orders in the after-hours window
-        if day in invest_days and all(market.close(asset, day) for asset in spec.assets):
-            _invest(spec, market, costs, account, day, new_money, execute, invest_days[day])
+        # 3. orders in the after-hours window; a session without a trade in
+        #    one of the assets postpones the orders to the next session that has one
+        if day in invest_days:
+            pending_signal_day = invest_days[day]
+        if pending_signal_day is not None and all(market.close(asset, day) for asset in spec.assets):
+            _invest(spec, market, costs, account, day, new_money, execute, pending_signal_day)
             new_money = 0.0
+            pending_signal_day = None
 
         # 4. valuation at the close
         value = account.cash + sum(
