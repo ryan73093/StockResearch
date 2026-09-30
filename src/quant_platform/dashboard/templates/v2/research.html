@@ -59,6 +59,35 @@
   {% endif %}
 </section>
 
+<section class="card">
+  <div class="card__head">
+    <h2>前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>
+    <span class="muted small">標準現金流：每月 5 日投入 10,000 元；每個交易日 15:30 記錄，只追加不改寫</span>
+  </div>
+  {% if forward_rows %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>策略</th><th class="num">已記錄交易日</th><th class="num">投入（元）</th><th class="num">目前資產（元）</th><th class="num">相對定期定額</th><th>最新紀錄</th></tr></thead>
+      <tbody>
+      {% for row in forward_rows %}
+        <tr>
+          <td data-primary><strong>{{ row.name }}</strong>{% if row.benchmark %}<span class="badge">基準</span>{% endif %}</td>
+          <td class="num" data-label="已記錄交易日">{{ row.sessions }}</td>
+          <td class="num" data-label="投入">{{ '{:,.0f}'.format(row.contributed) }}</td>
+          <td class="num" data-label="目前資產">{{ '{:,.0f}'.format(row.value) }}</td>
+          <td class="num {{ 'up' if (row.excess or 0) > 0 else ('down' if (row.excess or 0) < 0 else '') }}" data-label="相對定期定額">{{ '—' if row.benchmark or row.excess is none else '{:+.2%}'.format(row.excess) }}</td>
+          <td class="small" data-label="最新紀錄">{{ row.date }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">晉級門檻要求至少 8 週前向模擬且流程無異常；前向績效只作觀察，不單獨決定晉級。</p>
+  {% else %}
+  <p class="muted" style="margin:0">尚無紀錄。長歷史研究資料建立後，每個交易日 15:30 會記錄內建基準（之後加上晉級中的候選）的當日狀態。</p>
+  {% endif %}
+</section>
+
 {% if ranking.total %}
 <section class="card">
   <div class="card__head">

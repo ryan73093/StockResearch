@@ -213,6 +213,23 @@ def refresh_research_history(container: "Container", now: datetime | None = None
     return manifest.get("requests")
 
 
+def record_forward_simulation(container: "Container", now: datetime | None = None) -> object | None:
+    """S5-W05: append today's state of every tracked strategy (after the 15:15 refresh)."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.forward import ForwardTracker
+
+    research = _instance_dir(container.settings.database_url) / "research"
+    if not (research / "history" / "manifest.json").is_file():
+        return None
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if _exchange_closure(container, "TW", local_now) is not None:
+        return None
+    written = ForwardTracker(research).record(local_now.date())
+    logger.info("Forward simulation recorded %s strategies", len(written))
+    return len(written)
+
+
 def probe_close_availability(container: "Container") -> object:
     """S1-W05 measurement tick; the probe itself limits to 13:30–14:45 on trading days."""
     return container.close_availability.run()
@@ -262,6 +279,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        record_forward_simulation,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=30, timezone=timezone),
+        id="forward_simulation",
+        name="前向模擬紀錄（交易日 15:30）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3 * 3600,
     )
     scheduler.add_job(
         probe_close_availability,

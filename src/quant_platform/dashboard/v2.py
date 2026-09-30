@@ -21,6 +21,7 @@ from quant_platform.research.spec import BASELINES
 from quant_platform.application.close_availability import recent_table
 from quant_platform.config.settings import PAUSABLE_MODULES
 from quant_platform.container import _instance_dir
+from quant_platform.research.forward import FORWARD_START, ForwardTracker
 from quant_platform.research.reports import latest_reports, latest_stats, report_rows, trial_ranking
 
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -63,6 +64,7 @@ MAINTENANCE_JOBS = (
     (time(3, 0), "資料庫備份", "每日；保留最近 7 份"),
     (time(13, 30), "收盤資料時效實測", "交易日每分鐘到 14:45；記錄各來源公布時間"),
     (time(15, 15), "研究資料補抓", "交易日；長歷史資料只補當月、除權息只補今年"),
+    (time(15, 30), "前向模擬紀錄", "交易日；追蹤中的策略當日狀態只追加不改寫"),
 )
 BACKGROUND_JOBS = "背景工作：每 15 分鐘檢查漏跑、每 10 分鐘補台股研究池資料、每小時檢查證交所休市日。"
 STATUS_BADGES = {
@@ -472,10 +474,13 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         if stats and stats.get("candidates"):
             best = max(stats["candidates"], key=lambda item: item["dsr"]["deflated_sharpe"] or 0)
             best_dsr = {"name": best["name"], "value": best["dsr"]["deflated_sharpe"], "trials": best["dsr"]["trials"]}
+        forward_rows = ForwardTracker(research_dir).summary()
         return render_template(
             "v2/research.html",
             active_nav="research",
             tool_groups=TOOL_GROUPS,
+            forward_rows=forward_rows,
+            forward_start=FORWARD_START,
             ranking=ranking,
             stats=stats,
             best_dsr=best_dsr,
