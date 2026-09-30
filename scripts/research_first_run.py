@@ -95,9 +95,10 @@ def main() -> int:
             if result.stderr.strip():
                 handle.write("[stderr]\n" + result.stderr[-5000:] + "\n")
         log(f"結束：{name}（{time.monotonic() - started:.0f} 秒，結束碼 {result.returncode}）")
-        if result.returncode not in (0, 1) and name.startswith(("history build", "除權息")):
-            log("關鍵步驟失敗，停止")
-            return result.returncode
+        if result.returncode != 0 and name.startswith(("history build", "除權息")):
+            # A Python exception also exits with 1, so any non-zero code stops the chain.
+            log("關鍵步驟失敗，停止；修正後重新執行本腳本")
+            return result.returncode or 1
     log("全部完成")
     return 0
 

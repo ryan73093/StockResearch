@@ -146,6 +146,7 @@ def test_clean_reports_duplicates_no_trade_days_and_bad_bars():
 
 def test_parsers_follow_the_official_layouts():
     assert roc_date(" 92/07/01") == date(2003, 7, 1)
+    assert roc_date("106/01/17*") == date(2017, 1, 17)  # TPEx marks the listing day
     twse = parse_twse_stock_month({"stat": "OK", "data": [
         [" 99/01/04", "20,083,125", "1,132,155,005", "56.45", "56.65", "56.05", "56.50", "+0.05", "1,624", ""],
         [" 99/01/05", "0", "0", "--", "--", "--", "--", " 0.00", "0", ""],

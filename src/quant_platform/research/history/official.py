@@ -210,7 +210,8 @@ def is_empty_response(payload: object) -> bool:
 
 
 def roc_date(text: object) -> date:
-    parts = str(text).strip().replace("＊", "").split("/")
+    """'92/07/01' → 2003-07-01; TPEx marks some days (e.g. a listing day) with '*'."""
+    parts = str(text).strip().replace("＊", "").replace("*", "").strip().split("/")
     year, month, day = (int(part) for part in parts)
     return date(year + 1911 if year < 1911 else year, month, day)
 
