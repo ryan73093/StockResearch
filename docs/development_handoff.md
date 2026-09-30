@@ -27,16 +27,31 @@
 
 目標：總經與跨資產這類「全市場共用」特徵只存一份，不再複製到每一檔；主檔 < 3 GiB；總經步驟從約 13 分鐘降到秒級；特徵讀取結果與正規化前完全一致。
 
-現況（已查證）：`application/macro_data.py` `MacroDataPipeline._materialize` 把 7 個 FRED 序列的每個觀測值寫給每一檔啟用中的個股與 ETF（約 540 檔），每次執行重寫 7,198,905 筆（`fred_macro_data` 中位數 787 秒，每天台股、美股流程各跑一次以上）。跨資產特徵（`CROSS_ASSET_RESEARCH_FEATURES`）可能也有相同的複製，先查證。
+現況（已查證）：`application/macro_data.py` `MacroDataPipeline._materialize` 把 7 個 FRED 序列的每個觀測值寫給每一檔啟用中的個股與 ETF（約 540 檔），每次執行重寫 7,198,905 筆（`fred_macro_data` 中位數 787 秒，每天台股、美股流程各跑一次以上）。
+
+盤點結果（2026-10-01 00:30 唯讀查詢，53 秒；依 `feature_name`、`feature_version`、`event_time` 分組比較各 symbol 的值與可用時間）：
+
+| 類別 | 特徵 | 筆數 | 每檔是否相同 | 寫入位置 |
+|---|---|---|---|---|
+| 總經 | `treasury_10y`、`treasury_2y`、`yield_curve_10y2y`（各 228 萬）、`fed_funds_rate`、`unemployment_rate`、`cpi_yoy`、`gdp_yoy` | 7,198,905 | 完全相同（545 檔，含美股 ETF） | `MacroDataPipeline._materialize` |
+| 跨資產 | `twii_return_20d` | 840,737 | 完全相同（534 檔台股） | `feature_engineering/cross_asset.py`（逐檔 as-of join） |
+| 跨資產 | `vix_level`、`sp500_return_20d`、`sox_return_20d`、`gold_return_20d`、`brent_return_20d`、`usdtwd_return_20d` | 約 5,068,000 | 各有 1 個日期部分標的的值不同（可用時間相同）；其餘相同 | 同上 |
+| 日曆 | `day_of_week` | 850,735 | 完全相同 | 技術特徵引擎 |
+
+合計約 1,396 萬筆（全部 2,534 萬筆的 55%）。只靠這項大約能讓主檔從 9.6 GiB 降到 5–6 GiB；< 3 GiB 還要再處理預測（596 萬筆）與回測逐日點（`backtest_equity_points` 202 萬筆），列入後續評估。
+
+設計要點（避免改變模型輸入）：
+- 舊資料的覆蓋範圍不是「所有標的 × 所有日期」：總經只寫給寫入當時啟用中的個股／ETF；跨資產只寫在該檔有 K 線的日期。直接展開到所有要求的 symbol 會讓停牌、下市、上市前的日期多出列。
+- 驗收改以「模型訓練矩陣與每日決策結果一致」為準：遷移前後對同一批標的建立 `ModelResearchPipeline._dataset` 的輸入矩陣與每日決策分數，逐格比對；原始列層級的差異（上述 6 個跨資產特徵各 1 個日期）要列出並說明。
+- 讀取端全部經過 `SqlAlchemyFeatureLabelStoreRepository`（`list_features`、`list_recent_features`、`list_latest_features`、`feature_coverage`），再搜尋其他直接查 `feature_values` 的 SQL（資料品質、資料庫檢視頁）。
 
 做法：
-1. 盤點所有「每檔數值相同」的特徵：以唯讀查詢比對同一 `feature_name`、`event_time` 在不同 symbol 的值是否全部相同；列出名稱、筆數、寫入位置。
-2. 儲存改為一份：以保留代號（例如 `__MARKET__`）寫入；`SqlAlchemyFeatureLabelStoreRepository.list_features(symbols, names)` 對共用特徵讀一次再展開到要求的 symbol（只展開到原本會有該特徵的標的類型，避免結果變多）。讀取端（模型研究、每日決策、單股頁）不改介面。
-3. 一致性驗證：遷移前把抽樣 symbol（含 ETF、上市、上櫃、新加入標的）的 `list_features` 結果存成檔案，遷移後逐筆比對（symbol、名稱、版本、事件時間、可用時間、值）完全相同。
-4. 遷移腳本（停服務、備份、刪除複製列、VACUUM INTO、quick_check、筆數報告），沿用 `scripts/slim_database.py` 的安全步驟；只刪「已確認每檔相同」的特徵列。
-5. 部署時點：台股流程結束後（14:40 以後）；不要在 13:30–14:40 停服務。
+1. 儲存改為一份：總經以保留代號（例如 `@GLOBAL`）、跨資產與 `day_of_week` 以市場代號（`@TW`）寫入；讀取時依「該 symbol 在該日期有基礎特徵列」展開，重現原本的覆蓋範圍。
+2. 寫入端：總經只寫新的觀測值（不再每次重寫）；跨資產每個交易日只算一次。
+3. 一致性驗證（見上）＋遷移腳本（停服務、備份、刪除複製列、VACUUM INTO、quick_check、筆數報告），沿用 `scripts/slim_database.py` 的安全步驟。
+4. 部署時點：台股流程結束後（14:40 以後），並在 10/01 第一次完整台股流程觀察完之後；不要在 13:30–14:40 停服務。
 
-驗收：主檔 < 3 GiB；總經步驟秒級；抽樣讀取結果逐筆一致；模型研究與每日決策測試通過；全部測試通過；兩端驗收。
+驗收：總經步驟秒級；模型訓練矩陣與每日決策逐格一致（差異列出說明）；主檔縮小量有數字；全部測試通過；兩端驗收。
 
 ## 環境現況（2026-10-01 00:15）
 
