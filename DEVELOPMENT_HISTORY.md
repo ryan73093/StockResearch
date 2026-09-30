@@ -2,6 +2,20 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-09-30 — S2-W02 Cloudflare 上線
+
+- 使用者回饋（2026-09-30）：其他專案由 AI 自行完成 Cloudflare 設定，不應要求使用者手動複製 AUD。查證 `C:\ProgramData\PimiServices\Important System Log\2026-09-10 AutoLayout Cloudflare Deployment.md`：當時由 AI 在 Cloudflare 後台建立 Access application。改為由開發者在內建瀏覽器操作；使用者只完成 Cloudflare 登入（登入由本人操作，登入狀態保存在內建瀏覽器）。
+- Cloudflare Zero Trust（帳號 `c55301fc…`、團隊網域 `raspy-mode-cc1c`）：
+  - 新增規則 `StockResearch owner only`（id `ec4e2109-b2f2-491e-9ae9-229a3ef876ac`）：Allow；Include Emails `ryan73093@gmail.com`；Require Login Methods Google。沒有沿用 `AutoLayout Google users`（Include Everyone）與 `Ryan and Eva only`，避免放寬到其他人。
+  - 新增 self-hosted application `StockResearch`（id `c49fc706-9f0e-4080-82ef-79f6ebfa5490`）：目的地 `stockresearch.pimi-sunsun.com`、只接受 Google、instant authentication、工作階段 24 小時。既有三個應用程式未變更。
+- `.env` 加入 `AUTH_MODE=cloudflare-access`、`PUBLIC_URL`、`ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`（64 位 AUD tag）、`ACCESS_ALLOWED_EMAILS`；未輸出 `.env` 其他內容。
+- 重啟（21:39）：`supervisor.log` 顯示 "Supervisor started with tunnel"；Tunnel PID 296120 註冊 4 條 QUIC 連線（khh01×2、tpe01×2）。VectorDB Tunnel（PID 10704）與 PimiServices 共用服務（PID 5508）未變更。
+- 驗收：
+  - 本機 `http://127.0.0.1:5000/` 200，顯示新版今日頁（loopback 例外）。
+  - 外網未登入：`/`、`/holdings`、`/system/docs/roadmap` 皆 302 到 `raspy-mode-cc1c.cloudflareaccess.com/cdn-cgi/access/login/stockresearch.pimi-sunsun.com`（kid 與 AUD 一致）；帶偽造 `Cf-Access-Jwt-Assertion` 仍 302。
+  - 外網登入後（內建瀏覽器，21:41）：`https://stockresearch.pimi-sunsun.com/` 顯示今日頁（委託 2 筆、資料 09/30 13:30）；系統頁「外網發布：Cloudflare Access」、專案資訊文件可讀。
+- 回復：`.env` 的 `AUTH_MODE` 改回 `development` 並重啟（Tunnel 不會啟動）；需要撤下時在 Zero Trust 刪除 `StockResearch` application 與規則、刪除 DNS 記錄、`cloudflared tunnel delete stockresearch-pimi-sunsun`。
+
 ## 2026-09-30 — S2-W01～W04 Cloudflare 準備與新介面第一版
 
 - 使用者決定（2026-09-30）：S2 提前到 S1-W05／W06 之前；同意由開發者以本機 cloudflared 建立 Tunnel 與 DNS；Access application 由使用者在 Zero Trust 建立並提供 AUD。

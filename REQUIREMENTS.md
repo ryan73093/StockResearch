@@ -96,7 +96,7 @@
 
 - 主機：使用者的 Windows 電腦，長時間開機，與 VectorDB（5001）、AutoLayout（4173）、YtSummary（8001）共用。
 - 本專案 Web 綁 `127.0.0.1:5000`（Waitress）；FastAPI 只限本機 `127.0.0.1:8000`；排程 Worker 為獨立程序。
-- Cloudflare：本專案專屬 Tunnel `stockresearch-pimi-sunsun`，憑證放本專案 `.runtime/cloudflared/`；公開網址 `https://stockresearch.pimi-sunsun.com`。
+- Cloudflare：本專案專屬 Tunnel `stockresearch-pimi-sunsun`，憑證放本專案 `.runtime/cloudflared/`；公開網址 `https://stockresearch.pimi-sunsun.com`。Access application `StockResearch` 只允許擁有者 email 且必須以 Google 登入（規則 `StockResearch owner only`），不與其他專案共用規則；工作階段 24 小時。
 - 啟停腳本只操作核對過 PID、執行檔、命令列與 port 的本專案程序；不影響其他專案的程序與 Tunnel。
 - 開機後 App、Worker、Tunnel 自動恢復。
 - 每輪交付在本機與 Cloudflare 兩端以瀏覽器驗收同一版內容（S2 完成後適用）。
@@ -123,7 +123,6 @@
 
 | 項目 | 需要的決定 | 影響階段 |
 |---|---|---|
-| Access application | 由使用者在 Zero Trust 建立，或授權開發者以 API 建立 | S2 |
 | AI 研究員的 LLM Provider 與每月預算 | Anthropic Claude 或既有 OpenAI 設定；費用上限 | S4 |
 | 通知管道 | Email 之外是否加 Telegram 或 LINE Messaging API | S1／S6 |
 | 券商與手續費折扣 | 用於費用計算與對帳單格式 | S3、S5 |

@@ -68,13 +68,13 @@
 
 | 工作包 | 內容 | 驗收 | 狀態 |
 |---|---|---|---|
-| S2-W01 Access 驗證 | `dashboard/cloudflare_access.py`：驗證 `Cf-Access-Jwt-Assertion`（RS256、audience、issuer、exp、email）、擁有者 email 允許清單、本機 loopback 例外、設定不完整一律 503、跨來源寫入拒絕、安全標頭 | 11 項測試通過；啟用待 AUD | done（程式）；啟用 blocked：等使用者提供 AUD |
-| S2-W02 專屬 Tunnel | Tunnel `stockresearch-pimi-sunsun`（id `e37bb649-…`，憑證 `.runtime/cloudflared/`）與 DNS 已建立；監督程序只在 `AUTH_MODE=cloudflare-access` 時啟動 Tunnel；Access application 由使用者建立 | 手機開啟 `https://stockresearch.pimi-sunsun.com` 需 Google 登入；未授權帳號被擋；Tunnel 連線數 ≥ 1 | doing（等 Access application） |
+| S2-W01 Access 驗證 | `dashboard/cloudflare_access.py`：驗證 `Cf-Access-Jwt-Assertion`（RS256、audience、issuer、exp、email）、擁有者 email 允許清單、本機 loopback 例外、設定不完整一律 503、跨來源寫入拒絕、安全標頭 | 11 項測試通過；2026-09-30 21:39 啟用（`AUTH_MODE=cloudflare-access`） | done |
+| S2-W02 專屬 Tunnel | Tunnel `stockresearch-pimi-sunsun`（id `e37bb649-…`，憑證 `.runtime/cloudflared/`）與 DNS；Access application `StockResearch`（id `c49fc706-…`，Google 登入、instant authentication）＋規則 `StockResearch owner only`（Include 擁有者 email、Require Google）；監督程序只在 `AUTH_MODE=cloudflare-access` 時啟動 Tunnel | 未登入 302 到 Access 登入頁；偽造標頭被擋；登入後瀏覽器看到新版今日頁與系統頁；Tunnel 4 條連線 | done |
 | S2-W03 新版面骨架 | 設計 token（淺色、手機優先）、共用頁面骨架、頂部／底部導覽只有 今日／持倉／計畫／研究／系統；首頁 `/` 改為輕量「今日」頁；舊頁面移到「研究」入口，舊市場總覽改到 `/market` | 375 px 無水平溢出；導覽 5 項；首頁熱快取 20–50 ms（舊版 4.8 秒）；舊功能可進入 | done（第一版） |
-| S2-W04 專案資訊頁 | 系統頁「專案資訊」：路線圖、架構（Mermaid）、需求、交接、開發歷程，即時讀取 repo 原始檔（白名單） | 本機驗收完成；Cloudflare 端待 S2-W02 | done（本機） |
+| S2-W04 專案資訊頁 | 系統頁「專案資訊」：路線圖、架構（Mermaid）、需求、交接、開發歷程，即時讀取 repo 原始檔（白名單） | 本機與 Cloudflare 兩端驗收完成 | done |
 | S2-W05 開機自動恢復 | 登入時排程工作啟動監督程序（含 Tunnel）；每日 SQLite 線上備份與還原演練 | 重開機後兩端自動恢復；備份檔可還原 | doing（自動啟動已具備；備份與演練待做） |
 
-依賴：S1-W04。子網域已定案 `stockresearch.pimi-sunsun.com`（2026-09-30）。需要使用者：在 Cloudflare Zero Trust 建立 Access application，或提供操作授權。
+依賴：S1-W04。子網域 `stockresearch.pimi-sunsun.com`（2026-09-30 定案）。Cloudflare 後台操作：內建瀏覽器已保存使用者的 Cloudflare 登入，之後的 Access／DNS 調整由開發者在該瀏覽器完成；登入失效時請使用者重新登入。
 
 ---
 
