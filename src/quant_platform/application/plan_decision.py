@@ -119,7 +119,7 @@ class PlanDecisionService:
             histories[code] = history
             prices[code] = history[-1][1]
 
-        account = self._account.overview()
+        account = self._account.overview(include_shadow=False)
         month_key = (today.year, today.month)
         deposited = any(
             flow.kind == "deposit" and (flow.day.year, flow.day.month) == month_key for flow in account.flows

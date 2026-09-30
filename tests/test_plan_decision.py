@@ -31,7 +31,7 @@ class Account:
     def __init__(self, cash=0.0, holdings=(), flows=()):
         self.value = SimpleNamespace(cash=cash, holdings=list(holdings), flows=list(flows))
 
-    def overview(self):
+    def overview(self, include_shadow=True):
         return self.value
 
 

@@ -114,7 +114,7 @@ class ActualAccountService:
         symbol = str(form.get("symbol", "")).strip().upper()
         if symbol and not SYMBOL.match(symbol):
             raise ActualAccountError("代號格式不正確（例如 0050、00679B）")
-        if kind == "withdrawal" and float(amount) > self.overview().cash + 1e-6:
+        if kind == "withdrawal" and float(amount) > self.overview(include_shadow=False).cash + 1e-6:
             raise ActualAccountError("出金金額超過目前現金")
         return self._repository.add_cash_flow(
             ActualCashFlow(None, day, kind, amount.quantize(Decimal("0.01")), symbol,
@@ -179,7 +179,8 @@ class ActualAccountService:
         return self._repository.void(kind, entry_id, reason.strip()[:500], datetime.now(UTC))
 
     # --- overview -----------------------------------------------------------
-    def overview(self) -> ActualAccountOverview:
+    def overview(self, include_shadow: bool = True) -> ActualAccountOverview:
+        """Books as of today; ``include_shadow=False`` skips the DCA replay."""
         flows = self._repository.list_cash_flows()
         trades = self._repository.list_trades()
         cash = 0.0
@@ -232,7 +233,8 @@ class ActualAccountService:
             cash=cash, holdings=holdings, market_value=market_value, total_value=total,
             net_deposits=deposits - withdrawals, dividends=dividends,
             fees=sum(trade.fee for trade in trades), taxes=sum(trade.tax for trade in trades),
-            realized=realized, xirr=rate, shadow=self._shadow(flows, total, rate, notes),
+            realized=realized, xirr=rate,
+            shadow=self._shadow(flows, total, rate, notes) if include_shadow else None,
             flows=flows, trades=trades, notes=notes,
         )
 
