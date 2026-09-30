@@ -310,11 +310,17 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                 "is_today": upcoming == day,
                 "drawdown": investment_plan.max_drawdown_tolerance,
             }
+        decision = dependencies.plan_decision_service.decide(now)
+        decision_tone = {
+            "invest": "trade", "rebalance": "trade", "idle": "idle",
+        }.get(decision.kind, "hold")
         return render_template(
             "v2/today.html",
             active_nav="today",
             plan=plan,
             plan_card=plan_card,
+            decision=decision,
+            decision_tone=decision_tone,
             kind=kind,
             today={"label": label},
             deadline_iso=deadline,
@@ -325,6 +331,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             },
             names=names_for(
                 [order.symbol for order in plan.orders] + [item.symbol for item in plan.watchlist]
+                + [f"{order.symbol}.{suffix}" for order in decision.orders for suffix in ("TW", "TWO")]
             ),
             status={
                 "decision_time": _taipei_text(plan.decision_time),

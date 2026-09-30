@@ -10,6 +10,7 @@ from quant_platform.application.listing_reconciliation import TaiwanListingRecon
 from quant_platform.application.close_availability import CloseAvailabilityProbe
 from quant_platform.application.actual_account import ActualAccountService
 from quant_platform.application.investment_plan import InvestmentPlanService
+from quant_platform.application.plan_decision import PlanDecisionService
 from quant_platform.application.database_backup import DatabaseBackupService
 from quant_platform.application.prediction_archive import (
     PredictionArchiveService,
@@ -174,6 +175,7 @@ class Container:
     close_availability: CloseAvailabilityProbe
     investment_plan_service: InvestmentPlanService
     actual_account_service: ActualAccountService
+    plan_decision_service: PlanDecisionService
 
 
 def _sqlite_path(database_url: str) -> Path | None:
@@ -470,6 +472,14 @@ def build_container(settings: Settings | None = None) -> Container:
         after_hours_ai_service,
         universe_expansion_service,
     )
+    investment_plan_service = InvestmentPlanService(
+        SqlAlchemyInvestmentPlanRepository(database.session_factory)
+    )
+    actual_account_service = ActualAccountService(
+        SqlAlchemyActualAccountRepository(database.session_factory),
+        price_lookup=market_bar_repository.latest_closes,
+        research_dir=_instance_dir(resolved.database_url) / "research",
+    )
     return Container(
         settings=resolved,
         database=database,
@@ -560,12 +570,9 @@ def build_container(settings: Settings | None = None) -> Container:
         close_availability=CloseAvailabilityProbe(
             _instance_dir(resolved.database_url), market_calendar
         ),
-        investment_plan_service=InvestmentPlanService(
-            SqlAlchemyInvestmentPlanRepository(database.session_factory)
-        ),
-        actual_account_service=ActualAccountService(
-            SqlAlchemyActualAccountRepository(database.session_factory),
-            price_lookup=market_bar_repository.latest_closes,
-            research_dir=_instance_dir(resolved.database_url) / "research",
+        investment_plan_service=investment_plan_service,
+        actual_account_service=actual_account_service,
+        plan_decision_service=PlanDecisionService(
+            investment_plan_service, actual_account_service, market_bar_repository, market_calendar,
         ),
     )

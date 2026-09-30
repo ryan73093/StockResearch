@@ -11,6 +11,111 @@
 </header>
 {% endblock %}
 {% block content %}
+{% if decision.kind != 'no_plan' %}
+<section class="hero hero--{{ decision_tone }}">
+  <div>
+    <div class="hero__eyebrow">{{ icon('spark') }}依你的計畫・第 {{ decision.plan_version }} 版</div>
+    <h2 class="hero__headline">{{ decision.headline }}</h2>
+    <p class="hero__mode">策略：{{ decision.strategy }}{% if decision.data_time %}・資料 {{ decision.data_time }}{% endif %}</p>
+    <div class="hero__chips">
+      {% if deadline_iso and decision.orders %}
+        <span class="chip chip--tone countdown" data-deadline="{{ deadline_iso }}">{{ icon('clock') }}<span>14:30 撮合</span></span>
+      {% endif %}
+      <span class="chip">資料品質 <span class="badge {{ status.quality_badge }}">{{ status.quality_label }}</span></span>
+    </div>
+  </div>
+  <div class="kpis kpis--four">
+    <div class="kpi"><div class="kpi__label">委託</div><div class="kpi__value">{{ decision.orders|length }}<small>筆</small></div></div>
+    <div class="kpi"><div class="kpi__label">預估金額</div><div class="kpi__value">{% if decision.orders %}{{ '{:,.0f}'.format(decision.orders|sum(attribute='amount')) }}<small>元</small>{% else %}—{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">下次投入日</div><div class="kpi__value">{{ decision.invest_day.strftime('%m/%d') if decision.invest_day else '—' }}</div></div>
+    <div class="kpi"><div class="kpi__label">每月投入</div><div class="kpi__value">{{ '{:,.0f}'.format(plan_card.amount) if plan_card else '—' }}<small>元</small></div></div>
+  </div>
+</section>
+
+<div class="grid grid--main-side">
+  <div class="stack">
+    {% if decision.orders %}
+    <section class="card order-1">
+      <div class="card__head">
+        <h2>委託單 <span class="badge badge--accent">{{ decision.orders|length }} 筆</span></h2>
+        <span class="muted small">預估費稅 {{ '{:,.0f}'.format(decision.orders|sum(attribute='fee') + decision.orders|sum(attribute='tax')) }} 元</span>
+      </div>
+      <div class="table-wrap table-wrap--stack">
+        <table class="table--stack">
+          <thead><tr>
+            <th>標的</th><th>買賣</th><th class="num">股數</th><th class="num">限價（元）</th>
+            <th class="num">收盤（元）</th><th class="num">預估金額（元）</th>
+          </tr></thead>
+          <tbody>
+          {% for order in decision.orders %}
+            <tr>
+              <td data-primary>
+                <span class="symbol"><strong>{{ order.symbol }}</strong><span>{{ names.get(order.symbol ~ '.TW', names.get(order.symbol ~ '.TWO', '')) }}</span></span>
+                <span class="badge {{ 'badge--buy' if order.side == 'BUY' else 'badge--sell' }} stack-only">{{ '買進' if order.side == 'BUY' else '賣出' }}</span>
+              </td>
+              <td data-label="買賣" class="table-only"><span class="badge {{ 'badge--buy' if order.side == 'BUY' else 'badge--sell' }}">{{ '買進' if order.side == 'BUY' else '賣出' }}</span></td>
+              <td class="num" data-label="股數">{{ '{:,}'.format(order.shares) }}</td>
+              <td class="num" data-label="限價">{{ '{:,.2f}'.format(order.limit_price) }}</td>
+              <td class="num" data-label="收盤">{{ '{:,.2f}'.format(order.reference_close) }}</td>
+              <td class="num" data-label="預估金額">{{ '{:,.0f}'.format(order.amount) }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="actions-row">
+        <button class="btn btn--primary" type="button" id="copy-orders"
+          data-orders="{% for order in decision.orders %}{{ order.symbol }} {{ '買' if order.side == 'BUY' else '賣' }} {{ order.shares }} 股 限價 {{ '%.2f'|format(order.limit_price) }}（盤後零股）{% if not loop.last %}&#10;{% endif %}{% endfor %}">{{ icon('copy') }}複製委託</button>
+        <span class="muted small" id="copy-status" role="status"></span>
+      </div>
+      <p class="note">限價 = 收盤價加 10 bps 後進位到升降單位；成交後到「持倉」回報成交。系統不會自動下單。</p>
+    </section>
+    {% endif %}
+
+    <details class="card card--quiet order-4">
+      <summary><h2>研究模型觀察 <span class="badge badge--warn">未晉級・僅供參考</span></h2></summary>
+      <p style="margin:0 0 6px"><strong>{{ plan.headline }}</strong></p>
+      <p class="muted small">{{ plan.mode }}；舊版盤後 AI（機器學習選股），尚未通過研究晉級流程，不列入你的計畫建議。</p>
+      {% if plan.orders %}
+      <ul class="reasons">
+        {% for order in plan.orders %}<li>{{ order.symbol.split('.')[0] }} {{ names.get(order.symbol, '') }} {{ '買' if order.side == 'BUY' else '賣' }} {{ '{:,}'.format(order.quantity) }} 股（參考價 {{ '{:,.2f}'.format(order.reference_price) }}）</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% for reason in reasons %}<p class="note">{{ reason }}</p>{% endfor %}
+    </details>
+  </div>
+
+  <aside class="stack">
+    {% if decision.reasons %}
+    <section class="card order-2">
+      <div class="card__head"><h2>為什麼</h2></div>
+      <ul class="reasons">
+        {% for reason in decision.reasons %}<li>{{ reason }}</li>{% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    <section class="card order-3">
+      <div class="card__head"><h2>我的計畫</h2><a class="small" href="/plan">第 {{ plan_card.version }} 版</a></div>
+      <dl class="facts">
+        <div><dt>每月投入</dt><dd>{{ '{:,.0f}'.format(plan_card.amount) }} 元</dd></div>
+        <div><dt>薪資日</dt><dd>每月 {{ plan_card.salary_day }} 日</dd></div>
+        <div><dt>策略</dt><dd>{{ plan_card.strategy }}</dd></div>
+        <div><dt>可承受回撤</dt><dd>{{ '{:.0%}'.format(plan_card.drawdown) }}</dd></div>
+      </dl>
+    </section>
+
+    <section class="card order-5">
+      <div class="card__head"><h2>資料狀態</h2></div>
+      <dl class="facts">
+        <div><dt>最新收盤</dt><dd>{{ status.market_date }}</dd></div>
+        <div><dt>資料品質</dt><dd><span class="badge {{ status.quality_badge }}">{{ status.quality_label }}</span></dd></div>
+        <div><dt>今日排除</dt><dd>{{ status.excluded }} 檔{% if status.excluded %}（可能停牌）{% endif %}</dd></div>
+      </dl>
+    </section>
+  </aside>
+</div>
+{% else %}
 <section class="hero hero--{{ kind }}">
   <div>
     <div class="hero__eyebrow">{{ icon('spark') }}今日行動</div>
@@ -150,6 +255,7 @@
     {% endif %}
   </aside>
 </div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
