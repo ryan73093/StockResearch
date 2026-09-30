@@ -8,7 +8,8 @@
     <details class="sidebar-group-v2 important" open>
       <summary><span>核心決策</span><small>每天最重要</small></summary>
       <div>
-        <a class="{{ 'active' if request.path == '/' else '' }}" href="/" title="市場總覽"><i>01</i><span>市場總覽</span></a>
+        <a href="/" title="新版今日頁"><i>00</i><span>回到新版介面</span></a>
+        <a class="{{ 'active' if request.path == '/market' else '' }}" href="/market" title="市場總覽"><i>01</i><span>市場總覽</span></a>
         <a class="priority {{ 'active' if request.path.startswith('/stocks') else '' }}" href="/stocks" title="單股研究"><i>02</i><span>單股研究</span><b>重要</b></a>
         <a class="priority {{ 'active' if request.path.startswith('/ai-trading') or request.path.startswith('/odd-lot') or request.path.startswith('/decisions') else '' }}" href="/ai-trading" title="盤後選股、每日決策、資金配置與零股投入"><i>03</i><span>盤後 AI／零股</span><b>重要</b></a>
         <a class="priority {{ 'active' if request.path.startswith('/strategies') else '' }}" href="/strategies" title="策略、模型、回測、解釋與版本管理"><i>04</i><span>策略中心</span><b>重要</b></a>

@@ -17,6 +17,8 @@ dependencies = [
   "numpy>=1.26",
   "requests>=2.31,<3",
   "waitress>=3,<4",
+  "pyarrow>=17",
+  "PyJWT[crypto]>=2.8,<3",
   "gunicorn>=23,<24; platform_system != 'Windows'",
 ]
 
@@ -45,7 +47,7 @@ quant-worker = "quant_platform.scheduler.runner:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-quant_platform = ["dashboard/templates/*.html", "dashboard/static/css/*.css", "dashboard/static/js/*.js", "dashboard/static/*.svg", "market_calendar/data/*.json"]
+quant_platform = ["dashboard/templates/*.html", "dashboard/templates/v2/*.html","dashboard/static/css/*.css", "dashboard/static/js/*.js", "dashboard/static/*.svg", "market_calendar/data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

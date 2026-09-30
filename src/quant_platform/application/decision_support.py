@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -21,9 +22,13 @@ from quant_platform.application.ports import (
 )
 from quant_platform.domain.entities import DailyDecision, JobRunStatus
 from quant_platform.application.stock_refresh import StockRefreshState
+from quant_platform.market_calendar import MarketCalendarStore, default_market_calendar
 
 
-DECISION_VERSION = "1.0.0"
+# 1.1.0: symbols whose data trails the market (e.g. suspended) are excluded.
+DECISION_VERSION = "1.1.0"
+# Matches DataQualityPolicy.asset_lag_critical_sessions.
+STALE_EXCLUSION_SESSIONS = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +101,7 @@ class DailyDecisionPipeline:
         model_repository: ModelResearchRepository,
         decision_repository: DailyDecisionRepository,
         run_repository: SchedulerJobRunRepository,
+        calendar_store: MarketCalendarStore | None = None,
     ) -> None:
         self._universe_repository = universe_repository
         self._feature_repository = feature_repository
@@ -106,6 +112,22 @@ class DailyDecisionPipeline:
         self._model_repository = model_repository
         self._decision_repository = decision_repository
         self._run_repository = run_repository
+        self._calendar_store = calendar_store
+
+    def _session_lags(
+        self, market: str, feature_times: dict[str, datetime]
+    ) -> dict[str, int]:
+        """Exchange sessions each symbol's latest features trail the market's latest."""
+        zone = ZoneInfo("Asia/Taipei" if market == "TW" else "America/New_York")
+        days = {
+            symbol: (value if value.tzinfo else value.replace(tzinfo=UTC)).astimezone(zone).date()
+            for symbol, value in feature_times.items()
+        }
+        if not days:
+            return {}
+        latest = max(days.values())
+        calendar = (self._calendar_store or default_market_calendar()).calendar(market)
+        return {symbol: calendar.sessions_after(day, latest) for symbol, day in days.items()}
 
     def run(self, market: str, now: datetime | None = None) -> DecisionPipelineResult:
         normalized_market = market.upper()
@@ -117,6 +139,7 @@ class DailyDecisionPipeline:
         ]
         symbols = [item.symbol for item in assets]
         feature_scores, feature_times = self._factor_scores(symbols)
+        session_lags = self._session_lags(normalized_market, feature_times)
         predictions = self._prediction_evidence(normalized_market)
         regimes = self._latest_regimes(symbols)
         ensembles = {item.symbol: item for item in self._ensemble_repository.list_runs(normalized_market)}
@@ -160,7 +183,13 @@ class DailyDecisionPipeline:
                 gate_checks.append("模型預測早於最新收盤快照")
             risks: list[str] = []
             reasons: list[str] = []
-            if evidence is None:
+            lag = session_lags.get(symbol, 0)
+            if lag > STALE_EXCLUSION_SESSIONS:
+                # Typically a suspended stock: its last prices cannot be traded.
+                status = "資料不足"
+                gate_checks.append("行情落後市場，今日不列入決策")
+                risks.append(f"行情落後市場 {lag} 個交易日（可能停牌），今日不列入決策")
+            elif evidence is None:
                 status = "資料不足"
                 risks.append("缺少最新模型預測")
             elif predicted_return is not None and predicted_return < 0:

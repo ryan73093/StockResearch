@@ -1,63 +1,66 @@
 # 盤後決策台 — 當前開發交接
 
-記錄時間：2026-09-30 20:40（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
+記錄時間：2026-09-30 21:40（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
 
 ## 接手前必讀
 
-1. `AGENTS.md`：開發規則，特別是「資料庫安全」與服務啟停腳本。
-2. `docs/development_roadmap.md`：S1-W03 的內容與門檻。
-3. `REQUIREMENTS.md` §6（儲存與備份）。
-4. `DEVELOPMENT_HISTORY.md` 的 S0 量測數據（各資料表大小）與最上方的 S1-W02、S1-W04。
+1. `AGENTS.md`：開發規則。部署一律 `scripts\deploy.ps1`；只停服務用 `scripts\stop-services.ps1`，只啟動用 `scripts\start-services.ps1`。
+2. `docs/development_roadmap.md`：S2 的工作包與狀態（使用者決定 S2 提前）。
+3. `REQUIREMENTS.md` §2、§9、§10。
+4. `DEVELOPMENT_HISTORY.md` 最上方兩筆：S2 第一版、S1-W03 瘦身。
 
 ## 上一輪完成
 
-- S1-W04：補抓守門員修正、Waitress、啟停腳本；worker 閒置 CPU 約 0.15%。
-- S1-W02：每日官方名冊比對，2867.TW、5371.TWO 已停用；台股原始品質快照 #132 允許研究。
+- S1-W03：主檔 22.29 → 9.62 GiB；1,934 萬筆預測封存為 Parquet（247 MB）；每天 02:30 自動封存。
+- 停牌規則：個股落後只排除該檔（資料品質 v2、決策 1.1.0）。
+- S2：Tunnel 與 DNS 已建立；Access 驗證程式完成；新介面五頁第一版上線（本機）。
 
-## 當前工作包：S1-W03 資料庫瘦身
+## 當前工作包：S2-W02 啟用 Cloudflare 發布（等使用者提供 AUD）
 
-目標：主檔從 22.3 GiB 降到約 3 GiB 以下，並建立可還原的備份與保留政策；預測與特徵的歷史改存 Parquet，資料不遺失。
+使用者要在 Cloudflare Zero Trust 建立 self-hosted Access application：名稱 `StockResearch`、hostname `stockresearch.pimi-sunsun.com`、Google 登入、Allow 規則 Include Emails（擁有者 Google 帳號，預設 ryan73093@gmail.com，以使用者回覆為準）、不設 Bypass；並提供 Application Audience (AUD) Tag。
 
-2026-09-30 量測（`dbstat`）：`model_predictions` 含 9 個索引約 10.2 GiB；`feature_values` 含 6 個索引約 8.6 GiB；其他約 3.5 GiB；`market_bars` 0.13 GiB。
+收到 AUD 後：
+1. 在 `.env` 加入（不要輸出 `.env` 其他內容）：
+   ```
+   AUTH_MODE=cloudflare-access
+   PUBLIC_URL=https://stockresearch.pimi-sunsun.com
+   ACCESS_TEAM_DOMAIN=https://raspy-mode-cc1c.cloudflareaccess.com
+   ACCESS_AUD=<使用者提供>
+   ACCESS_ALLOWED_EMAILS=<擁有者 email>
+   ```
+2. `stop-services.ps1` → `start-services.ps1`（沒有程式變更，不需重新安裝）。監督程序看到 `AUTH_MODE=cloudflare-access` 會一併啟動 Tunnel；`instance\supervisor.log` 應顯示 "with tunnel"，`instance\tunnel.stderr.log` 應有 "Registered tunnel connection"。
+3. 驗收：
+   - 本機 `http://127.0.0.1:5000/` 仍可直接使用（loopback 例外）。
+   - 未登入的 `https://stockresearch.pimi-sunsun.com/` 應被 Cloudflare 導到 Access 登入頁（`cloudflareaccess.com`）。
+   - 使用者用手機登入後看到新版「今日」頁；系統頁「外網發布」顯示 Cloudflare Access。
+   - 若出現 1033／502：先看 Tunnel 程序與日誌；若是網站 401，核對 AUD 與團隊網域。
+4. 在開發歷程記錄兩端驗收時間與證據，路線圖 S2-W01／W02 改為 done。
 
-步驟（使用者已授權資料庫優化方式由開發者決定；預計停機 30–60 分鐘，避開 13:30–14:40）：
-1. 盤點：列出兩張表的所有索引，搜尋 `database/repositories.py` 與其他查詢實際用到的欄位；定義「使用中」的預測（最新決策、模型登錄、每個模型／標籤最新實驗引用的 experiment_id）與使用中的特徵版本。先以唯讀查詢量測各分類筆數。
-2. `stop-services.ps1` → `PRAGMA wal_checkpoint(TRUNCATE)` → 以 SQLite backup API 完整備份到 `instance\backups\`（C 槽可用約 510 GB），記錄路徑與 SHA-256。
-3. 新增依賴 `pyarrow`；非使用中的預測依 experiment_id、舊版特徵依版本匯出到 `instance\research\`（每檔記錄筆數與 SHA-256），核對筆數後才刪除。
-4. 移除查詢未使用的單欄索引，並同步修改 `database/models.py`，避免新安裝重建。
-5. `VACUUM INTO` 新檔 → 驗證（integrity_check、筆數、主要頁面）→ 替換主檔，舊檔保留到還原演練完成。
-6. 程式改動：模型研究每次實驗的預測寫 Parquet，資料庫只保留使用中的預測；加入保留政策與測試。
-7. 還原演練：從備份還原到暫存路徑並開啟查核；每日 SQLite 線上備份排程可併入 S2-W05。
+## 接著
 
-驗收：主檔大小、還原演練、首頁與決策頁正常、全部測試通過、隔日台股流程完成。
+- S2-W05：每日 SQLite 線上備份（保留 7 份）與還原演練；確認重開機後服務與 Tunnel 自動恢復。
+- 使用者確認隔日台股流程正常後，可刪除 `instance\backups\` 的兩個 22.29 GiB 暫存檔（刪除指令交由使用者執行）。
+- 之後：S1-W06（暫停非核心收集，含模型治理的全量預測載入）→ S1-W05（收盤時效實測）→ S1-W07（特徵表正規化）→ S3。
 
-回復：`stop-services.ps1` → 用步驟 2 的備份檔替換主檔 → `start-services.ps1`。
-
-## 之後的順序
-
-S1-W06（暫停非核心收集）→ S1-W05（收盤資料時效實測，需連續 5 個交易日）→ S2（Cloudflare 與新介面骨架，網址 `stockresearch.pimi-sunsun.com`）。
-
-## 環境現況（2026-09-30 20:40）
+## 環境現況（2026-09-30 21:40）
 
 | 項目 | 狀態 |
 |---|---|
-| 監督程序 | PID 282792（排程工作 `StockResearchLocalServices`），紀錄 `instance\supervisor.log` |
-| Web／API／Worker | 啟動器 3660／282688／277108；Waitress；閒置 CPU 低 |
-| 交易日曆 | 2021–2026；worker 每日更新快取 |
-| 台股資料品質 | 快照 #132 `warning`，允許研究 |
-| 資料庫 | `instance/quant_platform.db` 22.3 GiB + WAL |
-| 套件 | 已安裝 waitress；未安裝 pyarrow、duckdb、PyJWT |
-| Git | 可直接 push（使用者已完成 GitHub 登入） |
-| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；211 通過、1 略過 |
-| 同主機其他服務 | VectorDB 5001 與其 Tunnel（PID 10704）、`cloudflared` PID 5508、AutoLayout、YtSummary。一律不操作 |
+| 監督程序 | 排程工作 `StockResearchLocalServices` 啟動；紀錄 `instance\supervisor.log`；目前不含 Tunnel（AUTH_MODE=development） |
+| 網站 | Waitress 127.0.0.1:5000；新首頁熱快取 20–50 ms |
+| Tunnel | `stockresearch-pimi-sunsun`，id `e37bb649-0237-434f-b5c7-833722d87f9d`，憑證 `.runtime\cloudflared\stockresearch-pimi-sunsun.json`；DNS CNAME 已建立；程序尚未啟動 |
+| cloudflared | `C:\Users\皮咪\Project\YtSummary\.tools\cloudflared\cloudflared.exe`（2026.7.3） |
+| 資料庫 | `instance\quant_platform.db` 9.62 GiB；備份 `instance\backups\quant_platform-pre-s1w03-20260930-204109.db`、`quant_platform-pre-vacuum-20260930-204109.db`（各 22.29 GiB） |
+| 預測封存 | `instance\research\predictions\`（217 檔，manifest.jsonl） |
+| 套件 | waitress、pyarrow、PyJWT[crypto] 已安裝；site-packages 有 pip 中斷留下的 `~uant-research-platform` 殘留目錄（只造成警告） |
+| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；236 通過、1 略過 |
+| 同主機其他服務 | VectorDB 5001 與其 Tunnel、YtSummary Tunnel、AutoLayout。一律不操作 |
 
 ## 待使用者確認
 
 | 項目 | 建議 | 需要時點 |
 |---|---|---|
-| S1-W03 停機時段 | 今晚或非交易時段，停機 30–60 分鐘 | S1-W03 開始前 |
-| 停牌個股是否阻擋全市場 | 只排除該檔並列警告，排除清單納入資料指紋 | 下次出現停牌個股前 |
-| Access application 建立方式 | 使用者在 Zero Trust 建立，或授權以 API 建立 | S2-W02 |
+| Access application 與 AUD | 見上方 | 現在 |
 | AI 研究員的 LLM Provider 與每月預算 | Anthropic Claude 或既有 OpenAI 設定 | S4 開始前 |
 | 通知管道 | Email 之外是否加 Telegram 或 LINE Messaging API | S1-W06／S6 |
 | 券商手續費折扣與最低費用 | 用於成交模型 | S3-W03 |

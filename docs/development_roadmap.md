@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | S0 | 基線保全與規劃 | done | — | 0.5 |
 | S1 | 每日流程可信與資料庫瘦身 | doing | S0 | 4–6 |
-| S2 | Cloudflare 發布與新介面骨架 | todo | S1-W04 | 3–4 |
+| S2 | Cloudflare 發布與新介面骨架 | doing（使用者決定提前） | S1-W04 | 3–4 |
 | S3 | 長歷史資料與現金流對照回測引擎 | todo | S1 | 6–9 |
 | S4 | AI 研究迴圈（策略工廠） | todo | S3 | 7–10 |
 | S5 | 決策核心、帳務與前向模擬 | todo | S3；S4 晉級結果 | 6–9 |
@@ -49,11 +49,12 @@
 | 工作包 | 內容 | 驗收 | 狀態 |
 |---|---|---|---|
 | S1-W01 官方交易日曆 | `market_calendar/`：證交所開休市日期（2021–2026 隨程式發布，每日自動更新快取）、颱風等臨時休市以 CLI 人工補登、日曆缺年度時告警；接入每日行情、官方收盤來源、資料品質、盤後決策與排程（休市日略過） | 2026-09-25、09-28 休市不誤報；一般交易日照常阻擋缺資料；20 項情境測試；全部測試 205 通過 | done（2026-09-30 20:08 部署） |
-| S1-W02 品質問題排查 | 3 個嚴重問題查證為 2867.TW、5371.TWO 已不在官方名冊（下市）；新增每日官方名冊比對，自動停用下市個股並關閉股票池區間（名冊不完整、數量異常時不動作） | 兩檔停用；台股原始品質快照 #132 阻擋 0、允許研究；5 項測試；全部 211 通過。停牌但未下市的處理規則待使用者決定 | done |
-| S1-W03 資料庫瘦身 | 停 worker → 完整備份 → 非使用中實驗的預測與舊版特徵匯出為 Parquet → 刪除並移除未被查詢使用的單欄索引 → `VACUUM INTO` 新檔替換；之後每次實驗的預測直接寫 Parquet，資料庫只留摘要與使用中預測 | 主檔 < 3 GiB（量測後校準）；既有頁面與測試正常；由備份還原演練成功 | todo |
+| S1-W02 品質問題排查 | 3 個嚴重問題查證為 2867.TW、5371.TWO 已不在官方名冊（下市）；新增每日官方名冊比對，自動停用下市個股並關閉股票池區間（名冊不完整、數量異常時不動作） | 兩檔停用；台股原始品質快照 #132 阻擋 0、允許研究；5 項測試；全部 211 通過。停牌規則（2026-09-30 使用者決定）：個股落後只排除該檔，同時超過 5 檔或 2% 才阻擋；決策 1.1.0 排除落後超過 3 個交易日的個股 | done |
+| S1-W03 資料庫瘦身 | 完整備份 → 移除 11 個未使用索引 → 217 個非使用中實驗的預測（1,934 萬筆）封存為 Parquet（247 MB）→ `VACUUM INTO` 替換；保留政策每天 02:30 自動封存 | 主檔 22.29 → 9.62 GiB；quick_check 與逐表筆數一致；測試全過。3 GiB 目標移到 S1-W07；還原演練併入 S2-W05 | done |
 | S1-W04 服務啟停與效能 | `scripts/start-services.ps1`、`stop-services.ps1`（身分核對、盤後時段保護）、單一監督程序與 PID 檔；Web 改 Waitress；修正補抓守門員重跑整套流程的兩個錯誤（只看最近 30 筆紀錄、UTC 被當台北時間）；部署 S1-W01 | worker 10 分鐘 CPU 0.9 秒（原約 68% 單核）；`/health` 13 ms；啟停只影響本專案程序；日曆自動更新生效。首頁熱快取 4.8 秒，目標移到 S2-W03 | done |
 | S1-W05 收盤資料時效實測 | 連續 5 個交易日記錄各來源（證交所、櫃買、Yahoo、盤後零股成交）實際可取得時間；排程改為 13:31 起輪詢，13:38 前完成決策快照 | 時效表寫入架構文件圖 2；5 個交易日決策快照都在 13:40 前完成 | todo |
-| S1-W06 暫停非核心收集 | 關閉盤中／衍生品、Google Trends、新聞、RAG 等排程；保留程式與既有資料 | 每日流程只跑決策所需步驟；耗時與 CPU 下降有量測紀錄 | todo |
+| S1-W06 暫停非核心收集 | 關閉盤中／衍生品、Google Trends、新聞、RAG、模型治理全量預測載入等排程；保留程式與既有資料 | 每日流程只跑決策所需步驟；耗時與 CPU 下降有量測紀錄 | todo |
+| S1-W07 特徵表正規化 | 總經與跨資產特徵改為每市場只存一份（目前複製到每一檔，單項約 228 萬筆），讀取端改為依日期合併 | 主檔 < 3 GiB；特徵讀取結果與正規化前一致 | todo |
 
 美股仍以週一至週五判斷交易日（研究對照用途），NYSE 假日列為後續項目。2020 年以前的台股交易日由 S3-W01 以官方實際成交資料推算。
 
@@ -65,13 +66,13 @@
 
 目標：用手機透過 Cloudflare 安全開啟網站；新介面骨架上線，之後每輪交付都在本機與 Cloudflare 兩端驗收。
 
-| 工作包 | 內容 | 驗收 |
-|---|---|---|
-| S2-W01 Access 驗證 | 移植 VectorDB `access_control.py` 模式：驗證 `Cf-Access-Jwt-Assertion`（RS256、audience、issuer、email）、單一擁有者 email 允許清單、本機 loopback 開發模式、跨來源寫入拒絕、安全標頭；新增 `PyJWT`、`waitress` 依賴 | 無 JWT、錯誤 audience、非允許 email 都被拒絕；本機 loopback 可用；測試涵蓋 |
-| S2-W02 專屬 Tunnel | 建立 Tunnel `stockresearch-pimi-sunsun`（憑證放 `.runtime/cloudflared/`）、DNS `stockresearch.pimi-sunsun.com`、Access self-hosted application（Google 登入 + 擁有者 email）；啟動器核對 origin `/health` 後才啟動 Tunnel，並記錄 PID | 手機開啟 `https://stockresearch.pimi-sunsun.com` 需 Google 登入；未授權帳號被擋；Tunnel 連線數 ≥ 1 |
-| S2-W03 新版面骨架 | 設計 token（淺色、手機優先）、共用頁面骨架、底部／側邊導覽只有 今日／持倉／計畫／研究／系統；首頁 `/` 改為輕量「今日」頁；舊頁面（含舊市場總覽）移到「研究 › 舊版工具」 | 375 px 寬無水平捲動；導覽 5 項；首頁熱快取 < 2 秒；舊功能仍可進入 |
-| S2-W04 專案資訊頁 | 系統頁內的「專案資訊」：路線圖、架構（Mermaid 渲染）、需求、交接、開發歷程，直接讀取 docs 原始檔 | 兩端都能看到與 repo 一致的文件內容 |
-| S2-W05 開機自動恢復 | 開機排程啟動 App、Worker、Tunnel；每日 SQLite 線上備份 | 重開機後兩端自動恢復；備份檔可還原 |
+| 工作包 | 內容 | 驗收 | 狀態 |
+|---|---|---|---|
+| S2-W01 Access 驗證 | `dashboard/cloudflare_access.py`：驗證 `Cf-Access-Jwt-Assertion`（RS256、audience、issuer、exp、email）、擁有者 email 允許清單、本機 loopback 例外、設定不完整一律 503、跨來源寫入拒絕、安全標頭 | 11 項測試通過；啟用待 AUD | done（程式）；啟用 blocked：等使用者提供 AUD |
+| S2-W02 專屬 Tunnel | Tunnel `stockresearch-pimi-sunsun`（id `e37bb649-…`，憑證 `.runtime/cloudflared/`）與 DNS 已建立；監督程序只在 `AUTH_MODE=cloudflare-access` 時啟動 Tunnel；Access application 由使用者建立 | 手機開啟 `https://stockresearch.pimi-sunsun.com` 需 Google 登入；未授權帳號被擋；Tunnel 連線數 ≥ 1 | doing（等 Access application） |
+| S2-W03 新版面骨架 | 設計 token（淺色、手機優先）、共用頁面骨架、頂部／底部導覽只有 今日／持倉／計畫／研究／系統；首頁 `/` 改為輕量「今日」頁；舊頁面移到「研究」入口，舊市場總覽改到 `/market` | 375 px 無水平溢出；導覽 5 項；首頁熱快取 20–50 ms（舊版 4.8 秒）；舊功能可進入 | done（第一版） |
+| S2-W04 專案資訊頁 | 系統頁「專案資訊」：路線圖、架構（Mermaid）、需求、交接、開發歷程，即時讀取 repo 原始檔（白名單） | 本機驗收完成；Cloudflare 端待 S2-W02 | done（本機） |
+| S2-W05 開機自動恢復 | 登入時排程工作啟動監督程序（含 Tunnel）；每日 SQLite 線上備份與還原演練 | 重開機後兩端自動恢復；備份檔可還原 | doing（自動啟動已具備；備份與演練待做） |
 
 依賴：S1-W04。子網域已定案 `stockresearch.pimi-sunsun.com`（2026-09-30）。需要使用者：在 Cloudflare Zero Trust 建立 Access application，或提供操作授權。
 

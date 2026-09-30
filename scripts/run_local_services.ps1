@@ -33,6 +33,34 @@ $serviceDefinitions = @(
     }
 )
 
+# The public tunnel runs only when the site enforces Cloudflare Access, so a
+# development-mode origin (no login gate) is never exposed to the internet.
+$tunnelCredential = Join-Path $projectRoot '.runtime\cloudflared\stockresearch-pimi-sunsun.json'
+$envFile = Join-Path $projectRoot '.env'
+$accessEnforced = (Test-Path -LiteralPath $envFile) -and (
+    Select-String -LiteralPath $envFile -Pattern '^\s*AUTH_MODE\s*=\s*cloudflare-access\s*$' -Quiet
+)
+$cloudflared = @(
+    (Get-Command cloudflared.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1),
+    'C:\Program Files (x86)\cloudflared\cloudflared.exe',
+    'C:\Program Files\cloudflared\cloudflared.exe',
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\cloudflared.exe'),
+    (Join-Path (Split-Path -Parent $projectRoot) 'YtSummary\.tools\cloudflared\cloudflared.exe')
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
+if ($accessEnforced -and $cloudflared -and (Test-Path -LiteralPath $tunnelCredential)) {
+    $serviceDefinitions += @{
+        Name = 'tunnel'
+        Executable = $cloudflared
+        Arguments = @(
+            'tunnel', '--no-autoupdate', 'run',
+            '--credentials-file', "`"$tunnelCredential`"",
+            '--url', 'http://127.0.0.1:5000',
+            'stockresearch-pimi-sunsun'
+        )
+        ProbeUri = $null
+    }
+}
+
 New-Item -ItemType Directory -Path $instanceRoot, $runtimeRoot -Force | Out-Null
 
 function Write-SupervisorLog([string]$Message) {
@@ -58,7 +86,8 @@ foreach ($definition in $serviceDefinitions) {
 }
 Remove-Item -LiteralPath $stopFlagPath -Force -ErrorAction SilentlyContinue
 Set-Content -LiteralPath $supervisorPidPath -Value $PID -Encoding ascii
-Write-SupervisorLog 'Supervisor started.'
+$tunnelState = if ($serviceDefinitions.Name -contains 'tunnel') { 'with tunnel' } else { 'without tunnel (Access not enforced or credential missing)' }
+Write-SupervisorLog "Supervisor started $tunnelState."
 
 # Child Python processes write UTF-8 logs instead of the console code page.
 $env:PYTHONIOENCODING = 'utf-8'
@@ -69,13 +98,18 @@ function Start-StockResearchService {
     param([hashtable]$Definition)
 
     $name = $Definition.Name
-    $process = Start-Process `
-        -FilePath $Definition.Executable `
-        -WorkingDirectory $projectRoot `
-        -RedirectStandardOutput (Join-Path $instanceRoot "$name.stdout.log") `
-        -RedirectStandardError (Join-Path $instanceRoot "$name.stderr.log") `
-        -WindowStyle Hidden `
-        -PassThru
+    $startArguments = @{
+        FilePath = $Definition.Executable
+        WorkingDirectory = $projectRoot
+        RedirectStandardOutput = (Join-Path $instanceRoot "$name.stdout.log")
+        RedirectStandardError = (Join-Path $instanceRoot "$name.stderr.log")
+        WindowStyle = 'Hidden'
+        PassThru = $true
+    }
+    if ($Definition.Arguments) {
+        $startArguments.ArgumentList = $Definition.Arguments
+    }
+    $process = Start-Process @startArguments
     Set-Content -LiteralPath (Join-Path $runtimeRoot "$name.pid") -Value $process.Id -Encoding ascii
     $runningServices[$name] = [pscustomobject]@{
         Process = $process

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -3339,6 +3340,42 @@ class SqlAlchemyModelResearchRepository:
         with self._session_factory() as session:
             row_count, date_count = session.execute(statement).one()
         return int(row_count or 0), int(date_count or 0)
+
+    PREDICTION_ARCHIVE_COLUMNS = (
+        "id", "experiment_id", "market", "symbol", "model_name", "label_name", "horizon",
+        "event_time", "available_time", "predicted_value", "rank_score", "computed_at",
+    )
+
+    def prediction_experiment_ids(self) -> list[int]:
+        """Experiments that still hold prediction rows in the database."""
+        statement = select(ModelPredictionModel.experiment_id).distinct()
+        with self._session_factory() as session:
+            return sorted(int(value) for value in session.scalars(statement).all())
+
+    def iter_prediction_batches(
+        self, experiment_id: int, batch_size: int = 100_000
+    ) -> Iterator[list[tuple]]:
+        """Stream one experiment's rows as tuples in ``PREDICTION_ARCHIVE_COLUMNS`` order."""
+        table = ModelPredictionModel.__table__
+        statement = select(
+            *(table.c[name] for name in self.PREDICTION_ARCHIVE_COLUMNS)
+        ).where(table.c.experiment_id == experiment_id)
+        with self._session_factory() as session:
+            result = session.execute(
+                statement.execution_options(stream_results=True, yield_per=batch_size)
+            )
+            for partition in result.partitions(batch_size):
+                yield [tuple(row) for row in partition]
+
+    def delete_predictions_for_experiment(self, experiment_id: int) -> int:
+        with self._session_factory() as session:
+            result = session.execute(
+                delete(ModelPredictionModel).where(
+                    ModelPredictionModel.experiment_id == experiment_id
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
 
     def save_explanations(self, values: list[ModelExplanation]) -> int:
         if not values:

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}盤後決策台{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css', v='2.0.0') }}">
+</head>
+<body>
+  {% set nav_items = [
+    ('today', '/', '今日'),
+    ('holdings', '/holdings', '持倉'),
+    ('plan', '/plan', '計畫'),
+    ('research', '/research', '研究'),
+    ('system', '/system', '系統'),
+  ] %}
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="/">盤後決策台<small>台股</small></a>
+      <nav class="nav" aria-label="主要功能">
+        {% for key, href, label in nav_items %}
+          <a href="{{ href }}" class="{{ 'is-active' if active_nav == key else '' }}">{{ label }}</a>
+        {% endfor %}
+      </nav>
+    </div>
+  </header>
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="card"><span class="badge {{ 'badge--bad' if category == 'error' else 'badge--ok' }}">{{ '錯誤' if category == 'error' else '完成' }}</span> {{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <nav class="tabbar" aria-label="主要功能">
+    {% for key, href, label in nav_items %}
+      <a href="{{ href }}" class="{{ 'is-active' if active_nav == key else '' }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

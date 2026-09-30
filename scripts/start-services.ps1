@@ -71,7 +71,7 @@ while ((Get-Date) -lt $deadline -and $ready.Count -lt $probes.Count) {
     }
 }
 
-foreach ($name in 'supervisor', 'web', 'api', 'worker') {
+foreach ($name in 'supervisor', 'web', 'api', 'worker', 'tunnel') {
     $pidPath = Join-Path $runtimeRoot "$name.pid"
     $value = if (Test-Path -LiteralPath $pidPath) { (Get-Content -LiteralPath $pidPath -Raw).Trim() } else { '-' }
     $state = if ($ready.ContainsKey($name)) { "health 200 in $($ready[$name]) ms" } else { '' }

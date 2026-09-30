@@ -175,11 +175,34 @@ def configure_scheduler(scheduler: "BaseScheduler", container: "Container") -> i
     return len(scheduler.get_jobs())
 
 
+def archive_superseded_predictions(container: "Container") -> object | None:
+    """Move superseded experiments' predictions to Parquet outside trading hours."""
+    return container.automation_service.run_exclusive_maintenance(
+        container.prediction_archive.apply
+    )
+
+
 def _add_calendar_refresh_job(scheduler: "BaseScheduler", container: "Container") -> None:
-    """Refresh the TWSE schedule shortly after start and then at most once per day."""
+    """Refresh the TWSE schedule shortly after start and then at most once per day.
+
+    Also registers the nightly prediction archive (02:30), which needs the same
+    exclusive database lock as the daily workflows.
+    """
+    from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
 
     timezone = container.settings.scheduler_timezone
+    scheduler.add_job(
+        archive_superseded_predictions,
+        args=[container],
+        trigger=CronTrigger(hour=2, minute=30, timezone=timezone),
+        id="prediction_archive",
+        name="封存舊實驗預測到 Parquet（每日 02:30）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
+    )
     scheduler.add_job(
         refresh_market_calendar,
         args=[container],

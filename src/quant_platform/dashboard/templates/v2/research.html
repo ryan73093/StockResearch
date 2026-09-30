@@ -1,0 +1,19 @@
+{% extends "v2/base.html" %}
+{% block title %}研究 · 盤後決策台{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>AI 研究員 <span class="badge">S4 建置中</span></h2>
+  <p class="muted">策略工廠會在這裡顯示每週研究報告、試驗排行（含失敗次數）、候選策略與前向模擬狀態，以及晉級核准。</p>
+</section>
+
+{% for group in tool_groups %}
+<section class="card">
+  <h2>{{ group.title }} {% if group.badge %}<span class="badge {{ group.badge_class }}">{{ group.badge }}</span>{% endif %}</h2>
+  <div class="tool-grid">
+    {% for href, name, note in group.tools %}
+      <a class="tool" href="{{ href }}"><strong>{{ name }}</strong><span>{{ note }}</span></a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

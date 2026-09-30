@@ -36,6 +36,15 @@ function Get-ProjectSupervisors {
     }
 }
 
+function Get-ProjectTunnels {
+    # Only the cloudflared started with this project's credential file; the
+    # VectorDB and YtSummary tunnels on the same host are never matched.
+    $credential = Join-Path $projectRoot '.runtime\cloudflared\stockresearch-pimi-sunsun.json'
+    Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" | Where-Object {
+        $_.CommandLine -and $_.CommandLine.Contains($credential)
+    }
+}
+
 function Get-ProjectPythonChildren {
     # Console-script launchers start python.exe children whose command line
     # names the same launcher; match on the full launcher path.
@@ -66,6 +75,10 @@ foreach ($process in @(Get-ProjectServiceProcesses)) {
     Write-Host "Stopping $([IO.Path]::GetFileName($process.ExecutablePath)) tree (PID $($process.ProcessId))."
     & "$env:SystemRoot\System32\taskkill.exe" /PID $process.ProcessId /T /F 2>$null | Out-Null
 }
+foreach ($process in @(Get-ProjectTunnels)) {
+    Write-Host "Stopping project tunnel (PID $($process.ProcessId))."
+    Stop-Process -Id $process.ProcessId -Force -Confirm:$false -ErrorAction SilentlyContinue
+}
 Start-Sleep -Seconds 2
 foreach ($process in @(Get-ProjectPythonChildren)) {
     Write-Host "Stopping leftover python child (PID $($process.ProcessId))."
@@ -74,7 +87,7 @@ foreach ($process in @(Get-ProjectPythonChildren)) {
 
 # 3. Verify.
 Start-Sleep -Seconds 1
-$remaining = @(Get-ProjectServiceProcesses) + @(Get-ProjectPythonChildren) + @(Get-ProjectSupervisors)
+$remaining = @(Get-ProjectServiceProcesses) + @(Get-ProjectPythonChildren) + @(Get-ProjectSupervisors) + @(Get-ProjectTunnels)
 $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
     Where-Object { $_.LocalPort -in 5000, 8000 })
 Remove-Item -LiteralPath $stopFlagPath, $supervisorPidPath -Force -ErrorAction SilentlyContinue

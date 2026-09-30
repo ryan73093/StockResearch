@@ -204,6 +204,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "daily_data_freshness_guard",
             "tw_universe_continuous_backfill",
             "market_calendar_refresh",
+            "prediction_archive",
         }
     finally:
         scheduler.shutdown(wait=False)

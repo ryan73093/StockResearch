@@ -7,6 +7,10 @@ from typing import Callable
 from quant_platform import __version__
 from quant_platform.market_calendar import MarketCalendarStore, TwseHolidayScheduleClient
 from quant_platform.application.listing_reconciliation import TaiwanListingReconciliationService
+from quant_platform.application.prediction_archive import (
+    PredictionArchiveService,
+    active_registry_experiment_ids,
+)
 from quant_platform.application.services import (
     HealthService,
     MarketDataIngestionService,
@@ -159,6 +163,7 @@ class Container:
     earnings_call_service: EarningsCallService
     research_failure_memory_service: ResearchFailureMemoryService
     market_calendar: MarketCalendarStore
+    prediction_archive: PredictionArchiveService
 
 
 def _instance_dir(database_url: str) -> Path:
@@ -521,4 +526,11 @@ def build_container(settings: Settings | None = None) -> Container:
             failure_case_repository
         ),
         market_calendar=market_calendar,
+        prediction_archive=PredictionArchiveService(
+            model_repository,
+            _instance_dir(resolved.database_url) / "research" / "predictions",
+            registry_ids=lambda: active_registry_experiment_ids(
+                model_governance_repository.list_entries()
+            ),
+        ),
     )

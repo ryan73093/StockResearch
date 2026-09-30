@@ -169,18 +169,20 @@ class ModelPredictionModel(Base):
         UniqueConstraint("experiment_id", "symbol", "event_time", name="uq_model_prediction_snapshot"),
     )
 
+    # Queries filter by experiment (leading column of the unique constraint) or
+    # by symbol; other single-column indexes were unused and dropped in S1-W03.
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    experiment_id: Mapped[int] = mapped_column(ForeignKey("model_experiments.id"), index=True)
-    market: Mapped[str] = mapped_column(String(20), index=True)
+    experiment_id: Mapped[int] = mapped_column(ForeignKey("model_experiments.id"))
+    market: Mapped[str] = mapped_column(String(20))
     symbol: Mapped[str] = mapped_column(String(40), index=True)
-    model_name: Mapped[str] = mapped_column(String(100), index=True)
-    label_name: Mapped[str] = mapped_column(String(100), index=True)
+    model_name: Mapped[str] = mapped_column(String(100))
+    label_name: Mapped[str] = mapped_column(String(100))
     horizon: Mapped[int]
-    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    available_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    available_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     predicted_value: Mapped[float] = mapped_column(Float)
     rank_score: Mapped[float] = mapped_column(Float)
-    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ModelExplanationModel(Base):
@@ -697,13 +699,15 @@ class FeatureValueModel(Base):
         ),
     )
 
+    # Queries always filter by symbol (leading column of the unique constraint);
+    # feature_name keeps its index for market-wide coverage checks (S1-W03).
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    symbol: Mapped[str] = mapped_column(String(40), index=True)
+    symbol: Mapped[str] = mapped_column(String(40))
     feature_name: Mapped[str] = mapped_column(String(100), index=True)
     feature_version: Mapped[str] = mapped_column(String(30))
-    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    available_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    available_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     value: Mapped[float] = mapped_column(Float)
 
 

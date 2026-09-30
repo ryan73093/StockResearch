@@ -38,7 +38,7 @@
   - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\stop-services.ps1`：先以停止旗標請監督程序關閉服務，再以完整執行檔路徑核對並結束殘留程序樹，最後確認 5000／8000 已釋放。13:30–14:40（台北）預設拒絕執行。
   - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start-services.ps1`：觸發 Windows 排程工作 `StockResearchLocalServices`（登入時也會自動執行），服務因此脫離終端機與 AI 工具工作階段；等待 web、api 健康檢查通過並列出 PID。
 - 監督程序 `scripts/run_local_services.ps1` 同時只允許一個；PID 檔在 `.runtime\services\`，紀錄在 `instance\supervisor.log`，服務日誌為 UTF-8（`instance\*.stderr.log`）。
-- 服務從 `.venv\Lib\site-packages` 執行已安裝的套件。部署程式變更：`stop-services.ps1` → `.\.venv\Scripts\python.exe -m pip install .`（中文路徑不要用 editable 安裝）→ `start-services.ps1`。服務執行中安裝可能因執行檔被鎖定而中斷。
+- 服務從 `.venv\Lib\site-packages` 執行已安裝的套件。部署程式變更一律用 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy.ps1`（停止 → `pip install .` → 匯入檢查 → 啟動；中文路徑不要用 editable 安裝）。不要在服務執行中直接 `pip install`：2026-09-30 曾因此把套件移除一半，服務反覆啟動失敗。
 
 ## 資料庫安全
 

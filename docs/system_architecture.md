@@ -184,7 +184,7 @@ flowchart LR
         WORKER["排程 Worker"]
         APIAPP["FastAPI<br/>127.0.0.1:8000，只限本機"]
         DB[(instance/)]
-        TUN_SR["cloudflared<br/>Tunnel：stockresearch-pimi-sunsun"]
+        TUN_SR["cloudflared（由監督程序管理）<br/>Tunnel：stockresearch-pimi-sunsun<br/>只在 AUTH_MODE=cloudflare-access 時啟動"]
       end
       VDB["VectorDB 5001 + 專屬 Tunnel"]
       AL["AutoLayout 4173"]
@@ -201,7 +201,7 @@ flowchart LR
     PHONE -->|"stockresearch.pimi-sunsun.com（HTTPS）"| EDGE
 ```
 
-網站在每個請求驗證 `Cf-Access-Jwt-Assertion`（簽章、audience、issuer、email）；本機 loopback 請求可免登入以便開發。Tunnel、憑證與啟動器位於本專案 `.runtime/`，只操作核對過 PID 與命令列的本專案程序。
+網站在每個請求驗證 `Cf-Access-Jwt-Assertion`（RS256 簽章、audience、issuer、到期、email），只允許 `ACCESS_ALLOWED_EMAILS`；直接連到 127.0.0.1／localhost 的 loopback 請求可免登入。經 Tunnel 進來的請求雖然來自 127.0.0.1，但 Host 是公開網址，因此一定要有 JWT。設定不完整時所有公開請求回 503。Tunnel `stockresearch-pimi-sunsun`（id `e37bb649-…`）憑證在 `.runtime/cloudflared/`，由 `scripts/run_local_services.ps1` 監督；停止腳本只以本專案憑證路徑辨識 cloudflared 程序。
 
 ## 模組現況與處置
 
@@ -233,5 +233,7 @@ flowchart LR
 | `market_calendar/` | 官方交易日曆與臨時休市（已建立；CLI：`python -m quant_platform.market_calendar`） |
 | `research/` | 策略設定檔 schema、現金流對照回測引擎、盤後成交模型、試驗登錄、統計檢定、AI 研究員 |
 | `decision/` | 投資計畫、決策引擎、委託單、帳務與影子帳戶 |
-| `web/` 或 `dashboard/` 新模板 | 今日、持倉、計畫、研究、系統、專案資訊 |
-| `access/` | Cloudflare Access JWT 驗證 |
+| `dashboard/v2.py`、`dashboard/templates/v2/`、`static/css/v2.css` | 新介面：今日、持倉、計畫、研究、系統（含專案資訊，直接讀 docs 原始檔）（S2-W03／W04 第一版已建立） |
+| `dashboard/cloudflare_access.py` | Cloudflare Access JWT 驗證、擁有者允許清單、本機 loopback 例外、安全標頭（S2-W01） |
+| `application/prediction_archive.py` | 預測保留政策與 Parquet 封存（S1-W03） |
+| `application/listing_reconciliation.py` | 官方名冊比對與下市處理（S1-W02） |

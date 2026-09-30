@@ -32,7 +32,9 @@ from quant_platform.market_calendar import (
 
 @dataclass(frozen=True, slots=True)
 class DataQualityPolicy:
-    version: str = "data-quality-v1"
+    # v2: a single lagging or gappy asset (for example a suspended stock) is
+    # excluded from the day's research instead of blocking the whole market.
+    version: str = "data-quality-v2"
     recent_sessions: int = 63
     minimum_bar_coverage_rate: float = 0.90
     maximum_market_business_day_lag: int = 5
@@ -43,6 +45,9 @@ class DataQualityPolicy:
     minimum_technical_features: int = 8
     minimum_feature_coverage_rate: float = 0.80
     feature_lag_critical_sessions: int = 3
+    # More excluded assets than this points at a source problem, not suspensions.
+    maximum_excluded_assets: int = 5
+    maximum_excluded_rate: float = 0.02
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +61,7 @@ class DataQualityIssue:
     threshold: float | int | str
     unit: str
     blocks_research: bool
+    excludes_asset: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,12 +169,13 @@ class DataQualityService:
         def issue(
             code: str, category: str, severity: DataQualitySeverity,
             symbol: str | None, message: str, observed: object,
-            threshold: object, unit: str,
+            threshold: object, unit: str, excludes_asset: bool = False,
         ) -> None:
             issues.append(DataQualityIssue(
                 code=code, category=category, severity=severity, symbol=symbol,
                 message=message, observed=observed, threshold=threshold, unit=unit,
                 blocks_research=severity == DataQualitySeverity.CRITICAL,
+                excludes_asset=excludes_asset,
             ))
 
         if not active_symbols:
@@ -258,9 +265,10 @@ class DataQualityService:
             missing_rate = missing / len(expected) if expected else 0.0
             if missing_rate >= self._policy.missing_session_critical_rate:
                 issue(
-                    "SESSION_GAPS", "連續性", DataQualitySeverity.CRITICAL, asset.symbol,
-                    "近期共同交易日缺漏比例過高。", missing_rate,
-                    self._policy.missing_session_critical_rate, "%",
+                    "SESSION_GAPS", "連續性", DataQualitySeverity.WARNING, asset.symbol,
+                    "近期共同交易日缺漏比例過高（可能停牌）；今日排除於研究與決策。",
+                    missing_rate, self._policy.missing_session_critical_rate, "%",
+                    excludes_asset=True,
                 )
             elif missing_rate >= self._policy.missing_session_warning_rate:
                 issue(
@@ -273,9 +281,10 @@ class DataQualityService:
             if lag > self._policy.asset_lag_critical_sessions:
                 stale_assets += 1
                 issue(
-                    "ASSET_STALE", "時效性", DataQualitySeverity.CRITICAL, asset.symbol,
-                    "標的行情落後市場共同交易日。", lag,
+                    "ASSET_STALE", "時效性", DataQualitySeverity.WARNING, asset.symbol,
+                    "標的行情落後市場共同交易日（可能停牌）；今日排除於研究與決策。", lag,
                     self._policy.asset_lag_critical_sessions, "個交易日",
+                    excludes_asset=True,
                 )
             elif lag > self._policy.asset_lag_warning_sessions:
                 stale_assets += 1
@@ -284,6 +293,18 @@ class DataQualityService:
                     "標的行情略為落後市場共同交易日。", lag,
                     self._policy.asset_lag_warning_sessions, "個交易日",
                 )
+
+        excluded = {item.symbol for item in issues if item.excludes_asset}
+        exclusion_limit = max(
+            self._policy.maximum_excluded_assets,
+            int(len(active_symbols) * self._policy.maximum_excluded_rate),
+        )
+        if len(excluded) > exclusion_limit:
+            issue(
+                "ASSET_EXCLUSION_LIMIT", "時效性", DataQualitySeverity.CRITICAL, None,
+                "同時落後或缺漏的標的過多，可能是資料來源問題而非個別停牌。",
+                len(excluded), exclusion_limit, "個",
+            )
 
         taiwan_keys = self._check_taiwan_and_macro(
             normalized, computed_at, issues, issue, active_symbols
@@ -533,6 +554,17 @@ class DataQualityService:
                 f"{view.snapshot.market} 資料品質閘門阻擋研究："
                 f"{view.snapshot.blocking_issue_count} 個嚴重問題。"
             )
+
+    def latest_view(self, market: str) -> DataQualitySnapshotView | None:
+        """Most recent snapshot of either stage for one market."""
+        snapshots = [
+            item for item in (
+                self._repository.latest(market.upper(), stage) for stage in ("raw", "full")
+            ) if item is not None
+        ]
+        if not snapshots:
+            return None
+        return self._view(max(snapshots, key=lambda item: self._aware(item.computed_at)))
 
     def overview(self) -> DataQualityOverview:
         latest = []

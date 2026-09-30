@@ -58,6 +58,12 @@ class Settings:
     auth_session_days: int = 14
     auth_cookie_secure: bool = False
     api_write_token: str = ""
+    # Cloudflare Access (S2-W01): "development" or "cloudflare-access".
+    auth_mode: str = "development"
+    public_url: str = ""
+    access_team_domain: str = ""
+    access_aud: str = ""
+    access_allowed_emails: str = ""
     openai_enabled: bool = False
     openai_api_key: str = ""
     openai_response_model: str = "gpt-5.6-luna"
@@ -126,6 +132,11 @@ class Settings:
             auth_session_days=int(os.getenv("AUTH_SESSION_DAYS", "14")),
             auth_cookie_secure=os.getenv("AUTH_COOKIE_SECURE", "false").lower() in {"1", "true", "yes"},
             api_write_token=os.getenv("API_WRITE_TOKEN", ""),
+            auth_mode=os.getenv("AUTH_MODE", "development").strip().lower(),
+            public_url=os.getenv("PUBLIC_URL", ""),
+            access_team_domain=os.getenv("ACCESS_TEAM_DOMAIN", ""),
+            access_aud=os.getenv("ACCESS_AUD", ""),
+            access_allowed_emails=os.getenv("ACCESS_ALLOWED_EMAILS", ""),
             openai_enabled=os.getenv("OPENAI_ENABLED", "false").lower()
             in {"1", "true", "yes"},
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),

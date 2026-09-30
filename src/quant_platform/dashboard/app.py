@@ -13,6 +13,8 @@ from flask import Flask, flash, g, jsonify, redirect, render_template, request, 
 from sqlalchemy import inspect, text
 
 from quant_platform.container import Container, build_container
+from quant_platform.dashboard.cloudflare_access import register_cloudflare_access
+from quant_platform.dashboard.v2 import create_v2_blueprint
 from quant_platform.application.analytics import DEFAULT_UNIVERSE
 from quant_platform.application.odd_lot_research import OddLotAssumptions
 
@@ -53,12 +55,18 @@ def create_app(container: Container | None = None) -> Flask:
     app.extensions["quant_container"] = dependencies
     session_cookie = "quant_session"
     oauth_nonce_cookie = "quant_oauth_nonce"
+    # Registered first so it runs before any other request hook.
+    register_cloudflare_access(app, dependencies.settings)
+    app.register_blueprint(create_v2_blueprint(dependencies))
 
     @app.before_request
     def load_current_user() -> None:
         g.current_user = dependencies.authentication_service.authenticate(
             request.cookies.get(session_cookie)
         )
+        if dependencies.settings.auth_mode == "cloudflare-access":
+            # The Access gate already authenticated the owner or a loopback user.
+            return None
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             if dependencies.authentication_service.enabled and g.current_user is None:
                 flash("請先登入，才能執行會修改資料的操作。", "error")
@@ -72,7 +80,7 @@ def create_app(container: Container | None = None) -> Flask:
     @app.context_processor
     def authentication_context() -> dict[str, object]:
         return {
-            "current_user": getattr(g, "current_user", None),
+            "current_user": getattr(g, "current_user", None) or getattr(g, "access_user", None),
             "google_login_enabled": dependencies.authentication_service.enabled,
         }
 
@@ -610,7 +618,7 @@ def create_app(container: Container | None = None) -> Flask:
 
     app.jinja_env.globals["quality_value_display"] = quality_value_display
 
-    @app.get("/")
+    @app.get("/market")
     def index() -> str:
         overview = dependencies.research_overview_service.get_overview()
         active_symbols = set(dependencies.research_universe_service.active_symbols())

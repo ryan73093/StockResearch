@@ -2,6 +2,41 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-09-30 — S2-W01～W04 Cloudflare 準備與新介面第一版
+
+- 使用者決定（2026-09-30）：S2 提前到 S1-W05／W06 之前；同意由開發者以本機 cloudflared 建立 Tunnel 與 DNS；Access application 由使用者在 Zero Trust 建立並提供 AUD。
+- S2-W02 Tunnel：`cloudflared tunnel create --credentials-file .runtime\cloudflared\stockresearch-pimi-sunsun.json stockresearch-pimi-sunsun`（id `e37bb649-0237-434f-b5c7-833722d87f9d`；憑證不放共用 `.cloudflared`，避免影響 YtSummary 啟動腳本）；`tunnel route dns` 新增 CNAME `stockresearch.pimi-sunsun.com`。團隊網域沿用 VectorDB 設定 `https://raspy-mode-cc1c.cloudflareaccess.com`。
+- S2-W01 Access 驗證：`dashboard/cloudflare_access.py`（沿用 VectorDB 模式）：RS256、audience、issuer、exp、email 驗證；`ACCESS_ALLOWED_EMAILS` 允許清單；直接連 127.0.0.1／localhost 的 loopback 請求免登入；經 Tunnel 的請求雖來自 127.0.0.1，但 Host 是公開網址，因此必須有 JWT；設定不完整一律 503；跨來源寫入 403；安全標頭。`AUTH_MODE=cloudflare-access` 時舊 Google OAuth 寫入檢查略過。新增設定 `AUTH_MODE`、`PUBLIC_URL`、`ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`ACCESS_ALLOWED_EMAILS`；依賴 `PyJWT[crypto]`。
+- Tunnel 監督：`run_local_services.ps1` 在 `.env` 為 `AUTH_MODE=cloudflare-access` 且憑證存在時才把 cloudflared 納入監督（開發模式永遠不公開）；`stop-services.ps1` 以本專案憑證路徑辨識 cloudflared，不碰 VectorDB、YtSummary 的 Tunnel。
+- S2-W03／W04 新介面：`dashboard/v2.py` blueprint＋`templates/v2/`＋`static/css/v2.css`（淺色、手機優先、深色模式跟隨系統；桌面頂部導覽、手機底部 5 分頁）。
+  - 今日 `/`：行動卡（交易／不需操作／回看三種顏色、14:30 倒數）、委託單與「複製委託」、每筆理由只取「訊號」「風險」、觀察清單收合、資料時間與品質狀態一行。
+  - 持倉 `/holdings`：模擬帳戶權益、現金、報酬、曝險、持股與最近委託。
+  - 計畫 `/plan`：S5 前的空狀態。
+  - 研究 `/research`：舊版工具分組入口，暫停模組標示「S8 決定去留」。
+  - 系統 `/system`：服務、台美股行情時效、資料品質（含排除檔數）、交易日曆、外網發布狀態、最近排程；專案資訊分頁（路線圖、架構、需求、交接、開發歷程）即時讀 repo 原始檔，Mermaid 圖在瀏覽器渲染；文件讀取限白名單。
+  - 舊市場總覽移到 `/market`；舊側邊欄加「回到新版介面」。
+- 驗收（內建瀏覽器，375 px）：修正前整頁被表格撐寬（grid 子元素 min-width），改為 `minmax(0, 1fr)` 與表格區塊內捲動後無水平溢出；系統頁架構分頁 6 張圖渲染成功。
+- 部署事故：一次在服務執行中直接 `pip install .`，安裝被鎖定的執行檔中斷，套件被移除一半，服務反覆重啟約 4 分鐘（21:17–21:21）。以停止 → 重新安裝 → 啟動恢復，新增 `scripts/deploy.ps1` 固定此順序並寫入 `AGENTS.md`。`site-packages` 內留有 pip 中斷產生的 `~uant-research-platform` 殘留目錄（只造成警告），未手動刪除。
+- 測試：新增 `test_cloudflare_access.py` 11 項、`test_dashboard_v2.py` 8 項；`test_dashboard.py` 首頁改測 `/market`。全部測試 236 通過、1 略過。
+- 待辦：使用者建立 Access application 並提供 AUD → 寫入 `.env` → 重啟（Tunnel 隨之啟動）→ 本機與 Cloudflare 兩端驗收。
+
+## 2026-09-30 — S1-W03 資料庫瘦身，以及停牌個股規則
+
+- 使用者決定（2026-09-30）：今晚執行瘦身；停牌個股改為只排除該檔。
+- 盤點（唯讀）：`model_predictions` 2,530 萬筆／233 個實驗，每次重跑都把全部歷史樣本外預測再存一份（每個實驗約 66 萬筆）；`feature_values` 2,533 萬筆幾乎全是 1.0.0 版，體積主要來自總經與跨資產特徵被複製到每一檔（例如 `treasury_10y` 228 萬筆）。
+- 索引：兩表的唯一索引已涵蓋所有查詢的開頭欄位；移除 11 個未使用單欄索引（預測 7、特徵 4），並同步修改 `database/models.py`。
+- 保留政策 `application/prediction_archive.py`：資料庫只留使用中的實驗（每組最新、每組最新 rank IC 為正、每市場／標籤最佳 CANDIDATE、未淘汰的模型登錄）；其餘逐實驗寫 Parquet（zstd），讀回核對筆數、記錄 SHA-256 到 `manifest.jsonl` 後才刪除。排程每天 02:30 自動執行（`prediction_archive` 工作，使用每日流程同一把鎖）。
+- 一次性執行 `scripts/slim_database.py`（20:40–21:16，服務停機約 36 分鐘）：
+  - 完整備份 `instance/backups/quant_platform-pre-s1w03-20260930-204109.db`（22.29 GiB，68 秒，quick_check ok）。
+  - 封存 217 個實驗、19,340,138 筆（670 秒），Parquet 共 247 MB；資料庫保留 16 個實驗、5,959,558 筆（與原總數 25,299,696 相符）。
+  - `VACUUM INTO` 238 秒；新檔 quick_check ok、所有資料表筆數與壓縮前一致。
+  - 主檔 **22.29 GiB → 9.62 GiB**。腳本最後改名時因自身連線未關閉（Python sqlite3 的 `with` 不會關閉連線）失敗；驗證已通過，手動完成改名並補寫 `slim-report-20260930-204109.json`；腳本已改用 `contextlib.closing`。
+  - 暫存：`instance/backups/` 內兩個 22.29 GiB 檔（變更前備份、壓縮前檔）。隔日台股流程正常後可刪除，刪除指令交由使用者執行。
+  - 3 GiB 目標未達：剩餘體積主要是特徵表（資料 3.06 GiB＋索引），需把總經／跨資產特徵改為每市場只存一份，列為新工作包。
+- 停牌規則（資料品質 v2、決策 1.1.0）：個股落後超過 3 個交易日或近期缺漏達 25% 改為警告並排除（`excludes_asset`），不阻擋全市場；同時排除超過 5 檔或 2% 時視為來源問題並阻擋。每日決策以特徵日期與交易日曆計算落後交易日數，超過 3 日者標「資料不足」、不列候選。
+- 測試：新增 `test_prediction_archive.py` 3 項、`test_decision_exclusion.py` 1 項、`test_data_quality.py` 停牌 2 項；排程工作清單加 `prediction_archive`。
+- 回復：`stop-services.ps1` → 以 `quant_platform-pre-s1w03-*.db` 替換主檔 → 啟動；封存的預測可由 Parquet 依 `manifest.jsonl` 回灌。
+
 ## 2026-09-30 — S1-W02 下市個股處理
 
 - 起點：台股原始品質快照 #131 被 3 個嚴重問題阻擋——2867.TW 落後 11 個交易日；5371.TWO 落後 17 個交易日、近期缺漏 27%。

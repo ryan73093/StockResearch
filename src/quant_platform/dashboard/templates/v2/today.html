@@ -1,0 +1,111 @@
+{% extends "v2/base.html" %}
+{% block title %}今日 · 盤後決策台{% endblock %}
+{% block content %}
+<section class="action action--{{ kind }}">
+  <div class="action__label">今日行動 · {{ today.label }}</div>
+  <h1>{{ plan.headline }}</h1>
+  <div class="action__meta">{{ plan.mode }}</div>
+  {% if deadline_iso %}
+    <div class="countdown" data-deadline="{{ deadline_iso }}">14:30 撮合</div>
+  {% endif %}
+</section>
+
+{% if plan.orders %}
+<section class="card">
+  <h2>委託單 <span class="badge badge--accent">{{ plan.orders|length }} 筆</span></h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>標的</th><th>買賣</th><th class="num">股數</th><th class="num">參考價（元）</th>
+        <th class="num">預估金額（元）</th><th class="num">預估費稅（元）</th>
+      </tr></thead>
+      <tbody>
+      {% for order in plan.orders %}
+        <tr>
+          <td><strong>{{ order.symbol.split('.')[0] }}</strong> <span class="muted small">{{ names.get(order.symbol, '') }}</span></td>
+          <td><span class="badge {{ 'badge--accent' if order.side == 'BUY' else 'badge--warn' }}">{{ '買' if order.side == 'BUY' else '賣' }}</span></td>
+          <td class="num">{{ '{:,}'.format(order.quantity) }}</td>
+          <td class="num">{{ '{:,.2f}'.format(order.reference_price) }}</td>
+          <td class="num">{{ '{:,.0f}'.format(order.estimated_amount) }}</td>
+          <td class="num">{{ '{:,.0f}'.format(order.estimated_cost) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="actions-row">
+    <button class="btn btn--primary" type="button" id="copy-orders"
+      data-orders="{% for order in plan.orders %}{{ order.symbol.split('.')[0] }} {{ '買' if order.side == 'BUY' else '賣' }} {{ order.quantity }} 股 參考價 {{ '%.2f'|format(order.reference_price) }}（盤後零股）{% if not loop.last %}&#10;{% endif %}{% endfor %}">複製委託</button>
+    <span class="muted small" id="copy-status"></span>
+  </div>
+  <p class="muted small" style="margin-top:8px">參考價是 13:30 收盤價；盤後零股 14:30 一次撮合，限價與是否成交以券商為準。系統不會自動下單。</p>
+</section>
+{% endif %}
+
+{% if reasons %}
+<section class="card">
+  <h2>為什麼</h2>
+  <ul class="reasons">
+    {% for reason in reasons %}<li>{{ reason }}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if plan.watchlist %}
+<details class="card">
+  <summary>觀察清單 {{ plan.watchlist|length }} 檔</summary>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>標的</th><th>狀態</th><th class="num">分數</th><th>未進場原因</th></tr></thead>
+      <tbody>
+      {% for item in plan.watchlist %}
+        <tr>
+          <td>{{ item.symbol.split('.')[0] }} <span class="muted small">{{ names.get(item.symbol, '') }}</span></td>
+          <td>{{ item.status }}</td>
+          <td class="num">{{ '%.2f'|format(item.score) }}</td>
+          <td class="muted small" style="white-space:normal">{{ item.blocker }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+{% endif %}
+
+<p class="status-line">
+  決策資料 {{ status.decision_time }} · 最新收盤 {{ status.market_date }} ·
+  資料品質 <span class="badge {{ status.quality_badge }}">{{ status.quality_label }}</span>
+  {% if status.excluded %} · 今日排除 {{ status.excluded }} 檔{% endif %}
+  · 模擬帳戶權益 {{ '{:,.0f}'.format(plan.equity) }} 元
+</p>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const countdown = document.querySelector('.countdown');
+  if (countdown) {
+    const deadline = new Date(countdown.dataset.deadline);
+    const tick = () => {
+      const minutes = Math.floor((deadline - new Date()) / 60000);
+      countdown.textContent = minutes > 0
+        ? `距 14:30 撮合還有 ${Math.floor(minutes / 60) ? Math.floor(minutes / 60) + ' 小時 ' : ''}${minutes % 60} 分`
+        : '今日盤後撮合時段已結束';
+    };
+    tick();
+    setInterval(tick, 30000);
+  }
+  const copy = document.getElementById('copy-orders');
+  if (copy) {
+    copy.addEventListener('click', async () => {
+      const status = document.getElementById('copy-status');
+      try {
+        await navigator.clipboard.writeText(copy.dataset.orders);
+        status.textContent = '已複製';
+      } catch (error) {
+        status.textContent = '無法存取剪貼簿，請手動選取表格';
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

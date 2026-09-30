@@ -1,0 +1,80 @@
+{% extends "v2/base.html" %}
+{% block title %}系統 · 盤後決策台{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>運作狀態</h2>
+  <div class="stats">
+    {% for item in health_items %}
+      <div class="stat">
+        <div class="stat__label">{{ item.label }}</div>
+        <div class="stat__value" style="font-size:15px"><span class="badge {{ item.badge }}">{{ item.state }}</span></div>
+        <div class="small muted">{{ item.detail }}</div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <h2>最近排程</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>開始（台北）</th><th>工作</th><th>市場</th><th>結果</th></tr></thead>
+      <tbody>
+      {% for run in recent_runs %}
+        <tr>
+          <td class="small num">{{ run.started }}</td>
+          <td>{{ run.job }}</td>
+          <td>{{ run.market }}</td>
+          <td><span class="badge {{ run.badge }}">{{ run.status }}</span></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="muted">尚無排程紀錄</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card" id="project">
+  <h2>專案資訊</h2>
+  <div class="tabs" role="tablist">
+    {% for key, label in doc_tabs %}
+      <button type="button" data-doc="{{ key }}" class="{{ 'is-active' if loop.first else '' }}">{{ label }}</button>
+    {% endfor %}
+  </div>
+  <article class="doc" id="doc-body"><p class="muted">載入中…</p></article>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+(() => {
+  const body = document.getElementById('doc-body');
+  const buttons = [...document.querySelectorAll('[data-doc]')];
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default' });
+  const escapeHtml = (text) => text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  async function show(key) {
+    buttons.forEach((button) => button.classList.toggle('is-active', button.dataset.doc === key));
+    body.innerHTML = '<p class="muted">載入中…</p>';
+    const response = await fetch(`/system/docs/${key}`, { credentials: 'same-origin' });
+    if (!response.ok) { body.innerHTML = '<p class="muted">文件讀取失敗</p>'; return; }
+    const payload = await response.json();
+    const renderer = new marked.Renderer();
+    const baseCode = renderer.code.bind(renderer);
+    renderer.code = (code, language) => {
+      const source = typeof code === 'object' ? code.text : code;
+      const lang = typeof code === 'object' ? code.lang : language;
+      return lang === 'mermaid' ? `<pre class="mermaid">${escapeHtml(source)}</pre>` : baseCode(code, language);
+    };
+    body.innerHTML = `<p class="muted small">${payload.path} · 更新 ${payload.modified}</p>` + marked.parse(payload.markdown, { renderer });
+    if (window.mermaid) await mermaid.run({ nodes: body.querySelectorAll('.mermaid') });
+    history.replaceState(null, '', `#${key}`);
+  }
+  buttons.forEach((button) => button.addEventListener('click', () => show(button.dataset.doc)));
+  const initial = buttons.find((button) => `#${button.dataset.doc}` === location.hash) || buttons[0];
+  if (initial) show(initial.dataset.doc);
+})();
+</script>
+{% endblock %}

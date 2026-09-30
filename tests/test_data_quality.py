@@ -1,17 +1,26 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, call
 
 import pytest
 
-from quant_platform.application.data_quality import DataQualityGateError
+from quant_platform.application.data_quality import (
+    DataQualityGateError,
+    DataQualityPolicy,
+    DataQualityService,
+)
 from quant_platform.application.model_research import AVAILABLE_MODELS
 from quant_platform.application.research_pipeline import DailyResearchPipeline
 from quant_platform.config import Settings
 from quant_platform.container import build_container
 from quant_platform.database.repositories import (
+    SqlAlchemyDataQualityRepository,
     SqlAlchemyFeatureLabelStoreRepository,
+    SqlAlchemyMacroDataRepository,
     SqlAlchemyMarketBarRepository,
+    SqlAlchemyResearchUniverseRepository,
+    SqlAlchemyTaiwanDataRepository,
 )
 from quant_platform.domain.entities import MarketBar
 from quant_platform.feature_engineering import FeatureEngine
@@ -193,6 +202,47 @@ def test_after_hours_preview_is_built_before_slower_auxiliary_sources() -> None:
             model_names=("torch_cuda_mlp",),
             feature_profile="price_core",
         )
+
+
+def _spy_and_suspended_qqq(container) -> list[MarketBar]:
+    for asset in container.research_universe_service.list_all():
+        container.research_universe_service.set_active(asset.symbol, asset.symbol in {"SPY", "QQQ"})
+    spy = _bars()
+    qqq = [replace(item, symbol="QQQ") for item in _bars()[:-10]]
+    SqlAlchemyMarketBarRepository(container.database.session_factory).add_missing(spy + qqq)
+    return spy
+
+
+def test_single_suspended_asset_is_excluded_without_blocking_market(tmp_path) -> None:
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'suspended.db'}"))
+    spy = _spy_and_suspended_qqq(container)
+
+    view = container.data_quality_service.evaluate("US", as_of=spy[-1].ingested_at, stage="raw")
+
+    stale = [item for item in view.issues if item.code == "ASSET_STALE"]
+    assert view.snapshot.research_allowed
+    assert view.snapshot.policy_version == "data-quality-v2"
+    assert [item.symbol for item in stale] == ["QQQ"]
+    assert stale[0].excludes_asset
+    assert stale[0].severity.value == "warning"
+    assert "排除" in stale[0].message
+
+
+def test_too_many_excluded_assets_blocks_as_source_problem(tmp_path) -> None:
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'too-many.db'}"))
+    spy = _spy_and_suspended_qqq(container)
+    factory = container.database.session_factory
+    service = DataQualityService(
+        SqlAlchemyDataQualityRepository(factory), SqlAlchemyMarketBarRepository(factory),
+        SqlAlchemyResearchUniverseRepository(factory), SqlAlchemyFeatureLabelStoreRepository(factory),
+        SqlAlchemyTaiwanDataRepository(factory), SqlAlchemyMacroDataRepository(factory),
+        policy=DataQualityPolicy(maximum_excluded_assets=0, maximum_excluded_rate=0.0),
+    )
+
+    view = service.evaluate("US", as_of=spy[-1].ingested_at, stage="raw")
+
+    assert not view.snapshot.research_allowed
+    assert any(item.code == "ASSET_EXCLUSION_LIMIT" for item in view.issues)
 
 
 def test_quality_dashboard_shows_explicit_units(tmp_path) -> None:
