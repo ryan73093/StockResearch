@@ -15,7 +15,7 @@
 
 **背景下載**：2026-10-01 00:17 啟動的獨立程序（PID 記在 `instance\research\history\fetch.pid`，命令 `python -m quant_platform.research.history fetch`，以 `PYTHONPATH=src` 從原始碼執行，不經過服務）。紀錄 `instance\research\history\fetch.log`、錯誤 `fetch.err.log`；原始回應快取 `instance\research\history\raw\`。約 3,000 次請求、每次間隔 ≥ 3 秒，預計 03:30～04:00 完成。中斷時重新執行同一命令即可續抓（過去月份不重抓）。**不要在 13:30–14:40 執行抓取。**
 
-下載完成後依序（都在專案根目錄、`$env:PYTHONPATH="src"`）：
+**2026-10-01 01:23 已啟動無人值守接續**：`scripts/research_first_run.py`（PID 在 `instance\research\first_run.pid`，紀錄 `instance\research\first_run.log`）會等下載程序結束，自動跑完下列 1～6 步（13:20–14:45 暫停網路步驟）。接手時先看紀錄；若中斷，可手動依序執行（都在專案根目錄、`$env:PYTHONPATH="src"`）：
 1. `python -m quant_platform.research.history status`：各序列筆數、起訖、缺交易日、分割註記、下跌期涵蓋。預期 0050 從 2004-02-11 起、2025-06 有分割註記。
 2. `python -m quant_platform.research.history actions`：證交所 TWT49U 與櫃買 exDailyQ 除權息（約 50 次請求）、總報酬序列、Yahoo 股利核對。
 3. `python -m quant_platform.research.history crosscheck`：官方收盤 vs Yahoo（分割調整後）與總報酬 vs Yahoo 還原收盤價的漂移。
