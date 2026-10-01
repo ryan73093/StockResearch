@@ -159,6 +159,19 @@ class ResearchAgent:
             for record in ranked
         ]
         stats = self._latest_stats()
+        # The benchmark itself (the first night's model asked for it: every excess is relative to it).
+        # Every trial report carries the benchmark over the same span; the longest span describes it best.
+        benchmark = BASELINES["benchmark_dca"]
+        spanning = ([record for record in current if record.metrics.get("benchmark_xirr") is not None
+                     and record.metrics.get("benchmark_max_drawdown") is not None]   # older trials lack the drawdown
+                    or [record for record in current if record.metrics.get("benchmark_xirr") is not None])
+        reference = min(spanning, key=lambda record: str(record.metrics.get("start"))) if spanning else None
+        benchmark_line = (
+            f"比較基準「{benchmark.name}」（每月 5 日入帳當天全數買 0050）開發期 "
+            f"{reference.metrics.get('start')}～{reference.metrics.get('end')}：XIRR {_pct2(reference.metrics.get('benchmark_xirr'))}、"
+            f"最大回撤 {_pct2(reference.metrics.get('benchmark_max_drawdown'))}；下列勝率與超額都是相對它計算。"
+            if reference is not None else "下列勝率與超額都是相對定期定額基準計算。"
+        )
         journal_lines = []
         for entry in self.journal.entries()[-5:]:
             results = "；".join(
@@ -173,6 +186,7 @@ class ResearchAgent:
             f"可用標的（開發期有 3 年以上資料）：{names}；訊號標的另可用 TAIEX（加權指數）。",
             "StrategySpec v1 JSON Schema：",
             json.dumps(json_schema(), ensure_ascii=False, separators=(",", ":")),
+            benchmark_line,
             f"已測設定（開發期、目前資料版本 {len(current)} 個，依 3 年中位超額排序；超額以投入金額計）：",
             *lines,
             f"多重檢定：本期間累計 {len(current) + len(older)} 次試驗"
@@ -425,6 +439,10 @@ def _acquire(lock: Path) -> bool:
 
 def _pct(value) -> str:
     return "—" if value is None else f"{float(value):.0%}"
+
+
+def _pct2(value) -> str:
+    return "—" if value is None else f"{float(value):.2%}"
 
 
 def _signed(value) -> str:

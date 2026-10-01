@@ -1,23 +1,19 @@
 # 盤後決策台 — 當前開發交接
 
-記錄時間：2026-10-01 21:35（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
+記錄時間：2026-10-01 23:10（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
 
 ## 接手前必讀
 
 1. `AGENTS.md`：開發規則。部署一律 `scripts\deploy.ps1`；只停服務用 `scripts\stop-services.ps1`，只啟動用 `scripts\start-services.ps1`；還原資料庫步驟在「資料庫安全」。測試一律用暫存資料庫（`tests/conftest.py` 會擋下開啟正式資料庫的測試）。
-2. `docs/development_roadmap.md`：S6 done；S5 基準版 doing（S5-W07 LINE 等使用者設定）；S4-W03、W04、W05 doing；S1-W05 量測到 10/07。
+2. `docs/development_roadmap.md`：S6 done；S5 基準版 doing（S5-W07 LINE 等使用者設定）；S4-W04 done，S4-W03、W05 doing；S1-W05 量測到 10/07。
 3. `DEVELOPMENT_HISTORY.md` 最上方幾筆（10/01 下午）：服務中的 Yahoo 全部失敗的根本原因（`PYTHONUTF8=1` 與中文路徑）、股利提醒、任一天查詢、測試誤寫正式資料庫、今日頁一鍵回報成交、情境模擬、每週研究報告、使用教學。
 4. 使用者要求：所有回覆與進度說明用繁體中文。研究 CLI 一律在專案根目錄以 `$env:PYTHONPATH="src"` 從原始碼執行（`.venv` 裡安裝的是部署版）。UI 預覽用暫存資料庫（不要用預設設定連正式資料庫）。
 
-## 先驗收：AI 研究員第一晚（2026-10-01 22:00）
+## 今晚狀態（2026-10-01 23:10）
 
-10/01 21:23 起以 API 補跑舊版台股流程（在 api 服務內），22:00 的 AI 研究員在 worker 內照常執行、與它重疊。兩者都結束後再部署 `5156bd2` 起的晚間修改（每晚上限共用、中斷紀錄、主機記憶體）；部署時 `stop-services.ps1` 會把 15:39 被中斷的舊版回測（#3621）標為中斷。
-
-- 看 `instance\research\journal.jsonl` 的新輪次（研究頁「AI 研究員」卡）：每輪有分析、假設、理由；被拒絕的設定有原因；通過的設定是開發期候選試驗（`trials.jsonl`），統計檔 `instance\research\stats\development-*.json` 更新。
-- 看 `instance\research\agent\usage.jsonl`：每次呼叫都有 token 與費用；本月費用遠低於 US$3。
-- 異常時：`llm_error` 看錯誤訊息（HTTP 狀態與 OpenAI 錯誤說明）；`budget_exceeded` 表示預算用完。白天可用 `python -m quant_platform.research agent --dry-run` 檢查提示、`--check` 檢查連線（極小費用）；研究本身只在夜間跑。
-- 驗收通過後把路線圖 S4-W04 改為 done，證據寫入開發歷程。
-
+- AI 研究員第一晚已驗收（S4-W04 done，見開發歷程）；之後每晚 22:00，手動執行與排程共用一晚的額度。
+- 舊版台股流程：21:23 的補跑在 22:52 重開機時中斷於回測；23:01 起以獨立程序（`finish_tw_workflow`，非服務）補完剩下的回測、策略整合、組合、舊版決策與每日報告，時間固定為 10/01 23:00，預計 00:10 前後完成。完成後部署 `SchedulerJobRunRepository` 的 UTC 修正與 AI 研究員提示改進（部署時新的停止步驟會把 #3631 標為中斷）。
+- 主機記憶體外洩已由使用者更新 AMD 內顯驅動解決（22:57 複測不再留殭屍）。
 ## 當前工作包：S5-W06 舊決策程式退場（等使用者決定範圍）
 
 目標：每日建議已改由投資計畫產生（S5-W02），舊版盤後 AI 只剩今日頁收合的「研究模型觀察」；把 13:50 流程中只為舊決策服務的重運算移出交易時段。
@@ -66,7 +62,7 @@
 | 資料庫 | `instance\quant_platform.db` 約 9.7 GiB；`research_universe` 新增 4 檔 ETF（id 555–558）；每日備份 `instance\backups\daily\`；兩個 22.29 GiB 暫存備份待使用者刪除 |
 | 研究資料 | `instance\research\`：history（10 個序列）、reports、trials.jsonl、stats、forward、promotions.jsonl |
 | 憑證副本 | `C:\ProgramData\StockResearch\cacert.pem`（yfinance 用，見開發歷程） |
-| 主機記憶體外洩（10/01 17:40 診斷） | 開機 116 小時後核心非分頁記憶體池 6.5 GB、核心程序物件 10.6 萬個（實際只有 348 個程序）：**每個結束的程序都沒被釋放**（測試：30 個 `cmd /c exit` 後 `Proc` +30 且不回落），每個約佔 130 KB（VAD、權杖、分頁表），合計約 13 GB。不是本專案或 Codex 本身造成，而是核心層（Windows 26H1 build 28000.2956 或某個監看程序建立的驅動）的 bug；AI 工具大量開程序會加速累積。重開機可清掉，但 18:51 複測仍外洩（每個程序 `Proc` +1 不回落），會再慢慢累積。21:30 取樣：Claude 桌面版約每秒執行一次 `git`（每次 3 個程序）並持續執行 bash／python 短命程序，殭屍每分鐘增加約 170–240 個（每小時約 1.3–1.9 GB）。最可能的元兇：內顯 AMD Radeon 驅動 31.0.24002.92（2024-01-11），正是已知「每個程序都留下殭屍、約 64 KB」的 AMD Adrenalin 版本範圍（23.12～24.6，24.7.1 起修正）；主力顯卡是 RTX 5070 Ti，請使用者在 BIOS 關閉內顯或手動更新 AMD 驅動後複測 |
+| 主機記憶體 | 10/01 診斷出「每個結束的程序都留下殭屍」（開機 5 天約 13 GB），元凶是 AMD 內顯驅動 31.0.24002.92（2024-01）；使用者 22:5x 更新到 32.0.21045.5002 後複測已不再外洩。系統頁「主機記憶體」持續監看（殭屍 2 萬個以上偏高、5 萬個以上或可用不到 10% 建議重開機） |
 | 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；390 通過、1 略過（晚間修改後相關 70 項通過） |
 | 同主機其他服務 | VectorDB 5001 與其 Tunnel、PimiServices 共用 cloudflared 服務（YtSummary／AutoLayout）。一律不操作 |
 

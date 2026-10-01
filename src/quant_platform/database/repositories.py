@@ -1498,12 +1498,14 @@ class SqlAlchemySchedulerJobRunRepository:
         self._session_factory = session_factory
 
     def start(self, job_name: str, market: str, started_at: datetime) -> int:
+        # Stored as naive UTC like every reader expects; SQLite drops any other offset, so a
+        # Taipei time showed as 8 hours later (10/01: a manual rerun "started" at 07:00 next day).
         with self._session_factory() as session:
             row = SchedulerJobRunModel(
                 job_name=job_name,
                 market=market,
                 status=JobRunStatus.RUNNING.value,
-                started_at=started_at,
+                started_at=_utc_naive(started_at),
                 metrics_json="{}",
             )
             session.add(row)
@@ -1524,7 +1526,7 @@ class SqlAlchemySchedulerJobRunRepository:
             if row is None:
                 raise LookupError(f"Scheduler job run {run_id} does not exist")
             row.status = status
-            row.completed_at = completed_at
+            row.completed_at = _utc_naive(completed_at)
             row.metrics_json = metrics_json
             row.error = error
             session.commit()

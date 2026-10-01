@@ -167,8 +167,16 @@ def test_prompt_shows_only_development_results(tmp_path):
         run_trial(kind="candidate", spec=spec, period=period, market=MARKET, plan=STANDARD_PLAN,
                   registry=researcher.registry, reports_dir=tmp_path / "reports", window_months=(12,))
     validation = [record for record in researcher.registry.records() if record.period == "validation"][0]
+    development = [record for record in researcher.registry.records() if record.period == "development"][0]
 
     instructions, user_input = researcher.build_prompt(MARKET)
+
+    # The first night's model asked for the benchmark itself; it comes with every development trial.
+    assert "比較基準「定期定額基準」（每月 5 日入帳當天全數買 0050）開發期" in user_input
+    assert (f"XIRR {development.metrics['benchmark_xirr']:.2%}、"
+            f"最大回撤 {development.metrics['benchmark_max_drawdown']:.2%}") in user_input
+    assert f"{validation.metrics['benchmark_xirr']:.2%}" not in user_input or (
+        validation.metrics["benchmark_xirr"] == development.metrics["benchmark_xirr"])
 
     assert "不要推測或引用 2017 年以後的行情" in instructions and "每輪最多提出 3 個設定" in instructions
     assert "0050（元大台灣50，2013-01-02 起）" in user_input and "00878" not in user_input.split("StrategySpec")[0]

@@ -81,6 +81,20 @@ def test_scheduler_startup_closes_stale_running_audits(tmp_path):
     assert "自動關閉" in (recovered.error or "")
 
 
+def test_run_times_are_stored_in_utc_whatever_zone_they_come_in(tmp_path):
+    from zoneinfo import ZoneInfo
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'zones.db'}"))
+    runs = container.automation_service._runs
+    taipei = datetime(2026, 10, 1, 23, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    run_id = runs.start("walk_forward_backtest", "TW", taipei)
+    runs.finish(run_id, "succeeded", taipei + timedelta(hours=1), "{}", None)
+
+    stored = next(run for run in container.automation_service.overview().recent_runs if run.id == run_id)
+    started = stored.started_at if stored.started_at.tzinfo else stored.started_at.replace(tzinfo=UTC)
+    assert started == datetime(2026, 10, 1, 15, 0, tzinfo=UTC)          # not 23:00 read as UTC (07:00 next day)
+
+
 def test_runs_from_before_the_last_boot_or_a_full_stop_are_closed(tmp_path):
     from quant_platform.scheduler.runner import INTERRUPTED, close_interrupted_runs
 
