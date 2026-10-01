@@ -9,18 +9,25 @@ from pathlib import Path
 PERIOD_LABELS = {"full": "全期間", "development": "開發期", "validation": "驗證期", "holdout": "保留期"}
 
 
-def latest_reports(directory: str | Path, limit: int = 10) -> list[dict[str, object]]:
-    """Newest report per strategy spec and period, newest first; unreadable files are skipped."""
+def latest_reports(
+    directory: str | Path, limit: int = 10, period: str | None = None, kind: str | None = None
+) -> list[dict[str, object]]:
+    """Newest report per strategy spec and period, newest first; unreadable files are skipped.
+
+    ``period`` and ``kind`` filter before ``limit`` applies, so a large batch of
+    candidate reports cannot push the baselines out."""
     folder = Path(directory)
     if not folder.is_dir():
         return []
     latest: dict[tuple[str, str], dict[str, object]] = {}
-    for path in folder.glob("*.json"):
+    for path in folder.glob(f"{period}-*.json" if period else "*.json"):
         try:
             report = json.loads(path.read_text(encoding="utf-8"))
             key = (report["strategy"]["spec_hash"], str(report.get("period", "full")))
             stamp = str(report.get("generated_at", ""))
         except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if (period and key[1] != period) or (kind and report.get("kind", "baseline") != kind):
             continue
         if key not in latest or stamp > str(latest[key].get("generated_at", "")):
             latest[key] = {**report, "file": path.name}

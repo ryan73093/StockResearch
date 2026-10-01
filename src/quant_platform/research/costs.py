@@ -80,7 +80,7 @@ class BrokerProfile:
 BROKERS: dict[str, BrokerProfile] = {
     "conservative": BrokerProfile(
         "conservative", "保守估計", 1.0, 20, "—",
-        "不打折、每筆最低 20 元；還沒確認券商條件時使用，研究預設也用這組。",
+        "還沒確認券商條件時使用；研究預設也用這組。",
     ),
     "cathay": BrokerProfile(
         "cathay", "國泰證券", 0.28, 1, "待確認",

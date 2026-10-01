@@ -31,7 +31,7 @@ from quant_platform.research.reports import latest_reports, latest_stats, report
 logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.3.0"
+ASSET_VERSION = "2.3.1"
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {
@@ -478,8 +478,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         }
         reports_dir = _instance_dir(dependencies.settings.database_url) / "research" / "reports"
         research = {
-            row["name"]: row for row in report_rows(latest_reports(reports_dir, limit=50))
-            if row["period_label"] == "全期間"
+            row["name"]: row
+            for row in report_rows(latest_reports(reports_dir, limit=20, period="full", kind="baseline"))
         }
         return render_template(
             "v2/plan.html",
@@ -521,10 +521,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             ranking=ranking,
             stats=stats,
             best_dsr=best_dsr,
-            baseline_rows=[
-                row for row in report_rows(latest_reports(reports_dir, limit=200))
-                if row["kind"] == "baseline"
-            ],
+            # Baselines run on the full period; candidates never may (periods.check_gate).
+            baseline_rows=report_rows(latest_reports(reports_dir, limit=20, period="full", kind="baseline")),
         )
 
     @blueprint.get("/system")

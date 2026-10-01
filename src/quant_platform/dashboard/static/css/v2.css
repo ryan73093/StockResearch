@@ -436,7 +436,8 @@ td.wrap { white-space: normal; min-width: 180px; }
 }
 .choice:has(input:checked) { border-color: var(--accent); background: var(--accent-bg); }
 .choice input { width: auto; margin-top: 4px; accent-color: var(--accent); }
-.choice span { display: grid; gap: 2px; }
+.choice > span { display: grid; gap: 2px; }
+.choice strong .badge { margin-left: 6px; vertical-align: 1px; }
 .choice strong { color: var(--text); font-size: 14.5px; }
 .choice small { color: var(--muted); font-size: 12.5px; font-weight: 400; }
 .choice__stat { color: var(--accent) !important; }

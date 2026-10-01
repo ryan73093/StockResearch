@@ -189,14 +189,19 @@ def test_research_page_lists_the_latest_baseline_reports(tmp_path):
     assert "尚無回測結果" in client.get("/research").get_data(as_text=True)
 
     report = compare_to_benchmark(BASELINES["ma_value"], market(), PLAN, window_months=(1,))
-    report["generated_at"] = "20261001-010000"
+    report.update(generated_at="20261001-010000", period="full", kind="baseline")
     folder = tmp_path / "research" / "reports"
     folder.mkdir(parents=True)
-    (folder / "report.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
-    (folder / "broken.json").write_text("{", encoding="utf-8")
+    (folder / "full-report.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+    (folder / "full-broken.json").write_text("{", encoding="utf-8")
+    for index in range(60):  # a large candidate batch must not push the baselines out
+        candidate = {**report, "period": "development", "kind": "candidate", "generated_at": "20261001-020000",
+                     "strategy": {**report["strategy"], "spec_hash": f"{index:064d}", "spec": f"候選 {index}"}}
+        (folder / f"development-{index}.json").write_text(json.dumps(candidate, ensure_ascii=False), encoding="utf-8")
 
     body = client.get("/research").get_data(as_text=True)
     assert "定期不定額（200 日均線）" in body and "定期定額對照" in body
+    assert "全期間 XIRR" in client.get("/plan").get_data(as_text=True)
 
 
 def test_metrics_by_hand():
