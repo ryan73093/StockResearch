@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
 from quant_platform.application.close_availability import SOURCES as CLOSE_SOURCES
-from quant_platform.application.actual_account import FLOW_KINDS, ActualAccountError, stress_scenarios
+from quant_platform.application.actual_account import FLOW_KINDS, ActualAccountError, compare_on, stress_scenarios
 from quant_platform.application.investment_plan import InvestmentPlanError, parse_plan_form, strategy_name
 from quant_platform.application.plan_decision import clamped_date
 from quant_platform.research.costs import BROKERS
@@ -37,7 +37,7 @@ from quant_platform.research.reports import latest_reports, latest_stats, report
 logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.4.1"
+ASSET_VERSION = "2.4.2"
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {
@@ -451,7 +451,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             },
         )
 
-    def render_holdings(error: str | None = None, form: dict | None = None, status: int = 200):
+    def render_holdings(error: str | None = None, form: dict | None = None, status: int = 200, on: str = ""):
         overview = dependencies.paper_trading_service.overview()
         actual = dependencies.actual_account_service.overview()
         symbols = [item.position.symbol for item in overview.positions]
@@ -459,11 +459,21 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         names = names_for(symbols)
         investment_plan = dependencies.investment_plan_service.current()
         tolerance = investment_plan.max_drawdown_tolerance if investment_plan else None
+        today = datetime.now(TAIPEI).date()
+        lookup = None
+        if on.strip():  # "任一日期可查兩帳戶差異" (S5-W04)
+            try:
+                day = date.fromisoformat(on.strip())
+                lookup = {"error": "請選今天以前的日期"} if day > today else compare_on(actual, day)
+            except ValueError:
+                lookup = {"error": "日期格式是 YYYY-MM-DD"}
         return render_template(
             "v2/holdings.html",
             active_nav="holdings",
             overview=overview,
             actual=actual,
+            lookup=lookup,
+            on=on.strip(),
             scenarios=stress_scenarios(actual, tolerance) if actual.holdings else [],
             tolerance=tolerance,
             names=names,
@@ -474,7 +484,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             default_broker=dependencies.actual_account_service.default_broker(),
             error=error,
             form=form or {},
-            today_iso=datetime.now(TAIPEI).date().isoformat(),
+            today_iso=today.isoformat(),
         ), status
 
     @blueprint.get("/holdings")
@@ -482,7 +492,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         # "回報成交" on the Today page links here with the advised order (REQUIREMENTS §4);
         # the fill form starts from it and the user corrects price, shares and fee.
         prefill = {key: request.args[key] for key in ("symbol", "side", "shares", "price", "broker") if key in request.args}
-        return render_holdings(form={**prefill, "form": "trade"} if prefill else None)
+        return render_holdings(form={**prefill, "form": "trade"} if prefill else None, on=request.args.get("on", ""))
 
     @blueprint.post("/holdings/cash")
     def holdings_cash():

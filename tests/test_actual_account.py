@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from quant_platform.application.actual_account import ActualAccountError, ActualAccountService
+from quant_platform.application.actual_account import ActualAccountError, ActualAccountService, compare_on
 from quant_platform.config import Settings
 from quant_platform.container import build_container
 from quant_platform.dashboard.app import create_app
@@ -96,6 +96,50 @@ def test_drawdown_and_month_ends_by_hand(tmp_path):
     # The shadow buys the same 10,000 at 100.20 (research closes stay at 100): 99 shares and 60.20 cash.
     assert september["shadow"] == pytest.approx(99 * 100 + 60.2)
     assert september["difference"] == pytest.approx(990.0)
+
+    # Any day (S5-W04): Sunday 09-13 uses Friday 09-11, when 0050 closed at 80 in the account's bars.
+    sunday = compare_on(overview, date(2026, 9, 13))
+    assert (sunday["session"], sunday["shadow_day"]) == (date(2026, 9, 11), date(2026, 9, 11))
+    assert sunday["actual"] == pytest.approx(60.2 + 99 * 80)
+    assert sunday["shadow"] == pytest.approx(99 * 100 + 60.2)
+    assert sunday["difference"] == pytest.approx(-1_980.0) and sunday["invested"] == 10_000
+    assert compare_on(overview, date(2026, 8, 31)) == {"error": "2026-08-31 還沒有任何紀錄（第一筆是 2026-09-01）"}
+
+
+def test_holdings_page_compares_any_day(tmp_path):
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from quant_platform.database.repositories import SqlAlchemyMarketBarRepository
+    from quant_platform.domain.entities import MarketBar
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
+    sessions = [date(2026, 9, 1) + timedelta(days=offset) for offset in range(30)]
+    SqlAlchemyMarketBarRepository(container.database.session_factory).add_missing([
+        MarketBar(
+            symbol="0050.TW", market="TW", interval="1d",
+            event_time=datetime(day.year, day.month, day.day, 5, 30, tzinfo=UTC),
+            available_time=datetime(day.year, day.month, day.day, 6, tzinfo=UTC),
+            ingested_at=datetime(day.year, day.month, day.day, 6, tzinfo=UTC),
+            open=Decimal(100), high=Decimal(100), low=Decimal(100),
+            close=Decimal(100 if day.day < 11 else 80), adjusted_close=Decimal(100), volume=1_000, source="test",
+        )
+        for day in sessions if day.weekday() < 5
+    ])
+    client = create_app(container).test_client()
+    client.post("/holdings/cash", data={"kind": "deposit", "day": "2026-09-01", "amount": "10000"})
+    client.post("/holdings/trade", data={"day": "2026-09-01", "symbol": "0050", "side": "BUY", "shares": "99",
+                                         "price": "100.2", "fee": "20"})
+
+    body = client.get("/holdings?on=2026-09-13").get_data(as_text=True)
+    assert 'id="compare" open' in body and 'name="on" type="date" value="2026-09-13"' in body
+    assert "2026-09-11" in body and "（2026-09-13 沒有收盤，取前一個交易日）" in body
+    assert "7,980 元" in body and "10,000 元" in body          # 60.20 + 99 × 80; the 10,000 deposited
+
+    assert "還沒有任何紀錄（第一筆是 2026-09-01）" in client.get("/holdings?on=2026-08-01").get_data(as_text=True)
+    assert "請選今天以前的日期" in client.get("/holdings?on=2999-01-01").get_data(as_text=True)
+    assert "日期格式是 YYYY-MM-DD" in client.get("/holdings?on=9/13").get_data(as_text=True)
+    assert 'id="compare" open' not in client.get("/holdings").get_data(as_text=True)
 
 
 def test_stress_scenarios_by_hand():

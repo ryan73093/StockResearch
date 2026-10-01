@@ -93,8 +93,26 @@
 {% endif %}
 
 {% if actual.monthly %}
-<details class="card">
+<details class="card" id="compare"{% if on %} open{% endif %}>
   <summary><h2>每月底對照 <span class="badge">最近 {{ actual.monthly|length }} 個月</span></h2></summary>
+  <form method="get" action="/holdings#compare" class="form lookup-form">
+    <label>查詢某一天<input name="on" type="date" value="{{ on }}" max="{{ today_iso }}" required></label>
+    <button class="btn" type="submit">查詢</button>
+  </form>
+  {% if lookup %}
+    {% if lookup.error %}
+      <p class="form-error" role="alert">{{ lookup.error }}</p>
+    {% else %}
+      {% set gap = lookup.difference %}
+      <dl class="facts lookup-result">
+        <div><dt>收盤日</dt><dd>{{ lookup.session }}{% if lookup.session != lookup.requested %}<span class="muted small">（{{ lookup.requested }} 沒有收盤，取前一個交易日）</span>{% endif %}</dd></div>
+        <div><dt>你的帳戶</dt><dd>{{ '{:,.0f}'.format(lookup.actual) }} 元</dd></div>
+        <div><dt>定期定額</dt><dd>{{ '{:,.0f}'.format(lookup.shadow) ~ ' 元' if lookup.shadow is not none else '—' }}{% if lookup.shadow_day and lookup.shadow_day != lookup.session %}<span class="muted small">（{{ lookup.shadow_day }} 收盤）</span>{% endif %}</dd></div>
+        <div><dt>差額</dt><dd class="{{ 'up' if (gap or 0) > 0 else ('down' if (gap or 0) < 0 else '') }}">{{ '{:+,.0f}'.format(gap) ~ ' 元' if gap is not none else '—' }}</dd></div>
+        <div><dt>當時累計淨投入</dt><dd>{{ '{:,.0f}'.format(lookup.invested) }} 元</dd></div>
+      </dl>
+    {% endif %}
+  {% endif %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th>月份</th><th class="num">你的帳戶（元）</th><th class="num">定期定額（元）</th><th class="num">差額（元）</th></tr></thead>
@@ -111,7 +129,7 @@
       </tbody>
     </table>
   </div>
-  <p class="note">每個月最後一個交易日收盤的市值；影子帳戶用同樣的入金日期與金額買 0050。最大回撤以單位淨值計算，已排除新投入的錢。</p>
+  <p class="note">每個月最後一個交易日收盤的市值，上方可查任一天；影子帳戶用同樣的入金日期與金額買 0050。最大回撤以單位淨值計算，已排除新投入的錢。</p>
 </details>
 {% endif %}
 {% else %}

@@ -447,6 +447,11 @@ td.wrap { white-space: normal; min-width: 180px; }
 .choice__stat { color: var(--accent) !important; }
 .form-error { color: var(--bad); background: var(--bad-bg); border-radius: 10px; padding: 10px 12px; margin: 0 0 4px; }
 .form select { appearance: auto; }
+.lookup-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 0 0 14px; }
+.lookup-form label { flex: 1 1 200px; max-width: 260px; }
+.lookup-result { margin: 0 0 16px; }
+.lookup-result dt { flex-shrink: 0; }
+.lookup-result dd .small { display: block; }
 .void-form { display: flex; gap: 6px; align-items: center; }
 .void-form input {
   font: 13px var(--font); color: var(--text); background: var(--surface-2);

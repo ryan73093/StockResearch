@@ -61,6 +61,8 @@ class ActualAccountOverview:
     notes: list[str] = field(default_factory=list)
     max_drawdown: float | None = None  # unit-value drawdown of the real account
     monthly: list[dict[str, object]] = field(default_factory=list)  # month-end real vs shadow
+    history: dict[str, object] | None = None  # session closes: {"days", "values"}
+    shadow_series: dict[date, float] = field(default_factory=dict)  # DCA shadow by session
 
 
 def _day(text: str) -> date:
@@ -266,6 +268,7 @@ class ActualAccountService:
             flows=flows, trades=trades, notes=notes,
             max_drawdown=history["max_drawdown"] if history else None,
             monthly=_month_ends(history, shadow_series) if history else [],
+            history=history, shadow_series=shadow_series,
         )
 
     def _closes(self, symbol: str) -> dict[date, float]:
@@ -376,6 +379,30 @@ def stress_scenarios(overview: ActualAccountOverview, tolerance: float | None = 
             "over_tolerance": tolerance is not None and share > tolerance,
         })
     return rows
+
+
+def compare_on(overview: ActualAccountOverview, day: date) -> dict[str, object]:
+    """Both accounts at the last session on or before ``day`` (S5-W04).
+
+    Returns ``{"error": ...}`` when the day is before the first entry.
+    """
+    history = overview.history or {"days": [], "values": []}
+    sessions = [(session, value) for session, value in zip(history["days"], history["values"]) if session <= day]
+    if not sessions:
+        first = min([flow.day for flow in overview.flows] + [trade.day for trade in overview.trades], default=None)
+        return {"error": f"{day} 還沒有任何紀錄" + (f"（第一筆是 {first}）" if first else "")}
+    session, value = sessions[-1]
+    shadow_days = [item for item in overview.shadow_series if item <= session]
+    shadow_day = max(shadow_days) if shadow_days else None  # research history can lag a day
+    shadow = overview.shadow_series[shadow_day] if shadow_day else None
+    invested = sum(
+        float(flow.amount) if flow.kind == "deposit" else -float(flow.amount)
+        for flow in overview.flows if flow.kind in {"deposit", "withdrawal"} and flow.day <= session
+    )
+    return {
+        "requested": day, "session": session, "actual": value, "shadow": shadow, "shadow_day": shadow_day,
+        "invested": invested, "difference": None if shadow is None else value - shadow,
+    }
 
 
 def _month_ends(history: dict[str, object], shadow: dict[date, float], months: int = 12) -> list[dict[str, object]]:
