@@ -367,6 +367,9 @@ td.wrap { white-space: normal; min-width: 180px; }
 .weight__bar i { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
 
 @media (max-width: 767px) {
+  /* A long note beside a card title goes under it instead of squeezing the title to one character
+     per line (10/02: 舊版挑戰者評估 and AI 研究員 at 375 px). */
+  .card__head { flex-direction: column; align-items: flex-start; gap: 4px; }
   .table-wrap--stack { overflow: visible; margin: 0; }
   .table--stack thead { display: none; }
   .table--stack, .table--stack tbody { display: block; }

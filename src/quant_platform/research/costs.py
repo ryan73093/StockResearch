@@ -108,10 +108,19 @@ def etf_tick(price: float) -> float:
     return 0.01 if price < 50 else 0.05
 
 
-def fill_price(close: float, side: str, slippage_bps: float) -> float:
+def stock_tick(price: float) -> float:
+    """TWSE/TPEx tick size for stocks: 0.01 below 10, 0.05 below 50, 0.1 below 100, 0.5 below 500,
+    1 below 1,000 and 5 from 1,000 (the legacy challenger evaluation trades stocks)."""
+    for limit, tick in ((10, 0.01), (50, 0.05), (100, 0.1), (500, 0.5), (1_000, 1.0)):
+        if price < limit:
+            return tick
+    return 5.0
+
+
+def fill_price(close: float, side: str, slippage_bps: float, tick_size=etf_tick) -> float:
     """After-hours odd-lot fill: close ± slippage, rounded against the trader."""
     raw = close * (1 + slippage_bps / 10_000) if side == "BUY" else close * (1 - slippage_bps / 10_000)
-    tick = etf_tick(raw)
+    tick = tick_size(raw)
     steps = raw / tick
     rounded = math.ceil(steps - 1e-9) if side == "BUY" else math.floor(steps + 1e-9)
     return round(rounded * tick, 2)

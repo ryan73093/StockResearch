@@ -110,11 +110,49 @@ def _agent(args) -> int:
     return 0
 
 
+def _legacy(args) -> int:
+    """The legacy ML challenger evaluation (read-only on the application database)."""
+    from quant_platform.config.settings import Settings
+    from quant_platform.research.legacy_challenger import evaluate, load_legacy_data, save_report
+
+    url = Settings.from_env().database_url
+    if not url.startswith("sqlite:///"):
+        raise SystemExit("只支援 SQLite 資料庫")
+    data = load_legacy_data(Path(url.removeprefix("sqlite:///")), Path(args.base) / "raw", args.experiment)
+    print(f"實驗 #{args.experiment}（{data.notes['model']}／{data.notes['label']}）：{len(data.predictions)} 個交易日的預測、"
+          f"{data.notes['symbols']} 檔、官方除權息事件 {data.notes['official_events']} 筆；"
+          f"晚於當天 14:30 才可得而略過 {data.notes['late_predictions']} 筆", flush=True)
+    report = evaluate(data)
+    path = save_report(report, RESEARCH / "legacy")
+    quality = report["signal_quality"]
+    print(f"訊號：{quality.get('days')} 天、平均排序相關 {quality.get('mean_rank_ic')}（t={quality.get('rank_ic_t')}）、"
+          f"前 5 名比平均多 {quality.get('top5_minus_average_5d')}（5 日、未扣成本）")
+    sensitivity = report["sensitivity"]
+    rows = report["results"] + [{**row, "broker": "（敏感度）"} for row in sensitivity["results"]]
+    print(f"敏感度：{sensitivity['name']}（{sensitivity['symbols']} 檔，{sensitivity['broker']}）")
+    for row in rows:
+        windows = row.get("windows_3y") or {}
+        print(f"{row['broker']:12s} {row['name']}：XIRR {row['xirr']}、期末 {row['final_value']:,.0f}／投入 "
+              f"{row['contributed']:,.0f}、最大回撤 {row['max_drawdown']}、交易 {row['trades']} 筆、費稅 "
+              f"{row['fees'] + row['taxes']:,}"
+              + (f"；全期超額 {row['full_excess']:+.2%}、3 年視窗 {windows.get('count')} 個、勝率 "
+                 f"{windows.get('win_ratio')}、中位 {windows.get('median_excess')}、最差 {windows.get('worst_excess')}"
+                 f"；隨機選股平均 {row['random_control']['full_excess_mean']:+.2%}"
+                 f"（{row['random_control']['full_excess_min']:+.2%}～{row['random_control']['full_excess_max']:+.2%}，"
+                 f"平均交易 {row['random_control']['trades_mean']:,.0f} 筆、費稅 {row['random_control']['costs_mean']:,.0f}）、"
+                 f"選最差 {row['worst_control']['full_excess']:+.2%}、模型貢獻 {row['model_contribution']:+.2%}"
+                 if "full_excess" in row else ""))
+    print(report["verdict"])
+    print(f"報告：{path}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
-        "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote"),
+        "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy"),
     )
+    parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--dry-run", action="store_true", help="agent：只印出提示內容，不呼叫模型")
     parser.add_argument("--check", action="store_true", help="agent：極小的連線檢查呼叫（金鑰、模型、JSON 格式）")
     parser.add_argument("--name", default="first", help="batch：批次名稱")
@@ -154,6 +192,8 @@ def main() -> int:
 
     if args.command == "agent":
         return _agent(args)
+    if args.command == "legacy":
+        return _legacy(args)
     if args.command == "promote":
         from quant_platform.research.forward import STANDARD_PLAN
         from quant_platform.research.promotion import PromotionPipeline

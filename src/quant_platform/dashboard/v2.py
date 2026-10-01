@@ -28,6 +28,8 @@ from quant_platform.config.settings import PAUSABLE_MODULES
 from quant_platform.container import _instance_dir
 from quant_platform.research.agent.researcher import agent_status
 from quant_platform.research.forward import FORWARD_START, ForwardTracker
+from quant_platform.research.legacy_challenger import challenger_view
+from quant_platform.research.legacy_challenger import latest_report as latest_challenger
 from quant_platform.research.forward import STANDARD_PLAN as FORWARD_PLAN
 from quant_platform.research.periods import ResearchGateError
 from quant_platform.research.promotion import PromotionPipeline
@@ -38,7 +40,7 @@ from quant_platform.research.reports import latest_reports, latest_stats, report
 logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.4.3"
+ASSET_VERSION = "2.4.4"
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {
@@ -682,6 +684,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
             round_view=round_view,
+            legacy=challenger_view(latest_challenger(research_dir / "legacy")),
             ranking=ranking,
             stats=stats,
             best_dsr=best_dsr,

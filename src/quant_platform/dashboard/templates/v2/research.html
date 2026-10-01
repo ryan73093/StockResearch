@@ -126,6 +126,66 @@
 </section>
 {% endif %}
 
+{% if legacy %}
+<section class="card" id="legacy">
+  <div class="card__head">
+    <h2>舊版挑戰者評估 <span class="badge">{{ legacy.period.start[:7].replace('-', '/') }}～{{ legacy.period.end[:7].replace('-', '/') }}</span></h2>
+    <span class="muted small">舊版模型 #{{ legacy.experiment.experiment_id }} 的樣本外預測，與 0050 定期定額相同現金流比較（{{ legacy.broker }}費用）</span>
+  </div>
+  <p style="margin:0 0 12px"><strong>{{ legacy.headline }}</strong></p>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr>
+        <th>用法</th><th class="num">期末（元）</th><th class="num">XIRR</th><th class="num">比 0050</th><th class="num">3 年勝率</th><th class="num">最大回撤</th>
+        <th class="num">隨機選股</th><th class="num">選預測最差</th><th class="num">只用當時大型股</th>
+      </tr></thead>
+      <tbody>
+      {% for row in legacy.rows %}
+        {% set excess_class = 'up' if (row.excess or 0) > 0 else ('down' if (row.excess or 0) < 0 else '') %}
+        <tr>
+          <td data-primary><strong>{{ row.name }}</strong>{% if row.excess is not none %}<span class="stack-only num {{ excess_class }}">{{ '{:+.0%}'.format(row.excess) }}</span>{% endif %}</td>
+          <td class="num" data-label="期末">{{ '{:,.0f}'.format(row.final) }}</td>
+          <td class="num" data-label="XIRR">{{ '{:.1%}'.format(row.xirr) if row.xirr is not none else '—' }}</td>
+          <td class="num {{ excess_class }}" data-label="比 0050">{{ '{:+.0%}'.format(row.excess) if row.excess is not none else '—' }}</td>
+          <td class="num" data-label="3 年勝率">{{ '{:.0%}'.format(row.win_3y) if row.win_3y is not none else '—' }}</td>
+          <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.drawdown) }}</td>
+          <td class="num" data-label="隨機選股">{{ '{:+.0%}'.format(row.random) if row.random is not none else '—' }}</td>
+          <td class="num" data-label="選預測最差">{{ '{:+.0%}'.format(row.worst) if row.worst is not none else '—' }}</td>
+          <td class="num {{ 'up' if (row.early or 0) > 0 else ('down' if (row.early or 0) < 0 else '') }}" data-label="只用當時大型股">{{ '{:+.0%}'.format(row.early) if row.early is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if legacy.scan_sizes %}
+  <details style="margin-top:12px">
+    <summary class="small">依預測開始前的規模縮小股票池</summary>
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>用法</th>{% for size in legacy.scan_sizes %}<th class="num">前 {{ size }} 名</th>{% endfor %}<th class="num">全部</th></tr></thead>
+        <tbody>
+        {% for row in legacy.rows if row.scan %}
+          <tr>
+            <td data-primary><strong>{{ row.name }}</strong></td>
+            {% for value in row.scan %}
+            <td class="num {{ 'up' if value > 0 else ('down' if value < 0 else '') }}" data-label="{{ ('前 %d 名' % legacy.scan_sizes[loop.index0]) if not loop.last else '全部' }}">{{ '{:+.0%}'.format(value) }}</td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="note">只讓模型從「預測開始前成交值前 N 名」的股票裡挑，比 0050 多或少多少（以投入金額計）。股票池是 2026 年選的：當時還小的公司能留在池裡，代表它後來長大了，所以 N 越小、倖存者偏差越小。</p>
+  </details>
+  {% endif %}
+  <details style="margin-top:8px">
+    <summary class="small">完整說明</summary>
+    {% for part in legacy.verdict %}<p class="small" style="margin:8px 0 0">{{ part }}</p>{% endfor %}
+  </details>
+  <p class="note">比 0050＝（期末 − 0050 定期定額期末）÷ 投入金額；「只用當時大型股」＝{{ legacy.sensitivity_name }}。{{ legacy.controls }}。排序相關 {{ legacy.quality.mean_rank_ic }}（t={{ legacy.quality.rank_ic_t }}，未扣成本）。{{ legacy.generated }} 產生（評估版本 {{ legacy.version }}）；重跑：<code>python -m quant_platform.research legacy</code>。研究參考，不是交易建議。</p>
+</section>
+{% endif %}
+
 <section class="card" id="promotion">
   <div class="card__head">
     <h2>晉級流程 <span class="badge">開發 → 驗證 → 保留 → 前向 → 你核准</span></h2>
