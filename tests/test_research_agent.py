@@ -193,9 +193,30 @@ def test_night_stops_at_limits_and_errors_and_saves_stats(tmp_path):
     assert list((tmp_path / "stats").glob("development-*.json"))
     assert not (tmp_path / "agent" / "running.lock").exists()
 
-    failing = agent(tmp_path, LLMError("OpenAI API HTTP 401"))
+    failing = agent(tmp_path / "other", LLMError("OpenAI API HTTP 401"))
     entries = failing.run_night(MARKET)
     assert [entry["status"] for entry in entries] == ["llm_error"] and "401" in entries[0]["error"]
+
+
+def test_a_manual_run_and_the_scheduled_one_share_one_night(tmp_path):
+    second = {**GOOD, "name": "回撤：跌 12% 三倍", "sizing": {**GOOD["sizing"], "drawdown_threshold": 0.12,
+                                                            "weak_multiplier": 3.0}}
+    limits = AgentLimits(rounds_per_night=3, specs_per_round=2, trials_per_night=12)
+    manual = ResearchAgent(tmp_path, client(tmp_path, FakePost(completed(round_payload(GOOD)))), limits,
+                           clock=lambda: NOW - timedelta(hours=1))
+    manual.run_round(MARKET, 1, trials_left=12)                     # 21:00: one round, one trial
+    error = ResearchAgent(tmp_path, client(tmp_path, FakePost(LLMError("timeout"))), limits,
+                          clock=lambda: NOW - timedelta(minutes=30))
+    error.run_round(MARKET, 2, trials_left=11)                       # a failed round does not count
+
+    scheduled = agent(tmp_path, completed(round_payload(second)), completed(round_payload()), limits=limits)
+    assert scheduled.used_tonight() == (1, 1)
+    entries = scheduled.run_night(MARKET)                            # 22:00: rounds 2 and 3 only
+    assert [entry["round_id"][-1] for entry in entries] == ["2", "3"]
+
+    assert agent(tmp_path, limits=limits).run_night(MARKET) == []   # the night is used up: no model call
+    tomorrow = ResearchAgent(tmp_path, None, limits, clock=lambda: NOW + timedelta(hours=21))
+    assert tomorrow.used_tonight() == (0, 0)
 
 
 def test_a_running_night_is_not_started_twice(tmp_path):

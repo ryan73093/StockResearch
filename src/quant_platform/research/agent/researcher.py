@@ -20,7 +20,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -42,6 +42,7 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 PERIOD = "development"
 STANDARD_PLAN = ContributionPlan(monthly_amount=10_000, day_of_month=5)
 LOCK_STALE_SECONDS = 6 * 60 * 60
+NIGHT_HOURS = 20  # rounds within this window count against one night's limits
 
 
 @dataclass(frozen=True)
@@ -305,6 +306,23 @@ class ResearchAgent:
         return entry
 
     # --- a night --------------------------------------------------------------
+    def used_tonight(self) -> tuple[int, int]:
+        """Rounds and new trials of the last NIGHT_HOURS: a manual run and the scheduled one
+        share one night's limits (rounds that ended in an error do not count)."""
+        since = self._clock() - timedelta(hours=NIGHT_HOURS)
+        rounds = trials = 0
+        for entry in self.journal.entries():
+            try:
+                started = datetime.fromisoformat(str(entry.get("started_at")))
+            except ValueError:
+                continue
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            if entry.get("status") == "ok" and started >= since:
+                rounds += 1
+                trials += sum(1 for item in entry.get("accepted") or [] if not item.get("reused"))
+        return rounds, trials
+
     def run_night(self, market: MarketData) -> list[dict[str, object]]:
         """Rounds until a limit, the budget or an error stops them; then the stats."""
         lock = self._dir / "agent" / "running.lock"
@@ -313,8 +331,11 @@ class ResearchAgent:
             return []
         entries: list[dict[str, object]] = []
         try:
-            trials_left = self._limits.trials_per_night
-            for index in range(1, self._limits.rounds_per_night + 1):
+            used_rounds, used_trials = self.used_tonight()
+            trials_left = self._limits.trials_per_night - used_trials
+            if used_rounds:
+                logger.info("AI researcher: %s rounds and %s trials already used tonight", used_rounds, used_trials)
+            for index in range(used_rounds + 1, self._limits.rounds_per_night + 1):
                 if trials_left <= 0:
                     break
                 entry = self.run_round(market, index, trials_left)

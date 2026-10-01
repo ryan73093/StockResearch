@@ -1538,7 +1538,8 @@ class SqlAlchemySchedulerJobRunRepository:
             session.commit()
 
     def fail_stale_running(
-        self, cutoff: datetime, completed_at: datetime
+        self, cutoff: datetime, completed_at: datetime,
+        error: str = "工作程序已中止；啟動時自動關閉逾時的執行紀錄",
     ) -> int:
         with self._session_factory() as session:
             result = session.execute(
@@ -1550,7 +1551,7 @@ class SqlAlchemySchedulerJobRunRepository:
                 .values(
                     status=JobRunStatus.FAILED.value,
                     completed_at=_utc_naive(completed_at),
-                    error="工作程序已中止；啟動時自動關閉逾時的執行紀錄",
+                    error=error,
                 )
             )
             session.commit()

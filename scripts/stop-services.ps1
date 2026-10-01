@@ -98,4 +98,20 @@ if ($remaining.Count -gt 0) {
 if ($listeners.Count -gt 0) {
     throw "Ports still listening: $(($listeners | ForEach-Object { "$($_.LocalPort)/PID $($_.OwningProcess)" }) -join ', ')"
 }
+
+# 4. Nothing of this project runs now: run records still "running" were interrupted.
+$python = Join-Path $projectRoot '.venv\Scripts\python.exe'
+$closer = Join-Path $projectRoot 'scripts\close_interrupted_runs.py'
+if ((Test-Path -LiteralPath $python) -and (Test-Path -LiteralPath $closer)) {
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $closed = & $python $closer 2>&1
+        if ($closed) { Write-Host ($closed -join [Environment]::NewLine) }
+    } catch {
+        Write-Host "Could not close interrupted run records: $_" -ForegroundColor Yellow
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
 Write-Host 'StockResearch services stopped.' -ForegroundColor Green

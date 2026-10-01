@@ -160,12 +160,16 @@ class AutomationService:
         return self._runs.latest_succeeded(job_name, market, since) is not None
 
     def recover_stale_runs(
-        self, now: datetime | None = None, max_age: timedelta = timedelta(hours=6)
+        self, now: datetime | None = None, max_age: timedelta = timedelta(hours=6),
+        booted_at: datetime | None = None,
     ) -> int:
+        """Close runs left "running": older than ``max_age``, or started before the last boot
+        (nothing from before a reboot can still be running; 10/01 a backtest showed "running" for hours)."""
         checked_at = now or datetime.now(UTC)
-        recovered = self._runs.fail_stale_running(
-            checked_at - max_age, checked_at
-        )
+        cutoff = checked_at - max_age
+        if booted_at is not None and booted_at > cutoff:
+            cutoff = booted_at
+        recovered = self._runs.fail_stale_running(cutoff, checked_at)
         if recovered:
             logger.warning("Marked %s stale scheduler runs as failed", recovered)
         return recovered

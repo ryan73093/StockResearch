@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
+from quant_platform.application import host_memory
 from quant_platform.application.close_availability import SOURCES as CLOSE_SOURCES
 from quant_platform.application.actual_account import FLOW_KINDS, ActualAccountError, compare_on, stress_scenarios
 from quant_platform.application.investment_plan import InvestmentPlanError, parse_plan_form, strategy_name
@@ -284,6 +285,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         last = dependencies.notification_service.status()["last"]
         if last is not None and last.status != "sent":
             alerts.append("LINE 最近一則通知失敗")
+        memory = host_memory.memory_alert(host_memory.read_host_memory())
+        if memory:
+            alerts.append(memory)
         return alerts[:3]
 
     def onboarding_steps(investment_plan) -> dict[str, object]:
@@ -743,6 +747,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         items.append(backup_tile(now))
         items.append(research_tile())
         items.append(dividend_tile(now))
+        items.append(host_memory.memory_tile(host_memory.read_host_memory()))
         items.append(line_tile())
         access_on = dependencies.settings.auth_mode == "cloudflare-access"
         items.append({

@@ -35,8 +35,12 @@ def test_today_page_shows_one_line_when_the_system_has_a_problem(setup, monkeypa
     from datetime import UTC, datetime
 
     container, client = setup
-    # An empty database is "not updated today" after 15:00 on a trading day; keep the test time-independent.
+    # An empty database is "not updated today" after 15:00 on a trading day, and the real host's memory
+    # could raise its own line; keep the test independent of the clock and the machine.
+    from quant_platform.application import host_memory
+
     monkeypatch.setattr(container.daily_market_data_pipeline, "is_fresh", lambda *args, **kwargs: True)
+    monkeypatch.setattr(host_memory, "read_host_memory", lambda: None)
     assert 'class="alert-line"' not in client.get("/").get_data(as_text=True)
 
     runs = container.automation_service._runs

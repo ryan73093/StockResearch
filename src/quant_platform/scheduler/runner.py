@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -11,6 +11,33 @@ if TYPE_CHECKING:
     from quant_platform.container import Container
 
 logger = logging.getLogger(__name__)
+INTERRUPTED = "服務停止時中斷（未完成）"
+
+
+def booted_at() -> datetime | None:
+    """When Windows last started; a run that began before it cannot still be running."""
+    import ctypes
+    import os
+
+    if os.name != "nt":
+        return None
+    try:
+        ticks = ctypes.windll.kernel32.GetTickCount64
+        ticks.restype = ctypes.c_ulonglong
+        return datetime.now(UTC) - timedelta(milliseconds=ticks())
+    except (AttributeError, OSError):
+        return None
+
+
+def close_interrupted_runs(database_url: str, now: datetime | None = None) -> int:
+    """scripts/stop-services.ps1 calls this once every service process has stopped: whatever is
+    still "running" was interrupted (10/01 a stopped backtest kept showing "running")."""
+    from quant_platform.database.engine import Database
+    from quant_platform.database.repositories import SqlAlchemySchedulerJobRunRepository
+
+    checked_at = now or datetime.now(UTC)
+    repository = SqlAlchemySchedulerJobRunRepository(Database(database_url).session_factory)
+    return repository.fail_stale_running(checked_at + timedelta(seconds=1), checked_at, error=INTERRUPTED)
 
 _WEEKDAY_INDEX = {
     "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
@@ -541,7 +568,7 @@ def run_scheduler_worker(container: "Container | None" = None) -> None:
     if not dependencies.settings.scheduler_enabled:
         logger.warning("Scheduler worker stopped because SCHEDULER_ENABLED=false")
         return
-    dependencies.automation_service.recover_stale_runs()
+    dependencies.automation_service.recover_stale_runs(booted_at=booted_at())
     scheduler = BlockingScheduler(timezone=dependencies.settings.scheduler_timezone)
     job_count = configure_scheduler(scheduler, dependencies)
     _add_maintenance_jobs(scheduler, dependencies)

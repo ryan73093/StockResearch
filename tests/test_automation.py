@@ -81,6 +81,27 @@ def test_scheduler_startup_closes_stale_running_audits(tmp_path):
     assert "自動關閉" in (recovered.error or "")
 
 
+def test_runs_from_before_the_last_boot_or_a_full_stop_are_closed(tmp_path):
+    from quant_platform.scheduler.runner import INTERRUPTED, close_interrupted_runs
+
+    database_url = f"sqlite:///{tmp_path / 'boot.db'}"
+    container = build_container(Settings(database_url=database_url))
+    runs = container.automation_service._runs
+    now = datetime(2026, 10, 1, 11, 0, tzinfo=UTC)                         # 19:00 Taipei
+    before_boot = runs.start("walk_forward_backtest", "TW", now - timedelta(hours=3))
+    after_boot = runs.start("tw_daily_market_data", "TW", now - timedelta(minutes=20))
+
+    # Rebooted 45 minutes ago: the 3-hour-old run is dead even though it is younger than 6 hours.
+    assert container.automation_service.recover_stale_runs(now=now, booted_at=now - timedelta(minutes=45)) == 1
+    status = {run.id: run for run in container.automation_service.overview().recent_runs}
+    assert status[before_boot].status.value == "failed" and status[after_boot].status.value == "running"
+
+    # stop-services.ps1 has stopped every process: whatever still runs was interrupted.
+    assert close_interrupted_runs(database_url, now=now) == 1
+    closed = {run.id: run for run in container.automation_service.overview().recent_runs}[after_boot]
+    assert closed.status.value == "failed" and closed.error == INTERRUPTED
+
+
 def _mock_tw_workflow(service):
     service._daily_pipeline = MagicMock()
     service._paper_trading = MagicMock()
