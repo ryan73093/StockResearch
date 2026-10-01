@@ -152,5 +152,10 @@ def test_holdings_page_offers_to_record_the_dividend(tmp_path):
     assert "已帶入預估股利" in prefilled and 'name="amount" inputmode="decimal" value="866"' in prefilled
     assert '<option value="dividend" selected' in prefilled
 
+    container.investment_plan_service.save({"monthly_amount": "10000", "salary_day": "5", "strategy_key": "benchmark_dca",
+                                            "max_drawdown_tolerance": "30"})
+    assert "有 1 筆已除息的股利還沒記錄" in client.get("/").get_data(as_text=True)   # Today's "需要留意"
+
     client.post("/holdings/cash", data={"kind": "dividend", "day": today.isoformat(), "amount": "856", "symbol": "0056"})
     assert "待記錄" not in client.get("/holdings").get_data(as_text=True)
+    assert "股利還沒記錄" not in client.get("/").get_data(as_text=True)

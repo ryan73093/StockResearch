@@ -31,10 +31,12 @@ def test_guide_page_embeds_the_user_guide_and_every_page_links_to_it(setup):
     assert "第一次使用" in client.get("/system/docs/guide").get_json()["markdown"]
 
 
-def test_today_page_shows_one_line_when_the_system_has_a_problem(setup):
+def test_today_page_shows_one_line_when_the_system_has_a_problem(setup, monkeypatch):
     from datetime import UTC, datetime
 
     container, client = setup
+    # An empty database is "not updated today" after 15:00 on a trading day; keep the test time-independent.
+    monkeypatch.setattr(container.daily_market_data_pipeline, "is_fresh", lambda *args, **kwargs: True)
     assert 'class="alert-line"' not in client.get("/").get_data(as_text=True)
 
     runs = container.automation_service._runs

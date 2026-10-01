@@ -423,9 +423,15 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         decision_tone = {
             "invest": "trade", "rebalance": "trade", "idle": "idle",
         }.get(decision.kind, "hold")
+        dividends_due = 0  # "需要留意" points to the holdings page's dividend card (S5-W03)
+        if investment_plan is not None:
+            books = dependencies.actual_account_service.overview(include_shadow=False)
+            if books.trades:
+                dividends_due = len(dependencies.dividend_calendar.account_view(books.flows, books.trades, day)["due"])
         return render_template(
             "v2/today.html",
             active_nav="today",
+            dividends_due=dividends_due,
             onboarding=onboarding_steps(investment_plan),
             alerts=system_alerts(now),
             plan=plan,

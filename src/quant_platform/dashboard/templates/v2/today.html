@@ -110,10 +110,13 @@
     {% set attention = [] %}
     {% if status.quality_badge in ('badge--warn', 'badge--bad') %}{% set _ = attention.append('資料品質' ~ status.quality_label ~ (('，今日排除 %d 檔（可能停牌）' % status.excluded) if status.excluded else '') ~ '；細節在「系統」頁。') %}{% endif %}
     {% if decision.kind == 'missing_data' %}{% set _ = attention.append('今日收盤資料尚未齊全，委託會在資料到齊後產生；盤後零股收單到 14:30。') %}{% endif %}
-    {% if attention %}
+    {% if attention or dividends_due %}
     <section class="card card--highlight order-2">
       <div class="card__head"><h2>需要留意</h2></div>
-      <ul class="reasons">{% for item in attention %}<li>{{ item }}</li>{% endfor %}</ul>
+      <ul class="reasons">
+        {% for item in attention %}<li>{{ item }}</li>{% endfor %}
+        {% if dividends_due %}<li>有 {{ dividends_due }} 筆已除息的股利還沒記錄，入帳後到<a href="/holdings#dividends">持倉頁</a>按「記錄股利」。</li>{% endif %}
+      </ul>
     </section>
     {% endif %}
     {% if decision.reasons %}
