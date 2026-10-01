@@ -1,13 +1,13 @@
 # 盤後決策台 — 當前開發交接
 
-記錄時間：2026-10-01 11:00（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
+記錄時間：2026-10-01 15:10（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
 
 ## 接手前必讀
 
-1. `AGENTS.md`：開發規則。部署一律 `scripts\deploy.ps1`；只停服務用 `scripts\stop-services.ps1`，只啟動用 `scripts\start-services.ps1`；還原資料庫步驟在「資料庫安全」。
-2. `docs/development_roadmap.md`：S3-W01～W05、S4-W06 done；S4-W03、W04、W05 doing；S5 基準版 doing（S5-W07 LINE 等使用者設定）；S1-W05 量測到 10/07。
-3. `DEVELOPMENT_HISTORY.md` 最上方幾筆：S6-W01 今日頁行動卡；S4-W06 晉級流程；使用者決定（月退不計入、預算、LINE 摘要）；S4-W04 AI 研究員；除權息解析修正與第一批研究重跑、券商設定、LINE 通知。
-4. 使用者要求：所有回覆與進度說明用繁體中文。研究 CLI 一律在專案根目錄以 `$env:PYTHONPATH="src"` 從原始碼執行（`.venv` 裡安裝的是部署版，`python -m` 不加 PYTHONPATH 會跑到舊版）。
+1. `AGENTS.md`：開發規則。部署一律 `scripts\deploy.ps1`；只停服務用 `scripts\stop-services.ps1`，只啟動用 `scripts\start-services.ps1`；還原資料庫步驟在「資料庫安全」。測試一律用暫存資料庫（`tests/conftest.py` 會擋下開啟正式資料庫的測試）。
+2. `docs/development_roadmap.md`：S6 done；S5 基準版 doing（S5-W07 LINE 等使用者設定）；S4-W03、W04、W05 doing；S1-W05 量測到 10/07。
+3. `DEVELOPMENT_HISTORY.md` 最上方幾筆（10/01 下午）：服務中的 Yahoo 全部失敗的根本原因（`PYTHONUTF8=1` 與中文路徑）、股利提醒、任一天查詢、測試誤寫正式資料庫、今日頁一鍵回報成交、情境模擬、每週研究報告、使用教學。
+4. 使用者要求：所有回覆與進度說明用繁體中文。研究 CLI 一律在專案根目錄以 `$env:PYTHONPATH="src"` 從原始碼執行（`.venv` 裡安裝的是部署版）。UI 預覽用暫存資料庫（不要用預設設定連正式資料庫）。
 
 ## 先驗收：AI 研究員第一晚（2026-10-01 22:00）
 
@@ -16,48 +16,63 @@
 - 異常時：`llm_error` 看錯誤訊息（HTTP 狀態與 OpenAI 錯誤說明）；`budget_exceeded` 表示預算用完。白天可用 `python -m quant_platform.research agent --dry-run` 檢查提示、`--check` 檢查連線（極小費用）；研究本身只在夜間跑。
 - 驗收通過後把路線圖 S4-W04 改為 done，證據寫入開發歷程。
 
-## 當前工作包：S5-W06 舊決策程式退場（先量測）
+## 當前工作包：S5-W06 舊決策程式退場（等使用者決定範圍）
 
-目標：每日建議已改由投資計畫產生（S5-W02），舊版盤後 AI 只剩「研究模型觀察」；把每日 13:50 流程中只為舊決策服務的重運算移出交易時段，讓台股流程在 14:30 前穩定完成。
+目標：每日建議已改由投資計畫產生（S5-W02），舊版盤後 AI 只剩今日頁收合的「研究模型觀察」；把 13:50 流程中只為舊決策服務的重運算移出交易時段。
 
-做法：
-1. 量測：以今天（10/01）13:50 第一次完整台股流程的各子工作耗時（`scheduler_job_runs`，S1-W06 的量測項目）列出每一步是否被計畫建議、資料品質或研究資料使用。
-2. 盤點依賴：`after_hours_ai.py`、`decision_support.py`、每日決策（`DailyDecisionPipeline`）、九種組合配置（需求 §13 註明「現行每日決策讀取其結果」）、模型研究、樣本外回測；找出計畫建議與今日頁實際讀取的部分。
-3. 提案給使用者：哪些改到夜間或停用、今日頁「研究模型觀察」是否保留；需求 §13 的變更要使用者同意。
-4. 實作：依同意的範圍調整排程（`PAUSED_MODULES` 或新的夜間工作），保留程式與資料。
+量測（10/01 第一次完整台股流程；第一次嘗試因測試誤寫的 4 檔 ETF 在品質閘門失敗，數字取兩次嘗試與 09/07–09/08 的歷史）：
 
-驗收：台股流程在 14:30 前完成；今日頁與計畫建議不受影響；暫停項目列在系統頁。回復：`PAUSED_MODULES` 還原或 `git revert`。
+| 步驟 | 耗時 | 誰在用 |
+|---|---|---|
+| 行情（官方收盤；部署後最多等 10 分鐘） | 24 秒（官方表已公布時） | 今日建議、持倉估值、資料狀態 |
+| 官方名冊比對 | 15 秒 | 資料品質（下市處理） |
+| 價格特徵 | 約 4.5 分 | 舊版模型 |
+| GPU 模型 | 2–8 分 | 舊版模型 |
+| 舊版早盤決策 | 1.5–2 分 | 今日頁「研究模型觀察」 |
+| 籌碼與基本面（FinMind 額度常用完） | 0.5–7 分 | 舊版特徵 |
+| 總經 | 0.5–1 分 | 舊版特徵 |
+| 因子研究 | 約 8 分 | 舊版決策 |
+| 樣本外回測 | 約 59 分 | 舊版決策 |
+| 策略整合 | 約 5 分 | 舊版決策 |
+| 組合風險（九種配置） | 約 1.3 分 | 舊版決策 |
+| 每日決策、盤後 AI、報告 | 數分鐘 | 舊版頁面、Email 報告 |
 
-待確認：步驟 3 的範圍（需使用者決定）。
+提案（需求 §13 的變更要使用者同意）：
+- A（建議）：13:50 只跑行情、名冊比對與原始資料品質（今日頁的品質標示），約 1–11 分鐘；其餘舊版步驟改到 18:30 夜間工作（今日頁「研究模型觀察」改顯示前一晚的結果並標日期）。程式與資料都保留，前向的舊模型預測照樣累積。
+- B：舊版步驟全部暫停（`PAUSED_MODULES`），今日頁移除「研究模型觀察」，S8 再決定刪除。
+- C：維持現狀（每天 13:50–約 15:50 佔用 CPU 與每日寫入鎖；像 10/01 這樣閘門失敗會整套重跑）。
 
-## 今天（2026-10-01）要確認的事
+驗收：台股流程的關鍵部分在 14:00 前完成；今日頁與計畫建議不受影響；暫停或移動的項目列在系統頁。回復：`PAUSED_MODULES`／排程還原或 `git revert`。
+
+## 今天與明天要確認的事
 
 | 時間 | 事項 | 看哪裡 |
 |---|---|---|
-| 13:30–14:45 | 收盤時效量測寫入四個來源 | 系統頁「收盤資料時效」、`instance\close_availability.jsonl` |
-| 13:45–14:25 | LINE 未設定時 `line_plan_advice` 應靜默略過（不報錯） | `instance\*.stderr.log` |
-| 22:00 | AI 研究員第一晚（見上方「先驗收」） | 研究頁、`instance\research\journal.jsonl` |
-| 13:50 後 | 第一次完整台股流程（09-08 以來第一次）：今日頁 14:30 前有盤後計畫；記錄各子工作耗時（S1-W06），暫停步驟不應出現 | `scheduler_job_runs` |
-| 15:15、15:30 | 研究資料補抓（除權息改依表頭解析後的第一次排程）、前向模擬紀錄 | 系統頁「最近執行」、`instance\research\forward\log.jsonl` |
-| 流程正常後 | 提供使用者刪除兩個 22.29 GiB 暫存備份的指令（使用者執行）：`instance\backups\quant_platform-pre-s1w03-20260930-204109.db`、`quant_platform-pre-vacuum-20260930-204109.db` | — |
+| 10/01 部署後 | 教學 `/help`、今日頁開始使用清單與異常提示、計畫預覽、持倉（回撤、每月底對照、任一天查詢、股利、大跌情境、回報成交帶入）、研究頁本週報告；本機與外網、桌面與 375 px | 開發歷程「部署」一筆 |
+| 10/01 22:00 | AI 研究員第一晚（見上方） | 研究頁、`instance\research\journal.jsonl` |
+| 10/02 13:50 | 部署後第一次台股流程：官方收盤等待（不再逐檔問 Yahoo）、yfinance 不再出現 curl 77 或 possibly delisted；4 檔新 ETF 已有 2020 年起日線 | `scheduler_job_runs`、`instance\worker.stderr.log` |
+| 10/02 起 | 除權除息預告每 12 小時更新 | `instance\events\ex_dividends.json`、系統頁背景工作 |
+| 到 10/07 | S1-W05 收盤資料時效量測（櫃買與盤後零股何時公布） | 系統頁「收盤資料時效」 |
 
-## 環境現況（2026-10-01 10:40）
+## 環境現況（2026-10-01 15:10）
 
 | 項目 | 狀態 |
 |---|---|
 | 監督程序 | 排程工作 `StockResearchLocalServices`（使用者登入時觸發），含 Tunnel；紀錄 `instance\supervisor.log` |
-| 網站 | Waitress 127.0.0.1:5000；`AUTH_MODE=cloudflare-access`；本輪部署見開發歷程 |
-| 資料庫 | `instance\quant_platform.db` 約 9.6 GiB；本輪新增 `broker` 欄（`investment_plans`、`actual_cash_flows`、`actual_trades`）；每日備份 `instance\backups\daily\`；兩個 22.29 GiB 暫存備份待刪 |
-| 研究資料 | `instance\research\`：history（10 個序列，除權息已修正）、reports、trials.jsonl（142 筆：第一輪 71 筆舊資料版本＋重跑 71 筆）、stats |
-| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；353 通過、1 略過 |
+| 網站 | Waitress 127.0.0.1:5000；`AUTH_MODE=cloudflare-access`；正式環境是 12:05 部署的版本，之後的提交待部署（見開發歷程） |
+| 資料庫 | `instance\quant_platform.db` 約 9.7 GiB；`research_universe` 新增 4 檔 ETF（id 555–558）；每日備份 `instance\backups\daily\`；兩個 22.29 GiB 暫存備份待使用者刪除 |
+| 研究資料 | `instance\research\`：history（10 個序列）、reports、trials.jsonl、stats、forward、promotions.jsonl |
+| 憑證副本 | `C:\ProgramData\StockResearch\cacert.pem`（yfinance 用，見開發歷程） |
+| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；388 通過、1 略過 |
 | 同主機其他服務 | VectorDB 5001 與其 Tunnel、PimiServices 共用 cloudflared 服務（YtSummary／AutoLayout）。一律不操作 |
 
 ## 待使用者確認或操作
 
 | 項目 | 建議 | 需要時點 |
 |---|---|---|
-| LINE 官方帳號與 token | 使用者目前在遠端，稍後處理：依 `docs/line-notifications.md` 建立 Messaging API channel，在 `.env` 填 `LINE_ENABLED`、`LINE_CHANNEL_ACCESS_TOKEN`、`LINE_TO`，部署後按系統頁測試 | S5-W07 驗收 |
-| 台新、國泰對帳單 CSV | 各提供一份範例（可遮蔽帳號）以實作匯入；實際損益以對帳單為準 | S5-W03 |
-| 定期定額基準 ETF | 預設 0050 | S3 |
+| S5-W06 範圍 | A、B 或 C（見上方） | 下一個工作包 |
+| LINE 官方帳號與 token | 依 `docs/line-notifications.md` 建立 Messaging API channel，在 `.env` 填 `LINE_ENABLED`、`LINE_CHANNEL_ACCESS_TOKEN`、`LINE_TO`，部署後按系統頁測試 | S5-W07 驗收 |
+| 台新、國泰對帳單 CSV | 各提供一份範例（可遮蔽帳號）以實作匯入 | S5-W03 |
+| 兩個 22.29 GiB 暫存備份 | 確認後由使用者自行刪除（指令見最後回覆） | 任何時候 |
 
 已定（2026-10-01）：月退的退佣不計入、估算用原價；AI 研究員每月 US$3；非投入日的「今天不需操作」保留。
