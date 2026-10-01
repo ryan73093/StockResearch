@@ -291,17 +291,26 @@ def run_research_agent(container: "Container") -> object | None:
     from quant_platform.research.agent.researcher import build_agent
     from quant_platform.research.market import available_assets, load_market
 
+    from quant_platform.research.forward import STANDARD_PLAN
+    from quant_platform.research.promotion import PromotionPipeline
+
     research = _instance_dir(container.settings.database_url) / "research"
     base = research / "history"
-    if not container.settings.research_agent_enabled or not (base / "manifest.json").is_file():
+    if not (base / "manifest.json").is_file():
         return None
-    agent = build_agent(container.settings, research)
-    entries = agent.run_night(load_market(available_assets(base), base))
-    logger.info(
-        "AI researcher: %s rounds, %s trials, status %s",
-        len(entries), sum(len(entry.get("accepted") or []) for entry in entries),
-        [entry.get("status") for entry in entries],
-    )
+    market = load_market(available_assets(base), base)
+    entries = []
+    if container.settings.research_agent_enabled:
+        entries = build_agent(container.settings, research).run_night(market)
+        logger.info(
+            "AI researcher: %s rounds, %s trials, status %s",
+            len(entries), sum(len(entry.get("accepted") or []) for entry in entries),
+            [entry.get("status") for entry in entries],
+        )
+    # S4-W06: candidates that pass every gate move on (validation, holdout once, forward).
+    events = PromotionPipeline(research, STANDARD_PLAN).advance(market)
+    if events:
+        logger.info("Promotion: %s", [(event.name, event.stage, event.outcome) for event in events])
     return len(entries)
 
 

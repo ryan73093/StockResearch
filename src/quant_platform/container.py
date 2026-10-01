@@ -12,6 +12,7 @@ from quant_platform.application.actual_account import ActualAccountService
 from quant_platform.application.investment_plan import InvestmentPlanService
 from quant_platform.application.notifications import NotificationService
 from quant_platform.application.plan_decision import PlanDecisionService
+from quant_platform.research.promotion import strategy_catalog
 from quant_platform.application.database_backup import DatabaseBackupService
 from quant_platform.application.prediction_archive import (
     PredictionArchiveService,
@@ -474,8 +475,11 @@ def build_container(settings: Settings | None = None) -> Container:
         after_hours_ai_service,
         universe_expansion_service,
     )
+    research_dir = _instance_dir(resolved.database_url) / "research"
     investment_plan_service = InvestmentPlanService(
-        SqlAlchemyInvestmentPlanRepository(database.session_factory)
+        SqlAlchemyInvestmentPlanRepository(database.session_factory),
+        # Built-in baselines plus candidates the user approved (S4-W06).
+        strategies=lambda: strategy_catalog(research_dir),
     )
     def plan_broker() -> str:
         plan = investment_plan_service.current()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import Counter
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -26,6 +27,9 @@ from quant_platform.config.settings import PAUSABLE_MODULES
 from quant_platform.container import _instance_dir
 from quant_platform.research.agent.researcher import agent_status
 from quant_platform.research.forward import FORWARD_START, ForwardTracker
+from quant_platform.research.forward import STANDARD_PLAN as FORWARD_PLAN
+from quant_platform.research.periods import ResearchGateError
+from quant_platform.research.promotion import PromotionPipeline
 from quant_platform.research.summary import round_summary
 from quant_platform.research.reports import latest_reports, latest_stats, report_rows, trial_ranking
 
@@ -359,7 +363,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                 "version": investment_plan.version,
                 "amount": investment_plan.monthly_amount,
                 "salary_day": investment_plan.salary_day,
-                "strategy": strategy_name(investment_plan),
+                "strategy": strategy_name(investment_plan, dependencies.investment_plan_service.strategies()),
                 "next": upcoming,
                 "is_today": upcoming == day,
                 "drawdown": investment_plan.max_drawdown_tolerance,
@@ -483,14 +487,16 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             row["name"]: row
             for row in report_rows(latest_reports(reports_dir, limit=20, period="full", kind="baseline"))
         }
+        catalog = service.strategies()
         return render_template(
             "v2/plan.html",
             active_nav="plan",
             current=current,
-            current_strategy=strategy_name(current) if current else None,
+            current_strategy=strategy_name(current, catalog) if current else None,
             history=service.history(),
-            strategies=[(key, spec.name, spec.description) for key, spec in BASELINES.items()],
-            strategy_names={key: spec.name for key, spec in BASELINES.items()},
+            # Approved candidates (key "approved:…") follow the built-in baselines.
+            strategies=[(key, spec.name, spec.description) for key, spec in catalog.items()],
+            strategy_names={key: spec.name for key, spec in catalog.items()},
             brokers=list(BROKERS.values()),
             broker_names={key: profile.name for key, profile in BROKERS.items()},
             current_broker=BROKERS.get(current.broker) if current else None,
@@ -510,13 +516,14 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         best_dsr = None
         if stats and stats.get("candidates"):
             best = max(stats["candidates"], key=lambda item: item["dsr"]["deflated_sharpe"] or 0)
-            best_dsr = {"name": best["name"], "value": best["dsr"]["deflated_sharpe"], "trials": best["dsr"]["trials"]}
+            best_dsr = {"name": best["name"], "value": best["dsr"]["deflated_sharpe"], "trials": best["dsr"].get("trials")}
         forward_rows = ForwardTracker(research_dir).summary()
         round_view = round_summary(research_dir / "trials.jsonl", "development", stats)
         return render_template(
             "v2/research.html",
             active_nav="research",
             agent=agent_status(dependencies.settings, research_dir),
+            promotion=PromotionPipeline(research_dir, FORWARD_PLAN).overview(),
             tool_groups=TOOL_GROUPS,
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
@@ -527,6 +534,26 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             # Baselines run on the full period; candidates never may (periods.check_gate).
             baseline_rows=report_rows(latest_reports(reports_dir, limit=20, period="full", kind="baseline")),
         )
+
+    @blueprint.post("/research/promotions/<spec_hash>/<action>")
+    def research_promotion(spec_hash: str, action: str):
+        """The user's approval or revocation of a promoted candidate (S4-W06)."""
+        if action not in {"approve", "revoke"} or not re.fullmatch(r"[0-9a-f]{64}", spec_hash):
+            abort(404)
+        target = url_for("v2.research") + "#promotion"
+        if request.form.get("confirm") != "yes":
+            flash("請先勾選「我已看過證據」。", "error")
+            return redirect(target)
+        pipeline = PromotionPipeline(_instance_dir(dependencies.settings.database_url) / "research", FORWARD_PLAN)
+        note = str(request.form.get("note", ""))
+        try:
+            event = pipeline.approve(spec_hash, note) if action == "approve" else pipeline.revoke(spec_hash, note)
+        except ResearchGateError as exc:
+            flash(str(exc), "error")
+        else:
+            flash(f"已{'核准' if action == 'approve' else '撤銷'}「{event.name}」。"
+                  + ("計畫頁現在可以選用這個策略。" if action == "approve" else ""), "success")
+        return redirect(target)
 
     @blueprint.get("/system")
     def system():

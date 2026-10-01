@@ -22,8 +22,8 @@ class InvestmentPlanError(ValueError):
     pass
 
 
-def strategy_name(plan: InvestmentPlan) -> str:
-    spec = BASELINES.get(plan.strategy_key)
+def strategy_name(plan: InvestmentPlan, strategies: dict | None = None) -> str:
+    spec = (strategies or BASELINES).get(plan.strategy_key)
     return spec.name if spec else plan.strategy_key
 
 
@@ -52,11 +52,12 @@ def parse_amount(text: object) -> Decimal:
         raise InvestmentPlanError(f"看不懂每月投入金額「{text}」；請輸入數字，例如 10000 或 1萬") from exc
 
 
-def parse_plan_form(form: dict[str, str]) -> dict[str, object]:
+def parse_plan_form(form: dict[str, str], strategies: dict | None = None) -> dict[str, object]:
     """Validate raw form text; raises InvestmentPlanError with a readable message.
 
     Salary days 29–31 fall back to the month's last day in shorter months
-    (ContributionPlan.schedule and the Today advice both clamp).
+    (ContributionPlan.schedule and the Today advice both clamp). ``strategies``
+    is the built-in baselines plus approved candidates (promotion.strategy_catalog).
     """
     amount = parse_amount(form.get("monthly_amount", ""))
     if not Decimal("1000") <= amount <= Decimal("10000000"):
@@ -71,7 +72,7 @@ def parse_plan_form(form: dict[str, str]) -> dict[str, object]:
     if not 1 <= salary_day <= 31:
         raise InvestmentPlanError("薪資日請填 1～31（月底請填 31）")
     strategy_key = str(form.get("strategy_key", "")).strip()
-    if strategy_key not in BASELINES:
+    if strategy_key not in (strategies or BASELINES):
         raise InvestmentPlanError("請在「採用策略」選一個策略")
     broker = str(form.get("broker", "") or "conservative").strip()
     if broker not in BROKERS:
@@ -104,8 +105,13 @@ def parse_plan_form(form: dict[str, str]) -> dict[str, object]:
 
 
 class InvestmentPlanService:
-    def __init__(self, repository) -> None:
+    def __init__(self, repository, strategies=None) -> None:
         self._repository = repository
+        self._strategies = strategies or (lambda: dict(BASELINES))
+
+    def strategies(self) -> dict:
+        """Baselines plus candidates the user approved (S4-W06)."""
+        return self._strategies()
 
     def current(self) -> InvestmentPlan | None:
         return self._repository.latest()
@@ -115,4 +121,4 @@ class InvestmentPlanService:
 
     def save(self, form: dict[str, str], now: datetime | None = None) -> InvestmentPlan:
         """Validate the form and store it as the next version."""
-        return self._repository.add_version(parse_plan_form(form), now or datetime.now(UTC))
+        return self._repository.add_version(parse_plan_form(form, self.strategies()), now or datetime.now(UTC))

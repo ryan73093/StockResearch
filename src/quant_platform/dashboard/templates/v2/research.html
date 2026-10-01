@@ -104,6 +104,43 @@
 </section>
 {% endif %}
 
+<section class="card" id="promotion">
+  <div class="card__head">
+    <h2>晉級流程 <span class="badge">開發 → 驗證 → 保留 → 前向 → 你核准</span></h2>
+    {% if not promotion.chain_ok %}<span class="badge badge--bad">晉級紀錄雜湊鏈異常</span>{% endif %}
+  </div>
+  {% if promotion.pipeline %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>策略</th><th>目前關卡</th><th>結果</th><th>時間</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for row in promotion.pipeline %}
+        <tr>
+          <td data-primary><strong>{{ row.name }}</strong></td>
+          <td data-label="關卡">{{ row.stage_label }}</td>
+          <td data-label="結果"><span class="badge {{ 'badge--ok' if row.outcome in ('passed', 'approved') else ('badge--bad' if row.outcome == 'failed' else '') }}">{{ {'passed': '通過', 'failed': '未通過', 'started': '進行中', 'approved': '已核准', 'revoked': '已撤銷'}.get(row.outcome, row.outcome) }}</span>{% if row.evidence.reasons %}<span class="muted small">{{ row.evidence.reasons|join('；') }}</span>{% endif %}</td>
+          <td class="small" data-label="時間">{{ row.at[:10] }}</td>
+          <td data-label="操作" data-wide>
+            {% if row.can_approve or row.can_revoke %}
+            <form method="post" action="/research/promotions/{{ row.spec_hash }}/{{ 'approve' if row.can_approve else 'revoke' }}" class="void-form">
+              <label class="small"><input type="checkbox" name="confirm" value="yes"> 我已看過證據</label>
+              <input name="note" placeholder="備註（選填）">
+              <button class="btn {{ 'btn--primary' if row.can_approve else '' }}" type="submit">{{ '核准採用' if row.can_approve else '撤銷核准' }}</button>
+            </form>
+            {% else %}<span class="muted small">—</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p style="margin:0 0 8px"><strong>目前沒有候選進入晉級流程。</strong></p>
+  <p class="muted" style="margin:0">開發期 {{ promotion.candidates }} 個設定中，{{ promotion.window_ok }} 個通過 3 年與 5 年滾動視窗門檻；{% if promotion.best_dsr %}但扣除多重檢定後最佳 DSR {{ '%.2f' % promotion.best_dsr.dsr }}（{{ promotion.best_dsr.name }}）未達 {{ promotion.gates.dsr }}{% else %}統計檢定尚未完成{% endif %}，所以沒有設定可以進驗證期。</p>
+  {% endif %}
+  <p class="note">門檻：滾動 3／5 年勝率 ≥ {{ '{:.0%}'.format(promotion.gates.win) }} 且中位超額 > 0、回撤不比定期定額深超過 {{ '%.0f' % (promotion.gates.drawdown * 100) }} 個百分點、DSR ≥ {{ promotion.gates.dsr }}、PBO ≤ {{ '{:.0%}'.format(promotion.gates.pbo) }}；驗證期另需成本加倍與晚一天執行仍有 ≥ {{ '{:.0%}'.format(promotion.gates.robust) }} 勝率；保留期只評估一次；前向模擬至少 {{ promotion.gates.forward }} 個交易日。核准後才會出現在計畫頁。</p>
+</section>
+
 <section class="card">
   <div class="card__head">
     <h2>前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>

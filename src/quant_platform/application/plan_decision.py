@@ -93,9 +93,13 @@ class PlanDecisionService:
         plan = self._plans.current()
         if plan is None:
             return PlanDecision("no_plan", "還沒有投資計畫", None, "", None)
-        spec = BASELINES.get(plan.strategy_key)
+        strategies = self._plans.strategies() if hasattr(self._plans, "strategies") else BASELINES
+        spec = strategies.get(plan.strategy_key)
         if spec is None:
-            return PlanDecision("missing_data", f"找不到策略 {plan.strategy_key}", plan.version, plan.strategy_key, None)
+            return PlanDecision(
+                "missing_data", "計畫採用的策略已不可用（可能已撤銷核准），請到計畫頁改選",
+                plan.version, plan.strategy_key, None,
+            )
         calendar = self._calendar_store.calendar("TW")
         session = invest_session(spec, plan.salary_day, today, calendar)
         base = dict(plan_version=plan.version, strategy=spec.name, invest_day=session)

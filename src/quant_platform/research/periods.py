@@ -107,6 +107,7 @@ def run_trial(
     report["period"] = period
     report["kind"] = kind
     report["generated_at"] = generated_at
+    report["spec"] = spec.model_dump(mode="json")  # the promotion flow re-runs it on later periods
     key = trial_hash(report, benchmark, window_months)
     existing = registry.find(kind, period, key)
     folder = Path(reports_dir)
@@ -130,6 +131,9 @@ def run_trial(
             "xirr": report["strategy"]["xirr"],
             "benchmark_xirr": report["benchmark"]["xirr"],
             "max_drawdown": report["strategy"]["max_drawdown"],
+            "benchmark_max_drawdown": report["benchmark"]["max_drawdown"],
+            "execution_lag": execution_lag,
+            "cost_scale": round((costs or CostModel()).fee_rate / CostModel().fee_rate, 6),
             "trades": report["strategy"]["trades"],
             "costs": report["strategy"]["fees"] + report["strategy"]["taxes"],
             "windows": {

@@ -112,7 +112,9 @@ def _agent(args) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
-    parser.add_argument("command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent"))
+    parser.add_argument(
+        "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote"),
+    )
     parser.add_argument("--dry-run", action="store_true", help="agent：只印出提示內容，不呼叫模型")
     parser.add_argument("--check", action="store_true", help="agent：極小的連線檢查呼叫（金鑰、模型、JSON 格式）")
     parser.add_argument("--name", default="first", help="batch：批次名稱")
@@ -152,6 +154,18 @@ def main() -> int:
 
     if args.command == "agent":
         return _agent(args)
+    if args.command == "promote":
+        from quant_platform.research.forward import STANDARD_PLAN
+        from quant_platform.research.promotion import PromotionPipeline
+
+        pipeline = PromotionPipeline(RESEARCH, STANDARD_PLAN)
+        events = pipeline.advance(load_market(available_assets(args.base), args.base))
+        for event in events:
+            print(f"{event.name}：{event.stage} {event.outcome} {event.evidence.get('reasons') or ''}", flush=True)
+        overview = pipeline.overview()
+        print(f"開發期 {overview['candidates']} 個設定，{overview['window_ok']} 個過視窗門檻，"
+              f"{overview['eligible']} 個全部關卡通過；新事件 {len(events)} 筆")
+        return 0
 
     if args.command == "stats":
         basis = period_basis(load_market(available_assets(args.base), args.base), args.period)
