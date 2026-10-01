@@ -37,7 +37,7 @@ from quant_platform.research.reports import latest_reports, latest_stats, report
 logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.4.0"
+ASSET_VERSION = "2.4.1"
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {
@@ -479,7 +479,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
 
     @blueprint.get("/holdings")
     def holdings():
-        return render_holdings()
+        # "回報成交" on the Today page links here with the advised order (REQUIREMENTS §4);
+        # the fill form starts from it and the user corrects price, shares and fee.
+        prefill = {key: request.args[key] for key in ("symbol", "side", "shares", "price", "broker") if key in request.args}
+        return render_holdings(form={**prefill, "form": "trade"} if prefill else None)
 
     @blueprint.post("/holdings/cash")
     def holdings_cash():

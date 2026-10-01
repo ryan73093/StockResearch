@@ -63,7 +63,7 @@
         <table class="table--stack">
           <thead><tr>
             <th>標的</th><th>買賣</th><th class="num">股數</th><th class="num">限價（元）</th>
-            <th class="num">收盤（元）</th><th class="num">預估金額（元）</th>
+            <th class="num">收盤（元）</th><th class="num">預估金額（元）</th><th>成交後</th>
           </tr></thead>
           <tbody>
           {% for order in decision.orders %}
@@ -77,6 +77,7 @@
               <td class="num" data-label="限價">{{ '{:,.2f}'.format(order.limit_price) }}</td>
               <td class="num" data-label="收盤">{{ '{:,.2f}'.format(order.reference_close) }}</td>
               <td class="num" data-label="預估金額">{{ '{:,.0f}'.format(order.amount) }}</td>
+              <td data-label="成交後" data-wide><a class="btn btn--small" href="/holdings?symbol={{ order.symbol }}&amp;side={{ order.side }}&amp;shares={{ order.shares }}&amp;price={{ '%.2f'|format(order.limit_price) }}#trade">回報成交</a></td>
             </tr>
           {% endfor %}
           </tbody>

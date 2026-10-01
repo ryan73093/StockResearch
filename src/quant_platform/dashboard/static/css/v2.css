@@ -419,6 +419,7 @@ td.wrap { white-space: normal; min-width: 180px; }
 .btn--primary { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
 .btn--primary:hover { background: var(--accent); filter: brightness(1.08); }
 .actions-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.btn--small { padding: 5px 10px; font-size: 13px; }
 
 .note { color: var(--muted); font-size: 13px; margin: 12px 0 0; }
 

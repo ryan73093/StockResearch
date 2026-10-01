@@ -141,9 +141,10 @@
     </form>
   </section>
 
-  <section class="card">
+  <section class="card{{ ' card--highlight' if form.get('form') == 'trade' and not error else '' }}" id="trade">
     <div class="card__head"><h2>回報成交</h2><span class="muted small">依券商成交回報填寫</span></div>
     {% set t = form if form.get('form') == 'trade' else {} %}
+    {% if t and not error %}<p class="note" style="margin:0 0 10px">已帶入今日建議的委託；請改成實際成交的股數、價格與對帳單上的手續費後再記錄。</p>{% endif %}
     <form method="post" action="/holdings/trade" class="form">
       <div class="form__row">
         <label>成交日<input name="day" type="date" value="{{ t.get('day', today_iso) }}" max="{{ today_iso }}" required></label>

@@ -169,6 +169,12 @@ def test_today_action_card_shows_the_window_copy_text_and_attention(container):
 
     assert 'data-opening="2026-10-05T13:40:00+08:00"' in body and "盤後零股 13:40～14:30" in body
     assert "0050 買 99 股 限價 100.20（盤後零股）" in body                     # the copy text
+    assert "/holdings?symbol=0050&amp;side=BUY&amp;shares=99&amp;price=100.20#trade" in body  # report the fill
+
+    with app.test_client() as client:
+        prefilled = client.get("/holdings?symbol=0050&side=BUY&shares=99&price=100.20").get_data(as_text=True)
+    assert 'name="shares" inputmode="numeric" value="99"' in prefilled and 'value="100.20"' in prefilled
+    assert "已帶入今日建議的委託" in prefilled
     assert "查看其他依據（1）" in body and "第四點依據" in body                # reasons beyond three are folded
     assert "需要留意" in body and "今日排除 2 檔" in body                       # quality warning
     assert "今日收盤資料尚未齊全" in missing
