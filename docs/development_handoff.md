@@ -66,6 +66,7 @@
 | 資料庫 | `instance\quant_platform.db` 約 9.7 GiB；`research_universe` 新增 4 檔 ETF（id 555–558）；每日備份 `instance\backups\daily\`；兩個 22.29 GiB 暫存備份待使用者刪除 |
 | 研究資料 | `instance\research\`：history（10 個序列）、reports、trials.jsonl、stats、forward、promotions.jsonl |
 | 憑證副本 | `C:\ProgramData\StockResearch\cacert.pem`（yfinance 用，見開發歷程） |
+| 主機記憶體外洩（10/01 17:40 診斷） | 開機 116 小時後核心非分頁記憶體池 6.5 GB、核心程序物件 10.6 萬個（實際只有 348 個程序）：**每個結束的程序都沒被釋放**（測試：30 個 `cmd /c exit` 後 `Proc` +30 且不回落），每個約佔 130 KB（VAD、權杖、分頁表），合計約 13 GB。不是本專案或 Codex 本身造成，而是核心層（Windows 26H1 build 28000.2956 或某個監看程序建立的驅動）的 bug；AI 工具大量開程序會加速累積。重開機可清掉；重開機後先複測（以池標籤 `Proc` 前後數量比較），仍外洩就請使用者更新 Windows 與驅動、或用乾淨開機逐一排除（AMD 3D V-Cache／Crash Defender／AppCompat、NVIDIA 610.88、DeskIn、MSI NTIOLib、MsIo64、HWiNFO） |
 | 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；388 通過、1 略過 |
 | 同主機其他服務 | VectorDB 5001 與其 Tunnel、PimiServices 共用 cloudflared 服務（YtSummary／AutoLayout）。一律不操作 |
 
