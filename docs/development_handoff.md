@@ -1,6 +1,6 @@
 # 盤後決策台 — 當前開發交接
 
-記錄時間：2026-10-01 19:05（Asia/Taipei；18:16 使用者重開機後部署新版）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
+記錄時間：2026-10-01 21:35（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
 
 ## 接手前必讀
 
@@ -11,7 +11,7 @@
 
 ## 先驗收：AI 研究員第一晚（2026-10-01 22:00）
 
-只有 worker 在執行才會跑：重開機登入後服務會自動啟動；22:00 時 worker 沒在跑、但 23:00 前啟動也會補跑（misfire 寬限 1 小時），否則順延到隔晚。
+10/01 21:23 起以 API 補跑舊版台股流程（在 api 服務內），22:00 的 AI 研究員在 worker 內照常執行、與它重疊。兩者都結束後再部署 `5156bd2` 起的晚間修改（每晚上限共用、中斷紀錄、主機記憶體）；部署時 `stop-services.ps1` 會把 15:39 被中斷的舊版回測（#3621）標為中斷。
 
 - 看 `instance\research\journal.jsonl` 的新輪次（研究頁「AI 研究員」卡）：每輪有分析、假設、理由；被拒絕的設定有原因；通過的設定是開發期候選試驗（`trials.jsonl`），統計檔 `instance\research\stats\development-*.json` 更新。
 - 看 `instance\research\agent\usage.jsonl`：每次呼叫都有 token 與費用；本月費用遠低於 US$3。
@@ -57,7 +57,7 @@
 | 10/02 起 | 除權除息預告每 12 小時更新 | `instance\events\ex_dividends.json`、系統頁背景工作 |
 | 到 10/07 | S1-W05 收盤資料時效量測（櫃買與盤後零股何時公布） | 系統頁「收盤資料時效」 |
 
-## 環境現況（2026-10-01 15:10）
+## 環境現況（2026-10-01 21:35）
 
 | 項目 | 狀態 |
 |---|---|
@@ -66,8 +66,8 @@
 | 資料庫 | `instance\quant_platform.db` 約 9.7 GiB；`research_universe` 新增 4 檔 ETF（id 555–558）；每日備份 `instance\backups\daily\`；兩個 22.29 GiB 暫存備份待使用者刪除 |
 | 研究資料 | `instance\research\`：history（10 個序列）、reports、trials.jsonl、stats、forward、promotions.jsonl |
 | 憑證副本 | `C:\ProgramData\StockResearch\cacert.pem`（yfinance 用，見開發歷程） |
-| 主機記憶體外洩（10/01 17:40 診斷） | 開機 116 小時後核心非分頁記憶體池 6.5 GB、核心程序物件 10.6 萬個（實際只有 348 個程序）：**每個結束的程序都沒被釋放**（測試：30 個 `cmd /c exit` 後 `Proc` +30 且不回落），每個約佔 130 KB（VAD、權杖、分頁表），合計約 13 GB。不是本專案或 Codex 本身造成，而是核心層（Windows 26H1 build 28000.2956 或某個監看程序建立的驅動）的 bug；AI 工具大量開程序會加速累積。重開機可清掉，但 18:51 複測仍外洩（每個程序 `Proc` +1 不回落），會再慢慢累積。最可能的元兇：內顯 AMD Radeon 驅動 31.0.24002.92（2024-01-11），正是已知「每個程序都留下殭屍、約 64 KB」的 AMD Adrenalin 版本範圍（23.12～24.6，24.7.1 起修正）；主力顯卡是 RTX 5070 Ti，請使用者在 BIOS 關閉內顯或手動更新 AMD 驅動後複測 |
-| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；390 通過、1 略過 |
+| 主機記憶體外洩（10/01 17:40 診斷） | 開機 116 小時後核心非分頁記憶體池 6.5 GB、核心程序物件 10.6 萬個（實際只有 348 個程序）：**每個結束的程序都沒被釋放**（測試：30 個 `cmd /c exit` 後 `Proc` +30 且不回落），每個約佔 130 KB（VAD、權杖、分頁表），合計約 13 GB。不是本專案或 Codex 本身造成，而是核心層（Windows 26H1 build 28000.2956 或某個監看程序建立的驅動）的 bug；AI 工具大量開程序會加速累積。重開機可清掉，但 18:51 複測仍外洩（每個程序 `Proc` +1 不回落），會再慢慢累積。21:30 取樣：Claude 桌面版約每秒執行一次 `git`（每次 3 個程序）並持續執行 bash／python 短命程序，殭屍每分鐘增加約 170–240 個（每小時約 1.3–1.9 GB）。最可能的元兇：內顯 AMD Radeon 驅動 31.0.24002.92（2024-01-11），正是已知「每個程序都留下殭屍、約 64 KB」的 AMD Adrenalin 版本範圍（23.12～24.6，24.7.1 起修正）；主力顯卡是 RTX 5070 Ti，請使用者在 BIOS 關閉內顯或手動更新 AMD 驅動後複測 |
+| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；390 通過、1 略過（晚間修改後相關 70 項通過） |
 | 同主機其他服務 | VectorDB 5001 與其 Tunnel、PimiServices 共用 cloudflared 服務（YtSummary／AutoLayout）。一律不操作 |
 
 ## 待使用者確認或操作
