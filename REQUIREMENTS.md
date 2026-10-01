@@ -93,7 +93,8 @@
   - 模型（使用者 2026-10-01 決定，比照 VectorDB）：OpenAI `gpt-6-luna`，Responses API、`store: false`、JSON 輸出、不自動重試；金鑰取 `OPENAI_API_KEY` 或 `OPENAI_KEY_ENV_FILE`。每次呼叫記錄 token 與當時單價的費用（`instance/research/agent/usage.jsonl`），呼叫前檢查每月預算，用完即停。
   - 上限：每月 US$3（使用者 2026-10-01 決定）；每晚 22:00、最多 3 輪、每輪最多 4 個設定、每晚最多 12 個試驗；設定見 `.env.example` 的 `RESEARCH_AGENT_*`。
   - 模型只看到開發期結果與研究日誌；設定檔須通過 StrategySpec 驗證、只能用開發期有 3 年以上資料的目錄 ETF、不得與已測規則相同（名稱不同但規則相同也算），通過的才回測並登錄為候選試驗。
-- 每輪研究寫入研究日誌（`instance/research/journal.jsonl`）：對上一輪的分析、假設、理由、設定檔、結果、淘汰原因、費用。研究頁顯示最近三輪與本月費用。每週產生研究報告。
+- 每輪研究寫入研究日誌（`instance/research/journal.jsonl`）：對上一輪的分析、假設、理由、設定檔、結果、淘汰原因、費用。研究頁顯示最近三輪與本月費用。
+- 每週研究報告（`research/weekly.py`）：本週 AI 輪次與假設、新增與被拒絕的設定（含主要原因）、最好的新設定、多重檢定狀態、晉級事件、前向模擬、模型費用、下一步構想與白話結論；研究頁顯示本週即時版本，每週日 23:30 存到 `instance/research/weekly/<年>-W<週>.json`。
 - 晉級流程：候選 → 驗證期間 → 保留期（一次）→ 前向模擬（至少 8 週）→ 使用者在研究頁核准 → 決策引擎可使用。晉級門檻見路線圖 S4。
   - 自動推進（`research/promotion.py`，每晚 AI 研究員之後執行，或 `python -m quant_platform.research promote`）：開發期通過視窗、回撤與多重檢定門檻的候選才會跑驗證期（含成本加倍、晚一天執行）；通過才評估一次保留期；通過才加入前向模擬；滿 40 個交易日後等待使用者核准。
   - 每一步寫入只追加、雜湊串鏈的晉級紀錄（`instance/research/promotions.jsonl`），附試驗編號與報告；核准與撤銷都要使用者在研究頁勾選「我已看過證據」後操作，撤銷是新紀錄。

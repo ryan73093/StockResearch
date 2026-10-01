@@ -314,6 +314,16 @@ def run_research_agent(container: "Container") -> object | None:
     return len(entries)
 
 
+def save_weekly_research_report(container: "Container", now: datetime | None = None) -> object | None:
+    """S6-W04: keep a copy of the finished week's research report (Sunday 23:30)."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.weekly import save_weekly_report
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    return save_weekly_report(_instance_dir(container.settings.database_url) / "research", local_now.date())
+
+
 def probe_close_availability(container: "Container") -> object:
     """S1-W05 measurement tick; the probe itself limits to 13:30–14:45 on trading days."""
     return container.close_availability.run()
@@ -385,6 +395,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=30,
+    )
+    scheduler.add_job(
+        save_weekly_research_report,
+        args=[container],
+        trigger=CronTrigger(day_of_week="sun", hour=23, minute=30, timezone=timezone),
+        id="weekly_research_report",
+        name="每週研究報告存檔（週日 23:30）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
         run_research_agent,

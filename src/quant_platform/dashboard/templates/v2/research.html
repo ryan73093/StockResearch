@@ -39,6 +39,28 @@
   {% endif %}
 </section>
 
+<section class="card" id="weekly">
+  <div class="card__head">
+    <h2>本週研究報告 <span class="badge">{{ weekly.start[5:].replace('-', '/') }}～{{ weekly.end[5:].replace('-', '/') }}</span></h2>
+    <span class="muted small">每週日 23:30 存檔</span>
+  </div>
+  <div class="kpis kpis--four" style="margin-bottom:12px">
+    <div class="kpi"><div class="kpi__label">AI 研究輪次</div><div class="kpi__value">{{ weekly.rounds }}{% if weekly.round_errors %}<small>（{{ weekly.round_errors }} 次異常）</small>{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">新試驗</div><div class="kpi__value">{{ weekly.new_trials }}<small>個</small></div></div>
+    <div class="kpi"><div class="kpi__label">被拒絕的設定</div><div class="kpi__value">{{ weekly.rejected }}<small>個</small></div></div>
+    <div class="kpi"><div class="kpi__label">本週模型費用</div><div class="kpi__value">{{ '%.4f' % weekly.cost_usd }}<small>美元</small></div></div>
+  </div>
+  <p style="margin:0 0 10px"><strong>{{ weekly.verdict }}</strong></p>
+  <ul class="reasons">
+    {% if weekly.best_new %}<li>本週最好的新設定：{{ weekly.best_new.name }}（3 年勝率 {{ '{:.0%}'.format(weekly.best_new.win_3y) if weekly.best_new.win_3y is not none else '—' }}、中位超額 {{ '{:+.2%}'.format(weekly.best_new.median_3y) if weekly.best_new.median_3y is not none else '—' }}）</li>{% endif %}
+    {% for hypothesis in weekly.hypotheses %}<li>假設：{{ hypothesis }}</li>{% endfor %}
+    {% if weekly.top_rejections %}<li>拒絕原因：{% for reason, count in weekly.top_rejections %}{{ reason }}（{{ count }}）{% if not loop.last %}、{% endif %}{% endfor %}</li>{% endif %}
+    {% for event in weekly.promotions %}<li>晉級：{{ event.name }} {{ event.stage }} {{ event.outcome }}</li>{% endfor %}
+    <li>多重檢定：開發期目前資料版本 {{ weekly.development_trials }} 個設定、累計 {{ weekly.attempts }} 次試驗{% if weekly.best_dsr is not none %}；最佳 DSR {{ '%.2f' % weekly.best_dsr }}{% endif %}{% if weekly.pbo is not none %}、PBO {{ '{:.0%}'.format(weekly.pbo) }}{% endif %}</li>
+    {% for idea in weekly.next_ideas %}<li>下一步構想：{{ idea }}</li>{% endfor %}
+  </ul>
+</section>
+
 <section class="card">
   <div class="card__head">
     <h2>定期定額對照 <span class="badge">相同現金流</span></h2>

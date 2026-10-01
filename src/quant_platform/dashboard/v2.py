@@ -30,6 +30,7 @@ from quant_platform.research.forward import FORWARD_START, ForwardTracker
 from quant_platform.research.forward import STANDARD_PLAN as FORWARD_PLAN
 from quant_platform.research.periods import ResearchGateError
 from quant_platform.research.promotion import PromotionPipeline
+from quant_platform.research.weekly import weekly_report
 from quant_platform.research.summary import round_summary
 from quant_platform.research.reports import latest_reports, latest_stats, report_rows, trial_ranking
 
@@ -78,6 +79,7 @@ MAINTENANCE_JOBS = (
     (time(13, 45), "LINE 投入日建議", "投入日每 5 分鐘到 14:25，收盤到了就發一則；14:15 仍缺資料時提醒"),
     (time(15, 15), "研究資料補抓", "交易日；長歷史資料只補當月、除權息只補今年"),
     (time(15, 30), "前向模擬紀錄", "交易日；追蹤中的策略當日狀態只追加不改寫"),
+    (time(23, 30), "每週研究報告", "每週日；把本週研究報告存檔"),
 )
 BACKGROUND_JOBS = "背景工作：每 15 分鐘檢查漏跑、每 10 分鐘補台股研究池資料、每小時檢查證交所休市日。"
 STATUS_BADGES = {
@@ -623,6 +625,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             active_nav="research",
             agent=agent_status(dependencies.settings, research_dir),
             promotion=PromotionPipeline(research_dir, FORWARD_PLAN).overview(),
+            weekly=weekly_report(research_dir, datetime.now(TAIPEI).date()),
             tool_groups=TOOL_GROUPS,
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
