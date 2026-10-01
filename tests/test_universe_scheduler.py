@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 
 from quant_platform.application.services import MarketDataIngestionService
 from quant_platform.application.universe import DailyMarketDataPipeline
@@ -146,12 +147,14 @@ def test_yahoo_skips_yfinance_after_three_empty_symbols(monkeypatch):
     from quant_platform.data_sources import yahoo as yahoo_module
     from quant_platform.data_sources.yahoo import YahooFinanceProvider
 
-    tickers = []
+    tickers, sessions = [], []
     fake = types.SimpleNamespace(
         set_tz_cache_location=lambda path: None,
-        Ticker=lambda symbol: tickers.append(symbol) or types.SimpleNamespace(history=lambda **kwargs: pd.DataFrame()),
+        Ticker=lambda symbol, session=None: tickers.append(symbol) or sessions.append(session) or types.SimpleNamespace(
+            history=lambda **kwargs: pd.DataFrame()),
     )
     monkeypatch.setitem(sys.modules, "yfinance", fake)
+    monkeypatch.setattr(YahooFinanceProvider, "_curl_session", "ascii-ca-session")   # no real session in tests
     monkeypatch.setattr(yahoo_module.clock, "sleep", lambda seconds: None)
     monkeypatch.setattr(YahooFinanceProvider, "_yfinance_empty_streak", 0)
     monkeypatch.setattr(YahooFinanceProvider, "_yfinance_skip_until", 0.0)
@@ -166,6 +169,29 @@ def test_yahoo_skips_yfinance_after_three_empty_symbols(monkeypatch):
 
     assert sorted(set(tickers)) == ["A.TW", "B.TW", "C.TW"]   # three tries each, then no more yfinance
     assert charts == ["A.TW", "B.TW", "C.TW", "D.TW", "E.TW"]
+    assert set(sessions) == {"ascii-ca-session"}                # yfinance always gets our curl session
+
+
+def test_curl_gets_an_ascii_path_for_the_ca_bundle(tmp_path, monkeypatch):
+    from quant_platform.data_sources import yahoo as yahoo_module
+    from quant_platform.data_sources.yahoo import ascii_ca_bundle
+
+    # The temporary folder may itself sit under a non-ASCII profile; "使用者" marks the paths curl cannot open.
+    monkeypatch.setattr(yahoo_module, "_ascii", lambda path: "使用者" not in str(path))
+    plain = tmp_path / "plain" / "cacert.pem"
+    plain.parent.mkdir()
+    plain.write_bytes(b"roots")
+    assert ascii_ca_bundle(plain, tmp_path / "copy") == str(plain)              # usable as it is
+    assert not (tmp_path / "copy").exists()
+
+    profile = tmp_path / "使用者" / "cacert.pem"   # like C:\Users\皮咪\...\certifi\cacert.pem
+    profile.parent.mkdir()
+    profile.write_bytes(b"roots v1")
+    copied = ascii_ca_bundle(profile, tmp_path / "copy")
+    assert copied == str(tmp_path / "copy" / "cacert.pem") and Path(copied).read_bytes() == b"roots v1"
+    profile.write_bytes(b"roots v2")                                            # certifi upgraded: refreshed
+    assert Path(ascii_ca_bundle(profile, tmp_path / "copy")).read_bytes() == b"roots v2"
+    assert ascii_ca_bundle(profile, tmp_path / "使用者-copy") is None           # a non-ASCII copy would not help
 
 
 def test_universe_add_and_soft_deactivate(tmp_path):

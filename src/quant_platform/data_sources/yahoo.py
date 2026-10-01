@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import threading
 import time as clock
 from datetime import UTC, datetime, time, timedelta
@@ -14,6 +16,45 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from quant_platform.domain.entities import MarketBar
+
+logger = logging.getLogger(__name__)
+
+
+def _ascii(path: Path) -> bool:
+    return str(path).isascii()
+
+
+def ascii_ca_bundle(source: str | Path | None = None, target_dir: str | Path | None = None) -> str | None:
+    """A copy of certifi's CA bundle at an ASCII-only path for curl (yfinance).
+
+    The services run with PYTHONUTF8=1 (UTF-8 logs). curl_cffi then hands libcurl the bundle path
+    as UTF-8 bytes while BoringSSL opens it with the ANSI code page, so under a non-ASCII Windows
+    profile ("C:\\Users\\皮咪\\...") every yfinance request failed with curl error 77 and Yahoo
+    data only arrived through the slower chart fallback (found 2026-10-01). ``None`` when no
+    usable copy can be made; curl then keeps its default.
+    """
+    if source is None:
+        import certifi
+
+        source = certifi.where()
+    source = Path(source)
+    if _ascii(source):
+        return str(source)
+    folder = Path(target_dir or Path(os.environ.get("PROGRAMDATA") or r"C:\ProgramData") / "StockResearch")
+    target = folder / "cacert.pem"
+    if not _ascii(target):
+        return None
+    try:
+        data = source.read_bytes()
+        if not target.is_file() or target.read_bytes() != data:
+            folder.mkdir(parents=True, exist_ok=True)
+            partial = target.with_suffix(".pem.partial")
+            partial.write_bytes(data)
+            partial.replace(target)
+    except OSError as exc:
+        logger.warning("CA bundle copy for curl failed: %s", exc)
+        return None
+    return str(target)
 
 
 class YahooFinanceProvider:
@@ -39,6 +80,18 @@ class YahooFinanceProvider:
     _SKIP_SECONDS: ClassVar[float] = 1800.0
     _yfinance_empty_streak = 0
     _yfinance_skip_until = 0.0
+    _curl_session: ClassVar[object | None] = None
+
+    @classmethod
+    def _yfinance_session(cls) -> object | None:
+        """One curl_cffi session for yfinance, verifying with an ASCII-path CA bundle."""
+        if cls._curl_session is None:
+            try:
+                from curl_cffi import requests as curl_requests
+            except ImportError:  # older yfinance on requests: keep its own session
+                return None
+            cls._curl_session = curl_requests.Session(impersonate="chrome", verify=ascii_ca_bundle() or True)
+        return cls._curl_session
 
     def fetch_daily_bars(
         self, symbol: str, market: str, start: datetime, end: datetime
@@ -68,7 +121,7 @@ class YahooFinanceProvider:
                     wait = 0.45 - (clock.monotonic() - self._last_request_at)
                     if wait > 0:
                         clock.sleep(wait)
-                    history = yf.Ticker(symbol).history(
+                    history = yf.Ticker(symbol, session=self._yfinance_session()).history(
                         start=start.date().isoformat(),
                         end=end.date().isoformat(),
                         interval="1d",

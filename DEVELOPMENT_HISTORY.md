@@ -2,6 +2,15 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-01 — 服務中的 Yahoo（yfinance）全部失敗：根本原因與修正
+
+- 現象：10/01 13:50 台股流程的 yfinance 對每一檔都回「possibly delisted; no price data found」（worker 日誌 1,606 行），14:48 重試時改顯示 `curl: (77) error adding trust anchors from locations: CAfile: C:\Users\皮咪\...\certifi\cacert.pem`；資料最後都靠 chart API 備援取得，第一次嘗試的行情步驟因此花了 36 分鐘。
+- 原因（已重現）：`scripts/run_local_services.ps1` 為了 UTF-8 日誌設定 `PYTHONUTF8=1`。UTF-8 模式下 curl_cffi 把憑證檔路徑以 UTF-8 位元組交給 libcurl，BoringSSL 卻用系統字碼頁（950）開檔，使用者資料夾名稱「皮咪」使路徑打不開；同一行指令不設 `PYTHONUTF8` 就正常。所以自 S1-W04 改用監督程序以來，服務裡的每一次 yfinance 請求都失敗。
+- 修正：`data_sources/yahoo.py` 把 certifi 憑證檔複製到純英文路徑 `C:\ProgramData\StockResearch\cacert.pem`（內容不同時更新；複製失敗則維持原狀），yfinance 改用一個以該路徑驗證的 curl_cffi session。chart API（urllib）不受影響。
+- 驗證：`PYTHONUTF8=1` 下以原始碼抓 0056.TW 09/17～10/01 取得 8 筆日線，未觸發備援（空結果計數 0）。
+- 測試：純英文路徑原樣使用、非英文路徑複製並在內容更新時重抄、目標仍非英文時不複製；yfinance 一律拿到這個 session。
+- 回復：`git revert`；`C:\ProgramData\StockResearch\cacert.pem` 是公開的根憑證清單副本，留著無妨。
+
 ## 2026-10-01 — S5-W03 股利：除息提醒與一鍵記錄
 
 - 目標：持有的 ETF 除息後，使用者不必自己算股數與金額，也不會漏記股利（需求 §4）。
@@ -24,7 +33,7 @@
 - 發現（14:3x）：正式資料庫 `research_universe` 在 14:02:01 多了 4 筆（id 555–558：00713.TW、00919.TW、00679B.TWO、00687B.TWO），但加入這四檔的 `e0c85d4` 尚未部署；時間對應當時的完整測試。
 - 原因：`quant_platform/api/app.py` 在模組載入時執行 `app = create_api()`。測試只要 `from quant_platform.api.app import create_api`，就會以預設設定（讀專案根目錄 `.env`，`DATABASE_URL` 指向正式資料庫）建立容器：`create_schema()`（含累加式遷移）與 `ensure_default_universe()` 都作用在正式資料庫，`.env` 的值也被載入測試程序。這從初始版本就存在；以往遷移與預設股票池都已是最新，所以沒有留下痕跡。測試的外部呼叫都用假物件，沒有以真實金鑰對外連線。
 - 影響：資料只有這 4 筆股票池（部署後本來就會寫入的同樣內容），沒有刪改其他資料，保留不回復。但它們在台股流程進行中出現：#3608 特徵建置因四檔尚無日線「部分完成」，14:47 原始資料品質閘門把四檔缺行情判為 4 個嚴重問題而阻擋，第一次嘗試失敗；自動重試從 14:47:57 重跑整個流程（#3613 起，行情補到 536 檔、特徵建置成功），舊版研究步驟因此晚約一小時完成。依計畫的今日建議只用 0050 收盤，不受影響；舊版盤後 AI 的早盤決策在第一次嘗試 14:39 已產生。
-- 另見（同一時段）：重試時 yfinance 對四檔新 ETF 的 12 次請求都回 `curl: (77) error adding trust anchors`（憑證檔路徑含使用者名稱）；同一路徑在新程序、執行緒內都正常，代表是長時間執行的 worker 當下的狀態問題，不是路徑本身；四檔仍由 chart API 取得。已提交未部署的斷路器（連 3 檔失敗改走 chart API 30 分鐘）可降低影響，繼續觀察。
+- 另見（同一時段）：重試時 yfinance 對四檔新 ETF 的 12 次請求都回 `curl: (77) error adding trust anchors`；四檔由 chart API 取得。原因見上一筆「服務中的 Yahoo（yfinance）全部失敗」。
 - 修正：`api/app.py` 改為第一次存取 `app` 時才建立（模組 `__getattr__`；`uvicorn quant_platform.api.app:app` 與 `compose.yaml` 照常可用）；`quant-api` 的 `main()` 只建一次容器並直接傳入 app（原本建兩次）。新增 `tests/conftest.py`：測試期間 `Database` 拒絕開啟 `instance/quant_platform.db`。`AGENTS.md` 測試規則補上一條。
 - 測試：`test_test_isolation.py`（防護生效；子程序 import 模組不建立資料庫、存取 `app` 才建立）；全部 383 通過、1 略過。測試後正式股票池仍為 id 558 為止、啟用中台股 536 檔，沒有新寫入。
 - 回復：`git revert`（防護只影響測試）。
