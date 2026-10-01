@@ -90,7 +90,9 @@ class UniverseExpansionService:
         self._target = target_ready_assets
         self._runs = run_repository
         self._overview_cache: tuple[float, UniverseExpansionOverview] | None = None
-        self._membership_refresh_attempted_at = 0.0
+        # None until the first attempt: time.monotonic() counts from boot on Windows, so a 0.0
+        # start skipped every refresh during the first hour after a reboot (found 2026-10-01).
+        self._membership_refresh_attempted_at: float | None = None
         self._overview_lock = threading.Lock()
         self._batch_lock = threading.Lock()
 
@@ -168,7 +170,8 @@ class UniverseExpansionService:
                     self._overview_cache = None
             return
         now = time.monotonic()
-        if now - self._membership_refresh_attempted_at < 3600:
+        last = self._membership_refresh_attempted_at
+        if last is not None and now - last < 3600:
             return
         self._membership_refresh_attempted_at = now
         sync = getattr(self._history, "sync_taiwan", None)
