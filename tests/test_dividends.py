@@ -127,6 +127,18 @@ def test_account_view_by_hand():
     assert account_view(events, [], trades, today=date(2027, 2, 13))["due"] == []
 
 
+def test_system_page_shows_the_preview_cache(tmp_path):
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
+    client = create_app(container).test_client()
+    assert "除息資料" in client.get("/system").get_data(as_text=True)
+    assert "尚未更新" in client.get("/system").get_data(as_text=True)
+
+    DividendCalendar(tmp_path / "events" / "ex_dividends.json", fetch=lambda url: twse(
+        ("115年10月16日", "0056", "元大高股息", "息", "0", "0", "0", "1.07000000")) if "twse" in url else []).refresh()
+    body = client.get("/system").get_data(as_text=True)
+    assert "1 筆・更新於" in body
+
+
 def test_holdings_page_offers_to_record_the_dividend(tmp_path):
     container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
     today = date.today()

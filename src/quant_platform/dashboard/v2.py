@@ -10,7 +10,7 @@ import json
 import logging
 import re
 from collections import Counter
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -324,6 +324,21 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "badge": "badge--bad" if failed else "badge--ok",
             "detail": f"最近 {_taipei_text(last.attempted_at)}・{last.subject.split('｜', 1)[-1]}"
             + (f"：{last.error[:60]}" if failed and last.error else ""),
+        }
+
+    def dividend_tile(now: datetime) -> dict[str, str]:
+        """The ex-dividend previews (S5-W03): fetched every 12 hours, late after a day and a half."""
+        calendar = dependencies.dividend_calendar
+        updated = calendar.updated_at()
+        if updated is None:
+            return {"label": "除息資料", "state": "尚未更新", "badge": "",
+                    "detail": "worker 啟動後一小時內抓取證交所、櫃買除權除息預告"}
+        late = now - _aware(updated) > timedelta(hours=36)
+        return {
+            "label": "除息資料",
+            "state": "逾期" if late else "正常",
+            "badge": "badge--warn" if late else "badge--ok",
+            "detail": f"{len(calendar.events())} 筆・更新於 {_taipei_text(updated)}",
         }
 
     def research_tile() -> dict[str, str]:
@@ -727,6 +742,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         })
         items.append(backup_tile(now))
         items.append(research_tile())
+        items.append(dividend_tile(now))
         items.append(line_tile())
         access_on = dependencies.settings.auth_mode == "cloudflare-access"
         items.append({
