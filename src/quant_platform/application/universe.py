@@ -5,6 +5,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from time import sleep as _sleep
 from zoneinfo import ZoneInfo
 
 from quant_platform.application.analytics import DEFAULT_UNIVERSE
@@ -263,6 +264,10 @@ class DailyMarketDataPipeline:
         run_repository: SchedulerJobRunRepository,
         official_tw_provider: object | None = None,
         calendar_store: MarketCalendarStore | None = None,
+        official_wait: timedelta = timedelta(0),
+        official_poll_seconds: float = 30.0,
+        sleep=None,
+        clock=None,
     ) -> None:
         self._universe_repository = universe_repository
         self._market_bar_repository = market_bar_repository
@@ -271,6 +276,13 @@ class DailyMarketDataPipeline:
         self._official_tw_provider = official_tw_provider
         self._calendar_store = calendar_store
         self._validator = MarketBarValidator()
+        # How long a Taiwan run waits for today's official close before asking
+        # Yahoo symbol by symbol (S1-W05: the official table appeared at 13:51
+        # on 2026-10-01; one Yahoo request per symbol took over half an hour).
+        self._official_wait = official_wait
+        self._official_poll_seconds = official_poll_seconds
+        self._sleep = sleep or _sleep
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     @staticmethod
     def _market_clock(market: str) -> tuple[ZoneInfo, time]:
@@ -340,6 +352,45 @@ class DailyMarketDataPipeline:
         zone, _ = self._market_clock(normalized_market)
         return latest.astimezone(zone).date()
 
+    def _official_close_stored(self, symbols: list[str], expected_date: date) -> bool:
+        """Whether the official table for ``expected_date`` is already in the database
+        (a rerun must not wait for it again). Indices are not in that table."""
+        listed = [symbol for symbol in symbols if symbol.endswith((".TW", ".TWO"))][:20]
+        for symbol in sorted(listed, key=lambda item: item != "0050.TW"):
+            latest = self._market_bar_repository.latest_event_time(symbol, "1d", "twse_tpex_official")
+            if latest is None:
+                continue
+            if latest.tzinfo is None:
+                latest = latest.replace(tzinfo=UTC)
+            return latest.astimezone(ZoneInfo("Asia/Taipei")).date() >= expected_date
+        return False
+
+    def _wait_for_official_close(self, symbols: list[str], expected_date: date, started: datetime) -> list:
+        """Poll the official close table until it has ``expected_date`` or the wait ends."""
+        deadline = started + self._official_wait
+        while self._clock() + timedelta(seconds=self._official_poll_seconds) <= deadline:
+            self._sleep(self._official_poll_seconds)
+            fetch_range = getattr(self._official_tw_provider, "fetch_range", None)
+            try:
+                if callable(fetch_range):  # no cache, unlike fetch_snapshot
+                    bars = fetch_range(symbols, expected_date, expected_date, self._clock())
+                else:
+                    bars = self._official_tw_provider.fetch_snapshot(symbols, self._clock())
+                bars = [
+                    item for item in bars
+                    if item.event_time.astimezone(ZoneInfo("Asia/Taipei")).date() == expected_date
+                ]
+                self._validator.validate(bars)
+            except Exception:  # noqa: BLE001 -- keep polling; Yahoo is the fallback
+                logger.exception("Official TW close poll failed")
+                continue
+            if bars:
+                logger.info("Official TW close for %s appeared after %s", expected_date, self._clock() - started)
+                return bars
+        logger.warning("Official TW close for %s not published within %s; using Yahoo", expected_date,
+                       self._official_wait)
+        return []
+
     def is_fresh(self, market: str, now: datetime | None = None) -> bool:
         checked_at = now or datetime.now(UTC)
         return self.latest_market_date(market, checked_at) == self.expected_session_date(
@@ -406,6 +457,21 @@ class DailyMarketDataPipeline:
             except Exception as exc:
                 logger.exception("Official TW close snapshot ingestion failed")
                 failures["__official_tw_snapshot__"] = str(exc)
+            if (
+                not official_target_symbols
+                and "__official_tw_snapshot__" not in failures
+                and self._official_wait > timedelta(0)
+                and expected_date == started.astimezone(ZoneInfo("Asia/Taipei")).date()
+                and not self._official_close_stored(active_symbols, expected_date)
+            ):
+                bars = self._wait_for_official_close(active_symbols, expected_date, started)
+                received += len(bars)
+                inserted += self._market_bar_repository.add_missing(bars)
+                official_target_symbols = {
+                    item.symbol
+                    for item in bars
+                    if item.event_time.astimezone(ZoneInfo("Asia/Taipei")).date() == expected_date
+                }
 
         for asset in assets:
             try:

@@ -77,6 +77,8 @@ class TaiwanOfficialDailyBarProvider:
             ):
                 twse = self._fetch_twse(target, ingested_at)
                 tpex = self._fetch_tpex(target, ingested_at)
+                if not twse and not tpex:
+                    return []  # not published yet: do not remember an empty table
                 self._cached = {item.symbol: item for item in (*twse, *tpex)}
                 self._cached_date = target
                 self._cached_at = clock.monotonic()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -264,6 +265,7 @@ def build_container(settings: Settings | None = None) -> Container:
         job_run_repository,
         TaiwanOfficialDailyBarProvider(calendar_store=market_calendar),
         calendar_store=market_calendar,
+        official_wait=timedelta(minutes=resolved.tw_official_close_wait_minutes),
     )
     taiwan_data_pipeline = TaiwanDataPipeline(
         universe_repository,

@@ -72,6 +72,10 @@ class Settings:
     scheduler_timezone: str = "Asia/Taipei"
     tw_data_schedule: str = "13:50"
     us_data_schedule: str = "06:30"
+    # Minutes a Taiwan run waits for today's official close table before asking
+    # Yahoo per symbol (S1-W05). 0 here keeps directly built Settings (tests)
+    # offline; from_env defaults to 10.
+    tw_official_close_wait_minutes: int = 0
     finmind_base_url: str = "https://api.finmindtrade.com/api/v4/data"
     finmind_token: str = ""
     pit_auto_ingestion_enabled: bool = False
@@ -155,6 +159,7 @@ class Settings:
             scheduler_timezone=os.getenv("SCHEDULER_TIMEZONE", "Asia/Taipei"),
             tw_data_schedule=os.getenv("TW_DATA_SCHEDULE", "13:50"),
             us_data_schedule=os.getenv("US_DATA_SCHEDULE", "06:30"),
+            tw_official_close_wait_minutes=max(0, min(30, int(os.getenv("TW_OFFICIAL_CLOSE_WAIT_MINUTES", "10")))),
             finmind_base_url=os.getenv(
                 "FINMIND_BASE_URL", "https://api.finmindtrade.com/api/v4/data"
             ),

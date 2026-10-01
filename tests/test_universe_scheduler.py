@@ -39,6 +39,135 @@ class DynamicFakeProvider:
         ]
 
 
+TAIPEI_TZ = timezone(timedelta(hours=8))
+TW_CLOSE = datetime(2025, 1, 3, 13, 30, tzinfo=TAIPEI_TZ)
+
+
+def official_bar(symbol, now, close=TW_CLOSE):
+    return MarketBar(
+        symbol=symbol, market="TW", interval="1d", event_time=close,
+        available_time=close + timedelta(minutes=15), ingested_at=now, open=Decimal("100"),
+        high=Decimal("101"), low=Decimal("99"), close=Decimal("100"), adjusted_close=Decimal("100"),
+        volume=1_000, source="twse_tpex_official",
+    )
+
+
+class LateOfficialProvider:
+    """The official table is empty until ``ready_after`` polls (S1-W05: 13:51 on 2026-10-01)."""
+
+    def __init__(self, ready_after):
+        self.ready_after = ready_after
+        self.polls = 0
+
+    def fetch_snapshot(self, symbols, now):
+        return []
+
+    def fetch_range(self, symbols, start, end, now):
+        self.polls += 1
+        return [official_bar(symbol, now) for symbol in symbols] if self.polls >= self.ready_after else []
+
+
+def tw_pipeline(tmp_path, official, yahoo, wait_minutes=10):
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'tw.db'}"))
+    universe_repository = SqlAlchemyResearchUniverseRepository(container.database.session_factory)
+    for asset in universe_repository.list_all():
+        universe_repository.set_active(asset.symbol, False)
+    container.research_universe_service.add_asset("0050.TW", "TW", asset_type="ETF", data_start=date(2020, 1, 1))
+    market_repository = SqlAlchemyMarketBarRepository(container.database.session_factory)
+    started = datetime(2025, 1, 3, 5, 50, tzinfo=UTC)  # 13:50 Taipei
+    clock = {"now": started}
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += timedelta(seconds=seconds)
+
+    pipeline = DailyMarketDataPipeline(
+        universe_repository, market_repository, MarketDataIngestionService(yahoo, market_repository),
+        SqlAlchemySchedulerJobRunRepository(container.database.session_factory), official,
+        official_wait=timedelta(minutes=wait_minutes), official_poll_seconds=30, sleep=sleep,
+        clock=lambda: clock["now"],
+    )
+    return pipeline, market_repository, started, sleeps
+
+
+class NoYahoo:
+    name = "yahoo_finance"
+
+    def fetch_daily_bars(self, *_args, **_kwargs):
+        raise AssertionError("the official close covers this symbol")
+
+
+def test_tw_run_waits_for_the_official_close_instead_of_asking_yahoo_per_symbol(tmp_path):
+    official = LateOfficialProvider(ready_after=3)
+    pipeline, _bars, started, sleeps = tw_pipeline(tmp_path, official, NoYahoo())
+
+    result = pipeline.run("TW", now=started)
+
+    assert result.status == "succeeded" and result.fresh and result.inserted == 1
+    assert sleeps == [30, 30, 30]                      # 13:50:30, 13:51:00, 13:51:30
+
+
+def test_tw_run_falls_back_to_yahoo_when_the_official_close_never_comes(tmp_path):
+    class TodayYahoo(DynamicFakeProvider):
+        calls = 0
+
+        def fetch_daily_bars(self, symbol, market, start, end):
+            from dataclasses import replace
+
+            type(self).calls += 1
+            return [replace(official_bar(symbol, end), source="yahoo_finance")]
+
+    pipeline, _bars, started, sleeps = tw_pipeline(tmp_path, LateOfficialProvider(ready_after=10_000), TodayYahoo(),
+                                                   wait_minutes=2)
+
+    result = pipeline.run("TW", now=started)
+
+    assert sleeps == [30, 30, 30, 30] and TodayYahoo.calls == 1
+    assert result.status == "succeeded" and result.fresh
+
+
+def test_tw_rerun_does_not_wait_when_the_official_close_is_stored(tmp_path):
+    official = LateOfficialProvider(ready_after=10_000)
+    pipeline, bars, started, sleeps = tw_pipeline(tmp_path, official, NoYahoo())
+    bars.add_missing([official_bar("0050.TW", started)])
+
+    result = pipeline.run("TW", now=started + timedelta(minutes=20))
+
+    assert sleeps == [] and result.status == "succeeded"
+
+
+def test_yahoo_skips_yfinance_after_three_empty_symbols(monkeypatch):
+    import sys
+    import types
+
+    import pandas as pd
+
+    from quant_platform.data_sources import yahoo as yahoo_module
+    from quant_platform.data_sources.yahoo import YahooFinanceProvider
+
+    tickers = []
+    fake = types.SimpleNamespace(
+        set_tz_cache_location=lambda path: None,
+        Ticker=lambda symbol: tickers.append(symbol) or types.SimpleNamespace(history=lambda **kwargs: pd.DataFrame()),
+    )
+    monkeypatch.setitem(sys.modules, "yfinance", fake)
+    monkeypatch.setattr(yahoo_module.clock, "sleep", lambda seconds: None)
+    monkeypatch.setattr(YahooFinanceProvider, "_yfinance_empty_streak", 0)
+    monkeypatch.setattr(YahooFinanceProvider, "_yfinance_skip_until", 0.0)
+    charts = []
+    monkeypatch.setattr(YahooFinanceProvider, "_fetch_chart_bars",
+                        lambda self, symbol, *args: charts.append(symbol) or [])
+    provider = YahooFinanceProvider()
+    start, end = datetime(2025, 1, 1, tzinfo=UTC), datetime(2025, 1, 3, tzinfo=UTC)
+
+    for symbol in ("A.TW", "B.TW", "C.TW", "D.TW", "E.TW"):
+        provider.fetch_daily_bars(symbol, "TW", start, end)
+
+    assert sorted(set(tickers)) == ["A.TW", "B.TW", "C.TW"]   # three tries each, then no more yfinance
+    assert charts == ["A.TW", "B.TW", "C.TW", "D.TW", "E.TW"]
+
+
 def test_universe_add_and_soft_deactivate(tmp_path):
     container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'universe.db'}"))
     service = container.research_universe_service

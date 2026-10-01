@@ -31,10 +31,21 @@ class YahooFinanceProvider:
     }
     _request_lock = threading.Lock()
     _last_request_at = 0.0
+    # yfinance can return empty frames for every symbol (cookie/crumb trouble);
+    # each one then costs three tries and 3 s of back-off before the chart
+    # route (2026-10-01: 536 Taiwan symbols took over half an hour). After
+    # three empty symbols in a row the chart route is used directly for 30 minutes.
+    _EMPTY_STREAK_LIMIT: ClassVar[int] = 3
+    _SKIP_SECONDS: ClassVar[float] = 1800.0
+    _yfinance_empty_streak = 0
+    _yfinance_skip_until = 0.0
 
     def fetch_daily_bars(
         self, symbol: str, market: str, start: datetime, end: datetime
     ) -> list[MarketBar]:
+        provider = type(self)
+        if clock.monotonic() < provider._yfinance_skip_until:
+            return self._fetch_chart_bars(symbol, market, start, end)
         try:
             import yfinance as yf
         except ImportError as exc:
@@ -77,8 +88,13 @@ class YahooFinanceProvider:
             # frame while Yahoo's public chart route remains available. Use a
             # single range request as a bounded fallback; it avoids month-by-
             # month retry storms and still returns adjusted close and splits.
+            provider._yfinance_empty_streak += 1
+            if provider._yfinance_empty_streak >= provider._EMPTY_STREAK_LIMIT:
+                provider._yfinance_skip_until = clock.monotonic() + provider._SKIP_SECONDS
+                provider._yfinance_empty_streak = 0
             return self._fetch_chart_bars(symbol, market, start, end, last_error)
 
+        provider._yfinance_empty_streak = 0
         return self._normalize_history(history, symbol, market)
 
     def _normalize_history(
