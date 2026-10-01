@@ -1,6 +1,6 @@
 # 盤後決策台 — 系統架構
 
-更新：2026-09-30。本檔描述目標架構、每日流程與部署拓撲；各元件的交付狀態以 [開發路線圖](development_roadmap.md) 為準，需求以根目錄 [`REQUIREMENTS.md`](../REQUIREMENTS.md) 為準。
+更新：2026-10-01。本檔描述目標架構、每日流程與部署拓撲；各元件的交付狀態以 [開發路線圖](development_roadmap.md) 為準，需求以根目錄 [`REQUIREMENTS.md`](../REQUIREMENTS.md) 為準。
 
 ## 產品目標
 
@@ -22,6 +22,9 @@
 | D10 | 介面一套 HTML、三種版面：電腦完整側邊欄、iPad 圖示側欄、手機底部分頁；深色預設、可切換淺色（cookie，由伺服器直接輸出 `data-theme`，不閃爍） | 使用者會用電腦、iPad、手機開啟（2026-09-30）；不另做 App |
 | D11 | 資料庫每天 03:00 以 SQLite backup API 單一步驟線上備份，轉獨立檔後 `quick_check`、記錄各表筆數，保留 7 份；還原演練在暫存路徑核對筆數 | 9.6 GiB 複製約 20 秒，不需停機；WAL 模式下讀取快照不擋寫入 |
 | D12 | 研究資料集（長歷史日線、公司行動、總報酬）與研究報告放在 `instance/research/`，以 Parquet／JSON 保存並附 SHA-256；回測引擎只讀這些檔案，不讀寫 SQLite，也不經過 worker。資料集的初次建立用命令列在背景執行；之後由 worker 每個交易日 15:15 只補抓當月與今年（`research_history_refresh`，初次建立前自動略過） | 研究可重現（資料指紋＋設定檔雜湊＋引擎版本 → 報告雜湊），且研究工作不會拖慢或干擾每日流程 |
+| D13 | 試驗的資料指紋只涵蓋期間結束日以前的資料（`MarketData.fingerprint_until`，逐日串接雜湊），研究 CLI 一次載入全部目錄序列；排行與 PBO 只用目前資料版本的試驗，舊版保留並計入試驗次數 | 每日新增行情不會把同一設定變成「新試驗」灌水試驗次數；歷史資料被修正時舊結果自動退出排行，但多重檢定仍保守計數 |
+| D14 | 成本以券商設定檔表示（`research/costs.py` 的 `BROKERS`：保守、國泰、台新），研究預設保守；計畫選定的券商用於今日建議、預設手續費與影子帳戶 | 研究不因樂觀費率高估多次交易的策略；實際操作的估算貼近使用者的券商 |
+| D15 | 通知走 LINE Messaging API push（使用者自己的官方帳號），以 `notification_deliveries` 記錄並以鍵去重；請求帶 `X-Line-Retry-Key` | LINE Notify 已停止；單人使用不需 webhook；重試不會重複送達，排程可每 5 分鐘重跑 |
 
 ## 圖 1：目標架構總覽
 
@@ -64,7 +67,7 @@ flowchart TB
     end
 
     FILL["使用者回報成交<br/>或券商對帳單"]
-    NOTIFY["通知 13:40 前"]
+    NOTIFY["LINE 通知<br/>投入日建議、不需操作、失敗"]
     CF["Cloudflare Access + Tunnel"]
     PHONE["使用者（電腦／iPad／手機）"]
 
@@ -222,7 +225,7 @@ flowchart LR
 | 時點一致觀測與修訂 | 可用 | 沿用 | — |
 | 交易日曆 `market_calendar/` | 完成（S1-W01）：證交所 2021–2026、每日更新快取、人工補登臨時休市 | 沿用；2020 年以前由 S3-W01 以實際成交資料推算 | S1、S3 |
 | 資料品質閘門 | 可用；交易日判斷已改用官方日曆 | 保留阻擋邏輯；S1-W02 處理停牌與下市規則 | S1 |
-| 排程與通知 | 可用；補抓守門員重跑問題已修正，啟停腳本與單一監督程序完成（S1-W04）；需求 §13 的模組以 `PAUSED_MODULES` 暫停（S1-W06） | 依 S1-W05 量測重新分配時段（決策 13:30–13:40、研究夜間） | S1 |
+| 排程與通知 | 可用；補抓守門員重跑問題已修正，啟停腳本與單一監督程序完成（S1-W04）；需求 §13 的模組以 `PAUSED_MODULES` 暫停（S1-W06）；LINE 通知（`application/notifications.py`，worker 工作 `line_plan_advice`，S5-W07） | 依 S1-W05 量測重新分配時段（決策 13:30–13:40、研究夜間） | S1、S5 |
 | 特徵與標籤資料庫 | 可用；佔 8.6 GiB | 只保留使用中版本，其餘轉 Parquet | S1 |
 | 模型研究（Model Zoo、AutoML） | 可用；預測佔 10.2 GiB | 預測改存 Parquet；ML 只作為挑戰者 | S1、S4 |
 | 走動式回測、因子、Regime | 可用 | 保留作參考；主要評估改用現金流對照引擎 | S3 |
@@ -242,7 +245,8 @@ flowchart LR
 | 位置 | 內容 |
 |---|---|
 | `market_calendar/` | 官方交易日曆與臨時休市（已建立；CLI：`python -m quant_platform.market_calendar`） |
-| `research/` | 研究地基（S3，已建立）：`history/`（官方長歷史抓取、快取、Parquet 資料集、公司行動與總報酬、Yahoo 交叉核對、盤後零股成交分布；CLI `python -m quant_platform.research.history`）、`costs.py`（手續費、證交稅、盤後零股成交價）、`cashflow.py`（投入計畫）、`spec.py`（策略設定檔 v1 與四個基準）、`engine.py`（現金流回測）、`compare.py`（對定期定額的滾動視窗比較）、`metrics.py`、`reports.py`；CLI `python -m quant_platform.research backtest|baselines|schema`。後續：試驗登錄、統計檢定、AI 研究員（S4） |
+| `research/` | 研究地基（S3，已建立）：`history/`（官方長歷史抓取、快取、Parquet 資料集、除權息依表頭解析與參考價檢查、總報酬、Yahoo 交叉核對、盤後零股成交分布；CLI `python -m quant_platform.research.history`）、`costs.py`（手續費、證交稅、盤後零股成交價、券商設定檔）、`cashflow.py`（投入計畫）、`spec.py`（策略設定檔 v1 與四個基準）、`market.py`（資料載入與期間資料指紋）、`engine.py`（現金流回測）、`compare.py`（對定期定額的滾動視窗比較）、`registry.py`（試驗登錄與資料版本）、`periods.py`（期間與保留期關卡）、`statistics.py`、`significance.py`（DSR、PBO、bootstrap）、`batches.py`、`summary.py`、`forward.py`（前向模擬）、`metrics.py`、`reports.py`；CLI `python -m quant_platform.research baselines|trial|batch|trials|stats|schema`（`--broker`、`--cost-scale`、`--execution-lag`）。後續：AI 研究員（S4-W04） |
+| `application/notifications.py` | LINE Messaging API push、去重與傳送紀錄、訊息內容（S5-W07；設定 `docs/line-notifications.md`） |
 | `decision/` | 投資計畫、決策引擎、委託單、帳務與影子帳戶 |
 | `dashboard/v2.py`、`dashboard/templates/v2/`、`static/css/v2.css` | 新介面：今日、持倉、計畫、研究、系統（含專案資訊，直接讀 docs 原始檔）；電腦／iPad／手機三種版面、深色預設（S2-W03 第二版） |
 | `application/database_backup.py`、`scripts/database_backup.py` | 每日線上備份、保留 7 份、狀態與還原演練（S2-W05） |

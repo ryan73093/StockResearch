@@ -19,6 +19,7 @@ from quant_platform.application.close_availability import SOURCES as CLOSE_SOURC
 from quant_platform.application.actual_account import FLOW_KINDS, ActualAccountError
 from quant_platform.application.investment_plan import InvestmentPlanError, strategy_name
 from quant_platform.application.plan_decision import clamped_date
+from quant_platform.research.costs import BROKERS
 from quant_platform.research.spec import BASELINES
 from quant_platform.application.close_availability import recent_table
 from quant_platform.config.settings import PAUSABLE_MODULES
@@ -67,6 +68,7 @@ MAINTENANCE_JOBS = (
     (time(2, 30), "預測封存", "每日；舊實驗預測移到 Parquet"),
     (time(3, 0), "資料庫備份", "每日；保留最近 7 份"),
     (time(13, 30), "收盤資料時效實測", "交易日每分鐘到 14:45；記錄各來源公布時間"),
+    (time(13, 45), "LINE 投入日建議", "投入日每 5 分鐘到 14:25，收盤到了就發一則；14:15 仍缺資料時提醒"),
     (time(15, 15), "研究資料補抓", "交易日；長歷史資料只補當月、除權息只補今年"),
     (time(15, 30), "前向模擬紀錄", "交易日；追蹤中的策略當日狀態只追加不改寫"),
 )
@@ -248,6 +250,25 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             ),
         }
 
+    def line_tile() -> dict[str, str]:
+        status = dependencies.notification_service.status()
+        if not status["configured"]:
+            return {"label": "LINE 通知", "state": "未設定", "badge": "",
+                    "detail": "在 .env 填 LINE_CHANNEL_ACCESS_TOKEN 與 LINE_TO（見說明文件）"}
+        if not status["enabled"]:
+            return {"label": "LINE 通知", "state": "已關閉", "badge": "badge--warn", "detail": "LINE_ENABLED=false"}
+        last = status["last"]
+        if last is None:
+            return {"label": "LINE 通知", "state": "已啟用", "badge": "badge--ok", "detail": "尚未傳送過；可按下方測試"}
+        failed = last.status != "sent"
+        return {
+            "label": "LINE 通知",
+            "state": "最近一則失敗" if failed else "已啟用",
+            "badge": "badge--bad" if failed else "badge--ok",
+            "detail": f"最近 {_taipei_text(last.attempted_at)}・{last.subject.split('｜', 1)[-1]}"
+            + (f"：{last.error[:60]}" if failed and last.error else ""),
+        }
+
     def research_tile() -> dict[str, str]:
         base = _instance_dir(dependencies.settings.database_url) / "research" / "history"
         manifest_path = base / "manifest.json"
@@ -387,6 +408,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             names=names,
             code_names={symbol.split(".")[0]: name for symbol, name in names.items()},
             flow_kinds=FLOW_KINDS,
+            brokers=list(BROKERS.values()),
+            broker_names={key: profile.name for key, profile in BROKERS.items()},
+            default_broker=dependencies.actual_account_service.default_broker(),
             error=error,
             form=form or {},
             today_iso=datetime.now(TAIPEI).date().isoformat(),
@@ -450,6 +474,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "horizon_years": str(current.horizon_years or "") if current else "",
             "goal": current.goal if current else "",
             "note": "",
+            "broker": current.broker if current else "conservative",
         }
         reports_dir = _instance_dir(dependencies.settings.database_url) / "research" / "reports"
         research = {
@@ -464,6 +489,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             history=service.history(),
             strategies=[(key, spec.name, spec.description) for key, spec in BASELINES.items()],
             strategy_names={key: spec.name for key, spec in BASELINES.items()},
+            brokers=list(BROKERS.values()),
+            broker_names={key: profile.name for key, profile in BROKERS.items()},
+            current_broker=BROKERS.get(current.broker) if current else None,
             values={**defaults, **form},
             error=error,
             research=research,
@@ -475,6 +503,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         reports_dir = research_dir / "reports"
         ranking = trial_ranking(research_dir / "trials.jsonl", "development")
         stats = latest_stats(research_dir / "stats", "development")
+        if stats and str(stats.get("basis") or "")[:12] != ranking.get("basis"):
+            stats = None  # computed on another data basis than the ranked trials
         best_dsr = None
         if stats and stats.get("candidates"):
             best = max(stats["candidates"], key=lambda item: item["dsr"]["deflated_sharpe"] or 0)
@@ -534,6 +564,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         })
         items.append(backup_tile(now))
         items.append(research_tile())
+        items.append(line_tile())
         access_on = dependencies.settings.auth_mode == "cloudflare-access"
         items.append({
             "label": "外網發布",
@@ -583,7 +614,24 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             close_rows=recent_table(dependencies.close_availability),
             checked_at=_taipei_text(now),
             doc_tabs=[(key, label) for key, (label, _) in DOCS.items()],
+            line_enabled=dependencies.notification_service.enabled,
         )
+
+    @blueprint.post("/system/line-test")
+    def system_line_test():
+        now = datetime.now(TAIPEI)
+        status = dependencies.notification_service.send(
+            f"test:{now:%Y%m%d%H%M%S}", "測試訊息",
+            f"【盤後決策台】測試訊息 {now:%Y-%m-%d %H:%M}\n收到這則代表 LINE 通知設定可用。", once=False,
+        )
+        messages = {
+            "sent": ("已傳送測試訊息，請查看 LINE。", "success"),
+            "disabled": ("LINE 通知尚未設定或未啟用。", "error"),
+            "failed": ("傳送失敗，原因見「LINE 通知」狀態。", "error"),
+        }
+        text, category = messages.get(status, (status, "error"))
+        flash(text, category)
+        return redirect(url_for("v2.system"))
 
     @blueprint.get("/system/docs/<key>")
     def system_doc(key: str):

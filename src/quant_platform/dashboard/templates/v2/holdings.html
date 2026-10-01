@@ -89,6 +89,7 @@
         <label>金額（元）<input name="amount" inputmode="decimal" value="{{ f.get('amount', '') }}" required></label>
         <label>股利來源代號（選填）<input name="symbol" value="{{ f.get('symbol', '') }}" placeholder="0050"></label>
       </div>
+      <label>券商帳戶<select name="broker">{% for broker in brokers %}<option value="{{ broker.key }}" {{ 'selected' if f.get('broker', default_broker) == broker.key else '' }}>{{ '未指定' if broker.key == 'conservative' else broker.name }}</option>{% endfor %}</select></label>
       <label>備註（選填）<input name="note" maxlength="500" value="{{ f.get('note', '') }}"></label>
       <div class="actions-row"><button class="btn btn--primary" type="submit">記錄</button></div>
     </form>
@@ -108,7 +109,8 @@
         <label>成交價（元）<input name="price" inputmode="decimal" value="{{ t.get('price', '') }}" required></label>
       </div>
       <div class="form__row">
-        <label>手續費（元，空白自動估）<input name="fee" inputmode="numeric" value="{{ t.get('fee', '') }}"></label>
+        <label>券商<select name="broker">{% for broker in brokers %}<option value="{{ broker.key }}" {{ 'selected' if t.get('broker', default_broker) == broker.key else '' }}>{{ '未指定（保守估計）' if broker.key == 'conservative' else broker.name }}</option>{% endfor %}</select></label>
+        <label>手續費（元，空白依券商估）<input name="fee" inputmode="numeric" value="{{ t.get('fee', '') }}"></label>
         <label>證交稅（元，空白自動估）<input name="tax" inputmode="numeric" value="{{ t.get('tax', '') }}"></label>
       </div>
       <label>備註（選填）<input name="note" maxlength="500" value="{{ t.get('note', '') }}"></label>
@@ -127,7 +129,7 @@
       {% for flow in actual.flows|reverse %}
         <tr>
           <td data-primary><strong>{{ flow.day }}</strong><span class="muted small">{{ flow_kinds[flow.kind] }}{% if flow.symbol %} {{ flow.symbol }}{% endif %}</span></td>
-          <td class="table-only">{{ flow_kinds[flow.kind] }}{% if flow.symbol %} {{ flow.symbol }}{% endif %}{% if flow.note %}・{{ flow.note }}{% endif %}</td>
+          <td class="table-only">{{ flow_kinds[flow.kind] }}{% if flow.symbol %} {{ flow.symbol }}{% endif %}{% if flow.broker and flow.broker != 'conservative' %}・{{ broker_names.get(flow.broker, flow.broker) }}{% endif %}{% if flow.note %}・{{ flow.note }}{% endif %}</td>
           <td class="num" data-label="金額">{{ '{:+,.0f}'.format(-flow.amount if flow.kind == 'withdrawal' else flow.amount) }}</td>
           <td data-label="作廢" data-wide><form method="post" action="/holdings/void" class="void-form"><input type="hidden" name="kind" value="cash"><input type="hidden" name="id" value="{{ flow.id }}"><input name="reason" placeholder="作廢原因" required><button class="btn" type="submit">作廢</button></form></td>
         </tr>
@@ -135,7 +137,7 @@
       {% for trade in actual.trades|reverse %}
         <tr>
           <td data-primary><strong>{{ trade.day }}</strong><span class="badge {{ 'badge--buy' if trade.side == 'BUY' else 'badge--sell' }}">{{ '買進' if trade.side == 'BUY' else '賣出' }}</span></td>
-          <td class="table-only">{{ trade.symbol }} {{ '{:,}'.format(trade.shares) }} 股 × {{ '{:,.2f}'.format(trade.price) }}（費 {{ trade.fee }}、稅 {{ trade.tax }}）</td>
+          <td class="table-only">{{ trade.symbol }} {{ '{:,}'.format(trade.shares) }} 股 × {{ '{:,.2f}'.format(trade.price) }}（費 {{ trade.fee }}、稅 {{ trade.tax }}{% if trade.broker and trade.broker != 'conservative' %}・{{ broker_names.get(trade.broker, trade.broker) }}{% endif %}）</td>
           <td class="num" data-label="金額">{{ '{:+,.0f}'.format(-(trade.shares * trade.price) - trade.fee if trade.side == 'BUY' else trade.shares * trade.price - trade.fee - trade.tax) }}</td>
           <td data-label="作廢" data-wide><form method="post" action="/holdings/void" class="void-form"><input type="hidden" name="kind" value="trade"><input type="hidden" name="id" value="{{ trade.id }}"><input name="reason" placeholder="作廢原因" required><button class="btn" type="submit">作廢</button></form></td>
         </tr>

@@ -5,8 +5,10 @@ import pytest
 
 from quant_platform.research.history.actions import (
     CorporateAction,
+    actions_from_ex_rights,
     build_actions,
     nice_ratio,
+    reference_mismatches,
     splits_from_markers,
     total_return,
 )
@@ -15,7 +17,9 @@ from quant_platform.research.history.crosscheck import compare_total_return
 from quant_platform.research.history.dataset import read_series, write_parquet
 from quant_platform.research.history.official import (
     DailyRow,
+    ExRightsLayoutError,
     OfficialHistoryClient,
+    parse_tpex_ex_rights,
     parse_twse_ex_rights,
     roc_long_date,
 )
@@ -48,6 +52,63 @@ def test_ex_rights_rows_become_cash_dividends():
     assert roc_long_date("94年05月19日") == date(2005, 5, 19)
     assert events[0].day == date(2005, 5, 19) and events[0].cash == 1.85 and events[0].kind == "息"
     assert parse_twse_ex_rights({"stat": "OK", "data": [EX_RIGHTS_ROW]}, {"0056"}) == []
+
+
+# TWT49U from 2009 on: 權值 and 息值 are gone, only 權值+息值 and the 權/息 flag remain.
+SHORT_FIELDS = [
+    "資料日期", "股票代號", "股票名稱", "除權息前收盤價", "除權息參考價", "權值+息值", "權/息", "漲停價格",
+    "跌停價格", "開盤競價基準", "減除股利參考價", "詳細資料", "最近一次申報資料 季別/日期",
+    "最近一次申報每股 (單位)淨值", "最近一次申報每股 (單位)盈餘",
+]
+SHORT_ROW = [
+    "99年10月25日", "0050", "元大台灣50", "57.10", "54.90", "2.200000", "息", "58.70", "51.10",
+    "54.90", "54.90", "0050,20101025", "", "", "",
+]
+
+
+def test_short_twt49u_layout_is_read_by_header():
+    """The 2010 0050 dividend of 2.20 is cash, not a 4% stock dividend (the bug before this fix)."""
+    events = parse_twse_ex_rights({"stat": "OK", "fields": SHORT_FIELDS, "data": [SHORT_ROW]}, {"0050"})
+
+    assert len(events) == 1
+    event = events[0]
+    assert (event.day, event.cash, event.rights_value) == (date(2010, 10, 25), 2.2, 0.0)
+    actions = actions_from_ex_rights(events)
+    assert [(item.kind, item.cash) for item in actions] == [("cash_dividend", 2.2)]
+    assert reference_mismatches(actions) == []
+    # A cached payload without "fields" is recognised by its row length.
+    assert parse_twse_ex_rights({"stat": "OK", "data": [SHORT_ROW]}, {"0050"})[0].cash == 2.2
+
+
+def test_short_layout_stock_only_and_combined_rows():
+    stock_row = [*SHORT_ROW[:5], "1.000000", "權", *SHORT_ROW[7:]]
+    events = parse_twse_ex_rights({"stat": "OK", "fields": SHORT_FIELDS, "data": [stock_row]}, {"0050"})
+    assert (events[0].rights_value, events[0].cash) == (1.0, 0.0)
+
+    combined = [*SHORT_ROW[:5], "3.200000", "權息", *SHORT_ROW[7:]]
+    with pytest.raises(ExRightsLayoutError, match="同時除權與除息"):
+        parse_twse_ex_rights({"stat": "OK", "fields": SHORT_FIELDS, "data": [combined]}, {"0050"})
+    with pytest.raises(ExRightsLayoutError, match="表頭"):
+        parse_twse_ex_rights({"stat": "OK", "fields": ["日期", "代號"], "data": [SHORT_ROW]}, {"0050"})
+
+
+def test_tpex_rounding_residue_in_rights_column_is_ignored():
+    fields = ["除權息日期", "代號", "名稱", "除權息前收盤價", "除權息參考價", "權值", "息值", "權值+息值", "權/息",
+              "漲停價", "跌停價", "開始交易基準價", "減除股利參考價", "現金股利"]
+    row = ["107/11/22", "00679B", "元大美債20年", "36.70", "36.46", "-0.01", "0.24500000", "0.24", "除息",
+           "9999.95", "0.01", "36.46", "36.46", "0.24500000"]
+
+    events = parse_tpex_ex_rights({"stat": "ok", "tables": [{"fields": fields, "data": [row]}]}, {"00679B"})
+
+    assert (events[0].day, events[0].cash, events[0].rights_value) == (date(2018, 11, 22), 0.245, 0.0)
+    assert [item.kind for item in actions_from_ex_rights(events)] == ["cash_dividend"]
+
+
+def test_reference_mismatch_flags_a_misread_column():
+    good = CorporateAction(date(2010, 10, 25), "0050", "cash_dividend", cash=2.2, pre_close=57.10, reference=54.90)
+    wrong = CorporateAction(date(2011, 7, 26), "0050", "cash_dividend", cash=0.0, pre_close=59.0, reference=57.05)
+
+    assert [item["date"] for item in reference_mismatches([good, wrong])] == ["2011-07-26"]
 
 
 def test_total_return_reinvests_cash_and_multiplies_units_on_splits():
@@ -134,3 +195,37 @@ def test_build_actions_writes_total_return_files(tmp_path):
     tr = read_series(tmp_path / "total_return" / "0050.parquet")
     assert tr[1]["total_return_index"] == pytest.approx(100 * (45.00 + 1.85) / 46.69)
     assert (tmp_path / "actions.json").is_file()
+
+
+def test_yahoo_dividend_check_divides_pre_split_dividends_by_the_split(tmp_path):
+    """Yahoo shows 0050's 2025-01-17 dividend of 2.70 as 0.675 after the 1→4 split."""
+    catalog = (HistorySeries("0050", "元大台灣50", "twse_etf", date(2025, 1, 1), "0050.TW"),)
+    write_parquet(
+        [
+            DailyRow(date(2025, 1, 16), 200.0, 200.0, 199.0, 199.4, source="test"),
+            DailyRow(date(2025, 1, 17), 197.0, 198.0, 196.0, 197.0, source="test"),
+            DailyRow(date(2025, 6, 10), 188.0, 189.0, 187.0, 188.0, source="test"),
+            DailyRow(date(2025, 6, 18), 47.0, 47.8, 46.9, 47.6, note="**", source="test"),
+        ],
+        tmp_path / "daily" / "0050.parquet",
+    )
+    row = [*SHORT_ROW[:5], "2.700000", "息", *SHORT_ROW[7:]]
+    row[0], row[3], row[4] = "114年01月17日", "199.40", "196.70"
+
+    def exchange(url, data=None):
+        return {"stat": "OK", "fields": SHORT_FIELDS, "data": [row] if "2025" in url else []}
+
+    def yahoo(url):
+        stamp = int(datetime(2025, 1, 17, 9, 0, tzinfo=TAIPEI).timestamp())
+        return {"chart": {"result": [{"events": {"dividends": {str(stamp): {"date": stamp, "amount": 0.675}}}}]}}
+
+    client = OfficialHistoryClient(
+        tmp_path / "raw", fetch_json=exchange, min_interval=0, today=lambda: date(2025, 12, 31),
+        sleep=lambda _seconds: None,
+    )
+    report = build_actions(tmp_path, client, catalog, yahoo_fetch=yahoo, today=lambda: date(2025, 12, 31))
+
+    entry = report["series"]["0050"]
+    assert entry["splits"] == [{"date": "2025-06-18", "ratio": 4.0}]
+    assert entry["yahoo_dividend_check"]["amount_mismatches"] == []
+    assert entry["reference_mismatches"] == []

@@ -25,6 +25,7 @@
       </div>
       <dl class="facts" style="margin-top:14px">
         <div><dt>採用策略</dt><dd>{{ current_strategy }}</dd></div>
+        {% if current_broker %}<div><dt>券商（手續費估算）</dt><dd>{{ current_broker.name }}・{{ '不打折' if current_broker.fee_discount >= 1 else '{:g} 折'.format(current_broker.fee_discount * 10) }}、每筆最低 {{ current_broker.minimum_fee }} 元{% if not current_broker.confirmed and current_broker.key != 'conservative' %} <span class="badge">待確認</span>{% endif %}</dd></div>{% endif %}
         {% if current.goal %}<div><dt>目標</dt><dd>{{ current.goal }}</dd></div>{% endif %}
         {% if current.note %}<div><dt>備註</dt><dd>{{ current.note }}</dd></div>{% endif %}
       </dl>
@@ -57,6 +58,18 @@
             </label>
           {% endfor %}
         </fieldset>
+        <fieldset class="form__choices">
+          <legend>券商（用來估算手續費與委託股數）</legend>
+          {% for broker in brokers %}
+            <label class="choice">
+              <input type="radio" name="broker" value="{{ broker.key }}" {{ 'checked' if values.broker == broker.key else '' }}>
+              <span><strong>{{ broker.name }}{% if not broker.confirmed and broker.key != 'conservative' %} <span class="badge">待確認</span>{% endif %}</strong>
+                <small>{{ '不打折' if broker.fee_discount >= 1 else '{:g} 折'.format(broker.fee_discount * 10) }}、每筆最低 {{ broker.minimum_fee }} 元{% if broker.rebate not in ('—', '') %}・折讓：{{ broker.rebate }}{% endif %}</small>
+                <small>{{ broker.note }}</small>
+              </span>
+            </label>
+          {% endfor %}
+        </fieldset>
         <div class="form__row">
           <label>可承受的最大回撤（%，5～80）<input name="max_drawdown_tolerance" inputmode="decimal" value="{{ values.max_drawdown_tolerance }}" required></label>
           <label>預計投資年數（選填）<input name="horizon_years" inputmode="numeric" value="{{ values.horizon_years }}"></label>
@@ -77,7 +90,7 @@
           <li>
             <span class="timeline__time">v{{ item.version }}</span>
             <span class="timeline__text"><strong>{{ '{:,.0f}'.format(item.monthly_amount) }} 元／月・每月 {{ item.salary_day }} 日</strong>
-              <span>{{ strategy_names.get(item.strategy_key, item.strategy_key) }}・回撤 {{ '{:.0%}'.format(item.max_drawdown_tolerance) }}・{{ item.created_at.astimezone(taipei).strftime('%Y-%m-%d') }}{% if item.note %}・{{ item.note }}{% endif %}</span></span>
+              <span>{{ strategy_names.get(item.strategy_key, item.strategy_key) }}・{{ broker_names.get(item.broker, item.broker) }}・回撤 {{ '{:.0%}'.format(item.max_drawdown_tolerance) }}・{{ item.created_at.astimezone(taipei).strftime('%Y-%m-%d') }}{% if item.note %}・{{ item.note }}{% endif %}</span></span>
           </li>
         {% endfor %}
       </ul>

@@ -56,6 +56,10 @@
     {% if paused_modules %}
       <p class="note">每日流程已暫停（需求 §13）：{{ paused_modules|join('、') }}。</p>
     {% endif %}
+    <form method="post" action="/system/line-test" class="actions-row" style="margin-top:12px">
+      <button class="btn" type="submit" {{ '' if line_enabled else 'disabled' }}>傳送 LINE 測試訊息</button>
+      <span class="muted small">{{ '投入日收盤後自動傳送委託建議；流程或備份失敗也會通知' if line_enabled else 'LINE 尚未設定（.env 的 LINE_* 三項）' }}</span>
+    </form>
   </section>
 </div>
 

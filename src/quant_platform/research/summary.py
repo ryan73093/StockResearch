@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from quant_platform.research.registry import TrialRegistry
+from quant_platform.research.registry import TrialRegistry, current_basis
 
 WIN_RATIO_GATE = 0.60
 DSR_GATE = 0.95
@@ -37,12 +37,11 @@ def passes_development_gate(record) -> bool:
 
 
 def round_summary(registry_path: str | Path, period: str, stats: dict | None) -> dict[str, object] | None:
-    records = [
-        record for record in TrialRegistry(registry_path).records()
-        if record.kind == "candidate" and record.period == period
-    ]
+    records, older = current_basis(TrialRegistry(registry_path).records(), period)
     if not records:
         return None
+    if stats and stats.get("basis") != records[0].data_fingerprint:
+        stats = None  # computed on another data basis; the verdict waits for a new run
     groups: dict[str, list] = {}
     for record in records:
         groups.setdefault(_direction(record.spec_name), []).append(record)
@@ -67,11 +66,12 @@ def round_summary(registry_path: str | Path, period: str, stats: dict | None) ->
         values = [item["dsr"]["deflated_sharpe"] for item in stats.get("candidates") or [] if item["dsr"]["deflated_sharpe"] == item["dsr"]["deflated_sharpe"]]
         best_dsr = max(values) if values else None
         pbo = (stats.get("pbo") or {}).get("pbo")
+    attempts = (stats or {}).get("trials") or len(records) + len(older)
     reasons = []
     if not passing:
         reasons.append(f"沒有設定在開發期同時達到 3 年勝率 ≥ {WIN_RATIO_GATE:.0%} 且中位超額 > 0")
     if best_dsr is not None and best_dsr < DSR_GATE:
-        reasons.append(f"扣除 {len(records)} 次試驗的多重檢定後，最佳 DSR {best_dsr:.2f} 未達 {DSR_GATE}")
+        reasons.append(f"扣除 {attempts} 次試驗的多重檢定後，最佳 DSR {best_dsr:.2f} 未達 {DSR_GATE}")
     if pbo is not None and pbo > PBO_GATE:
         reasons.append(f"過度擬合機率 PBO {pbo:.0%} 高於 {PBO_GATE:.0%}")
     if stats is None:
@@ -83,6 +83,8 @@ def round_summary(registry_path: str | Path, period: str, stats: dict | None) ->
     return {
         "period": period,
         "trials": len(records),
+        "older_trials": len(older),
+        "attempts": attempts,
         "passing": len(passing),
         "rows": rows,
         "best_dsr": best_dsr,

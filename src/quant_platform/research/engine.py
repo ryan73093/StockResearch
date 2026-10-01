@@ -31,7 +31,9 @@ from quant_platform.research.market import MarketData
 from quant_platform.research.metrics import annualized, max_drawdown, unit_values, xirr
 from quant_platform.research.spec import StrategySpec
 
-ENGINE_VERSION = "1.1.0"  # 1.1.0: orders postponed past no-trade sessions; explicit contributions
+# 1.1.0: orders postponed past no-trade sessions; explicit contributions
+# 1.2.0: the input hash covers only the data up to the simulation's end (MarketData.fingerprint_until)
+ENGINE_VERSION = "1.2.0"
 DRAWDOWN_LOOKBACK = 252
 
 
@@ -137,7 +139,7 @@ def input_hash(
         "plan": plan.as_dict(),
         "contributions": [[day.isoformat(), amount] for day, amount in contributions or []],
         "costs": costs.as_dict(),
-        "data": market.fingerprint,
+        "data": market.fingerprint_until(end),
         "start": start.isoformat(),
         "end": end.isoformat(),
         "dividend_lag_days": dividend_lag_days,

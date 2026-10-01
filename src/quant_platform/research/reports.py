@@ -29,11 +29,11 @@ def latest_reports(directory: str | Path, limit: int = 10) -> list[dict[str, obj
 
 
 def trial_ranking(registry_path: str | Path, period: str, limit: int = 10) -> dict[str, object]:
-    """Candidate trials of one period ranked by the 3-year median excess."""
-    from quant_platform.research.registry import TrialRegistry
+    """Candidate trials of one period on the current data basis, ranked by the 3-year median excess."""
+    from quant_platform.research.registry import TrialRegistry, current_basis
 
     registry = TrialRegistry(registry_path)
-    records = [record for record in registry.records() if record.kind == "candidate" and record.period == period]
+    records, older = current_basis(registry.records(), period)
 
     def score(record) -> float:
         window = (record.metrics.get("windows") or {}).get("3y") or {}
@@ -45,6 +45,8 @@ def trial_ranking(registry_path: str | Path, period: str, limit: int = 10) -> di
         "period": period,
         "period_label": PERIOD_LABELS.get(period, period),
         "total": len(records),
+        "older": len(older),
+        "basis": records[0].data_fingerprint[:12] if records else None,
         "rows": [
             {
                 "trial_id": record.trial_id,

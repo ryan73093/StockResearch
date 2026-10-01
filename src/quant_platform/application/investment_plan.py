@@ -1,10 +1,11 @@
 """Investment plan with versions (S5-W01).
 
 The plan says how much money arrives each month, on which day, which
-strategy the daily advice follows and how deep a drawdown the investor
-accepts. Every save creates a new version; decisions will cite the version
-they used (S5-W02). Only built-in baselines can be chosen until candidates
-are promoted through S4-W06.
+strategy the daily advice follows, how deep a drawdown the investor accepts
+and which broker's fees apply (research/costs.py BROKERS). Every save
+creates a new version; decisions cite the version they used (S5-W02). Only
+built-in baselines can be chosen until candidates are promoted through
+S4-W06.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
 from quant_platform.domain.entities import InvestmentPlan
+from quant_platform.research.costs import BROKERS
 from quant_platform.research.spec import BASELINES
 
 
@@ -71,6 +73,9 @@ def parse_plan_form(form: dict[str, str]) -> dict[str, object]:
     strategy_key = str(form.get("strategy_key", "")).strip()
     if strategy_key not in BASELINES:
         raise InvestmentPlanError("請在「採用策略」選一個策略")
+    broker = str(form.get("broker", "") or "conservative").strip()
+    if broker not in BROKERS:
+        raise InvestmentPlanError("請在「券商」選國泰、台新或保守估計")
     try:
         drawdown = float(_clean(form.get("max_drawdown_tolerance", ""), "%")) / 100
     except ValueError as exc:
@@ -94,6 +99,7 @@ def parse_plan_form(form: dict[str, str]) -> dict[str, object]:
         "horizon_years": horizon,
         "goal": str(form.get("goal", "")).strip()[:200],
         "note": str(form.get("note", "")).strip()[:1000],
+        "broker": broker,
     }
 
 

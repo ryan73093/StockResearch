@@ -37,6 +37,14 @@ class ResearchGateError(PermissionError):
     """The research rules do not allow this evaluation."""
 
 
+def period_basis(market: MarketData, period: str) -> str:
+    """The data fingerprint a trial of ``period`` records: the data up to the
+    period's last session (compare_to_benchmark ``data_fingerprint``)."""
+    _start, end = PERIODS[period]
+    sessions = [day for day in market.sessions if end is None or day <= end]
+    return market.fingerprint_until(sessions[-1])
+
+
 @dataclass(frozen=True)
 class TrialOutcome:
     record: TrialRecord

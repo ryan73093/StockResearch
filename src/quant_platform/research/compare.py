@@ -118,7 +118,9 @@ def compare_to_benchmark(
         },
         "plan": plan.as_dict(),
         "costs": costs.as_dict(),
-        "data_fingerprint": market.fingerprint,
+        # The data this comparison could see; unchanged by rows added after its end.
+        "data_fingerprint": market.fingerprint_until(strategy_run.end),
+        "dataset_fingerprint": market.fingerprint,
         "dividend_lag_days": dividend_lag_days,
         "execution_lag": execution_lag,
         "strategy_output_hash": strategy_run.output_hash,

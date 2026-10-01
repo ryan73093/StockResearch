@@ -3601,6 +3601,7 @@ class SqlAlchemyInvestmentPlanRepository:
             monthly_amount=Decimal(row.monthly_amount), salary_day=row.salary_day,
             strategy_key=row.strategy_key, max_drawdown_tolerance=row.max_drawdown_tolerance,
             goal=row.goal or "", horizon_years=row.horizon_years, note=row.note or "",
+            broker=row.broker or "conservative",
         )
 
     def latest(self) -> InvestmentPlan | None:
@@ -3636,7 +3637,7 @@ class SqlAlchemyActualAccountRepository:
     def _flow(row: ActualCashFlowModel) -> ActualCashFlow:
         return ActualCashFlow(
             id=row.id, day=row.day, kind=row.kind, amount=Decimal(row.amount), symbol=row.symbol or "",
-            note=row.note or "", voided=row.voided_at is not None,
+            note=row.note or "", voided=row.voided_at is not None, broker=row.broker or "",
         )
 
     @staticmethod
@@ -3644,14 +3645,14 @@ class SqlAlchemyActualAccountRepository:
         return ActualTrade(
             id=row.id, day=row.day, symbol=row.symbol, side=row.side, shares=int(row.shares),
             price=Decimal(row.price), fee=int(row.fee), tax=int(row.tax), note=row.note or "",
-            voided=row.voided_at is not None,
+            voided=row.voided_at is not None, broker=row.broker or "",
         )
 
     def add_cash_flow(self, value: ActualCashFlow, created_at: datetime) -> ActualCashFlow:
         with self._session_factory() as session:
             row = ActualCashFlowModel(
                 day=value.day, kind=value.kind, amount=value.amount, symbol=value.symbol,
-                note=value.note, created_at=created_at,
+                note=value.note, created_at=created_at, broker=value.broker,
             )
             session.add(row)
             session.commit()
@@ -3663,6 +3664,7 @@ class SqlAlchemyActualAccountRepository:
             row = ActualTradeModel(
                 day=value.day, symbol=value.symbol, side=value.side, shares=value.shares,
                 price=value.price, fee=value.fee, tax=value.tax, note=value.note, created_at=created_at,
+                broker=value.broker,
             )
             session.add(row)
             session.commit()

@@ -100,7 +100,21 @@ def run_scheduled_workflow(
     if closure is not None:
         logger.info("Skipping %s: %s market closed (%s)", job_key, market, closure)
         return None
-    return container.automation_service.execute(job_key)
+    result = container.automation_service.execute(job_key)
+    if getattr(result, "status", None) == "failed":
+        _notify_failure(container, f"workflow:{job_key}:{local_now.date()}", f"每日資料流程（{market}）", result.error)
+    return result
+
+
+def _notify_failure(container: "Container", key: str, what: str, error: str | None) -> None:
+    from quant_platform.application.notifications import failure_text
+
+    try:
+        container.notification_service.send(
+            key, f"{what}失敗", failure_text(what, error, container.settings.public_url)
+        )
+    except Exception:  # a notification problem must not hide the original failure
+        logger.exception("Failure notification %s could not be sent", key)
 
 
 def refresh_market_calendar(container: "Container") -> object | None:
@@ -148,6 +162,11 @@ def run_startup_catch_up(
         result = container.automation_service.execute(schedule.job_key)
         if result.status in {"succeeded", "skipped_locked"}:
             executed.append(schedule.job_key)
+        elif result.status == "failed":  # the same key as the cron run: at most one message a day
+            _notify_failure(
+                container, f"workflow:{schedule.job_key}:{local_now.date()}",
+                f"每日資料流程（{schedule.market}）", result.error,
+            )
     return tuple(executed)
 
 
@@ -187,7 +206,43 @@ def backup_database(container: "Container") -> object | None:
     if container.database_backup is None:
         logger.warning("Database backup skipped: the database is not a SQLite file")
         return None
-    return container.database_backup.run()
+    try:
+        return container.database_backup.run()
+    except Exception as exc:
+        _notify_failure(container, f"backup:{datetime.now().date()}", "夜間資料庫備份", str(exc))
+        raise
+
+
+def notify_plan_advice(container: "Container", now: datetime | None = None) -> str | None:
+    """Trading days 13:45–14:25 (REQUIREMENTS §11). Invest days: push the plan's
+    orders once the close is in; at 14:15 warn once when the close is still
+    missing or no share is affordable. Other days: one "no action" summary
+    unless LINE_DAILY_SUMMARY=false."""
+    from datetime import time as clock
+
+    from quant_platform.application.notifications import idle_text, plan_advice_text, plan_problem_text
+
+    service = container.notification_service
+    if not service.enabled:
+        return None
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if not clock(13, 45) <= local_now.time() <= clock(14, 25):
+        return None
+    if _exchange_closure(container, "TW", local_now) is not None:
+        return None
+    decision = container.plan_decision_service.decide(local_now)
+    today = local_now.date()
+    public_url = container.settings.public_url
+    if decision.invest_day != today:
+        if decision.kind == "idle" and container.settings.line_daily_summary:
+            return service.send(f"daily:{today}", "今日不需操作", idle_text(decision, today, public_url))
+        return None
+    if decision.kind in {"invest", "rebalance"}:
+        return service.send(f"plan:{today}", "今日投入建議", plan_advice_text(decision, public_url))
+    if decision.kind in {"missing_data", "idle"} and local_now.time() >= clock(14, 15):
+        return service.send(f"plan-problem:{today}", "投入日提醒", plan_problem_text(decision, public_url))
+    return None
 
 
 def refresh_research_history(container: "Container", now: datetime | None = None) -> object | None:
@@ -301,6 +356,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=30,
+    )
+    scheduler.add_job(
+        notify_plan_advice,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour="13-14", minute="*/5", timezone=timezone),
+        id="line_plan_advice",
+        name="LINE 投入日建議（投入日 13:45–14:25 每 5 分鐘，每天最多一則）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=120,
     )
     scheduler.add_job(
         refresh_market_calendar,

@@ -209,6 +209,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "close_availability_probe",
             "research_history_refresh",
             "forward_simulation",
+            "line_plan_advice",
         }
     finally:
         scheduler.shutdown(wait=False)

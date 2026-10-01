@@ -20,9 +20,9 @@ from zoneinfo import ZoneInfo
 
 from quant_platform.research.batches import BATCHES
 from quant_platform.research.cashflow import ContributionPlan
-from quant_platform.research.costs import CostModel
-from quant_platform.research.market import DEFAULT_BASE, load_market
-from quant_platform.research.periods import PERIODS, ResearchGateError, run_trial
+from quant_platform.research.costs import BROKERS, broker_costs
+from quant_platform.research.market import DEFAULT_BASE, available_assets, load_market
+from quant_platform.research.periods import PERIODS, ResearchGateError, period_basis, run_trial
 from quant_platform.research.registry import TrialRegistry
 from quant_platform.research.significance import significance
 from quant_platform.research.spec import BASELINES, json_schema, load_spec
@@ -80,6 +80,7 @@ def main() -> int:
     parser.add_argument("--day", type=int, default=5)
     parser.add_argument("--windows", default="36,60")
     parser.add_argument("--cost-scale", type=float, default=1.0)
+    parser.add_argument("--broker", default="conservative", choices=tuple(BROKERS), help="券商手續費設定")
     parser.add_argument("--dividend-lag", type=int, default=25)
     parser.add_argument("--execution-lag", type=int, default=0, help="穩健性：晚幾個交易日成交")
     parser.add_argument("--base", default=str(DEFAULT_BASE))
@@ -108,9 +109,10 @@ def main() -> int:
         return 0 if not problems else 1
 
     if args.command == "stats":
-        report = significance(registry, RESEARCH / "reports", args.period)
+        basis = period_basis(load_market(available_assets(args.base), args.base), args.period)
+        report = significance(registry, RESEARCH / "reports", args.period, fingerprint=basis)
         if not report["candidates"]:
-            print(f"{args.period} 沒有候選試驗")
+            print(f"{args.period} 在目前資料版本 {basis[:12]} 沒有候選試驗（舊版 {report['older_trials']} 筆）")
             return 1
         RESEARCH.joinpath("stats").mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
@@ -124,11 +126,18 @@ def main() -> int:
             )
         if report.get("pbo"):
             print(f"PBO {report['pbo']['pbo']:.2f}（{report['pbo']['combinations']} 種切分）")
+        print(
+            f"資料版本 {basis[:12]}：目前 {report['current_trials']} 筆；舊版 {report['older_trials']} 筆不列入，"
+            f"但計入多重檢定試驗數 {report['trials']}"
+        )
         print(f"報告：{path}")
         return 0
 
     plan = ContributionPlan(monthly_amount=args.monthly, day_of_month=args.day)
-    costs = CostModel().scaled(args.cost_scale) if args.cost_scale != 1 else CostModel()
+    costs = broker_costs(args.broker)
+    if args.cost_scale != 1:
+        costs = costs.scaled(args.cost_scale)
+    print(f"成本：{BROKERS[args.broker].name}（{costs.fee_discount:g} 折數、最低 {costs.minimum_fee} 元、滑價 {costs.slippage_bps:g} bps）", flush=True)
     windows = tuple(int(item) for item in args.windows.split(",") if item)
     benchmark = BASELINES["benchmark_dca"]
     if args.command == "baselines":
@@ -142,9 +151,14 @@ def main() -> int:
             raise SystemExit("trial 需要 --spec")
         runs = [("candidate", load_spec(args.spec))]
     stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
+    # One market with every catalog series: all trials of a period then record
+    # the same data fingerprint (periods.period_basis).
+    market = load_market(available_assets(args.base), args.base)
     for kind, spec in runs:
-        assets = sorted(set(spec.assets) | {spec.signal} | set(benchmark.assets))
-        market = load_market(assets, args.base)
+        missing = sorted((set(spec.assets) | {spec.signal} | set(benchmark.assets)) - set(market.closes))
+        if missing:
+            print(f"{spec.name}：缺少資料 {', '.join(missing)}", file=sys.stderr)
+            return 3
         try:
             outcome = run_trial(
                 kind=kind, spec=spec, period=args.period, market=market, plan=plan,

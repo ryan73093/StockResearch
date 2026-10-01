@@ -27,6 +27,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from quant_platform.research.history.catalog import SERIES, HistorySeries
+from quant_platform.research.history.crosscheck import split_factor
 from quant_platform.research.history.dataset import read_series, sha256
 from quant_platform.research.history.official import (
     OfficialHistoryClient,
@@ -96,6 +97,30 @@ def actions_from_ex_rights(events) -> list[CorporateAction]:
                 event.day, event.code, "stock_dividend", ratio=round(ratio, 6),
                 pre_close=event.pre_close, reference=event.reference, source=event.source,
             ))
+    return output
+
+
+def reference_mismatches(actions: list[CorporateAction]) -> list[dict[str, object]]:
+    """Cash-only ex-dates where pre-ex close − cash is more than a tick from the reference price.
+
+    The exchange computes the reference price that way and rounds it to the
+    tick (ETF: 0.01 below 50, 0.05 from 50), so a gap above one tick means the
+    row was read from the wrong column.
+    """
+    stock_days = {action.day for action in actions if action.kind == "stock_dividend"}
+    output = []
+    for action in actions:
+        if action.kind != "cash_dividend" or action.day in stock_days:
+            continue
+        if action.pre_close is None or action.reference is None:
+            continue
+        tick = 0.01 if action.reference < 50 else 0.05
+        gap = action.pre_close - action.cash - action.reference
+        if abs(gap) > tick + 1e-9:
+            output.append({
+                "date": action.day.isoformat(), "pre_close": action.pre_close, "cash": action.cash,
+                "reference": action.reference, "gap": round(gap, 6),
+            })
     return output
 
 
@@ -192,11 +217,16 @@ def build_actions(
         actions.sort(key=lambda action: (action.day, action.kind))
         yahoo_check = None
         if item.yahoo and yahoo_fetch is not None:
-            # Cross-check only: official and Yahoo cash dividends by ex-date.
+            # Cross-check only: official and Yahoo cash dividends by ex-date. Yahoo
+            # states dividends before a split per post-split unit (0050: 2.20 → 0.55).
             yahoo = dict(yahoo_dividends(
                 item.yahoo, rows[0]["date"], rows[-1]["date"] + timedelta(days=1), yahoo_fetch
             ))
-            official = {action.day: action.cash for action in actions if action.kind == "cash_dividend"}
+            splits = [(action.day, action.ratio) for action in actions if action.kind == "split"]
+            official = {
+                action.day: action.cash / split_factor(action.day, splits)
+                for action in actions if action.kind == "cash_dividend"
+            }
             yahoo_check = {
                 "official_events": len(official),
                 "yahoo_events": len(yahoo),
@@ -227,6 +257,7 @@ def build_actions(
                 for action in actions if action.kind == "split"
             ],
             "stock_dividends": sum(1 for action in actions if action.kind == "stock_dividend"),
+            "reference_mismatches": reference_mismatches(actions),
             "sources": sorted({action.source for action in actions}),
             "total_return_cagr": round(growth ** (1 / years) - 1, 6) if years > 0 else None,
             "price_only_cagr_unadjusted": round(price_growth ** (1 / years) - 1, 6) if years > 0 else None,

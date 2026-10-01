@@ -69,10 +69,13 @@ def main() -> int:
     if args.command == "crosscheck":
         report = crosscheck(base, keys=keys)
         for key, entry in report["series"].items():
+            tr = entry.get("total_return_vs_yahoo_adjclose") or {}
             print(
                 f"{key:9s} 共同 {entry['common_days']:5d} 天；僅官方 {entry['only_official']}、僅 Yahoo {entry['only_yahoo']}；"
                 f">0.5% {entry['over_0_5pct']}、>2% {entry['over_2pct']}；最大 {entry['max_relative_difference']}；"
-                f"分割 {entry['splits'] or '無'}；Yahoo 起 {entry['first_yahoo_day']}",
+                f"分割 {entry['splits'] or '無'}（{entry['split_source'] or '－'}）；"
+                f"Yahoo 未調整分割 {entry['yahoo_unadjusted_days']} 天；Yahoo 起 {entry['first_yahoo_day']}；"
+                f"總報酬對 Yahoo 還原價 {tr.get('first', '－')} 起年化漂移 {tr.get('annualized_drift', '－')}",
                 flush=True,
             )
         print(f"報告：{base / 'crosscheck.json'}")
@@ -108,10 +111,15 @@ def main() -> int:
             print(f"官方來源拒絕連線，已停止：{exc}", file=sys.stderr)
             return 2
         for key, entry in report["series"].items():
+            check = entry.get("yahoo_dividend_check") or {}
             print(
                 f"{key:7s} {entry['first']}～{entry['last']} 現金股利 {entry['cash_dividends']} 次、"
-                f"分割 {entry['splits'] or '無'}；總報酬年化 {entry['total_return_cagr']:.2%}"
-                f"（未調整價格 {entry['price_only_cagr_unadjusted']:.2%}）；來源 {', '.join(entry['sources']) or '無'}",
+                f"配股 {entry['stock_dividends']} 次、分割 {entry['splits'] or '無'}；"
+                f"總報酬年化 {entry['total_return_cagr']:.2%}"
+                f"（未調整價格 {entry['price_only_cagr_unadjusted']:.2%}）；"
+                f"參考價不符 {len(entry['reference_mismatches'])} 筆；"
+                f"Yahoo 股利 {check.get('yahoo_events', '－')} 次、金額不符 {len(check.get('amount_mismatches') or [])} 筆；"
+                f"來源 {', '.join(entry['sources']) or '無'}",
                 flush=True,
             )
         print(f"報告：{base / 'actions.json'}")

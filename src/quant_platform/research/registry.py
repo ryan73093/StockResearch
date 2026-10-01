@@ -47,6 +47,27 @@ class TrialRecord:
         return (self.kind, self.period, self.input_hash)
 
 
+def current_basis(
+    records: list[TrialRecord], period: str, kind: str = "candidate", fingerprint: str | None = None
+) -> tuple[list[TrialRecord], list[TrialRecord]]:
+    """Split one period's trials into those on the current data basis and older ones.
+
+    All trials of a period see the same data (the whole catalog up to the
+    period's end), so they share one fingerprint until the history is
+    corrected. The basis is ``fingerprint`` when given (computed from the
+    dataset), else the newest trial's. Older trials stay in the registry and
+    still count as attempts in the multiple-testing correction.
+    """
+    selected = [record for record in records if record.kind == kind and record.period == period]
+    if not selected:
+        return [], []
+    basis = fingerprint or selected[-1].data_fingerprint
+    return (
+        [record for record in selected if record.data_fingerprint == basis],
+        [record for record in selected if record.data_fingerprint != basis],
+    )
+
+
 class TrialRegistry:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)

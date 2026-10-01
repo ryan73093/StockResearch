@@ -63,7 +63,7 @@
 <section class="card{% if round_view.passing and round_view.best_dsr and round_view.best_dsr >= round_view.gates.dsr %} card--highlight{% endif %}">
   <div class="card__head">
     <h2>第一批研究結論 <span class="badge">開發期 2004–2016</span></h2>
-    <span class="muted small">{{ round_view.trials }} 個設定，全部計入多重檢定</span>
+    <span class="muted small">{% if round_view.older_trials %}目前資料版本 {{ round_view.trials }} 個設定；舊版資料的 {{ round_view.older_trials }} 筆不列入，但多重檢定以 {{ round_view.attempts }} 次計{% else %}{{ round_view.trials }} 個設定，全部計入多重檢定{% endif %}</span>
   </div>
   <p style="margin:0 0 12px"><strong>{{ round_view.verdict }}</strong></p>
   <div class="table-wrap table-wrap--stack">
@@ -121,7 +121,7 @@
 <section class="card">
   <div class="card__head">
     <h2>試驗排行 <span class="badge">{{ ranking.period_label }}</span></h2>
-    <span class="muted small">已登錄 {{ ranking.total }} 個候選試驗（含未勝出的）{% if not ranking.chain_ok %}・<span class="badge badge--bad">紀錄雜湊鏈異常</span>{% endif %}</span>
+    <span class="muted small">目前資料版本 {{ ranking.total }} 個候選試驗（含未勝出的）{% if ranking.older %}；舊版資料 {{ ranking.older }} 筆保留在紀錄中、不列入排行{% endif %}{% if not ranking.chain_ok %}・<span class="badge badge--bad">紀錄雜湊鏈異常</span>{% endif %}</span>
   </div>
   {% if stats %}
   <div class="kpis kpis--four" style="margin-bottom:14px">

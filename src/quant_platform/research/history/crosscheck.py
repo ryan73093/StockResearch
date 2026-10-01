@@ -1,9 +1,13 @@
 """Compare the official history with Yahoo (S3-W01).
 
 Yahoo's daily closes are split-adjusted while the official files keep the
-traded prices, so official closes before each Yahoo split date are scaled by
-denominator / numerator before comparing. Dividends are not adjusted on
-either side (Yahoo's ``close`` is not dividend-adjusted).
+traded prices, so official closes before each split date are scaled by
+denominator / numerator before comparing. Yahoo does not always return the
+split event (0050's 1→4 split on 2025-06-18 is adjusted in its closes but
+missing from ``events``); the splits found in the official STOCK_DAY markers
+(actions.json) are used then, and the report says which source applied.
+Dividends are not adjusted on either side (Yahoo's ``close`` is not
+dividend-adjusted).
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ def yahoo_history(
         "period1": int(datetime(start.year, start.month, start.day, tzinfo=TAIPEI).timestamp()),
         "period2": int(datetime(end.year, end.month, end.day, tzinfo=TAIPEI).timestamp()) + 86400,
         "interval": "1d",
-        "events": "split",
+        "events": "splits",
     })
     payload = fetch_json(f"{YAHOO}{quote(symbol)}?{query}")
     result = ((payload or {}).get("chart") or {}).get("result") or []
@@ -70,7 +74,7 @@ def yahoo_adjusted(
         "period1": int(datetime(start.year, start.month, start.day, tzinfo=TAIPEI).timestamp()),
         "period2": int(datetime(end.year, end.month, end.day, tzinfo=TAIPEI).timestamp()) + 86400,
         "interval": "1d",
-        "events": "div,split",
+        "events": "div,splits",
         "includeAdjustedClose": "true",
     })
     payload = fetch_json(f"{YAHOO}{quote(symbol)}?{query}")
@@ -119,17 +123,32 @@ def split_factor(day: date, splits: list[tuple[date, float]]) -> float:
 def compare(
     official: dict[date, float], yahoo: dict[date, float], splits: list[tuple[date, float]]
 ) -> dict[str, object]:
+    """Day-by-day close comparison.
+
+    Yahoo is not always consistent about splits: its 0050 closes up to
+    2013-12-31 are the traded prices while later pre-split closes are divided
+    by 4. A pre-split day that matches the traded price (and not the adjusted
+    one) is compared unadjusted and counted in ``yahoo_unadjusted_days``.
+    """
     common = sorted(set(official) & set(yahoo))
     only_official = sorted(set(official) - set(yahoo))
     only_yahoo = sorted(set(yahoo) - set(official))
     differences = []
+    unadjusted = []
     for day in common:
         expected = official[day] / split_factor(day, splits)
+        if expected != official[day] and official[day]:
+            raw_gap = abs(yahoo[day] - official[day]) / official[day]
+            if raw_gap < 0.005 and raw_gap < abs(yahoo[day] - expected) / expected:
+                unadjusted.append(day)
+                expected = official[day]
         if expected:
             differences.append((abs(yahoo[day] - expected) / expected, day, expected, yahoo[day]))
     differences.sort(reverse=True)
     return {
         "common_days": len(common),
+        "yahoo_unadjusted_days": len(unadjusted),
+        "yahoo_unadjusted_range": [unadjusted[0].isoformat(), unadjusted[-1].isoformat()] if unadjusted else None,
         "only_official": len(only_official),
         "only_official_examples": [day.isoformat() for day in only_official[:10]],
         "only_yahoo": len(only_yahoo),
@@ -147,6 +166,18 @@ def compare(
     }
 
 
+def official_splits(base_dir: str | Path) -> dict[str, list[tuple[date, float]]]:
+    """Splits per series from actions.json (units after / units before)."""
+    path = Path(base_dir) / "actions.json"
+    if not path.is_file():
+        return {}
+    report = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        key: [(date.fromisoformat(item["date"]), float(item["ratio"])) for item in entry.get("splits") or []]
+        for key, entry in (report.get("series") or {}).items()
+    }
+
+
 def crosscheck(
     base_dir: str | Path,
     catalog: tuple[HistorySeries, ...] = SERIES,
@@ -159,6 +190,7 @@ def crosscheck(
         "generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"),
         "series": {},
     }
+    known_splits = official_splits(base)
     for item in catalog:
         if item.yahoo is None or (keys and item.key not in keys):
             continue
@@ -169,12 +201,19 @@ def crosscheck(
         if not official:
             continue
         yahoo, splits = yahoo_history(item.yahoo, min(official), max(official) + timedelta(days=1), fetch_json)
-        entry = {"yahoo": item.yahoo, **compare(official, yahoo, splits)}
+        split_source = "yahoo" if splits else None
+        if not splits and known_splits.get(item.key):
+            splits, split_source = known_splits[item.key], "official"
+        entry = {"yahoo": item.yahoo, "split_source": split_source, **compare(official, yahoo, splits)}
         tr_path = base / "total_return" / f"{item.key}.parquet"
         if tr_path.is_file():
             time.sleep(pause)
             tr = {row["date"]: row["total_return_index"] for row in read_series(tr_path)}
             adjusted = yahoo_adjusted(item.yahoo, min(tr), max(tr) + timedelta(days=1), fetch_json)
+            if entry["yahoo_unadjusted_range"]:
+                # Yahoo's adjusted close is as inconsistent as its close there.
+                last_unadjusted = date.fromisoformat(entry["yahoo_unadjusted_range"][1])
+                adjusted = {day: value for day, value in adjusted.items() if day > last_unadjusted}
             entry["total_return_vs_yahoo_adjclose"] = compare_total_return(tr, adjusted)
         report["series"][item.key] = entry
         time.sleep(pause)

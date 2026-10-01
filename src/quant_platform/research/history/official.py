@@ -315,35 +315,92 @@ def roc_long_date(text: object) -> date:
     return date(int(year) + 1911, int(month), int(rest.rstrip("日")))
 
 
+class ExRightsLayoutError(ValueError):
+    """An ex-rights row whose cash and stock parts cannot be told apart."""
+
+
+# Column names as the exchanges publish them. TWT49U dropped the separate
+# 權值 / 息值 columns in 2009 and only keeps 權值+息值 with the 權/息 flag;
+# TPEx still has both. Rows are read by header, never by position.
+_EX_RIGHTS_COLUMNS = {
+    "day": ("資料日期", "除權息日期"),
+    "code": ("股票代號", "代號"),
+    "pre_close": ("除權息前收盤價",),
+    "reference": ("除權息參考價",),
+    "rights": ("權值",),
+    "cash": ("息值",),
+    "total": ("權值+息值",),
+    "kind": ("權/息",),
+}
+# Fallback headers for a cached payload without "fields": 17 columns up to 2008,
+# 15 columns from 2009.
+_TWT49U_FULL = ("資料日期", "股票代號", "股票名稱", "除權息前收盤價", "除權息參考價", "權值", "息值",
+                "權值+息值", "權/息")
+_TWT49U_SHORT = ("資料日期", "股票代號", "股票名稱", "除權息前收盤價", "除權息參考價", "權值+息值", "權/息")
+
+
 def parse_twse_ex_rights(payload: object, codes: set[str]) -> list[ExRightsEvent]:
-    """TWT49U: 資料日期, 代號, 名稱, 前收, 參考價, 權值, 息值, 權值+息值, 權/息, …"""
+    """TWT49U 除權除息計算結果表, read by the payload's own header."""
     if not isinstance(payload, dict) or payload.get("stat") != "OK":
         return []
-    return _ex_rights_rows(payload.get("data") or [], codes, "twse_ex_rights")
+    rows = payload.get("data") or []
+    fields = payload.get("fields") or (
+        _TWT49U_FULL if rows and len(rows[0]) >= 17 else _TWT49U_SHORT
+    )
+    return _ex_rights_rows(fields, rows, codes, "twse_ex_rights")
 
 
 def parse_tpex_ex_rights(payload: object, codes: set[str]) -> list[ExRightsEvent]:
-    """TPEx exDailyQ: same columns as TWT49U, dates as 112/01/30."""
+    """TPEx exDailyQ: dates as 112/01/30, separate 權值 and 息值 columns."""
     if not isinstance(payload, dict) or str(payload.get("stat", "")).lower() != "ok":
         return []
-    rows = [row for table in payload.get("tables") or [] for row in (table or {}).get("data") or []]
-    return _ex_rights_rows(rows, codes, "tpex_ex_rights")
+    events = []
+    for table in payload.get("tables") or []:
+        table = table or {}
+        events += _ex_rights_rows(
+            table.get("fields") or _TWT49U_FULL, table.get("data") or [], codes, "tpex_ex_rights"
+        )
+    return events
 
 
-def _ex_rights_rows(rows: list, codes: set[str], source: str) -> list[ExRightsEvent]:
+def _ex_rights_rows(fields, rows: list, codes: set[str], source: str) -> list[ExRightsEvent]:
+    names = [str(name).strip() for name in fields]
+    column = {
+        key: next((names.index(name) for name in aliases if name in names), None)
+        for key, aliases in _EX_RIGHTS_COLUMNS.items()
+    }
+    missing = [key for key in ("day", "code", "pre_close", "reference", "kind") if column[key] is None]
+    if missing or (column["cash"] is None and column["total"] is None):
+        raise ExRightsLayoutError(f"除權息表頭無法辨識（{source}）：{names}")
     events = []
     for item in rows:
-        if not isinstance(item, list) or len(item) < 9:
+        if not isinstance(item, list) or len(item) < len(names):
             continue
-        code = str(item[1]).strip()
+        code = str(item[column["code"]]).strip()
         if code not in codes:
             continue
-        text = str(item[0])
+        text = str(item[column["day"]])
+        day = roc_long_date(text) if "年" in text else roc_date(text)
+        kind = str(item[column["kind"]]).strip()
+        stock_part, cash_part = "權" in kind, "息" in kind  # 權 / 息 / 權息, TPEx 除權 / 除息 / 除權息
+        if not (stock_part or cash_part):
+            raise ExRightsLayoutError(f"{code} {day} 的權/息欄位無法辨識：{kind!r}")
+        if column["cash"] is not None and column["rights"] is not None:
+            # The flag decides which part exists: TPEx prints rounding residue such
+            # as -0.01 in 權值 for cash-only events.
+            rights = (number(item[column["rights"]]) or 0.0) if stock_part else 0.0
+            cash = (number(item[column["cash"]]) or 0.0) if cash_part else 0.0
+        else:
+            total = number(item[column["total"]]) or 0.0
+            if stock_part and cash_part:
+                raise ExRightsLayoutError(
+                    f"{code} {day} 同時除權與除息，表格只有合計 {total}，需查明細拆分"
+                )
+            rights, cash = (total, 0.0) if stock_part else (0.0, total)
         events.append(ExRightsEvent(
-            day=roc_long_date(text) if "年" in text else roc_date(text), code=code,
-            pre_close=number(item[3]), reference=number(item[4]),
-            rights_value=number(item[5]) or 0.0, cash=number(item[6]) or 0.0,
-            kind=str(item[8]).strip(), source=source,
+            day=day, code=code, pre_close=number(item[column["pre_close"]]),
+            reference=number(item[column["reference"]]),
+            rights_value=max(rights, 0.0), cash=max(cash, 0.0), kind=kind, source=source,
         ))
     return events
 

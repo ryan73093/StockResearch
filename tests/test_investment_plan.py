@@ -101,6 +101,45 @@ def test_today_page_shows_the_plan_card(container):
     assert "依你的計畫・第 1 版" in body and "未晉級・僅供參考" in body
 
 
+def test_plan_keeps_the_broker_and_rejects_unknown_ones(container):
+    assert parse_plan_form(FORM)["broker"] == "conservative"   # not chosen: conservative costs
+    with pytest.raises(InvestmentPlanError, match="券商"):
+        parse_plan_form({**FORM, "broker": "unknown"})
+
+    saved = container.investment_plan_service.save({**FORM, "broker": "cathay"})
+    assert saved.broker == "cathay" and container.investment_plan_service.current().broker == "cathay"
+    assert container.actual_account_service.default_broker() == "cathay"
+
+    body = create_app(container).test_client().get("/plan").get_data(as_text=True)
+    assert "國泰證券" in body and "台新證券" in body and "2.8 折、每筆最低 1 元" in body and "待確認" in body
+
+
+def test_existing_plan_and_ledger_tables_get_the_broker_column(tmp_path):
+    import sqlite3
+
+    from quant_platform.database.engine import Database
+    from quant_platform.database.repositories import SqlAlchemyInvestmentPlanRepository
+
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE investment_plans (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER NOT NULL UNIQUE, "
+            "created_at DATETIME NOT NULL, monthly_amount NUMERIC(20, 2) NOT NULL, salary_day INTEGER NOT NULL, "
+            "strategy_key VARCHAR(80) NOT NULL, max_drawdown_tolerance FLOAT NOT NULL, goal VARCHAR(200) NOT NULL, "
+            "horizon_years INTEGER, note VARCHAR(1000) NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO investment_plans VALUES (1, 1, '2026-10-01 00:00:00', 10000, 5, 'benchmark_dca', 0.3, '', NULL, '')"
+        )
+    database = Database(f"sqlite:///{path}")
+    database.create_schema()
+
+    with sqlite3.connect(path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(actual_trades)")}
+    assert "broker" in columns
+    assert SqlAlchemyInvestmentPlanRepository(database.session_factory).latest().broker == "conservative"
+
+
 def test_plan_page_saves_and_shows_errors(container):
     client = create_app(container).test_client()
     assert "建立你的投資計畫" in client.get("/plan").get_data(as_text=True)

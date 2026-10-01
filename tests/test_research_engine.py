@@ -37,10 +37,31 @@ def market(closes=None, dividends=None, ratios=None, assets=("0050",)) -> Market
 
 PLAN = ContributionPlan(monthly_amount=10_000, day_of_month=5)
 DCA = BASELINES["benchmark_dca"]
+# The hand calculations below use 10 bps slippage (fills at 100.10).
+TEN_BPS = CostModel(slippage_bps=10.0)
+
+
+def test_default_costs_are_conservative_with_20_bps_slippage():
+    from quant_platform.research.costs import BROKERS, broker_costs
+
+    assert CostModel().slippage_bps == 20 and CostModel().minimum_fee == 20 and CostModel().fee_discount == 1
+    assert fill_price(100.0, "BUY", 20) == 100.20
+    assert broker_costs(None) == CostModel() and broker_costs("unknown") == CostModel()
+    cathay = broker_costs("cathay")
+    assert (cathay.fee_discount, cathay.minimum_fee) == (0.28, 1)
+    assert cathay.fee(9_919.8) == 3              # floor(9,919.8 × 0.1425% × 0.28) = floor(3.958)
+    assert cathay.fee(100) == 1                  # the odd-lot minimum
+    assert not any(profile.confirmed for profile in BROKERS.values())
+
+    result = simulate(DCA, market(), PLAN)
+    # 99 × 100.20 + 20 leaves 60.20; 100 shares next (10,060.20 − 10,040 → 20.20);
+    # 99 in March (10,020.20 − 9,939.80 → 80.40).
+    assert [trade.shares for trade in result.trades] == [99, 100, 99]
+    assert result.final_cash == pytest.approx(80.4)
 
 
 def test_costs_and_fills_follow_broker_rules():
-    costs = CostModel()
+    costs = TEN_BPS
     assert costs.fee(9_909.9) == 20            # floor(14.12) is below the minimum
     assert costs.fee(100_000) == 142           # floor(142.5)
     assert costs.tax(100_000, "stock_etf", "SELL") == 100
@@ -68,7 +89,7 @@ def test_contribution_schedule_moves_to_the_next_session():
 
 
 def test_dca_by_hand():
-    result = simulate(DCA, market(), PLAN)
+    result = simulate(DCA, market(), PLAN, costs=TEN_BPS)
 
     # 99 shares (9,909.90 + fee 20), then 100 and 100 shares with the leftovers.
     assert [trade.shares for trade in result.trades] == [99, 100, 100]
@@ -81,7 +102,7 @@ def test_dca_by_hand():
 def test_dividends_are_paid_after_the_lag_on_units_held_at_the_ex_date():
     data = market(dividends={"0050": {date(2020, 2, 10): 1.0}})
 
-    result = simulate(DCA, data, PLAN, dividend_lag_days=25)
+    result = simulate(DCA, data, PLAN, costs=TEN_BPS, dividend_lag_days=25)
 
     assert result.dividends_received == pytest.approx(199.0)   # 99 + 100 units on 02-10
     assert result.final_cash == pytest.approx(10.1 + 199.0)     # paid 03-06, after the 03-05 buy
@@ -99,10 +120,10 @@ def test_splits_multiply_units():
     closes = {"0050": {day: (100.0 if day < date(2020, 2, 10) else 25.0) for day in SESSIONS}}
     data = market(closes=closes, ratios={"0050": {date(2020, 2, 10): 4.0}})
 
-    result = simulate(DCA, data, PLAN)
+    result = simulate(DCA, data, PLAN, costs=TEN_BPS)
 
     march = result.trades[-1]
-    assert march.price == 25.03 and march.shares == affordable_shares(10_040.1, 25.03, CostModel())
+    assert march.price == 25.03 and march.shares == affordable_shares(10_040.1, 25.03, TEN_BPS)
     held = 199 * 4 + march.shares
     assert result.final_value == pytest.approx(held * 25.0 + result.final_cash)
 
@@ -125,7 +146,7 @@ def test_moving_average_sizing_keeps_a_reserve_when_prices_are_strong():
 
 def test_two_asset_allocation_uses_new_money_for_the_gaps():
     spec = BASELINES["rebalance_80_20"]
-    result = simulate(spec, market(assets=("0050", "00679B")), PLAN, end=date(2020, 1, 31))
+    result = simulate(spec, market(assets=("0050", "00679B")), PLAN, costs=TEN_BPS, end=date(2020, 1, 31))
 
     bought = {trade.asset: trade.shares for trade in result.trades}
     assert bought == {"0050": 79, "00679B": 19}

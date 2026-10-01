@@ -171,6 +171,19 @@ def test_crosscheck_scales_official_prices_by_yahoo_splits():
     assert report["only_yahoo"] == 1 and report["max_relative_difference"] == 0.0
 
 
+def test_crosscheck_counts_yahoo_days_left_unadjusted_for_a_later_split():
+    """Yahoo keeps 0050's traded prices up to 2013 but divides 2014+ pre-split closes by 4."""
+    splits = [(date(2025, 6, 18), 4.0)]
+    official = {date(2013, 12, 31): 58.0, date(2014, 1, 2): 58.5, date(2025, 6, 18): 47.6}
+    yahoo = {date(2013, 12, 31): 58.0, date(2014, 1, 2): 14.625, date(2025, 6, 18): 47.6}
+
+    report = compare(official, yahoo, splits)
+
+    assert report["yahoo_unadjusted_days"] == 1
+    assert report["yahoo_unadjusted_range"] == ["2013-12-31", "2013-12-31"]
+    assert report["over_0_5pct"] == 0
+
+
 def test_yahoo_history_reads_closes_and_split_events():
     payload = {"chart": {"result": [{
         "timestamp": [1750208400, 1750294800],  # 2025-06-18 / 06-19 09:00 Taipei
@@ -182,3 +195,32 @@ def test_yahoo_history_reads_closes_and_split_events():
 
     assert history == {date(2025, 6, 18): 47.6}
     assert splits == [(date(2025, 6, 18), 4.0)]
+
+
+def test_crosscheck_uses_official_splits_when_yahoo_omits_the_event(tmp_path):
+    """Yahoo adjusts 0050's closes for the 2025-06-18 1→4 split but returns no split event."""
+    import json
+
+    from quant_platform.research.history.crosscheck import crosscheck
+    from quant_platform.research.history.dataset import write_parquet
+
+    write_parquet(
+        [DailyRow(date(2025, 6, 17), 190.0, 191.0, 189.0, 190.0, source="test"),
+         DailyRow(date(2025, 6, 18), 47.3, 47.8, 47.2, 47.6, source="test")],
+        tmp_path / "daily" / "0050.parquet",
+    )
+    (tmp_path / "actions.json").write_text(json.dumps({"series": {"0050": {
+        "splits": [{"date": "2025-06-18", "ratio": 4.0}],
+    }}}), encoding="utf-8")
+    payload = {"chart": {"result": [{
+        "timestamp": [1750122000, 1750208400],  # 2025-06-17 / 06-18 09:00 Taipei
+        "indicators": {"quote": [{"close": [47.5, 47.6]}]},
+        "events": {},
+    }]}}
+
+    report = crosscheck(tmp_path, CATALOG[:1], fetch_json=lambda _url: payload, pause=0)
+
+    entry = report["series"]["0050"]
+    assert entry["split_source"] == "official"
+    assert entry["splits"] == [{"date": "2025-06-18", "ratio": 4.0}]
+    assert entry["over_0_5pct"] == 0 and entry["common_days"] == 2

@@ -10,6 +10,7 @@ from quant_platform.application.listing_reconciliation import TaiwanListingRecon
 from quant_platform.application.close_availability import CloseAvailabilityProbe
 from quant_platform.application.actual_account import ActualAccountService
 from quant_platform.application.investment_plan import InvestmentPlanService
+from quant_platform.application.notifications import NotificationService
 from quant_platform.application.plan_decision import PlanDecisionService
 from quant_platform.application.database_backup import DatabaseBackupService
 from quant_platform.application.prediction_archive import (
@@ -176,6 +177,7 @@ class Container:
     investment_plan_service: InvestmentPlanService
     actual_account_service: ActualAccountService
     plan_decision_service: PlanDecisionService
+    notification_service: NotificationService
 
 
 def _sqlite_path(database_url: str) -> Path | None:
@@ -475,10 +477,15 @@ def build_container(settings: Settings | None = None) -> Container:
     investment_plan_service = InvestmentPlanService(
         SqlAlchemyInvestmentPlanRepository(database.session_factory)
     )
+    def plan_broker() -> str:
+        plan = investment_plan_service.current()
+        return plan.broker if plan else "conservative"
+
     actual_account_service = ActualAccountService(
         SqlAlchemyActualAccountRepository(database.session_factory),
         price_lookup=market_bar_repository.latest_closes,
         research_dir=_instance_dir(resolved.database_url) / "research",
+        default_broker=plan_broker,
     )
     return Container(
         settings=resolved,
@@ -575,4 +582,5 @@ def build_container(settings: Settings | None = None) -> Container:
         plan_decision_service=PlanDecisionService(
             investment_plan_service, actual_account_service, market_bar_repository, market_calendar,
         ),
+        notification_service=NotificationService(resolved, automation_repository),
     )

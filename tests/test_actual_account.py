@@ -50,6 +50,21 @@ def test_ledger_by_hand(service):
     assert overview.xirr is not None and overview.xirr > 0
 
 
+def test_default_fee_follows_the_trades_broker(service):
+    service.record_cash_flow({"kind": "deposit", "day": "2026-09-01", "amount": "20,000", "broker": "taishin"})
+    cathay = service.record_trade({"day": "2026-09-01", "symbol": "0050", "side": "BUY", "shares": "99",
+                                   "price": "100.2", "broker": "cathay"})
+    unknown = service.record_trade({"day": "2026-09-01", "symbol": "0050", "side": "BUY", "shares": "1",
+                                    "price": "100"})
+
+    assert (cathay.fee, cathay.broker) == (3, "cathay")      # floor(9,919.80 × 0.1425% × 0.28)
+    assert (unknown.fee, unknown.broker) == (20, "")          # no broker: the plan's (here conservative)
+    assert service.overview().flows[0].broker == "taishin"
+    with pytest.raises(ActualAccountError, match="券商"):
+        service.record_trade({"day": "2026-09-01", "symbol": "0050", "side": "BUY", "shares": "1",
+                              "price": "100", "broker": "nowhere"})
+
+
 def test_invalid_entries_are_rejected(service):
     service.record_cash_flow({"kind": "deposit", "day": "2026-09-01", "amount": "5000"})
     service.record_trade({"day": "2026-09-01", "symbol": "0050", "side": "BUY", "shares": "10", "price": "100"})
@@ -77,8 +92,8 @@ def test_shadow_dca_invests_each_deposit_the_same_day(service):
 
     shadow = service.overview().shadow
 
-    # 99 shares at 100.10 (+ fee 20) → 99 × 100 + 70.1 cash at the last close.
-    assert shadow["value"] == pytest.approx(99 * 100 + 70.1)
+    # 99 shares at 100.20 (close + 20 bps, + fee 20) → 99 × 100 + 60.2 cash at the last close.
+    assert shadow["value"] == pytest.approx(99 * 100 + 60.2)
     assert shadow["as_of"] == "2026-09-30" and shadow["trades"] == 1
 
 

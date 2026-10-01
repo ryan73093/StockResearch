@@ -2,8 +2,10 @@
 
 Every candidate trial registered for the period counts towards the number of
 trials, so the Deflated Sharpe Ratio reflects all attempts, failures
-included. PBO compares the candidates' monthly active returns on the months
-they share.
+included, also those on an older data basis (conservative). The DSR of each
+candidate and the PBO use only the trials on the current data basis
+(registry.current_basis): results on corrected-away data are not evidence.
+PBO compares the candidates' monthly active returns on the months they share.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from quant_platform.research.registry import TrialRegistry
+from quant_platform.research.registry import TrialRegistry, current_basis
 from quant_platform.research.statistics import (
     block_bootstrap_mean,
     deflated_sharpe,
@@ -22,11 +24,14 @@ from quant_platform.research.statistics import (
 )
 
 
-def significance(registry: TrialRegistry, reports_dir: str | Path, period: str) -> dict[str, object]:
-    records = [record for record in registry.records() if record.kind == "candidate" and record.period == period]
+def significance(
+    registry: TrialRegistry, reports_dir: str | Path, period: str, fingerprint: str | None = None
+) -> dict[str, object]:
+    current, older = current_basis(registry.records(), period, fingerprint=fingerprint)
+    records = current + older  # every attempt counts towards the number of trials
     series: dict[int, dict[str, float]] = {}
     names: dict[int, str] = {}
-    for record in records:
+    for record in current:
         path = Path(reports_dir) / record.report_file
         try:
             report = json.loads(path.read_text(encoding="utf-8"))
@@ -36,7 +41,14 @@ def significance(registry: TrialRegistry, reports_dir: str | Path, period: str) 
         if months:
             series[record.trial_id] = months
             names[record.trial_id] = record.spec_name
-    output: dict[str, object] = {"period": period, "trials": len(records), "candidates": []}
+    output: dict[str, object] = {
+        "period": period,
+        "trials": len(records),
+        "current_trials": len(current),
+        "older_trials": len(older),
+        "basis": current[0].data_fingerprint if current else fingerprint,
+        "candidates": [],
+    }
     if not series:
         return output
     sharpes = [sharpe(list(values.values())) for values in series.values()]

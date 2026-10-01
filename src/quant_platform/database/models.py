@@ -1044,6 +1044,7 @@ class InvestmentPlanModel(Base):
     goal: Mapped[str] = mapped_column(String(200), default="")
     horizon_years: Mapped[int | None] = mapped_column(nullable=True)
     note: Mapped[str] = mapped_column(String(1000), default="")
+    broker: Mapped[str] = mapped_column(String(20), default="conservative", server_default="conservative")
 
 class ActualCashFlowModel(Base):
     """Money moved into or out of the investor's real brokerage account (S5-W03)."""
@@ -1059,6 +1060,7 @@ class ActualCashFlowModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     void_reason: Mapped[str] = mapped_column(String(500), default="")
+    broker: Mapped[str] = mapped_column(String(20), default="", server_default="")
 
 
 class ActualTradeModel(Base):
@@ -1078,3 +1080,4 @@ class ActualTradeModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     void_reason: Mapped[str] = mapped_column(String(500), default="")
+    broker: Mapped[str] = mapped_column(String(20), default="", server_default="")

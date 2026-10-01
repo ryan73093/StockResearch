@@ -20,7 +20,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from quant_platform.domain.entities import ActualCashFlow, ActualTrade
-from quant_platform.research.costs import CostModel
+from quant_platform.research.costs import BROKERS, CostModel, broker_costs
 from quant_platform.research.metrics import xirr
 
 logger = logging.getLogger(__name__)
@@ -93,12 +93,28 @@ class ActualAccountService:
         research_dir: str | Path | None = None,
         costs: CostModel | None = None,
         today: Callable[[], date] | None = None,
+        default_broker: Callable[[], str] | None = None,
     ) -> None:
         self._repository = repository
         self._prices = price_lookup
         self._research_dir = Path(research_dir) if research_dir else None
-        self._costs = costs or CostModel()
+        self._fixed_costs = costs
         self._today = today or date.today
+        # The plan's broker: default for new entries and for the shadow's fees.
+        self._default_broker = default_broker or (lambda: "conservative")
+
+    def default_broker(self) -> str:
+        return self._default_broker()
+
+    def _costs(self, broker: str | None = None) -> CostModel:
+        return self._fixed_costs or broker_costs(broker or self._default_broker())
+
+    @staticmethod
+    def _broker(form: dict[str, str]) -> str:
+        broker = str(form.get("broker", "")).strip()
+        if broker and broker not in BROKERS:
+            raise ActualAccountError("請選擇券商")
+        return broker
 
     # --- recording --------------------------------------------------------
     def record_cash_flow(self, form: dict[str, str]) -> ActualCashFlow:
@@ -118,7 +134,7 @@ class ActualAccountService:
             raise ActualAccountError("出金金額超過目前現金")
         return self._repository.add_cash_flow(
             ActualCashFlow(None, day, kind, amount.quantize(Decimal("0.01")), symbol,
-                           str(form.get("note", "")).strip()[:500]),
+                           str(form.get("note", "")).strip()[:500], broker=self._broker(form)),
             datetime.now(UTC),
         )
 
@@ -142,10 +158,10 @@ class ActualAccountService:
         if price <= 0:
             raise ActualAccountError("成交價必須大於 0")
         amount = float(price) * shares
-        fee = self._integer_or_default(form.get("fee"), self._costs.fee(amount), "手續費")
-        tax = self._integer_or_default(
-            form.get("tax"), self._costs.tax(amount, tax_kind(symbol), side), "證交稅"
-        )
+        broker = self._broker(form)
+        costs = self._costs(broker)
+        fee = self._integer_or_default(form.get("fee"), costs.fee(amount), "手續費")
+        tax = self._integer_or_default(form.get("tax"), costs.tax(amount, tax_kind(symbol), side), "證交稅")
         trades = self._repository.list_trades()
         held = sum(
             (trade.shares if trade.side == "BUY" else -trade.shares)
@@ -154,7 +170,8 @@ class ActualAccountService:
         if side == "SELL" and shares > held:
             raise ActualAccountError(f"{day} 當時只有 {held:,} 股 {symbol}，無法賣出 {shares:,} 股")
         return self._repository.add_trade(
-            ActualTrade(None, day, symbol, side, shares, price, fee, tax, str(form.get("note", "")).strip()[:500]),
+            ActualTrade(None, day, symbol, side, shares, price, fee, tax, str(form.get("note", "")).strip()[:500],
+                        broker=broker),
             datetime.now(UTC),
         )
 
@@ -254,7 +271,7 @@ class ActualAccountService:
             market = load_market(benchmark.assets, self._research_dir / "history")
             first = min(day for day, _ in deposits)
             result = simulate(
-                benchmark, market, ContributionPlan(), self._costs, start=first,
+                benchmark, market, ContributionPlan(), self._costs(), start=first,
                 contributions=deposits,
             )
         except FileNotFoundError:

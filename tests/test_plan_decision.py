@@ -85,9 +85,23 @@ def test_dca_invest_day_by_hand():
 
     assert decision.kind == "invest"
     order = decision.orders[0]
-    assert (order.symbol, order.side, order.shares, order.limit_price) == ("0050", "BUY", 99, 100.10)
+    # Limit = close 100 + 20 bps rounded up to the 0.05 tick; 99 × 100.20 + fee 20 fits in 10,000.
+    assert (order.symbol, order.side, order.shares, order.limit_price) == ("0050", "BUY", 99, 100.20)
     assert decision.budget == 10_000  # the month's deposit is not recorded yet, so the plan amount is used
     assert any("本月入金尚未記錄" in reason for reason in decision.reasons)
+
+
+def test_the_plans_broker_sets_the_fee_estimate():
+    plans = Plans()
+    plans.plan = InvestmentPlan(1, datetime(2026, 9, 1, tzinfo=UTC), Decimal(10_000), 5, "benchmark_dca", 0.3,
+                                broker="taishin")
+    closes = {"0050.TW": [(item, 100.0) for item in sessions_until(date(2026, 10, 5), 300)]}
+    decision = PlanDecisionService(plans, Account(), Bars(closes), Calendars()).decide(at(date(2026, 10, 5)))
+
+    order = decision.orders[0]
+    # 99 × 100.20 = 9,919.80; fee floor(9,919.80 × 0.1425% × 0.28) = 3 instead of the NT$20 minimum.
+    assert (order.shares, order.fee) == (99, 3)
+    assert any("台新證券" in reason and "尚待以對帳單確認" in reason for reason in decision.reasons)
 
 
 def test_recorded_deposit_is_not_counted_twice():

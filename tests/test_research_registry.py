@@ -131,7 +131,62 @@ def test_research_page_ranks_candidate_trials(tmp_path):
                   registry=registry, reports_dir=tmp_path / "research" / "reports", window_months=(3,))
 
     body = client.get("/research").get_data(as_text=True)
-    assert "已登錄 2 個候選試驗" in body and "回撤 5%" in body and "開發期" in body
+    assert "目前資料版本 2 個候選試驗" in body and "回撤 5%" in body and "開發期" in body
+
+
+def test_fingerprint_covers_only_data_up_to_the_end():
+    from quant_platform.research.periods import period_basis
+
+    later = SESSIONS[-1] + timedelta(days=3)
+    appended = MarketData(
+        sessions=[*SESSIONS, later],
+        closes={"0050": {**MARKET.closes["0050"], later: 99.0}},
+        tax_kind={"0050": "stock_etf"},
+    )
+    corrected = MarketData(
+        sessions=SESSIONS,
+        closes={"0050": {**MARKET.closes["0050"], date(2016, 3, 1): 1.0}},
+        tax_kind={"0050": "stock_etf"},
+    )
+    end = date(2016, 12, 30)
+
+    assert appended.fingerprint_until(end) == MARKET.fingerprint_until(end)       # a new day after the end
+    assert corrected.fingerprint_until(end) != MARKET.fingerprint_until(end)      # a corrected old close
+    assert appended.fingerprint_until(later) != MARKET.fingerprint_until(later)
+    assert period_basis(MARKET, "development") == MARKET.fingerprint_until(end)
+
+
+def test_trials_on_corrected_data_replace_old_ones_in_the_ranking_but_all_attempts_count(tmp_path):
+    from quant_platform.research.periods import period_basis
+    from quant_platform.research.reports import trial_ranking
+    from quant_platform.research.significance import significance
+
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    corrected = MarketData(
+        sessions=SESSIONS,
+        closes={"0050": {day: value * 1.01 for day, value in MARKET.closes["0050"].items()}},
+        tax_kind={"0050": "stock_etf"},
+    )
+    for market in (MARKET, corrected):
+        for threshold in (0.05, 0.2):
+            spec = StrategySpec(
+                name=f"回撤 {threshold:.0%}", allocation=Allocation(weights={"0050": 1.0}),
+                sizing=Sizing(type="drawdown", drawdown_threshold=threshold),
+            )
+            outcome = run_trial(kind="candidate", spec=spec, period="development", market=market, plan=PLAN,
+                                registry=registry, reports_dir=tmp_path / "reports", window_months=(3,))
+            assert outcome.record.data_fingerprint == period_basis(market, "development")
+
+    ranking = trial_ranking(registry.path, "development")
+    stats = significance(registry, tmp_path / "reports", "development",
+                         fingerprint=period_basis(corrected, "development"))
+
+    assert registry.count("candidate") == 4
+    assert ranking["total"] == 2 and ranking["older"] == 2
+    assert {row["trial_id"] for row in ranking["rows"]} == {3, 4}
+    assert stats["current_trials"] == 2 and stats["older_trials"] == 2 and stats["trials"] == 4
+    assert {item["trial_id"] for item in stats["candidates"]} == {3, 4}
+    assert all(item["dsr"]["trials"] == 4 for item in stats["candidates"])  # every attempt counts
 
 
 def test_round_summary_states_an_honest_verdict(tmp_path):
@@ -147,10 +202,18 @@ def test_round_summary_states_an_honest_verdict(tmp_path):
         })
 
     pending = round_summary(registry.path, "development", None)
-    weak = round_summary(registry.path, "development", {"candidates": [{"dsr": {"deflated_sharpe": 0.4}}], "pbo": {"pbo": 0.6}})
-    strong = round_summary(registry.path, "development", {"candidates": [{"dsr": {"deflated_sharpe": 0.99}}], "pbo": {"pbo": 0.1}})
+    weak = round_summary(registry.path, "development", {
+        "basis": "d", "trials": 3, "candidates": [{"dsr": {"deflated_sharpe": 0.4}}], "pbo": {"pbo": 0.6},
+    })
+    strong = round_summary(registry.path, "development", {
+        "basis": "d", "trials": 3, "candidates": [{"dsr": {"deflated_sharpe": 0.99}}], "pbo": {"pbo": 0.1},
+    })
+    stale = round_summary(registry.path, "development", {
+        "basis": "old", "trials": 3, "candidates": [{"dsr": {"deflated_sharpe": 0.99}}], "pbo": {"pbo": 0.1},
+    })
 
     assert pending["verdict"].startswith("統計檢定尚未完成")
+    assert stale["verdict"].startswith("統計檢定尚未完成")  # stats from another data basis are not used
     assert [row["direction"] for row in weak["rows"]] == ["均線", "時點"]
     assert weak["rows"][0]["trials"] == 2 and weak["rows"][0]["passing"] == 1
     assert "沒有設定能證明勝過定期定額" in weak["verdict"] and "DSR 0.40" in weak["verdict"]

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
-from quant_platform.research.costs import CostModel, affordable_shares, fill_price
+from quant_platform.research.costs import BROKERS, CostModel, affordable_shares, fill_price
 from quant_platform.research.spec import BASELINES, StrategySpec
 
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -76,7 +76,7 @@ class PlanDecisionService:
         self._account = account
         self._bars = bars
         self._calendar_store = calendar_store
-        self._costs = costs or CostModel()
+        self._fixed_costs = costs  # otherwise the plan's broker profile
 
     def _closes(self, code: str, now: datetime) -> tuple[str | None, list[tuple[date, float]]]:
         for suffix in SUFFIXES:
@@ -125,6 +125,8 @@ class PlanDecisionService:
             histories[code] = history
             prices[code] = history[-1][1]
 
+        broker = BROKERS.get(getattr(plan, "broker", "") or "conservative", BROKERS["conservative"])
+        costs = self._fixed_costs or broker.cost_model()
         account = self._account.overview(include_shadow=False)
         month_key = (today.year, today.month)
         deposited = any(
@@ -160,12 +162,12 @@ class PlanDecisionService:
                 for code in sorted(weights):
                     excess = values[code] - weights[code] * target_total
                     if excess > 0:
-                        price = fill_price(prices[code], "SELL", self._costs.slippage_bps)
+                        price = fill_price(prices[code], "SELL", costs.slippage_bps)
                         shares = min(holdings[code].shares, math.floor(excess / price))
                         if shares > 0:
                             amount = shares * price
-                            fee = self._costs.fee(amount)
-                            tax = self._costs.tax(amount, _tax_kind(code), "SELL")
+                            fee = costs.fee(amount)
+                            tax = costs.tax(amount, _tax_kind(code), "SELL")
                             orders.append(PlanOrder(code, "SELL", shares, price, prices[code], amount, fee, tax))
                             budget += amount - fee - tax
                             values[code] -= shares * prices[code]
@@ -177,13 +179,18 @@ class PlanDecisionService:
         for code in sorted(weights):
             allowance = budget * gaps[code] / gap_total if gap_total > 0 else budget * weights[code]
             allowance = min(allowance, remaining)
-            price = fill_price(prices[code], "BUY", self._costs.slippage_bps)
-            shares = affordable_shares(allowance, price, self._costs)
+            price = fill_price(prices[code], "BUY", costs.slippage_bps)
+            shares = affordable_shares(allowance, price, costs)
             if shares > 0:
                 amount = shares * price
-                fee = self._costs.fee(amount)
+                fee = costs.fee(amount)
                 orders.append(PlanOrder(code, "BUY", shares, price, prices[code], amount, fee, 0))
                 remaining -= amount + fee
+        reasons.append(
+            f"限價＝收盤加 {costs.slippage_bps:g} bps 進位到升降單位（盤後零股成交價中位數約高於收盤 13–18 bps）；"
+            f"手續費以{broker.name}估算（{costs.fee_discount:g} 折數、每筆最低 {costs.minimum_fee} 元"
+            f"{'' if broker.confirmed else '，尚待以對帳單確認'}）。"
+        )
         if not orders:
             return PlanDecision(
                 "idle", "今天是投入日，但可用資金不足以買進 1 股", reasons=reasons, budget=budget,

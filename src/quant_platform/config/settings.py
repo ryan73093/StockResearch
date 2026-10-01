@@ -78,6 +78,11 @@ class Settings:
     smtp_from: str = ""
     report_email_to: str = ""
     smtp_starttls: bool = True
+    # LINE Messaging API push (application/notifications.py); LINE Notify ended 2025-03-31.
+    line_enabled: bool = False
+    line_channel_access_token: str = ""
+    line_to: str = ""
+    line_daily_summary: bool = True  # also "no action today" on other trading days (REQUIREMENTS §11)
     google_oauth_enabled: bool = False
     google_client_id: str = ""
     google_client_secret: str = ""
@@ -154,6 +159,10 @@ class Settings:
             smtp_from=os.getenv("SMTP_FROM", ""),
             report_email_to=os.getenv("REPORT_EMAIL_TO", ""),
             smtp_starttls=os.getenv("SMTP_STARTTLS", "true").lower() in {"1", "true", "yes"},
+            line_enabled=os.getenv("LINE_ENABLED", "false").lower() in {"1", "true", "yes"},
+            line_channel_access_token=os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip(),
+            line_to=os.getenv("LINE_TO", "").strip(),
+            line_daily_summary=os.getenv("LINE_DAILY_SUMMARY", "true").lower() in {"1", "true", "yes"},
             google_oauth_enabled=os.getenv("GOOGLE_OAUTH_ENABLED", "false").lower() in {"1", "true", "yes"},
             google_client_id=os.getenv("GOOGLE_CLIENT_ID", ""),
             google_client_secret=os.getenv("GOOGLE_CLIENT_SECRET", ""),

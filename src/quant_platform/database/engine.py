@@ -88,6 +88,10 @@ class Database:
         nullable/defaulted metadata columns and never drop or rewrite research data.
         """
         additions = {
+            # 2026-10-01: broker profile of the plan and of each real-account entry.
+            "investment_plans": {"broker": "VARCHAR(20) NOT NULL DEFAULT 'conservative'"},
+            "actual_cash_flows": {"broker": "VARCHAR(20) NOT NULL DEFAULT ''"},
+            "actual_trades": {"broker": "VARCHAR(20) NOT NULL DEFAULT ''"},
             "rag_query_audits": {
                 "answer_provider": "VARCHAR(40) NOT NULL DEFAULT 'local'",
                 "answer_model": "VARCHAR(100) NOT NULL DEFAULT 'evidence-summary-v1'",

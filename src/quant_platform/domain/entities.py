@@ -983,6 +983,7 @@ class InvestmentPlan:
     goal: str = ""
     horizon_years: int | None = None
     note: str = ""
+    broker: str = "conservative"  # research/costs.py BROKERS key
 
 @dataclass(frozen=True, slots=True)
 class ActualCashFlow:
@@ -993,6 +994,7 @@ class ActualCashFlow:
     symbol: str = ""
     note: str = ""
     voided: bool = False
+    broker: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1007,3 +1009,4 @@ class ActualTrade:
     tax: int
     note: str = ""
     voided: bool = False
+    broker: str = ""
