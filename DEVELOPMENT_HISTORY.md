@@ -10,6 +10,7 @@
 - 排程與介面：worker 工作 `research_agent`（每晚 22:00，`RESEARCH_AGENT_HOUR` 只能設 19–23 或 0–6）；CLI `python -m quant_platform.research agent`（白天拒絕執行）、`--dry-run`（只印提示）、`--check`（極小的連線檢查）。研究頁「AI 研究員」卡顯示模型、本月費用／上限、每晚上限與最近三輪的假設、結果、拒絕數；系統頁排程表列出 22:00 AI 研究員。設定 `RESEARCH_AGENT_*`（`.env.example`）。
 - 實測：`--dry-run` 提示約 9,400 字（目前 68 個開發期試驗）；`--check` 前兩次 HTTP 400（json_object 需要輸入含「json」，修正後）成功：輸入 41、輸出 38 tokens，US$0.000024。研究本身依需求 §8 只在夜間執行，第一晚 22:00。
 - 測試：`test_research_agent.py` 9 項（費用手算、金鑰檔、JSON 解析與預算硬上限、失敗記帳與無單價模型、設定檔驗證與拒絕原因、提示不含驗證期結果、每晚上限與錯誤停止與統計、鎖、研究頁）；排程清單加 `research_agent`。全部 362 通過、1 略過。
+- 部署（`3f99cc7`，10:32，無資料表變更）：外網與本機研究頁「AI 研究員・每晚 22:00・gpt-6-luna・本月 US$0.0000／上限 US$3.00・尚未執行」，375 px 無水平捲動；系統頁排程表有 22:00 AI 研究員；worker 啟動無錯誤。
 - 回復：`.env` 設 `RESEARCH_AGENT_ENABLED=false` 後重新部署即停止；試驗紀錄與日誌只追加，不需回復。
 
 ## 2026-10-01 — 除權息解析修正與第一批研究重跑、券商設定、LINE 通知
