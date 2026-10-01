@@ -1,0 +1,49 @@
+{% extends "v2/base.html" %}
+{% block title %}使用教學 · 盤後決策台{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>使用教學</h1>
+    <p class="page-head__sub">第一次使用、每個交易日怎麼用、各頁說明、名詞與常見問題</p>
+  </div>
+  <div class="page-head__meta">更新 {{ modified }}</div>
+</header>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="doc-layout">
+    <nav class="doc-tabs" id="guide-toc" aria-label="教學章節"></nav>
+    <article class="doc" id="guide-body"><p class="muted">載入中…</p></article>
+  </div>
+</section>
+<script type="application/json" id="guide-markdown">{{ markdown|tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script>
+(() => {
+  const body = document.getElementById('guide-body');
+  const toc = document.getElementById('guide-toc');
+  const source = JSON.parse(document.getElementById('guide-markdown').textContent);
+  // The first heading is the page title already shown above.
+  body.innerHTML = marked.parse(source.replace(/^# .*\n/, ''));
+  const headings = [...body.querySelectorAll('h2')];
+  headings.forEach((heading, index) => {
+    heading.id = `section-${index + 1}`;
+    const link = document.createElement('a');
+    link.href = `#${heading.id}`;
+    link.textContent = heading.textContent;
+    toc.appendChild(link);
+  });
+  const links = [...toc.querySelectorAll('a')];
+  const mark = () => {
+    let current = headings[0];
+    headings.forEach((heading) => { if (heading.getBoundingClientRect().top < 120) current = heading; });
+    links.forEach((link) => link.setAttribute('aria-current', String(current && link.hash === `#${current.id}`)));
+  };
+  window.addEventListener('scroll', mark, { passive: true });
+  mark();
+  if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
+})();
+</script>
+{% endblock %}

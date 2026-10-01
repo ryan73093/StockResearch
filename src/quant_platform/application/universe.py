@@ -50,6 +50,10 @@ DEFAULT_ASSET_METADATA: dict[str, tuple[str, str, str | None, str]] = {
     "0056.TW": ("TW", "ETF", "Dividend", "0050.TW"),
     "006208.TW": ("TW", "ETF", "Broad Market", "0050.TW"),
     "00878.TW": ("TW", "ETF", "Dividend ESG", "0050.TW"),
+    "00713.TW": ("TW", "ETF", "Dividend Low Volatility", "0050.TW"),
+    "00919.TW": ("TW", "ETF", "Dividend", "0050.TW"),
+    "00679B.TWO": ("TW", "ETF", "Treasury Bond", "0050.TW"),
+    "00687B.TWO": ("TW", "ETF", "Treasury Bond", "0050.TW"),
 }
 
 DEFAULT_ASSET_NAMES = {
@@ -57,6 +61,10 @@ DEFAULT_ASSET_NAMES = {
     "0056.TW": "元大高股息",
     "006208.TW": "富邦台50",
     "00878.TW": "國泰永續高股息",
+    "00713.TW": "元大台灣高息低波",
+    "00919.TW": "群益台灣精選高息",
+    "00679B.TWO": "元大美債20年",
+    "00687B.TWO": "國泰20年美債",
     "^TWII": "臺灣加權股價指數",
 }
 

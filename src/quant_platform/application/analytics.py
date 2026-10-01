@@ -13,6 +13,8 @@ DEFAULT_UNIVERSE = [
     "SPY", "QQQ", "IWM", "XLK", "XLF", "XLE", "XLV", "XLI",
     "XLP", "XLY", "TLT", "GLD", "0050.TW", "0056.TW", "006208.TW", "00878.TW",
     "^IXIC", "^GSPC", "^SOX", "GC=F", "TWD=X", "^TWII", "JPY=X", "^VIX", "BZ=F",
+    # The rest of the research catalog's ETFs, so plans and holdings have daily closes (2026-10-01).
+    "00713.TW", "00919.TW", "00679B.TWO", "00687B.TWO",
 ]
 
 MAJOR_INDICATORS = ("^IXIC", "^GSPC", "^SOX", "GC=F", "TWD=X", "^TWII", "JPY=X", "^VIX", "BZ=F")

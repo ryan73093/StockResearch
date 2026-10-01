@@ -36,10 +36,11 @@ from quant_platform.research.reports import latest_reports, latest_stats, report
 logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.3.2"
+ASSET_VERSION = "2.4.0"
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {
+    "guide": ("使用教學", "docs/user-guide.md"),
     "roadmap": ("路線圖", "docs/development_roadmap.md"),
     "architecture": ("架構", "docs/system_architecture.md"),
     "requirements": ("需求", "REQUIREMENTS.md"),
@@ -256,6 +257,51 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             ),
         }
 
+    def system_alerts(now: datetime) -> list[str]:
+        """Problems worth one line on the Today page (S6-W05); the System page has the details."""
+        alerts = []
+        local = now.astimezone(TAIPEI)
+        if dependencies.database_backup is not None and backup_tile(now)["state"] == "逾期":
+            alerts.append("資料庫備份逾期")
+        latest: dict[tuple[str, str], object] = {}
+        for run in dependencies.automation_service.overview().recent_runs:  # newest first
+            latest.setdefault((run.job_name, run.market), run)
+        for (job, market), run in latest.items():
+            started = run.started_at if run.started_at.tzinfo else run.started_at.replace(tzinfo=UTC)
+            if run.status.value == "failed" and started.astimezone(TAIPEI).date() == local.date():
+                alerts.append(f"{JOB_LABELS.get(job, job)}（{market}）今天執行失敗")
+        calendar = dependencies.market_calendar.calendar("TW")
+        if (
+            calendar.is_trading_day(local.date()) and local.time() >= time(15, 0)
+            and not dependencies.daily_market_data_pipeline.is_fresh("TW", now)
+        ):
+            alerts.append("台股行情還沒更新到今天")
+        last = dependencies.notification_service.status()["last"]
+        if last is not None and last.status != "sent":
+            alerts.append("LINE 最近一則通知失敗")
+        return alerts[:3]
+
+    def onboarding_steps(investment_plan) -> dict[str, object]:
+        """The "開始使用" checklist on the Today page; it stays until a plan and a deposit exist."""
+        account = dependencies.actual_account_service.overview(include_shadow=False)
+        deposited = any(flow.kind == "deposit" for flow in account.flows)
+        line_ready = dependencies.notification_service.status()["configured"]
+        steps = [
+            {"label": "建立投資計畫", "hint": "每月投入、薪資日、策略與券商", "href": "/plan",
+             "done": investment_plan is not None},
+            {"label": "記錄入金", "hint": "目前證券帳戶的現金（含已持有 ETF 的成本）", "href": "/holdings",
+             "done": deposited},
+            {"label": "回報已持有的 ETF", "hint": "沒有持股可略過", "href": "/holdings", "done": bool(account.trades),
+             "optional": True},
+            {"label": "設定 LINE 通知", "hint": "系統 › 專案資訊 › LINE 設定", "href": "/system#line", "done": line_ready,
+             "optional": True},
+        ]
+        return {
+            "steps": steps,
+            "show": investment_plan is None or not deposited,
+            "done": sum(1 for step in steps if step["done"]),
+        }
+
     def line_tile() -> dict[str, str]:
         status = dependencies.notification_service.status()
         if not status["configured"]:
@@ -375,6 +421,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         return render_template(
             "v2/today.html",
             active_nav="today",
+            onboarding=onboarding_steps(investment_plan),
+            alerts=system_alerts(now),
             plan=plan,
             plan_card=plan_card,
             decision=decision,
@@ -680,6 +728,21 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             path=relative,
             modified=f"{modified:%Y-%m-%d %H:%M}",
             markdown=path.read_text(encoding="utf-8"),
+        )
+
+    @blueprint.get("/help")
+    def guide():
+        """The user guide (docs/user-guide.md), reachable from every page's help button.
+        (/guide stays the legacy research platform's guide until S8.)"""
+        path = _project_root() / DOCS["guide"][1]
+        if not path.is_file():
+            abort(404)
+        modified = datetime.fromtimestamp(path.stat().st_mtime, TAIPEI)
+        return render_template(
+            "v2/guide.html",
+            active_nav="guide",
+            markdown=path.read_text(encoding="utf-8"),
+            modified=f"{modified:%Y-%m-%d}",
         )
 
     return blueprint

@@ -1,5 +1,21 @@
 {% extends "v2/base.html" %}
 {% from "v2/_icons.html" import icon %}
+{% macro onboarding_card(onboarding, extra_class='') %}
+<section class="card card--highlight {{ extra_class }}" id="onboarding">
+  <div class="card__head">
+    <h2>開始使用 <span class="badge">{{ onboarding.done }}／{{ onboarding.steps|length }}</span></h2>
+    <a class="small" href="/help">看使用教學</a>
+  </div>
+  <ol class="checklist">
+    {% for step in onboarding.steps %}
+      <li class="{{ 'is-done' if step.done else '' }}">
+        <span class="checklist__mark">{% if step.done %}{{ icon('check') }}{% else %}{{ loop.index }}{% endif %}</span>
+        <span class="checklist__text"><span><a href="{{ step.href }}"><strong>{{ step.label }}</strong></a>{% if step.optional %} <span class="muted small">（選用）</span>{% endif %}</span><small>{{ step.hint }}</small></span>
+      </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endmacro %}
 {% block title %}今日 · 盤後決策台{% endblock %}
 {% block heading %}
 <header class="page-head">
@@ -11,6 +27,9 @@
 </header>
 {% endblock %}
 {% block content %}
+{% if alerts %}
+<a class="alert-line" href="/system">{{ icon('system') }}<span>{{ alerts|join('；') }}</span><span class="alert-line__more">看系統頁</span></a>
+{% endif %}
 {% if decision.kind != 'no_plan' %}
 <section class="hero hero--{{ decision_tone }}">
   <div>
@@ -86,6 +105,7 @@
   </div>
 
   <aside class="stack">
+    {% if onboarding and onboarding.show %}{{ onboarding_card(onboarding, 'order-2') }}{% endif %}
     {% set attention = [] %}
     {% if status.quality_badge in ('badge--warn', 'badge--bad') %}{% set _ = attention.append('資料品質' ~ status.quality_label ~ (('，今日排除 %d 檔（可能停牌）' % status.excluded) if status.excluded else '') ~ '；細節在「系統」頁。') %}{% endif %}
     {% if decision.kind == 'missing_data' %}{% set _ = attention.append('今日收盤資料尚未齊全，委託會在資料到齊後產生；盤後零股收單到 14:30。') %}{% endif %}
@@ -131,6 +151,7 @@
   </aside>
 </div>
 {% else %}
+{% if onboarding and onboarding.show %}{{ onboarding_card(onboarding) }}{% endif %}
 <section class="hero hero--{{ kind }}">
   <div>
     <div class="hero__eyebrow">{{ icon('spark') }}今日行動</div>

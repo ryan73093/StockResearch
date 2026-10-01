@@ -185,6 +185,9 @@ h1, h2, h3, p, li, dd { overflow-wrap: anywhere; }
   border-radius: 10px; padding: 8px 10px; cursor: pointer; font-size: 13.5px;
 }
 .theme-toggle:hover { background: var(--surface-2); color: var(--text); }
+a.theme-toggle { gap: 10px; }
+a.theme-toggle:hover, a.icon-btn:hover { text-decoration: none; }
+a.theme-toggle[aria-current="page"] { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
 .user { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (min-width: 768px) {
@@ -519,22 +522,46 @@ td.wrap { white-space: normal; min-width: 180px; }
   border-bottom: 1px solid var(--border); margin: 0 -18px; padding: 0 12px;
 }
 .doc-tabs::-webkit-scrollbar { display: none; }
-.doc-tabs button {
+.doc-tabs button, .doc-tabs a {
   background: none; border: 0; cursor: pointer; white-space: nowrap;
   padding: 9px 12px; color: var(--muted); font-weight: 500; font-size: 14px;
   border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
-.doc-tabs button:hover { color: var(--text); }
-.doc-tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.doc-tabs button:hover, .doc-tabs a:hover { color: var(--text); text-decoration: none; }
+.doc-tabs button[aria-selected="true"], .doc-tabs a[aria-current="true"] { color: var(--accent); border-bottom-color: var(--accent); }
 @media (min-width: 1024px) {
   .doc-layout { grid-template-columns: 170px minmax(0, 1fr); gap: 24px; }
   .doc-tabs {
     flex-direction: column; margin: 0; padding: 0; border-bottom: 0; overflow: visible;
     align-self: start; position: sticky; top: 24px;
   }
-  .doc-tabs button { text-align: left; border-bottom: 0; margin: 0; border-radius: 8px; padding: 8px 12px; }
-  .doc-tabs button[aria-selected="true"] { background: var(--accent-bg); }
+  .doc-tabs button, .doc-tabs a { text-align: left; border-bottom: 0; margin: 0; border-radius: 8px; padding: 8px 12px; }
+  .doc-tabs button[aria-selected="true"], .doc-tabs a[aria-current="true"] { background: var(--accent-bg); }
 }
+.doc h2[id] { scroll-margin-top: 72px; }
+
+/* Today: one line when the System page has a problem (S6-W05) */
+.alert-line {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius);
+  border: 1px solid var(--warn); background: var(--warn-bg); color: var(--text); font-size: 14px;
+}
+.alert-line:hover { text-decoration: none; filter: brightness(1.05); }
+.alert-line .icon { flex: none; color: var(--warn); }
+.alert-line > span:first-of-type { flex: 1; min-width: 0; }
+.alert-line__more { flex: none; color: var(--accent); font-size: 13px; white-space: nowrap; }
+
+/* Today: the "開始使用" checklist */
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.checklist li { display: flex; align-items: flex-start; gap: 10px; }
+.checklist__mark {
+  flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  border: 1px solid var(--border-strong, var(--border)); color: var(--muted); font-size: 12.5px; font-weight: 600;
+}
+.checklist__mark .icon { width: 14px; height: 14px; }
+.checklist li.is-done .checklist__mark { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.checklist li.is-done .checklist__text strong { color: var(--muted); text-decoration: line-through; }
+.checklist__text { display: grid; gap: 1px; min-width: 0; }
+.checklist__text small { color: var(--muted); font-size: 12.5px; }
 
 .doc { max-width: 940px; font-size: 15px; line-height: 1.75; color: var(--text-2); }
 .doc h1, .doc h2, .doc h3, .doc h4 { color: var(--text); }
