@@ -141,6 +141,39 @@ def test_existing_plan_and_ledger_tables_get_the_broker_column(tmp_path):
     assert SqlAlchemyInvestmentPlanRepository(database.session_factory).latest().broker == "conservative"
 
 
+def test_today_action_card_shows_the_window_copy_text_and_attention(container):
+    from datetime import date
+    from types import SimpleNamespace
+
+    from flask import render_template
+
+    from quant_platform.application.plan_decision import PlanDecision, PlanOrder
+
+    app = create_app(container)
+    order = PlanOrder("0050", "BUY", 99, 100.2, 100.0, 9_919.8, 14, 0)
+    reasons = ["限價＝收盤加 20 bps", "手續費以台新證券估算", "本月入金尚未記錄", "第四點依據"]
+    status = {"decision_time": "10/05 13:46", "market_date": "2026-10-05", "quality_badge": "badge--warn",
+              "quality_label": "有警告", "excluded": 2}
+    common = dict(
+        decision_tone="trade", deadline_iso="2026-10-05T14:30:00+08:00", opening_iso="2026-10-05T13:40:00+08:00",
+        status=status, names={}, reasons=[], today={"label": "10/05（一）"},
+        plan=SimpleNamespace(headline="", mode="", orders=[]),
+        plan_card={"amount": 10_000, "version": 1, "salary_day": 5, "strategy": "定期定額基準", "drawdown": 0.3},
+    )
+    invest = PlanDecision("invest", "今天依計畫投入：買進 0050 99 股", 1, "定期定額基準", date(2026, 10, 5),
+                          [order], reasons, 10_000, "10/05 收盤")
+    with app.test_request_context("/"):
+        body = render_template("v2/today.html", decision=invest, **common)
+        missing = render_template("v2/today.html", **{**common, "decision": PlanDecision(
+            "missing_data", "0050 今日收盤尚未取得，稍後重新整理", 1, "定期定額基準", date(2026, 10, 5))})
+
+    assert 'data-opening="2026-10-05T13:40:00+08:00"' in body and "盤後零股 13:40～14:30" in body
+    assert "0050 買 99 股 限價 100.20（盤後零股）" in body                     # the copy text
+    assert "查看其他依據（1）" in body and "第四點依據" in body                # reasons beyond three are folded
+    assert "需要留意" in body and "今日排除 2 檔" in body                       # quality warning
+    assert "今日收盤資料尚未齊全" in missing
+
+
 def test_plan_page_saves_and_shows_errors(container):
     client = create_app(container).test_client()
     assert "建立你的投資計畫" in client.get("/plan").get_data(as_text=True)

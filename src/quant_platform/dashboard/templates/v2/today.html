@@ -18,8 +18,8 @@
     <h2 class="hero__headline">{{ decision.headline }}</h2>
     <p class="hero__mode">策略：{{ decision.strategy }}{% if decision.data_time %}・資料 {{ decision.data_time }}{% endif %}</p>
     <div class="hero__chips">
-      {% if deadline_iso and decision.orders %}
-        <span class="chip chip--tone countdown" data-deadline="{{ deadline_iso }}">{{ icon('clock') }}<span>14:30 撮合</span></span>
+      {% if deadline_iso and decision.kind in ('invest', 'rebalance', 'wait_close', 'missing_data') %}
+        <span class="chip chip--tone countdown" data-opening="{{ opening_iso }}" data-deadline="{{ deadline_iso }}">{{ icon('clock') }}<span>盤後零股 13:40～14:30</span></span>
       {% endif %}
       <span class="chip">資料品質 <span class="badge {{ status.quality_badge }}">{{ status.quality_label }}</span></span>
     </div>
@@ -68,7 +68,7 @@
           data-orders="{% for order in decision.orders %}{{ order.symbol }} {{ '買' if order.side == 'BUY' else '賣' }} {{ order.shares }} 股 限價 {{ '%.2f'|format(order.limit_price) }}（盤後零股）{% if not loop.last %}&#10;{% endif %}{% endfor %}">{{ icon('copy') }}複製委託</button>
         <span class="muted small" id="copy-status" role="status"></span>
       </div>
-      <p class="note">限價 = 收盤價加 10 bps 後進位到升降單位；成交後到「持倉」回報成交。系統不會自動下單。</p>
+      <p class="note">限價 = 收盤價加滑價後進位到升降單位（假設寫在「為什麼」）；成交後到「持倉」依對帳單回報成交。系統不會自動下單。</p>
     </section>
     {% endif %}
 
@@ -86,12 +86,27 @@
   </div>
 
   <aside class="stack">
+    {% set attention = [] %}
+    {% if status.quality_badge in ('badge--warn', 'badge--bad') %}{% set _ = attention.append('資料品質' ~ status.quality_label ~ (('，今日排除 %d 檔（可能停牌）' % status.excluded) if status.excluded else '') ~ '；細節在「系統」頁。') %}{% endif %}
+    {% if decision.kind == 'missing_data' %}{% set _ = attention.append('今日收盤資料尚未齊全，委託會在資料到齊後產生；盤後零股收單到 14:30。') %}{% endif %}
+    {% if attention %}
+    <section class="card card--highlight order-2">
+      <div class="card__head"><h2>需要留意</h2></div>
+      <ul class="reasons">{% for item in attention %}<li>{{ item }}</li>{% endfor %}</ul>
+    </section>
+    {% endif %}
     {% if decision.reasons %}
     <section class="card order-2">
       <div class="card__head"><h2>為什麼</h2></div>
       <ul class="reasons">
-        {% for reason in decision.reasons %}<li>{{ reason }}</li>{% endfor %}
+        {% for reason in decision.reasons[:3] %}<li>{{ reason }}</li>{% endfor %}
       </ul>
+      {% if decision.reasons|length > 3 %}
+      <details>
+        <summary class="small">查看其他依據（{{ decision.reasons|length - 3 }}）</summary>
+        <ul class="reasons">{% for reason in decision.reasons[3:] %}<li>{{ reason }}</li>{% endfor %}</ul>
+      </details>
+      {% endif %}
     </section>
     {% endif %}
 
@@ -123,7 +138,7 @@
     <p class="hero__mode">{{ plan.mode }}</p>
     <div class="hero__chips">
       {% if deadline_iso %}
-        <span class="chip chip--tone countdown" data-deadline="{{ deadline_iso }}">{{ icon('clock') }}<span>14:30 撮合</span></span>
+        <span class="chip chip--tone countdown" data-opening="{{ opening_iso }}" data-deadline="{{ deadline_iso }}">{{ icon('clock') }}<span>盤後零股 13:40～14:30</span></span>
       {% endif %}
       <span class="chip">資料品質 <span class="badge {{ status.quality_badge }}">{{ status.quality_label }}</span></span>
     </div>
@@ -263,12 +278,17 @@
   const countdown = document.querySelector('.countdown');
   if (countdown) {
     const label = countdown.querySelector('span');
+    const opening = countdown.dataset.opening ? new Date(countdown.dataset.opening) : null;
     const deadline = new Date(countdown.dataset.deadline);
+    const span = (minutes) => `${Math.floor(minutes / 60) ? Math.floor(minutes / 60) + ' 小時 ' : ''}${minutes % 60} 分`;
     const tick = () => {
-      const minutes = Math.floor((deadline - new Date()) / 60000);
-      if (minutes <= 0) { label.textContent = '今日盤後撮合時段已結束'; return; }
-      const hours = Math.floor(minutes / 60);
-      label.textContent = `距 14:30 撮合 ${hours ? hours + ' 小時 ' : ''}${minutes % 60} 分`;
+      const now = new Date();
+      if (now >= deadline) { label.textContent = '今日盤後零股已截止'; return; }
+      if (opening && now < opening) {
+        label.textContent = `13:40 開始收單（還有 ${span(Math.ceil((opening - now) / 60000))}）`;
+        return;
+      }
+      label.textContent = `收單中・距 14:30 截止 ${span(Math.ceil((deadline - now) / 60000))}`;
     };
     tick();
     setInterval(tick, 30000);

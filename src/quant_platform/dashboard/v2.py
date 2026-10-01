@@ -324,10 +324,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         if not is_trading:
             reason = closure.name if closure is not None and closure.source != "weekday" else "週末"
             label += f" · 休市（{reason}），下一個交易日 {calendar.next_trading_day(day):%m/%d}"
-        deadline = (
-            datetime.combine(day, time(14, 30), TAIPEI).isoformat()
-            if is_trading and now.time() < time(14, 30) else None
-        )
+        # The after-hours odd-lot window (13:40–14:30); the page counts down to its
+        # opening, then to its close, then says it is over (S6-W01).
+        deadline = datetime.combine(day, time(14, 30), TAIPEI).isoformat() if is_trading else None
+        opening = datetime.combine(day, time(13, 40), TAIPEI).isoformat() if is_trading else None
         plan = dependencies.after_hours_ai_service.plan_for_page()
         if plan.orders and plan.submission_allowed:
             kind = "trade"
@@ -382,6 +382,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             kind=kind,
             today={"label": label},
             deadline_iso=deadline,
+            opening_iso=opening,
             reasons=reasons,
             totals={
                 "amount": sum(order.estimated_amount for order in plan.orders),
