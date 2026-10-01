@@ -13,6 +13,7 @@ from quant_platform.market_calendar import MarketCalendarStore, TwseHolidaySched
 from quant_platform.application.listing_reconciliation import TaiwanListingReconciliationService
 from quant_platform.application.close_availability import CloseAvailabilityProbe
 from quant_platform.application.actual_account import ActualAccountService
+from quant_platform.application.dividends import DividendCalendar
 from quant_platform.application.investment_plan import InvestmentPlanService
 from quant_platform.application.notifications import NotificationService
 from quant_platform.application.plan_decision import PlanDecisionService
@@ -183,6 +184,7 @@ class Container:
     actual_account_service: ActualAccountService
     plan_decision_service: PlanDecisionService
     notification_service: NotificationService
+    dividend_calendar: DividendCalendar
 
 
 def _sqlite_path(database_url: str) -> Path | None:
@@ -600,4 +602,5 @@ def build_container(settings: Settings | None = None) -> Container:
             investment_plan_service, actual_account_service, market_bar_repository, market_calendar,
         ),
         notification_service=NotificationService(resolved, automation_repository),
+        dividend_calendar=DividendCalendar(_instance_dir(resolved.database_url) / "events" / "ex_dividends.json"),
     )

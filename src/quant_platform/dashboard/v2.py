@@ -81,7 +81,10 @@ MAINTENANCE_JOBS = (
     (time(15, 30), "前向模擬紀錄", "交易日；追蹤中的策略當日狀態只追加不改寫"),
     (time(23, 30), "每週研究報告", "每週日；把本週研究報告存檔"),
 )
-BACKGROUND_JOBS = "背景工作：每 15 分鐘檢查漏跑、每 10 分鐘補台股研究池資料、每小時檢查證交所休市日。"
+BACKGROUND_JOBS = (
+    "背景工作：每 15 分鐘檢查漏跑、每 10 分鐘補台股研究池資料、每小時檢查證交所休市日、"
+    "每 12 小時更新證交所與櫃買除權除息預告。"
+)
 STATUS_BADGES = {
     "succeeded": ("成功", "badge--ok"),
     "partial": ("部分成功", "badge--warn"),
@@ -460,6 +463,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         investment_plan = dependencies.investment_plan_service.current()
         tolerance = investment_plan.max_drawdown_tolerance if investment_plan else None
         today = datetime.now(TAIPEI).date()
+        dividends = dependencies.dividend_calendar.account_view(actual.flows, actual.trades, today)
+        dividends["updated_text"] = _taipei_text(dividends["updated_at"])
         lookup = None
         if on.strip():  # "任一日期可查兩帳戶差異" (S5-W04)
             try:
@@ -472,6 +477,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             active_nav="holdings",
             overview=overview,
             actual=actual,
+            dividends=dividends,
             lookup=lookup,
             on=on.strip(),
             scenarios=stress_scenarios(actual, tolerance) if actual.holdings else [],
@@ -491,6 +497,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     def holdings():
         # "回報成交" on the Today page links here with the advised order (REQUIREMENTS §4);
         # the fill form starts from it and the user corrects price, shares and fee.
+        # "記錄股利" on the dividend card starts the cash form from the estimate (S5-W03).
+        if request.args.get("kind") == "dividend":
+            form = {key: request.args[key] for key in ("symbol", "amount", "note") if key in request.args}
+            return render_holdings(form={**form, "kind": "dividend", "form": "cash"})
         prefill = {key: request.args[key] for key in ("symbol", "side", "shares", "price", "broker") if key in request.args}
         return render_holdings(form={**prefill, "form": "trade"} if prefill else None, on=request.args.get("on", ""))
 

@@ -121,6 +121,14 @@ def refresh_market_calendar(container: "Container") -> object | None:
     return container.market_calendar.refresh_if_due()
 
 
+def refresh_ex_dividends(container: "Container") -> object | None:
+    """S5-W03: the exchanges' ex-dividend previews, at most every 12 hours."""
+    result = container.dividend_calendar.refresh_if_due()
+    if result is not None:
+        logger.info("Ex-dividend previews: %s", result)
+    return result
+
+
 def run_startup_catch_up(
     container: "Container", now: datetime | None = None
 ) -> tuple[str, ...]:
@@ -439,6 +447,21 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         ),
         id="market_calendar_refresh",
         name="證交所開休市日期更新（每日一次）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+    )
+    scheduler.add_job(
+        refresh_ex_dividends,
+        args=[container],
+        trigger=IntervalTrigger(
+            hours=1,
+            start_date=datetime.now(ZoneInfo(timezone)) + timedelta(seconds=45),
+            timezone=timezone,
+        ),
+        id="ex_dividend_refresh",
+        name="證交所、櫃買除權除息預告更新（每 12 小時）",
         replace_existing=True,
         coalesce=True,
         max_instances=1,

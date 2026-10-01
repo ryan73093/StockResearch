@@ -341,6 +341,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "line_plan_advice",
             "research_agent",
             "weekly_research_report",
+            "ex_dividend_refresh",
         }
     finally:
         scheduler.shutdown(wait=False)
