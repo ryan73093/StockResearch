@@ -57,9 +57,8 @@
 
 | 項目 | 建議 | 需要時點 |
 |---|---|---|
-| LINE 官方帳號與 token | 依 `docs/line-notifications.md` 建立 Messaging API channel，在 `.env` 填 `LINE_ENABLED`、`LINE_CHANNEL_ACCESS_TOKEN`、`LINE_TO`，部署後按系統頁測試 | S5-W07 驗收 |
-| 台新、國泰實際手續費 | 以對帳單確認折數、最低手續費、當日折或月退；目前標示「待確認」 | S5-W03 |
-| 台新、國泰對帳單 CSV | 各提供一份範例（可遮蔽帳號）以實作匯入 | S5-W03 |
-| AI 研究員每月預算 | 預設每月 US$3、每晚 3 輪、每輪 4 個、共 12 個試驗（每輪約 US$0.002） | S4-W04 |
-| LINE 每日摘要 | 非投入日「今天不需操作」是否保留（預設保留） | S5-W07 |
+| LINE 官方帳號與 token | 使用者目前在遠端，稍後處理：依 `docs/line-notifications.md` 建立 Messaging API channel，在 `.env` 填 `LINE_ENABLED`、`LINE_CHANNEL_ACCESS_TOKEN`、`LINE_TO`，部署後按系統頁測試 | S5-W07 驗收 |
+| 台新、國泰對帳單 CSV | 各提供一份範例（可遮蔽帳號）以實作匯入；實際損益以對帳單為準 | S5-W03 |
 | 定期定額基準 ETF | 預設 0050 | S3 |
+
+已定（2026-10-01）：月退的退佣不計入、估算用原價；AI 研究員每月 US$3；非投入日的「今天不需操作」保留。

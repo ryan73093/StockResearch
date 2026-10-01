@@ -111,7 +111,8 @@ def test_plan_keeps_the_broker_and_rejects_unknown_ones(container):
     assert container.actual_account_service.default_broker() == "cathay"
 
     body = create_app(container).test_client().get("/plan").get_data(as_text=True)
-    assert "國泰證券" in body and "台新證券" in body and "2.8 折、每筆最低 1 元" in body and "待確認" in body
+    assert "國泰證券" in body and "台新證券" in body and "不打折、每筆最低 1 元" in body
+    assert "月退（不計入）" in body and "待確認" not in body
 
 
 def test_existing_plan_and_ledger_tables_get_the_broker_column(tmp_path):

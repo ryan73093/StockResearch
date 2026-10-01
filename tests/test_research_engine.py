@@ -48,10 +48,11 @@ def test_default_costs_are_conservative_with_20_bps_slippage():
     assert fill_price(100.0, "BUY", 20) == 100.20
     assert broker_costs(None) == CostModel() and broker_costs("unknown") == CostModel()
     cathay = broker_costs("cathay")
-    assert (cathay.fee_discount, cathay.minimum_fee) == (0.28, 1)
-    assert cathay.fee(9_919.8) == 3              # floor(9,919.8 × 0.1425% × 0.28) = floor(3.958)
-    assert cathay.fee(100) == 1                  # the odd-lot minimum
-    assert not any(profile.confirmed for profile in BROKERS.values())
+    # The monthly rebate is not modelled (user, 2026-10-01): list price, odd-lot minimum NT$1.
+    assert (cathay.fee_discount, cathay.minimum_fee) == (1.0, 1)
+    assert cathay.fee(9_919.8) == 14             # floor(9,919.8 × 0.1425%) = floor(14.136)
+    assert cathay.fee(100) == 1                  # floor(0.1425) = 0, the odd-lot minimum
+    assert {key for key, profile in BROKERS.items() if profile.confirmed} == {"cathay", "taishin"}
 
     result = simulate(DCA, market(), PLAN)
     # 99 × 100.20 + 20 leaves 60.20; 100 shares next (10,060.20 − 10,040 → 20.20);

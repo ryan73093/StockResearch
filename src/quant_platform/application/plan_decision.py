@@ -186,10 +186,11 @@ class PlanDecisionService:
                 fee = costs.fee(amount)
                 orders.append(PlanOrder(code, "BUY", shares, price, prices[code], amount, fee, 0))
                 remaining -= amount + fee
+        fee_terms = "原價" if costs.fee_discount >= 1 else f"{costs.fee_discount * 10:g} 折"
         reasons.append(
             f"限價＝收盤加 {costs.slippage_bps:g} bps 進位到升降單位（盤後零股成交價中位數約高於收盤 13–18 bps）；"
-            f"手續費以{broker.name}估算（{costs.fee_discount:g} 折數、每筆最低 {costs.minimum_fee} 元"
-            f"{'' if broker.confirmed else '，尚待以對帳單確認'}）。"
+            f"手續費以{broker.name}估算（{fee_terms}、每筆最低 {costs.minimum_fee} 元"
+            f"{'；月退的退佣不計入' if '月退' in broker.rebate else ''}），實際以對帳單為準。"
         )
         if not orders:
             return PlanDecision(

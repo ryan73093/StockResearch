@@ -99,9 +99,9 @@ def test_the_plans_broker_sets_the_fee_estimate():
     decision = PlanDecisionService(plans, Account(), Bars(closes), Calendars()).decide(at(date(2026, 10, 5)))
 
     order = decision.orders[0]
-    # 99 × 100.20 = 9,919.80; fee floor(9,919.80 × 0.1425% × 0.28) = 3 instead of the NT$20 minimum.
-    assert (order.shares, order.fee) == (99, 3)
-    assert any("台新證券" in reason and "尚待以對帳單確認" in reason for reason in decision.reasons)
+    # 99 × 100.20 = 9,919.80; fee floor(9,919.80 × 0.1425%) = 14 at list price (the conservative profile charges 20).
+    assert (order.shares, order.fee) == (99, 14)
+    assert any("台新證券" in reason and "月退的退佣不計入" in reason for reason in decision.reasons)
 
 
 def test_recorded_deposit_is_not_counted_twice():

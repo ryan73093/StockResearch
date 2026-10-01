@@ -12,9 +12,11 @@ every 10th session since 2010; instance/research/history/odd_lot.json) sit a
 median 13 bps (0050), 18 bps (0056) and 16 bps (00878) above the close.
 
 The default cost model is the conservative profile (no discount, minimum
-NT$20). Broker profiles (BROKERS) carry the user's brokers' published
-odd-lot terms; they stay marked unconfirmed until the user checks them
-against a statement (REQUIREMENTS §14).
+NT$20). Broker profiles (BROKERS) carry the user's brokers' odd-lot terms.
+The user's brokers rebate the discount monthly (月退); the user decided
+(2026-10-01) that the rebate is extra income and is not modelled: estimates
+use the list price charged on the trade, and real profit and loss follows
+the broker statement (REQUIREMENTS §5).
 """
 
 from __future__ import annotations
@@ -64,33 +66,34 @@ class CostModel:
 class BrokerProfile:
     key: str
     name: str
-    fee_discount: float
+    fee_discount: float  # applied on the trade; a monthly rebate is not a discount here
     minimum_fee: int
-    rebate: str      # when the discount is paid back: 當日折 / 月退 / 待確認
+    rebate: str          # how a discount comes back, e.g. 月退（不計入）
     note: str
-    confirmed: bool = False  # True once the user checked it against a statement
+    confirmed: bool = False  # True once the user decided how this broker is modelled
 
     def cost_model(self, slippage_bps: float = DEFAULT_SLIPPAGE_BPS) -> CostModel:
         return CostModel(fee_discount=self.fee_discount, minimum_fee=self.minimum_fee, slippage_bps=slippage_bps)
 
 
-# Electronic odd-lot terms as published in 2026; the official pages confirm the
-# formula and the NT$1 regular-savings fees, the discounts come from public
-# broker comparisons. Monthly rebates (月退) are modelled as if deducted at once.
+# The fee charged on the trade: list price 0.1425%, odd-lot minimum NT$1 (both
+# brokers' published odd-lot terms). The monthly rebate (月退) is extra income
+# the user does not want modelled (2026-10-01).
 BROKERS: dict[str, BrokerProfile] = {
     "conservative": BrokerProfile(
         "conservative", "保守估計", 1.0, 20, "—",
-        "還沒確認券商條件時使用；研究預設也用這組。",
+        "還沒選券商時使用；研究預設也用這組。",
     ),
     "cathay": BrokerProfile(
-        "cathay", "國泰證券", 0.28, 1, "待確認",
-        "電子下單 2.8 折、零股每筆最低 1 元（零股另有 1.8 折優惠至 2026-12-31，未計入）；"
-        "定期定額每筆 1 元（官網，至 2026-12-31）。以對帳單為準。",
+        "cathay", "國泰證券", 1.0, 1, "月退（不計入）",
+        "成交時收原價 0.1425%、零股每筆最低 1 元；月退的退佣視為額外收入，不計入估算。實際損益以對帳單為準。",
+        confirmed=True,
     ),
     "taishin": BrokerProfile(
-        "taishin", "台新證券", 0.28, 1, "月退",
-        "電子下單 2.8 折、月退（成交時先收原價，次月退回）；零股每筆最低 1 元；"
-        "存才富定期定額／預約買零股每筆 2 萬元以下收 1 元（官網）。以對帳單為準。",
+        "taishin", "台新證券", 1.0, 1, "月退（不計入）",
+        "成交時收原價 0.1425%、零股每筆最低 1 元；月退的退佣視為額外收入，不計入估算。"
+        "存才富定期定額／預約買零股另有每筆 2 萬元以下收 1 元的方案。實際損益以對帳單為準。",
+        confirmed=True,
     ),
 }
 

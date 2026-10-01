@@ -57,7 +57,7 @@ def test_default_fee_follows_the_trades_broker(service):
     unknown = service.record_trade({"day": "2026-09-01", "symbol": "0050", "side": "BUY", "shares": "1",
                                     "price": "100"})
 
-    assert (cathay.fee, cathay.broker) == (3, "cathay")      # floor(9,919.80 × 0.1425% × 0.28)
+    assert (cathay.fee, cathay.broker) == (14, "cathay")     # floor(9,919.80 × 0.1425%), rebate not modelled
     assert (unknown.fee, unknown.broker) == (20, "")          # no broker: the plan's (here conservative)
     assert service.overview().flows[0].broker == "taishin"
     with pytest.raises(ActualAccountError, match="券商"):

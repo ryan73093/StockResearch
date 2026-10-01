@@ -179,7 +179,9 @@ def main() -> int:
     costs = broker_costs(args.broker)
     if args.cost_scale != 1:
         costs = costs.scaled(args.cost_scale)
-    print(f"成本：{BROKERS[args.broker].name}（{costs.fee_discount:g} 折數、最低 {costs.minimum_fee} 元、滑價 {costs.slippage_bps:g} bps）", flush=True)
+    fee_terms = "原價" if costs.fee_discount >= 1 else f"{costs.fee_discount * 10:g} 折"
+    print(f"成本：{BROKERS[args.broker].name}（手續費{fee_terms}、最低 {costs.minimum_fee} 元、滑價 {costs.slippage_bps:g} bps）",
+          flush=True)
     windows = tuple(int(item) for item in args.windows.split(",") if item)
     benchmark = BASELINES["benchmark_dca"]
     if args.command == "baselines":
