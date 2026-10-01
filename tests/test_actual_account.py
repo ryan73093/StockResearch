@@ -65,6 +65,39 @@ def test_default_fee_follows_the_trades_broker(service):
                               "price": "100", "broker": "nowhere"})
 
 
+def test_drawdown_and_month_ends_by_hand(tmp_path):
+    database = Database(f"sqlite:///{tmp_path / 'history.db'}")
+    database.create_schema()
+    research = tmp_path / "research"
+    sessions = [TODAY - timedelta(days=offset) for offset in range(40, -1, -1)]
+    sessions = [day for day in sessions if day.weekday() < 5]
+    write_parquet([DailyRow(day, 100.0, 100.0, 100.0, 100.0, source="test") for day in sessions],
+                  research / "history" / "daily" / "0050.parquet")
+
+    def close(day):
+        return 100.0 if day < date(2026, 9, 11) else (80.0 if day < date(2026, 9, 21) else 110.0)
+
+    service = ActualAccountService(
+        SqlAlchemyActualAccountRepository(database.session_factory),
+        price_lookup=lambda symbols: {"0050.TW": 110.0}, research_dir=research, today=lambda: TODAY,
+        bar_history=lambda symbol: [(day, close(day)) for day in sessions] if symbol == "0050.TW" else [],
+    )
+    service.record_cash_flow({"kind": "deposit", "day": "2026-09-01", "amount": "10000"})
+    service.record_trade({"day": "2026-09-01", "symbol": "0050", "side": "BUY", "shares": "99", "price": "100.2",
+                          "fee": "20"})
+
+    overview = service.overview()
+
+    # 9,960.20 on 09-01 → 60.20 + 99 × 80 = 7,980.20 from 09-11: a 19.88% fall in unit value.
+    assert overview.max_drawdown == pytest.approx(7_980.2 / 9_960.2 - 1)
+    september = overview.monthly[0]
+    assert (september["month"], september["day"]) == ("2026-09", date(2026, 9, 30))
+    assert september["actual"] == pytest.approx(60.2 + 99 * 110)
+    # The shadow buys the same 10,000 at 100.20 (research closes stay at 100): 99 shares and 60.20 cash.
+    assert september["shadow"] == pytest.approx(99 * 100 + 60.2)
+    assert september["difference"] == pytest.approx(990.0)
+
+
 def test_invalid_entries_are_rejected(service):
     service.record_cash_flow({"kind": "deposit", "day": "2026-09-01", "amount": "5000"})
     service.record_trade({"day": "2026-09-01", "symbol": "0050", "side": "BUY", "shares": "10", "price": "100"})

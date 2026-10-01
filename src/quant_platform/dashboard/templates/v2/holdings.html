@@ -59,7 +59,8 @@
       <dl class="facts">
         <div><dt>你的 XIRR</dt><dd>{{ '{:.2%}'.format(actual.xirr) if actual.xirr is not none else '—' }}</dd></div>
         <div><dt>定期定額 XIRR</dt><dd>{{ '{:.2%}'.format(actual.shadow.xirr) if actual.shadow.xirr is not none else '—' }}</dd></div>
-        <div><dt>影子帳戶最大回撤</dt><dd>{{ '{:.1%}'.format(actual.shadow.max_drawdown) }}</dd></div>
+        <div><dt>你的最大回撤</dt><dd>{{ '{:.1%}'.format(actual.max_drawdown) if actual.max_drawdown is not none else '—' }}</dd></div>
+        <div><dt>定期定額最大回撤</dt><dd>{{ '{:.1%}'.format(actual.shadow.max_drawdown) }}</dd></div>
         <div><dt>影子帳戶計算至</dt><dd>{{ actual.shadow.as_of }}</dd></div>
       </dl>
     {% else %}
@@ -68,6 +69,29 @@
     {% for note in actual.notes %}<p class="note">{{ note }}</p>{% endfor %}
   </section>
 </div>
+
+{% if actual.monthly %}
+<details class="card">
+  <summary><h2>每月底對照 <span class="badge">最近 {{ actual.monthly|length }} 個月</span></h2></summary>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>月份</th><th class="num">你的帳戶（元）</th><th class="num">定期定額（元）</th><th class="num">差額（元）</th></tr></thead>
+      <tbody>
+      {% for row in actual.monthly %}
+        {% set gap_class = 'up' if (row.difference or 0) > 0 else ('down' if (row.difference or 0) < 0 else '') %}
+        <tr>
+          <td data-primary><strong>{{ row.month }}</strong><span class="muted small">{{ row.day.strftime('%m/%d') }} 收盤</span></td>
+          <td class="num" data-label="你的帳戶">{{ '{:,.0f}'.format(row.actual) }}</td>
+          <td class="num" data-label="定期定額">{{ '{:,.0f}'.format(row.shadow) if row.shadow is not none else '—' }}</td>
+          <td class="num {{ gap_class }}" data-label="差額">{{ '{:+,.0f}'.format(row.difference) if row.difference is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">每個月最後一個交易日收盤的市值；影子帳戶用同樣的入金日期與金額買 0050。最大回撤以單位淨值計算，已排除新投入的錢。</p>
+</details>
+{% endif %}
 {% else %}
 <section class="card empty">
   <div class="empty__icon">{{ icon('holdings') }}</div>

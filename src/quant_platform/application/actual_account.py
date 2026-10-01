@@ -21,7 +21,7 @@ from pathlib import Path
 
 from quant_platform.domain.entities import ActualCashFlow, ActualTrade
 from quant_platform.research.costs import BROKERS, CostModel, broker_costs
-from quant_platform.research.metrics import xirr
+from quant_platform.research.metrics import max_drawdown, unit_values, xirr
 
 logger = logging.getLogger(__name__)
 SYMBOL = re.compile(r"^[0-9A-Z]{4,6}$")
@@ -59,6 +59,8 @@ class ActualAccountOverview:
     flows: list[ActualCashFlow]
     trades: list[ActualTrade]
     notes: list[str] = field(default_factory=list)
+    max_drawdown: float | None = None  # unit-value drawdown of the real account
+    monthly: list[dict[str, object]] = field(default_factory=list)  # month-end real vs shadow
 
 
 def _day(text: str) -> date:
@@ -94,9 +96,13 @@ class ActualAccountService:
         costs: CostModel | None = None,
         today: Callable[[], date] | None = None,
         default_broker: Callable[[], str] | None = None,
+        bar_history: Callable[[str], list[tuple[date, float]]] | None = None,
     ) -> None:
         self._repository = repository
         self._prices = price_lookup
+        # Daily closes by Yahoo symbol ("0050.TW"), oldest first: the account's
+        # day-by-day value, drawdown and month-end comparison (S6-W02).
+        self._bar_history = bar_history
         self._research_dir = Path(research_dir) if research_dir else None
         self._fixed_costs = costs
         self._today = today or date.today
@@ -246,19 +252,74 @@ class ActualAccountService:
         notes = [] if not any(item.price is None for item in holdings) else [
             "部分持股沒有最新收盤價，暫以成本估值。"
         ]
+        shadow, shadow_series = (None, {})
+        history = None
+        if include_shadow:
+            shadow, shadow_series = self._shadow(flows, total, rate, notes)
+            history = self._history(flows, trades)
         return ActualAccountOverview(
             cash=cash, holdings=holdings, market_value=market_value, total_value=total,
             net_deposits=deposits - withdrawals, dividends=dividends,
             fees=sum(trade.fee for trade in trades), taxes=sum(trade.tax for trade in trades),
             realized=realized, xirr=rate,
-            shadow=self._shadow(flows, total, rate, notes) if include_shadow else None,
+            shadow=shadow,
             flows=flows, trades=trades, notes=notes,
+            max_drawdown=history["max_drawdown"] if history else None,
+            monthly=_month_ends(history, shadow_series) if history else [],
         )
 
-    def _shadow(self, flows, total, rate, notes) -> dict[str, object] | None:
+    def _closes(self, symbol: str) -> dict[date, float]:
+        for suffix in ("TW", "TWO"):
+            rows = self._bar_history(f"{symbol}.{suffix}")
+            if rows:
+                return dict(rows)  # one close per day; a later source for the same day wins
+        return {}
+
+    def _history(self, flows, trades) -> dict[str, object] | None:
+        """The account's value at every session close since its first entry (S6-W02)."""
+        if self._bar_history is None or not flows:
+            return None
+        first = min([flow.day for flow in flows] + [trade.day for trade in trades])
+        sessions = sorted({day for day, _ in self._bar_history("0050.TW") if first <= day <= self._today()})
+        if not sessions:
+            return None
+        closes = {symbol: self._closes(symbol) for symbol in {trade.symbol for trade in trades}}
+        ordered_flows = sorted(flows, key=lambda item: (item.day, item.id or 0))
+        ordered_trades = sorted(trades, key=lambda item: (item.day, item.id or 0))
+        cash, shares, last_price = 0.0, {}, {}
+        values, external, next_flow, next_trade = [], [], 0, 0
+        for session in sessions:
+            arrived = 0.0  # entries dated on a closed day count on the next session
+            while next_flow < len(ordered_flows) and ordered_flows[next_flow].day <= session:
+                flow = ordered_flows[next_flow]
+                amount = float(flow.amount)
+                cash += -amount if flow.kind == "withdrawal" else amount
+                if flow.kind in {"deposit", "withdrawal"}:
+                    arrived += -amount if flow.kind == "withdrawal" else amount
+                next_flow += 1
+            while next_trade < len(ordered_trades) and ordered_trades[next_trade].day <= session:
+                trade = ordered_trades[next_trade]
+                gross = trade.shares * float(trade.price)
+                if trade.side == "BUY":
+                    cash -= gross + trade.fee
+                    shares[trade.symbol] = shares.get(trade.symbol, 0) + trade.shares
+                else:
+                    cash += gross - trade.fee - trade.tax
+                    shares[trade.symbol] = shares.get(trade.symbol, 0) - trade.shares
+                last_price[trade.symbol] = float(trade.price)
+                next_trade += 1
+            for symbol in shares:
+                if session in closes.get(symbol, {}):
+                    last_price[symbol] = closes[symbol][session]
+            values.append(cash + sum(count * last_price.get(symbol, 0.0) for symbol, count in shares.items()))
+            external.append(arrived)
+        drawdown, _peak, _trough = max_drawdown(unit_values(values, external))
+        return {"days": sessions, "values": values, "max_drawdown": drawdown}
+
+    def _shadow(self, flows, total, rate, notes) -> tuple[dict[str, object] | None, dict[date, float]]:
         deposits = [(flow.day, float(flow.amount)) for flow in flows if flow.kind == "deposit"]
         if not deposits or self._research_dir is None:
-            return None
+            return None, {}
         if any(flow.kind == "withdrawal" for flow in flows):
             notes.append("影子帳戶只模擬入金；有出金時兩者的比較需另行解讀。")
         try:
@@ -277,11 +338,11 @@ class ActualAccountService:
         except FileNotFoundError:
             logger.info("DCA shadow skipped: research history not built yet")
             notes.append("長歷史研究資料尚未建立；建立後會自動計算定期定額影子帳戶。")
-            return None
+            return None, {}
         except ValueError as exc:
             logger.warning("DCA shadow could not be computed: %s", exc)
             notes.append("定期定額影子帳戶暫時無法計算（研究資料尚未涵蓋入金日期）。")
-            return None
+            return None, {}
         return {
             "name": benchmark.name,
             "as_of": result.end.isoformat(),
@@ -291,7 +352,23 @@ class ActualAccountService:
             "xirr_difference": None if rate is None or result.xirr is None else rate - result.xirr,
             "max_drawdown": result.max_drawdown,
             "trades": len(result.trades),
-        }
+        }, dict(zip(result.days, result.values))
+
+
+def _month_ends(history: dict[str, object], shadow: dict[date, float], months: int = 12) -> list[dict[str, object]]:
+    """The last session of each month: real account against the DCA shadow, newest first."""
+    last: dict[str, tuple[date, float]] = {}
+    for day, value in zip(history["days"], history["values"]):
+        last[f"{day:%Y-%m}"] = (day, value)
+    rows = []
+    for month, (day, value) in sorted(last.items(), reverse=True)[:months]:
+        shadow_days = [item for item in shadow if item <= day]
+        shadow_value = shadow[max(shadow_days)] if shadow_days else None
+        rows.append({
+            "month": month, "day": day, "actual": value, "shadow": shadow_value,
+            "difference": None if shadow_value is None else value - shadow_value,
+        })
+    return rows
 
 
 def _with_weight(item: Holding, total: float) -> Holding:

@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import Callable
+from zoneinfo import ZoneInfo
+
+TAIPEI_ZONE = ZoneInfo("Asia/Taipei")
 
 from quant_platform import __version__
 from quant_platform.market_calendar import MarketCalendarStore, TwseHolidayScheduleClient
@@ -487,11 +490,19 @@ def build_container(settings: Settings | None = None) -> Container:
         plan = investment_plan_service.current()
         return plan.broker if plan else "conservative"
 
+    def bar_history(symbol: str) -> list:
+        """Daily closes as (Taipei session date, close), oldest first."""
+        return [
+            (bar.event_time.astimezone(TAIPEI_ZONE).date(), float(bar.close))
+            for bar in market_bar_repository.list_bars(symbol)
+        ]
+
     actual_account_service = ActualAccountService(
         SqlAlchemyActualAccountRepository(database.session_factory),
         price_lookup=market_bar_repository.latest_closes,
         research_dir=_instance_dir(resolved.database_url) / "research",
         default_broker=plan_broker,
+        bar_history=bar_history,
     )
     return Container(
         settings=resolved,

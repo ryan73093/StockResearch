@@ -555,6 +555,10 @@ def run_scheduler_worker(container: "Container | None" = None) -> None:
 
 
 def main() -> None:
+    # Worker logs go to instance/worker.stderr.log (scripts/run_local_services.ps1);
+    # without a handler only warnings reached it and the file stayed empty.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)  # "Running job …" every minute at 13–14
     run_scheduler_worker()
 
 
