@@ -481,12 +481,20 @@ def create_api(container: Container | None = None) -> FastAPI:
     return app
 
 
-app = create_api()
+def __getattr__(name: str) -> FastAPI:
+    # ``uvicorn quant_platform.api.app:app`` still works, but importing this module (tests, tools)
+    # no longer opens the configured database: on 2026-10-01 a test run that only imported
+    # ``create_api`` added rows to the production universe through this module-level app.
+    if name == "app":
+        application = create_api()
+        globals()["app"] = application
+        return application
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def main() -> None:
-    settings = build_container().settings
-    uvicorn.run("quant_platform.api.app:app", host=settings.api_host, port=settings.api_port)
+    container = build_container()
+    uvicorn.run(create_api(container), host=container.settings.api_host, port=container.settings.api_port)
 
 
 if __name__ == "__main__":

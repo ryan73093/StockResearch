@@ -51,6 +51,7 @@
 ## 測試與驗收
 
 - Python 變更跑相關測試：`.\.venv\Scripts\python.exe -m pytest tests\<檔案> -q -p no:cacheprovider --basetemp <可寫目錄>`（受限環境無法寫入系統暫存的 `pytest-of-*` 目錄時，`--basetemp` 指向工作階段暫存區或 `build\`）；階段結束跑全部測試並記錄通過數。
+- 測試一律用暫存資料庫；`tests/conftest.py` 會讓開啟 `instance/quant_platform.db` 的測試直接失敗。模組不可在 import 時建立容器或連線資料庫。
 - UI 變更實際開頁查看（桌面與 375 px 寬）。
 - 研究與回測變更需有手算或已知結果的測試案例；結果記錄資料版本與指紋。
 - S2 完成後，每輪交付在本機（`http://127.0.0.1:5000`）與 Cloudflare 子網域兩端以瀏覽器驗收同一版內容，並記錄時間與證據。Access 出現登入畫面時請使用者完成登入。

@@ -2,6 +2,15 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-01 — 測試誤寫正式資料庫：原因與防護
+
+- 發現（14:3x）：正式資料庫 `research_universe` 在 14:02:01 多了 4 筆（id 555–558：00713.TW、00919.TW、00679B.TWO、00687B.TWO），但加入這四檔的 `e0c85d4` 尚未部署；時間對應當時的完整測試。
+- 原因：`quant_platform/api/app.py` 在模組載入時執行 `app = create_api()`。測試只要 `from quant_platform.api.app import create_api`，就會以預設設定（讀專案根目錄 `.env`，`DATABASE_URL` 指向正式資料庫）建立容器：`create_schema()`（含累加式遷移）與 `ensure_default_universe()` 都作用在正式資料庫，`.env` 的值也被載入測試程序。這從初始版本就存在；以往遷移與預設股票池都已是最新，所以沒有留下痕跡。測試的外部呼叫都用假物件，沒有以真實金鑰對外連線。
+- 影響：只有這 4 筆股票池資料（部署後本來就會寫入的同樣內容），沒有刪改其他資料；台股流程 #3608 特徵建置因四檔尚無日線而「部分完成」，下一次台股流程會補抓。資料保留不回復。
+- 修正：`api/app.py` 改為第一次存取 `app` 時才建立（模組 `__getattr__`；`uvicorn quant_platform.api.app:app` 與 `compose.yaml` 照常可用）；`quant-api` 的 `main()` 只建一次容器並直接傳入 app（原本建兩次）。新增 `tests/conftest.py`：測試期間 `Database` 拒絕開啟 `instance/quant_platform.db`。`AGENTS.md` 測試規則補上一條。
+- 測試：`test_test_isolation.py`（防護生效；子程序 import 模組不建立資料庫、存取 `app` 才建立）；全部 383 通過、1 略過。測試後正式股票池仍為 id 558 為止、啟用中台股 536 檔，沒有新寫入。
+- 回復：`git revert`（防護只影響測試）。
+
 ## 2026-10-01 — 今日頁一鍵回報成交（需求 §4）
 
 - 今日頁委託單每筆加「回報成交」：開啟 `/holdings?symbol=…&side=…&shares=…&price=…#trade`，持倉頁的成交表單帶入建議的代號、買賣、股數與限價並醒目標示，提醒改成實際成交與對帳單手續費再記錄。使用手冊投入日步驟同步。
