@@ -10,17 +10,33 @@
 </header>
 {% endblock %}
 {% block content %}
-<section class="card feature">
-  <div class="card__head" style="margin-bottom:0">
-    <h2>AI 研究員 <span class="badge badge--accent">S4 建置中</span></h2>
+<section class="card">
+  <div class="card__head">
+    <h2>AI 研究員 <span class="badge {{ 'badge--ok' if agent.enabled and agent.configured else 'badge--warn' }}">{{ ('每晚 %d:00' % agent.hour) if agent.enabled and agent.configured else ('未設定金鑰' if agent.enabled else '已關閉') }}</span></h2>
+    <span class="muted small">{{ agent.model }}・本月 US${{ '%.4f' % agent.spent_usd }}／上限 US${{ '%.2f' % agent.budget_usd }}</span>
   </div>
-  <p class="muted" style="margin:0">AI 提出與測試交易規則，以相同現金流的定期定額為基準；通過多重檢定與保留期驗證的規則才會進入前向模擬。</p>
-  <div class="feature__items">
-    <div class="feature__item"><strong>每週研究報告</strong><span>本週試了什麼、結果與下一步</span></div>
-    <div class="feature__item"><strong>試驗排行</strong><span>含失敗次數與多重檢定校正</span></div>
-    <div class="feature__item"><strong>候選與前向模擬</strong><span>保留期與上線前觀察</span></div>
-    <div class="feature__item"><strong>晉級核准</strong><span>由你決定是否採用</span></div>
-  </div>
+  <p class="muted" style="margin:0 0 10px">模型讀開發期（2004–2016）的結果與研究日誌，提出假設與策略設定檔；通過驗證的設定只在開發期回測並計入多重檢定。每晚最多 {{ agent.limits.rounds }} 輪、每輪 {{ agent.limits.specs }} 個、共 {{ agent.limits.trials }} 個試驗；看不到驗證期與保留期，也不會下單。</p>
+  {% if agent.recent %}
+  <ul class="timeline">
+    {% for entry in agent.recent %}
+      <li>
+        <span class="timeline__time">{{ entry.round_id[4:6] }}/{{ entry.round_id[6:8] }} {{ entry.round_id[9:11] }}:{{ entry.round_id[11:13] }}</span>
+        <span class="timeline__text">
+          {% if entry.status == 'ok' %}
+            <strong>{{ entry.hypothesis or '（無假設）' }}</strong>
+            <span>{% for item in entry.accepted %}{{ item.name }}：3 年勝率 {{ '{:.0%}'.format(item.win_3y) if item.win_3y is not none else '—' }}、中位 {{ '{:+.2%}'.format(item.median_3y) if item.median_3y is not none else '—' }}{% if item.passes_gate %}（過開發期門檻）{% endif %}{% if not loop.last %}；{% endif %}{% else %}沒有可回測的設定{% endfor %}{% if entry.rejected %}；拒絕 {{ entry.rejected|length }} 個{% endif %}</span>
+          {% else %}
+            <strong>{{ {'budget_exceeded': '預算用完，停止', 'llm_error': '模型呼叫失敗', 'disabled': '未啟用'}.get(entry.status, entry.status) }}</strong>
+            <span>{{ entry.error }}</span>
+          {% endif %}
+        </span>
+      </li>
+    {% endfor %}
+  </ul>
+  <p class="note">累計 {{ agent.rounds }} 輪、{{ agent.trials }} 個 AI 試驗；完整紀錄在 <code>instance/research/journal.jsonl</code>。</p>
+  {% else %}
+  <p class="muted" style="margin:0">尚未執行。{{ '第一輪會在今晚 %d:00 開始。' % agent.hour if agent.enabled and agent.configured else '' }}</p>
+  {% endif %}
 </section>
 
 <section class="card">

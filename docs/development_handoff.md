@@ -1,32 +1,35 @@
 # 盤後決策台 — 當前開發交接
 
-記錄時間：2026-10-01 10:40（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
+記錄時間：2026-10-01 11:00（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
 
 ## 接手前必讀
 
 1. `AGENTS.md`：開發規則。部署一律 `scripts\deploy.ps1`；只停服務用 `scripts\stop-services.ps1`，只啟動用 `scripts\start-services.ps1`；還原資料庫步驟在「資料庫安全」。
-2. `docs/development_roadmap.md`：S3-W01～W05 done；S4-W03、W05 doing；S5 基準版 doing（含 S5-W07 LINE 通知）；S1-W05 量測到 10/07。
-3. `DEVELOPMENT_HISTORY.md` 最上方兩筆：除權息解析修正與第一批研究重跑、券商設定、LINE 通知；無人值守第一輪與計畫表單修正。
+2. `docs/development_roadmap.md`：S3-W01～W05 done；S4-W03、W04、W05 doing；S5 基準版 doing（含 S5-W07 LINE 通知）；S1-W05 量測到 10/07。
+3. `DEVELOPMENT_HISTORY.md` 最上方三筆：S4-W04 AI 研究員；除權息解析修正與第一批研究重跑、券商設定、LINE 通知；無人值守第一輪與計畫表單修正。
 4. 使用者要求：所有回覆與進度說明用繁體中文。研究 CLI 一律在專案根目錄以 `$env:PYTHONPATH="src"` 從原始碼執行（`.venv` 裡安裝的是部署版，`python -m` 不加 PYTHONPATH 會跑到舊版）。
 
-## 當前工作包：S4-W04 AI 研究員（OpenAI `gpt-6-luna`）
+## 先驗收：AI 研究員第一晚（2026-10-01 22:00）
 
-目標：夜間由 LLM 提出策略假設與設定檔，經 Schema 驗證後在開發期回測、登錄試驗、寫研究日誌，再依結果提出下一個假設；只產生研究證據，不碰保留期，不接入每日建議。
+- 看 `instance\research\journal.jsonl` 的新輪次（研究頁「AI 研究員」卡）：每輪有分析、假設、理由；被拒絕的設定有原因；通過的設定是開發期候選試驗（`trials.jsonl`），統計檔 `instance\research\stats\development-*.json` 更新。
+- 看 `instance\research\agent\usage.jsonl`：每次呼叫都有 token 與費用；本月費用遠低於 US$3。
+- 異常時：`llm_error` 看錯誤訊息（HTTP 狀態與 OpenAI 錯誤說明）；`budget_exceeded` 表示預算用完。白天可用 `python -m quant_platform.research agent --dry-run` 檢查提示、`--check` 檢查連線（極小費用）；研究本身只在夜間跑。
+- 驗收通過後把路線圖 S4-W04 改為 done，證據寫入開發歷程。
 
-使用者決定（2026-10-01）：比照 VectorDB 專案使用 `gpt-6-luna`。VectorDB 做法（`C:\Users\皮咪\Project\VectorDB`，只讀參考）：OpenAI Responses API 以 `urllib` 呼叫（不用 SDK）、`store: false`、金鑰取 `OPENAI_API_KEY` 或 `OPENAI_KEY_ENV_FILE` 指向的 dotenv（只讀其中 `OPENAI_API_KEY`）、每次呼叫記錄 token 與費用（`gpt-6-luna` 每百萬 token：輸入 0.125、快取輸入 0.0125、輸出 0.50 美元）、每月預算硬上限。本專案 `.env` 已有 `OPENAI_API_KEY`（`OPENAI_RESPONSE_MODEL` 目前寫 `gpt-5.6-luna`，研究員另設 `RESEARCH_AGENT_MODEL=gpt-6-luna`）。
+## 當前工作包：S4-W06 晉級流程
+
+目標：候選從開發期走到可被使用者核准的完整關卡，每一步都有證據，未核准的策略不會出現在今日頁。
 
 範圍：
-1. `research/agent/`：Provider adapter（Responses API、JSON 結構化輸出、逾時與重試、不記錄金鑰）、費用帳本（`instance/research/agent/usage.jsonl`）、每月預算與每晚試驗數上限（超過即停並記錄）。
-2. 提示內容：研究題目與規範（需求 §7、§8）、StrategySpec JSON Schema、目前資料版本的試驗摘要與淘汰原因（只給開發期結果，不給驗證期與保留期）。輸出：假設、理由、1～N 個設定檔。
-3. 驗證：pydantic 解析失敗、指名個股、非目錄 ETF、重複設定都拒絕並寫入日誌；通過的以 `run_trial(kind="candidate", period="development")` 登錄（計入多重檢定）。
-4. 研究日誌：`instance/research/journal.jsonl`（假設、理由、設定檔雜湊、試驗編號、結果、淘汰原因、費用）。研究頁顯示最近一輪與本月費用。
-5. 排程：worker 夜間（預設 22:00，19:00–07:00 之間）執行一輪；預算或上限用完就停。CLI `python -m quant_platform.research agent --dry-run`（不呼叫 API）與 `--once`。
+1. 晉級候選清單：開發期過門檻（3 年勝率 ≥ 60%、中位超額 > 0）且 DSR ≥ 0.95、PBO ≤ 0.2 的設定（目前 0 個）；研究頁列出「為什麼還沒有候選」。
+2. 驗證期：對晉級候選跑 `trial --period validation`，加上穩健性（成本 ×2、晚一天執行）；門檻見路線圖 S4。
+3. 保留期：驗證通過才可評估一次（`periods.check_gate` 已實作），結果與證據連結寫入晉級紀錄（append-only）。
+4. 前向模擬：通過保留期的候選加入 `research/forward.py` 追蹤（至少 8 週）。
+5. 使用者核准：研究頁「晉級核准」需要使用者按鈕確認（含證據摘要）；核准後才可在計畫頁選用（`BASELINES` 之外的策略來源）。
 
-測試：以假的 Provider 回應測試解析、拒絕規則、預算停止、日誌內容、不讀保留期；費用計算手算。上線前以 `--once` 實際呼叫一次並記錄費用。
+測試：關卡順序（不可跳過）、保留期只能一次、核准前今日頁不可用、證據連結完整。回復：晉級紀錄只追加；撤銷核准以新紀錄表示。
 
-回復：worker 工作可由設定關閉（`RESEARCH_AGENT_ENABLED=false`）；試驗紀錄只新增不刪。
-
-待確認：每月預算上限（實作先以每月 3 美元、每晚 20 個試驗為預設，等使用者決定）。
+待確認：無（門檻已在路線圖；核准由使用者在研究頁操作）。
 
 ## 今天（2026-10-01）要確認的事
 
@@ -34,6 +37,7 @@
 |---|---|---|
 | 13:30–14:45 | 收盤時效量測寫入四個來源 | 系統頁「收盤資料時效」、`instance\close_availability.jsonl` |
 | 13:45–14:25 | LINE 未設定時 `line_plan_advice` 應靜默略過（不報錯） | `instance\*.stderr.log` |
+| 22:00 | AI 研究員第一晚（見上方「先驗收」） | 研究頁、`instance\research\journal.jsonl` |
 | 13:50 後 | 第一次完整台股流程（09-08 以來第一次）：今日頁 14:30 前有盤後計畫；記錄各子工作耗時（S1-W06），暫停步驟不應出現 | `scheduler_job_runs` |
 | 15:15、15:30 | 研究資料補抓（除權息改依表頭解析後的第一次排程）、前向模擬紀錄 | 系統頁「最近執行」、`instance\research\forward\log.jsonl` |
 | 流程正常後 | 提供使用者刪除兩個 22.29 GiB 暫存備份的指令（使用者執行）：`instance\backups\quant_platform-pre-s1w03-20260930-204109.db`、`quant_platform-pre-vacuum-20260930-204109.db` | — |
@@ -56,6 +60,6 @@
 | LINE 官方帳號與 token | 依 `docs/line-notifications.md` 建立 Messaging API channel，在 `.env` 填 `LINE_ENABLED`、`LINE_CHANNEL_ACCESS_TOKEN`、`LINE_TO`，部署後按系統頁測試 | S5-W07 驗收 |
 | 台新、國泰實際手續費 | 以對帳單確認折數、最低手續費、當日折或月退；目前標示「待確認」 | S5-W03 |
 | 台新、國泰對帳單 CSV | 各提供一份範例（可遮蔽帳號）以實作匯入 | S5-W03 |
-| AI 研究員每月預算 | 預設每月 3 美元、每晚 20 個試驗 | S4-W04 |
+| AI 研究員每月預算 | 預設每月 US$3、每晚 3 輪、每輪 4 個、共 12 個試驗（每輪約 US$0.002） | S4-W04 |
 | LINE 每日摘要 | 非投入日「今天不需操作」是否保留（預設保留） | S5-W07 |
 | 定期定額基準 ETF | 預設 0050 | S3 |

@@ -2,6 +2,16 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-01 — S4-W04 AI 研究員（gpt-6-luna）
+
+- 使用者決定（10/01）：比照 VectorDB 專案使用 `gpt-6-luna`。參考 VectorDB `gpt_client.py`、`ai_costs.py`（唯讀）：Responses API 以 `urllib` 呼叫、`store: false`、不自動重試、呼叫前檢查每月預算硬上限、每次呼叫記錄 token 與當時單價（`gpt-6-luna` 每百萬 token：輸入 0.125、快取輸入 0.0125、輸出 0.50 美元）。
+- `research/agent/llm.py`：金鑰取 `OPENAI_API_KEY` 或 `OPENAI_KEY_ENV_FILE` 指向的 dotenv（只讀其中的 `OPENAI_API_KEY`）；JSON 物件輸出（輸入沒有「json」字樣時自動補一句，否則 OpenAI 回 400）；沒有單價的模型拒絕呼叫（無法控管預算）；失敗的呼叫也記帳；HTTP 錯誤只帶 OpenAI 的錯誤訊息（不含金鑰）。費用帳本 `instance/research/agent/usage.jsonl`。
+- `research/agent/researcher.py`：每輪把研究題目、規範、成本與門檻、StrategySpec JSON Schema、開發期有 3 年以上資料的標的（0050、0056、006208；訊號可用 TAIEX）、目前資料版本的開發期試驗結果、多重檢定次數與最近 5 輪日誌交給模型；模型回傳對上一輪的分析、假設、理由、設定檔與 v1 表達不了的研究構想。設定檔逐一以 pydantic 驗證，拒絕不合 Schema、開發期資料不足、與已測規則相同（以排除名稱與說明後的規則雜湊判斷，涵蓋內建基準、規則批次與過去 AI 輪次）、超過每輪上限者，原因寫入日誌；通過者以 `run_trial(kind="candidate", period="development")` 登錄（計入多重檢定）。每晚最多 3 輪、每輪 4 個、共 12 個試驗，預算用完或模型錯誤即停；有新試驗時自動重算統計檢定；以鎖檔避免同時執行。研究日誌 `instance/research/journal.jsonl`（只追加）。
+- 排程與介面：worker 工作 `research_agent`（每晚 22:00，`RESEARCH_AGENT_HOUR` 只能設 19–23 或 0–6）；CLI `python -m quant_platform.research agent`（白天拒絕執行）、`--dry-run`（只印提示）、`--check`（極小的連線檢查）。研究頁「AI 研究員」卡顯示模型、本月費用／上限、每晚上限與最近三輪的假設、結果、拒絕數；系統頁排程表列出 22:00 AI 研究員。設定 `RESEARCH_AGENT_*`（`.env.example`）。
+- 實測：`--dry-run` 提示約 9,400 字（目前 68 個開發期試驗）；`--check` 前兩次 HTTP 400（json_object 需要輸入含「json」，修正後）成功：輸入 41、輸出 38 tokens，US$0.000024。研究本身依需求 §8 只在夜間執行，第一晚 22:00。
+- 測試：`test_research_agent.py` 9 項（費用手算、金鑰檔、JSON 解析與預算硬上限、失敗記帳與無單價模型、設定檔驗證與拒絕原因、提示不含驗證期結果、每晚上限與錯誤停止與統計、鎖、研究頁）；排程清單加 `research_agent`。全部 362 通過、1 略過。
+- 回復：`.env` 設 `RESEARCH_AGENT_ENABLED=false` 後重新部署即停止；試驗紀錄與日誌只追加，不需回復。
+
 ## 2026-10-01 — 除權息解析修正與第一批研究重跑、券商設定、LINE 通知
 
 使用者 10/01 指示：計畫頁填寫報錯要修；AI 研究員比照 VectorDB 用 `gpt-6-luna`；券商預計台新與國泰；用 LINE 通知；其他研究繼續。

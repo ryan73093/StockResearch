@@ -24,7 +24,7 @@ from quant_platform.research.costs import BROKERS, broker_costs
 from quant_platform.research.market import DEFAULT_BASE, available_assets, load_market
 from quant_platform.research.periods import PERIODS, ResearchGateError, period_basis, run_trial
 from quant_platform.research.registry import TrialRegistry
-from quant_platform.research.significance import significance
+from quant_platform.research.significance import save_stats, significance
 from quant_platform.research.spec import BASELINES, json_schema, load_spec
 
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -70,9 +70,51 @@ def _saved_plan() -> tuple[float, int] | None:
     return (float(row[0]), int(row[1])) if row else None
 
 
+def _agent(args) -> int:
+    """One night of the AI researcher now (or only the prompt with --dry-run)."""
+    from quant_platform.config.settings import Settings
+    from quant_platform.research.agent.researcher import build_agent
+
+    from quant_platform.research.agent.llm import LLMError
+
+    now = datetime.now(TAIPEI)
+    agent = build_agent(Settings.from_env(), RESEARCH)
+    if args.check:
+        try:
+            result = agent.check()
+        except LLMError as exc:
+            print(f"連線檢查失敗：{exc}", file=sys.stderr)
+            return 1
+        usage = result["usage"]
+        print(f"連線檢查成功：{result['payload']}；輸入 {usage.get('input_tokens')}、輸出 {usage.get('output_tokens')} tokens；"
+              f"本月費用 US${result['budget']['spent_usd']:.6f}／上限 US${result['budget']['budget_usd']:.2f}")
+        return 0
+    if not args.dry_run and not (now.hour >= 19 or now.hour < 7):
+        print("研究只在夜間（19:00–07:00）執行（需求 §8）；白天可用 --dry-run 或 --check", file=sys.stderr)
+        return 3
+    market = load_market(available_assets(args.base), args.base)
+    if args.dry_run:
+        instructions, user_input = agent.build_prompt(market)
+        print(instructions)
+        print(user_input)
+        print(f"（提示約 {len(instructions) + len(user_input):,} 字）")
+        return 0
+    for entry in agent.run_night(market):
+        print(f"{entry['round_id']}：{entry.get('status')}　{entry.get('hypothesis') or entry.get('error') or ''}", flush=True)
+        for item in entry.get("accepted") or []:
+            print(f"  #{item['trial_id']} {item['name']}：3 年勝率 {item.get('win_3y')}、中位 {item.get('median_3y')}")
+        for item in entry.get("rejected") or []:
+            print(f"  拒絕 {item.get('name')}：{item.get('reason')}")
+        if entry.get("budget"):
+            print(f"  本月費用 US${entry['budget']['spent_usd']:.4f}／上限 US${entry['budget']['budget_usd']:.2f}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
-    parser.add_argument("command", choices=("baselines", "trial", "batch", "trials", "stats", "schema"))
+    parser.add_argument("command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent"))
+    parser.add_argument("--dry-run", action="store_true", help="agent：只印出提示內容，不呼叫模型")
+    parser.add_argument("--check", action="store_true", help="agent：極小的連線檢查呼叫（金鑰、模型、JSON 格式）")
     parser.add_argument("--name", default="first", help="batch：批次名稱")
     parser.add_argument("--spec")
     parser.add_argument("--period", default="full", choices=tuple(PERIODS))
@@ -108,16 +150,16 @@ def main() -> int:
         print("雜湊鏈完整" if not problems else "\n".join(problems))
         return 0 if not problems else 1
 
+    if args.command == "agent":
+        return _agent(args)
+
     if args.command == "stats":
         basis = period_basis(load_market(available_assets(args.base), args.base), args.period)
         report = significance(registry, RESEARCH / "reports", args.period, fingerprint=basis)
         if not report["candidates"]:
             print(f"{args.period} 在目前資料版本 {basis[:12]} 沒有候選試驗（舊版 {report['older_trials']} 筆）")
             return 1
-        RESEARCH.joinpath("stats").mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
-        path = RESEARCH / "stats" / f"{args.period}-{stamp}.json"
-        path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        path = save_stats(report, RESEARCH / "stats", args.period, datetime.now(TAIPEI))
         for item in report["candidates"]:
             print(
                 f"#{item['trial_id']} {item['name']}：月超額平均 {item['bootstrap']['mean']:+.3%}"

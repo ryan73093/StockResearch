@@ -33,6 +33,14 @@ def parse_paused_modules(value: str | None) -> frozenset[str]:
     return frozenset(names)
 
 
+def _night_hour(value: str) -> int:
+    """Research runs only at night (REQUIREMENTS §8: 19:00–07:00)."""
+    hour = int(value)
+    if not (hour >= 19 or hour < 7):
+        raise ValueError("RESEARCH_AGENT_HOUR 必須在 19～23 或 0～6 之間（夜間研究）")
+    return hour
+
+
 def _load_dotenv(path: Path) -> None:
     """Load a small .env file without making configuration depend on a library."""
     if not path.exists():
@@ -105,6 +113,14 @@ class Settings:
     openai_embedding_dimensions: int = 1024
     openai_base_url: str = "https://api.openai.com/v1"
     openai_timeout_seconds: int = 45
+    # AI researcher (S4-W04, research/agent/): OpenAI Responses API like VectorDB.
+    research_agent_enabled: bool = True
+    research_agent_model: str = "gpt-6-luna"
+    research_agent_monthly_budget_usd: float = 3.0
+    research_agent_rounds_per_night: int = 3
+    research_agent_specs_per_round: int = 4
+    research_agent_trials_per_night: int = 12
+    research_agent_hour: int = 22
     rag_local_dimensions: int = 384
     local_embedding_backend: str = "hash"
     local_embedding_model: str = "BAAI/bge-small-zh-v1.5"
@@ -193,6 +209,13 @@ class Settings:
             ),
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             openai_timeout_seconds=int(os.getenv("OPENAI_TIMEOUT_SECONDS", "45")),
+            research_agent_enabled=os.getenv("RESEARCH_AGENT_ENABLED", "true").lower() in {"1", "true", "yes"},
+            research_agent_model=os.getenv("RESEARCH_AGENT_MODEL", "gpt-6-luna").strip(),
+            research_agent_monthly_budget_usd=max(0.0, float(os.getenv("RESEARCH_AGENT_MONTHLY_BUDGET_USD", "3"))),
+            research_agent_rounds_per_night=max(0, min(10, int(os.getenv("RESEARCH_AGENT_ROUNDS_PER_NIGHT", "3")))),
+            research_agent_specs_per_round=max(1, min(10, int(os.getenv("RESEARCH_AGENT_SPECS_PER_ROUND", "4")))),
+            research_agent_trials_per_night=max(0, min(50, int(os.getenv("RESEARCH_AGENT_TRIALS_PER_NIGHT", "12")))),
+            research_agent_hour=_night_hour(os.getenv("RESEARCH_AGENT_HOUR", "22")),
             rag_local_dimensions=int(os.getenv("RAG_LOCAL_DIMENSIONS", "384")),
             local_embedding_backend=os.getenv("LOCAL_EMBEDDING_BACKEND", "hash").lower(),
             local_embedding_model=os.getenv(

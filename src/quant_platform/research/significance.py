@@ -24,6 +24,17 @@ from quant_platform.research.statistics import (
 )
 
 
+def save_stats(report: dict[str, object], stats_dir: str | Path, period: str, now) -> Path:
+    """Write ``<period>-<Taipei time>.json`` (reports.latest_stats reads the newest)."""
+    from zoneinfo import ZoneInfo
+
+    folder = Path(stats_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{period}-{now.astimezone(ZoneInfo('Asia/Taipei')):%Y%m%d-%H%M%S}.json"
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 def significance(
     registry: TrialRegistry, reports_dir: str | Path, period: str, fingerprint: str | None = None
 ) -> dict[str, object]:

@@ -285,6 +285,26 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
     return len(written)
 
 
+def run_research_agent(container: "Container") -> object | None:
+    """S4-W04: one night of the AI researcher (development period only)."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.agent.researcher import build_agent
+    from quant_platform.research.market import available_assets, load_market
+
+    research = _instance_dir(container.settings.database_url) / "research"
+    base = research / "history"
+    if not container.settings.research_agent_enabled or not (base / "manifest.json").is_file():
+        return None
+    agent = build_agent(container.settings, research)
+    entries = agent.run_night(load_market(available_assets(base), base))
+    logger.info(
+        "AI researcher: %s rounds, %s trials, status %s",
+        len(entries), sum(len(entry.get("accepted") or []) for entry in entries),
+        [entry.get("status") for entry in entries],
+    )
+    return len(entries)
+
+
 def probe_close_availability(container: "Container") -> object:
     """S1-W05 measurement tick; the probe itself limits to 13:30–14:45 on trading days."""
     return container.close_availability.run()
@@ -356,6 +376,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=30,
+    )
+    scheduler.add_job(
+        run_research_agent,
+        args=[container],
+        trigger=CronTrigger(hour=container.settings.research_agent_hour, minute=0, timezone=timezone),
+        id="research_agent",
+        name=f"AI 研究員（每晚 {container.settings.research_agent_hour}:00，只用開發期）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
     )
     scheduler.add_job(
         notify_plan_advice,

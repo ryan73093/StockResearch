@@ -24,6 +24,7 @@ from quant_platform.research.spec import BASELINES
 from quant_platform.application.close_availability import recent_table
 from quant_platform.config.settings import PAUSABLE_MODULES
 from quant_platform.container import _instance_dir
+from quant_platform.research.agent.researcher import agent_status
 from quant_platform.research.forward import FORWARD_START, ForwardTracker
 from quant_platform.research.summary import round_summary
 from quant_platform.research.reports import latest_reports, latest_stats, report_rows, trial_ranking
@@ -515,6 +516,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         return render_template(
             "v2/research.html",
             active_nav="research",
+            agent=agent_status(dependencies.settings, research_dir),
             tool_groups=TOOL_GROUPS,
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
@@ -584,7 +586,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         ] + [
             {"at": at, "name": name, "rule": rule, "enabled": True}
             for at, name, rule in MAINTENANCE_JOBS
-        ]
+        ] + [{
+            "at": time(dependencies.settings.research_agent_hour, 0),
+            "name": "AI 研究員",
+            "rule": f"每晚；只用開發期，每月上限 US${dependencies.settings.research_agent_monthly_budget_usd:g}",
+            "enabled": dependencies.settings.research_agent_enabled,
+        }]
         schedule.sort(key=lambda item: item["at"])
         runs = []
         for run in overview.recent_runs[:12]:
