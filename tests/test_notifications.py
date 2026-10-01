@@ -185,3 +185,5 @@ def test_system_page_shows_line_status_and_test_button(tmp_path):
 
     response = app.post("/system/line-test", follow_redirects=True)
     assert "LINE 通知尚未設定或未啟用" in response.get_data(as_text=True)
+    guide = app.get("/system/docs/line")
+    assert guide.status_code == 200 and "Messaging API" in guide.get_json()["markdown"]

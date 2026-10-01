@@ -497,7 +497,7 @@ td.wrap { white-space: normal; min-width: 180px; }
 .tile--warn .tile__dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-bg); }
 .tile--bad .tile__dot { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-bg); }
 .tile--accent .tile__dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
-.tile__detail { font-size: 12.5px; color: var(--muted); }
+.tile__detail { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; } /* long setting names */
 
 .timeline { list-style: none; margin: 0; padding: 0; display: grid; }
 .timeline li {

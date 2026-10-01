@@ -31,7 +31,7 @@ from quant_platform.research.reports import latest_reports, latest_stats, report
 logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.3.1"
+ASSET_VERSION = "2.3.2"
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {
@@ -40,6 +40,7 @@ DOCS = {
     "requirements": ("需求", "REQUIREMENTS.md"),
     "handoff": ("交接", "docs/development_handoff.md"),
     "history": ("開發歷程", "DEVELOPMENT_HISTORY.md"),
+    "line": ("LINE 設定", "docs/line-notifications.md"),
 }
 JOB_LABELS = {
     "daily_market_data": "日線行情",
@@ -254,7 +255,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         status = dependencies.notification_service.status()
         if not status["configured"]:
             return {"label": "LINE 通知", "state": "未設定", "badge": "",
-                    "detail": "在 .env 填 LINE_CHANNEL_ACCESS_TOKEN 與 LINE_TO（見說明文件）"}
+                    "detail": ".env 填入 LINE 的 token 與 user ID（步驟見下方專案資訊「LINE 設定」）"}
         if not status["enabled"]:
             return {"label": "LINE 通知", "state": "已關閉", "badge": "badge--warn", "detail": "LINE_ENABLED=false"}
         last = status["last"]
