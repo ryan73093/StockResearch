@@ -2,6 +2,12 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-01 — 依使用者要求停止服務（未部署）
+
+- 使用者（16:4x）：「專案先停止，稍後我會重開電腦再試試」。16:41 以 `scripts\stop-services.ps1` 停止本專案的監督程序、web、api、worker 與 Tunnel；5000／8000 已釋放，VectorDB（5001）未受影響。
+- 當時狀態：台股流程第二次嘗試在舊版樣本外回測（#3621，15:39 開始）被中斷，紀錄停在「執行中」，worker 下次在 6 小時後啟動時會標為失敗；行情、特徵、模型、早盤決策、籌碼、總經、因子研究都已完成，今日建議不受影響。主機記憶體 31 GiB 只剩約 3.5 GiB——worker 私有 7 GB 幾乎全在分頁檔，停止服務後可用記憶體仍只有 3.3 GiB，壓力主要來自其他程式。
+- 12:05 之後的提交（使用教學 `/help`、異常提示、計畫預覽、持倉回撤與每月底對照、任一天查詢、股利、大跌情境、一鍵回報成交、每週研究報告、官方收盤等待、yfinance 憑證路徑修正、測試隔離）都已提交但**尚未部署**；重開機登入後排程工作會以 12:05 的版本啟動服務。下一步：使用者回來後執行 `scripts\deploy.ps1` 並驗收（本機與外網、桌面與 375 px）。
+
 ## 2026-10-01 — 服務中的 Yahoo（yfinance）全部失敗：根本原因與修正
 
 - 現象：10/01 13:50 台股流程的 yfinance 對每一檔都回「possibly delisted; no price data found」（worker 日誌 1,606 行），14:48 重試時改顯示 `curl: (77) error adding trust anchors from locations: CAfile: C:\Users\皮咪\...\certifi\cacert.pem`；資料最後都靠 chart API 備援取得，第一次嘗試的行情步驟因此花了 36 分鐘。

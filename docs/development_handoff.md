@@ -1,6 +1,6 @@
 # 盤後決策台 — 當前開發交接
 
-記錄時間：2026-10-01 15:10（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
+記錄時間：2026-10-01 16:45（Asia/Taipei；16:41 依使用者要求停止服務）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
 
 ## 接手前必讀
 
@@ -10,6 +10,8 @@
 4. 使用者要求：所有回覆與進度說明用繁體中文。研究 CLI 一律在專案根目錄以 `$env:PYTHONPATH="src"` 從原始碼執行（`.venv` 裡安裝的是部署版）。UI 預覽用暫存資料庫（不要用預設設定連正式資料庫）。
 
 ## 先驗收：AI 研究員第一晚（2026-10-01 22:00）
+
+只有 worker 在執行才會跑：重開機登入後服務會自動啟動；22:00 時 worker 沒在跑、但 23:00 前啟動也會補跑（misfire 寬限 1 小時），否則順延到隔晚。
 
 - 看 `instance\research\journal.jsonl` 的新輪次（研究頁「AI 研究員」卡）：每輪有分析、假設、理由；被拒絕的設定有原因；通過的設定是開發期候選試驗（`trials.jsonl`），統計檔 `instance\research\stats\development-*.json` 更新。
 - 看 `instance\research\agent\usage.jsonl`：每次呼叫都有 token 與費用；本月費用遠低於 US$3。
@@ -40,7 +42,8 @@
 提案（需求 §13 的變更要使用者同意）：
 - A（建議）：13:50 只跑行情、名冊比對與原始資料品質（今日頁的品質標示），約 1–11 分鐘；其餘舊版步驟改到 18:30 夜間工作（今日頁「研究模型觀察」改顯示前一晚的結果並標日期）。程式與資料都保留，前向的舊模型預測照樣累積。
 - B：舊版步驟全部暫停（`PAUSED_MODULES`），今日頁移除「研究模型觀察」，S8 再決定刪除。
-- C：維持現狀（每天 13:50–約 15:50 佔用 CPU 與每日寫入鎖；像 10/01 這樣閘門失敗會整套重跑）。
+- 記憶體（10/01 15:40 實測）：主機 31 GiB 只剩 3.6 GiB，worker 私有記憶體 7 GB 大多被換到分頁檔（2.3 億次分頁錯誤），因子研究跑了 36 分鐘（平常約 8 分鐘）。舊版步驟移走或暫停也會解除這個壓力。
+- C：維持現狀（每天 13:50–約 15:50 佔用 CPU 與每日寫入鎖；像 10/01 這樣閘門失敗會整套重跑；舊版決策更新後第一次開今日頁要重建快取——10/01 15:11 實測 12 秒，之後 40–170 毫秒）。
 
 驗收：台股流程的關鍵部分在 14:00 前完成；今日頁與計畫建議不受影響；暫停或移動的項目列在系統頁。回復：`PAUSED_MODULES`／排程還原或 `git revert`。
 
@@ -48,7 +51,7 @@
 
 | 時間 | 事項 | 看哪裡 |
 |---|---|---|
-| 10/01 部署後 | 教學 `/help`、今日頁開始使用清單與異常提示、計畫預覽、持倉（回撤、每月底對照、任一天查詢、股利、大跌情境、回報成交帶入）、研究頁本週報告；本機與外網、桌面與 375 px | 開發歷程「部署」一筆 |
+| 使用者重開機後 | 確認服務已自動啟動（`/health`）；部署新版（`scripts\deploy.ps1`，避開 13:30–14:40 與 22:00 AI 研究員）後驗收：教學 `/help`、今日頁開始使用清單與異常提示、計畫預覽、持倉（回撤、每月底對照、任一天查詢、股利、大跌情境、回報成交帶入）、研究頁本週報告、系統頁除息資料；本機與外網、桌面與 375 px。快速檢查腳本可照 `GET /`、`/help`、`/holdings`、`/plan`、`/research`、`/system` 找關鍵字 | 開發歷程「部署」一筆 |
 | 10/01 22:00 | AI 研究員第一晚（見上方） | 研究頁、`instance\research\journal.jsonl` |
 | 10/02 13:50 | 部署後第一次台股流程：官方收盤等待（不再逐檔問 Yahoo）、yfinance 不再出現 curl 77 或 possibly delisted；4 檔新 ETF 已有 2020 年起日線 | `scheduler_job_runs`、`instance\worker.stderr.log` |
 | 10/02 起 | 除權除息預告每 12 小時更新 | `instance\events\ex_dividends.json`、系統頁背景工作 |
@@ -59,7 +62,7 @@
 | 項目 | 狀態 |
 |---|---|
 | 監督程序 | 排程工作 `StockResearchLocalServices`（使用者登入時觸發），含 Tunnel；紀錄 `instance\supervisor.log` |
-| 網站 | Waitress 127.0.0.1:5000；`AUTH_MODE=cloudflare-access`；正式環境是 12:05 部署的版本，之後的提交待部署（見開發歷程） |
+| 網站 | **16:41 依使用者要求停止全部服務**（使用者稍後重開機，登入後排程工作會自動啟動）；Waitress 127.0.0.1:5000、`AUTH_MODE=cloudflare-access`；已安裝的是 12:05 部署的版本，之後的提交都還沒部署——先 `scripts\deploy.ps1`，再依下表驗收 |
 | 資料庫 | `instance\quant_platform.db` 約 9.7 GiB；`research_universe` 新增 4 檔 ETF（id 555–558）；每日備份 `instance\backups\daily\`；兩個 22.29 GiB 暫存備份待使用者刪除 |
 | 研究資料 | `instance\research\`：history（10 個序列）、reports、trials.jsonl、stats、forward、promotions.jsonl |
 | 憑證副本 | `C:\ProgramData\StockResearch\cacert.pem`（yfinance 用，見開發歷程） |
