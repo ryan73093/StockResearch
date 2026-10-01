@@ -54,7 +54,7 @@ class AgentLimits:
 
 def rule_key(spec: StrategySpec) -> str:
     """Hash of the rule itself; the name and description do not make a new rule."""
-    body = spec.model_dump(mode="json", exclude={"name", "description"})
+    body = spec.canonical_dict(exclude={"name", "description"})
     return hashlib.sha256(json.dumps(body, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -83,7 +83,7 @@ INSTRUCTIONS = """你是台股盤後投資研究員，只負責提出並檢驗�
 研究題目：薪資每月入帳的資金，在相同現金流下，長期能否勝過「定期定額基準」——每月 5 日入帳（遇休市順延），當天以盤後零股把可用現金全數買進 0050，股利留到下次一起投入。
 
 規範（違反的設定會被拒絕並記錄）：
-1. 只能用 StrategySpec v1（使用者訊息中的 JSON Schema）描述規則；不得指名個股；配置與訊號標的只能從「可用標的」清單選。
+1. 只能用 StrategySpec v1（使用者訊息中的 JSON Schema）描述規則；不得指名個股；配置與訊號標的只能從「可用標的」清單選。除了投入時點與金額倍數，也可以用 allocation.defensive（趨勢控制：訊號收盤跌破均線時改用防守配置）與 allocation.rotation（ETF 輪動；搭配 core 就是核心＋衛星）；訊號一律使用還原分割後的收盤價。
 2. 你只會看到開發期（2004-02-11～2016-12-31）的結果；驗證期與保留期的結果不提供，也不要推測或引用 2017 年以後的行情。
 3. 每個新設定都計入多重檢定的試驗次數，試越多越難證明有效。每輪最多提出 {specs_per_round} 個設定；只提出有明確經濟機制的假設，不要做參數掃描、不要只微調已失敗設定的數字。
 4. 不要重複已測過的規則（名稱與說明不同但規則相同也算重複）。

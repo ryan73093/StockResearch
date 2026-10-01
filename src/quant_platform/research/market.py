@@ -82,6 +82,31 @@ class MarketData:
         end = bisect.bisect_right(days, day)
         return self._prices[asset][max(0, end - sessions):end]
 
+    def adjusted_trailing(self, asset: str, day: date, sessions: int) -> list[float]:
+        """``trailing`` with each close divided by the splits and stock dividends (unit ratios) that
+        took effect after it, up to ``day``: signals must not read a split as a fall (0050 split 1:4
+        in June 2025; the raw close then sat far below every moving average for months)."""
+        days = self._days.get(asset, [])
+        end = bisect.bisect_right(days, day)
+        start = max(0, end - sessions)
+        closes = self._prices[asset][start:end] if asset in self._prices else []
+        ratios = self.unit_ratios.get(asset) or {}
+        window = days[start:end]
+        effective = sorted((when, ratio) for when, ratio in ratios.items() if window and window[0] < when <= window[-1])
+        if not effective:
+            return closes
+        adjusted = []
+        for when_close, close in zip(window, closes):
+            factor = 1.0
+            for when, ratio in effective:
+                if when > when_close:
+                    factor *= ratio
+            adjusted.append(close / factor)
+        return adjusted
+
+    def has_unit_ratios(self, assets: set[str], until: date) -> bool:
+        return any(day <= until for asset in assets for day in self.unit_ratios.get(asset, {}))
+
 
 def available_assets(base_dir: str | Path = DEFAULT_BASE) -> list[str]:
     """Every catalog series with a daily file; research runs load all of them so

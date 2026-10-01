@@ -25,6 +25,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
 
+from quant_platform.research.allocation import target_weights
 from quant_platform.research.cashflow import ContributionPlan
 from quant_platform.research.costs import CostModel, affordable_shares, fill_price
 from quant_platform.research.market import MarketData
@@ -33,6 +34,10 @@ from quant_platform.research.spec import StrategySpec
 
 # 1.1.0: orders postponed past no-trade sessions; explicit contributions
 # 1.2.0: the input hash covers only the data up to the simulation's end (MarketData.fingerprint_until)
+# 2026-10-01 (version unchanged on purpose): signals read split-adjusted closes, and specs may use
+# allocation.defensive / allocation.rotation. A run is affected only when a signal instrument has a unit
+# ratio up to its end, and exactly those runs get "signals": "split-adjusted" in their input hash, so
+# every earlier run (the whole development period) keeps its hash and its recorded result.
 ENGINE_VERSION = "1.2.0"
 DRAWDOWN_LOOKBACK = 252
 
@@ -146,12 +151,14 @@ def input_hash(
     }
     if execution_lag:
         payload["execution_lag"] = execution_lag
+    if market.has_unit_ratios(spec.signals, end):
+        payload["signals"] = "split-adjusted"
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def common_start(spec: StrategySpec, market: MarketData) -> date:
     """First session on which every instrument of the spec has traded."""
-    return max(market.first_day(asset) for asset in set(spec.assets) | {spec.signal})
+    return max(market.first_day(asset) for asset in set(spec.assets) | {spec.signal} | spec.signals)
 
 
 def _invest_days(spec: StrategySpec, sessions: list[date], contributions: list[tuple[date, float]]) -> set[date]:
@@ -170,12 +177,12 @@ def _invest_days(spec: StrategySpec, sessions: list[date], contributions: list[t
 def _multiplier(spec: StrategySpec, market: MarketData, day: date) -> float:
     sizing = spec.sizing
     if sizing.type == "moving_average":
-        closes = market.trailing(spec.signal, day, sizing.ma_sessions)
+        closes = market.adjusted_trailing(spec.signal, day, sizing.ma_sessions)
         if len(closes) < sizing.ma_sessions:
             return 1.0
         return sizing.weak_multiplier if closes[-1] < sum(closes) / len(closes) else sizing.strong_multiplier
     if sizing.type == "drawdown":
-        closes = market.trailing(spec.signal, day, DRAWDOWN_LOOKBACK)
+        closes = market.adjusted_trailing(spec.signal, day, DRAWDOWN_LOOKBACK)
         if not closes:
             return 1.0
         drawdown = closes[-1] / max(closes) - 1
@@ -329,12 +336,13 @@ def _invest(spec, market, costs, account, day, new_money, execute, signal_day) -
         reserve_cap = new_money * sizing.max_reserve_months
         if account.cash - budget > reserve_cap:
             budget = account.cash - reserve_cap
-    weights = spec.allocation.weights
+    weights = target_weights(spec, lambda asset, sessions: market.adjusted_trailing(asset, signal_day, sessions))
     prices = {asset: market.close(asset, day) for asset in spec.assets}
     holdings = {asset: account.shares[asset] * prices[asset] for asset in spec.assets}
     invested = sum(holdings.values())
 
-    if len(weights) > 1 and spec.allocation.rebalance == "band" and invested > 0:
+    # One instrument at 100% never drifts; a cash target (defensive with no weights) does.
+    if (len(weights) > 1 or sum(weights.values()) < 1 - 1e-9) and spec.allocation.rebalance == "band" and invested > 0:
         drift = max(abs(holdings[asset] / invested - weights[asset]) for asset in weights)
         if drift > spec.allocation.band:
             target_total = invested + budget

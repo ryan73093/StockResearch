@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
+from quant_platform.research.allocation import adjust_gaps, describe_target, target_weights
 from quant_platform.research.costs import BROKERS, CostModel, affordable_shares, fill_price
 from quant_platform.research.spec import BASELINES, StrategySpec
 
@@ -118,7 +119,7 @@ class PlanDecisionService:
 
         prices: dict[str, float] = {}
         histories: dict[str, list[tuple[date, float]]] = {}
-        for code in sorted(set(spec.assets) | {spec.signal}):
+        for code in sorted(set(spec.assets) | {spec.signal} | spec.signals):
             symbol, history = self._closes(code, now)
             if not history or history[-1][0] != today:
                 return PlanDecision(
@@ -155,9 +156,18 @@ class PlanDecisionService:
         values = {code: (holdings[code].shares * prices[code] if code in holdings else 0.0) for code in spec.assets}
         orders: list[PlanOrder] = []
         kind = "invest"
-        weights = spec.allocation.weights
+        # The same targets as the research engine; split-adjusted closes like its signals.
+        adjusted = {code: adjust_gaps([close for _, close in history]) for code, history in histories.items()}
+
+        def trailing(code: str, sessions: int) -> list[float]:
+            return adjusted.get(code, [])[-sessions:]
+
+        weights = target_weights(spec, trailing)
+        why_target = describe_target(spec, trailing)
+        if why_target:
+            reasons.append(why_target)
         invested = sum(values.values())
-        if len(weights) > 1 and spec.allocation.rebalance == "band" and invested > 0:
+        if (len(weights) > 1 or sum(weights.values()) < 1 - 1e-9) and spec.allocation.rebalance == "band" and invested > 0:
             drift = max(abs(values[code] / invested - weights[code]) for code in weights)
             if drift > spec.allocation.band:
                 kind = "rebalance"
@@ -165,7 +175,7 @@ class PlanDecisionService:
                 target_total = invested + budget
                 for code in sorted(weights):
                     excess = values[code] - weights[code] * target_total
-                    if excess > 0:
+                    if excess > 0 and code in holdings:
                         price = fill_price(prices[code], "SELL", costs.slippage_bps)
                         shares = min(holdings[code].shares, math.floor(excess / price))
                         if shares > 0:
@@ -197,9 +207,10 @@ class PlanDecisionService:
             f"{'；月退的退佣不計入' if '月退' in broker.rebate else ''}），實際以對帳單為準。"
         )
         if not orders:
+            headline = ("今天是投入日：依規則保留現金、暫不買進" if not any(weights.values())
+                        else "今天是投入日，但可用資金不足以買進 1 股")
             return PlanDecision(
-                "idle", "今天是投入日，但可用資金不足以買進 1 股", reasons=reasons, budget=budget,
-                data_time=f"{today:%m/%d} 收盤", **base,
+                "idle", headline, reasons=reasons, budget=budget, data_time=f"{today:%m/%d} 收盤", **base,
             )
         headline = "今天依計畫投入：" + "、".join(
             f"{'買進' if order.side == 'BUY' else '賣出'} {order.symbol} {order.shares:,} 股" for order in orders
@@ -212,7 +223,7 @@ class PlanDecisionService:
     @staticmethod
     def _multiplier(spec: StrategySpec, history: list[tuple[date, float]]) -> tuple[float, str]:
         sizing = spec.sizing
-        closes = [close for _, close in history]
+        closes = adjust_gaps([close for _, close in history])  # a split is not a fall
         if sizing.type == "moving_average":
             window = closes[-sizing.ma_sessions:]
             if len(window) < sizing.ma_sessions:
