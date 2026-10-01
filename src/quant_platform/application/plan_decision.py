@@ -12,6 +12,7 @@ orders; the investor copies them to the broker.
 from __future__ import annotations
 
 import math
+from calendar import monthrange
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
@@ -49,12 +50,17 @@ class PlanDecision:
     data_time: str = ""
 
 
+def clamped_date(year: int, month: int, day: int) -> date:
+    """``day`` in that month, or the month's last day when it is shorter (31 → 30/28)."""
+    return date(year, month, min(day, monthrange(year, month)[1]))
+
+
 def invest_session(spec: StrategySpec, salary_day: int, today: date, calendar) -> date:
     """This month's invest session for the spec, or next month's once passed."""
     day_of_month = salary_day if spec.contribution.invest_on == "contribution_day" else spec.contribution.day_of_month
 
     def session_for(year: int, month: int) -> date:
-        target = date(year, month, day_of_month)
+        target = clamped_date(year, month, day_of_month)
         return target if calendar.is_trading_day(target) else calendar.next_trading_day(target)
 
     session = session_for(today.year, today.month)

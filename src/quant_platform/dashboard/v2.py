@@ -7,6 +7,7 @@ research pages stay reachable from 研究 until S8 retires them.
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -17,6 +18,7 @@ from flask import Blueprint, abort, flash, jsonify, redirect, render_template, r
 from quant_platform.application.close_availability import SOURCES as CLOSE_SOURCES
 from quant_platform.application.actual_account import FLOW_KINDS, ActualAccountError
 from quant_platform.application.investment_plan import InvestmentPlanError, strategy_name
+from quant_platform.application.plan_decision import clamped_date
 from quant_platform.research.spec import BASELINES
 from quant_platform.application.close_availability import recent_table
 from quant_platform.config.settings import PAUSABLE_MODULES
@@ -25,6 +27,7 @@ from quant_platform.research.forward import FORWARD_START, ForwardTracker
 from quant_platform.research.summary import round_summary
 from quant_platform.research.reports import latest_reports, latest_stats, report_rows, trial_ranking
 
+logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
 ASSET_VERSION = "2.3.0"
@@ -157,11 +160,11 @@ def _tone(badge: str) -> str:
 
 def next_contribution_day(calendar, today, salary_day: int):
     """First session on or after this month's salary day; next month's once it has passed."""
-    target = date(today.year, today.month, salary_day)
+    target = clamped_date(today.year, today.month, salary_day)
     session = target if calendar.is_trading_day(target) else calendar.next_trading_day(target)
     if session < today:
         year, month = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
-        target = date(year, month, salary_day)
+        target = clamped_date(year, month, salary_day)
         session = target if calendar.is_trading_day(target) else calendar.next_trading_day(target)
     return session
 
@@ -434,6 +437,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                 saved = service.save(form)
             except InvestmentPlanError as exc:
                 error = str(exc)
+                logger.info("Plan form rejected: %s", error)
             else:
                 flash(f"已儲存投資計畫第 {saved.version} 版。", "success")
                 return redirect(url_for("v2.plan"))

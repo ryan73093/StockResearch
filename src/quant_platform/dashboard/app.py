@@ -58,6 +58,17 @@ def create_app(container: Container | None = None) -> Flask:
     # Registered first so it runs before any other request hook.
     register_cloudflare_access(app, dependencies.settings)
     app.register_blueprint(create_v2_blueprint(dependencies))
+    request_log = logging.getLogger("quant_platform.web.requests")
+
+    @app.after_request
+    def log_failed_requests(response):
+        # Without a trace of 4xx/5xx answers a user's "it showed an error" cannot be diagnosed.
+        if response.status_code >= 400 and not request.path.startswith("/static/"):
+            request_log.warning(
+                "%s %s -> %s (%s)", request.method, request.path, response.status_code,
+                request.headers.get("User-Agent", "")[:80],
+            )
+        return response
 
     @app.before_request
     def load_current_user() -> None:
@@ -2988,6 +2999,10 @@ def create_app(container: Container | None = None) -> Flask:
 
 
 def main() -> None:
+    # Service logs go to instance/web.stderr.log (scripts/run_local_services.ps1).
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     dependencies = build_container()
     from quant_platform.scheduler.runner import start_background_scheduler
 

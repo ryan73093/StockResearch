@@ -27,11 +27,42 @@ def test_form_validation_messages():
     values = parse_plan_form(FORM)
     assert values["monthly_amount"] == 15_000 and values["max_drawdown_tolerance"] == 0.35
     for field, value in (
-        ("monthly_amount", "abc"), ("monthly_amount", "500"), ("salary_day", "31"),
+        ("monthly_amount", "abc"), ("monthly_amount", "500"), ("salary_day", "32"),
         ("strategy_key", "all_in_2330"), ("max_drawdown_tolerance", "95"), ("horizon_years", "100"),
     ):
         with pytest.raises(InvestmentPlanError):
             parse_plan_form({**FORM, field: value})
+
+
+@pytest.mark.parametrize(
+    ("field", "text", "expected_key", "expected"),
+    [
+        ("monthly_amount", "1萬", "monthly_amount", 10_000),
+        ("monthly_amount", "1.5 萬", "monthly_amount", 15_000),
+        ("monthly_amount", "NT$ 12,000 元", "monthly_amount", 12_000),
+        ("monthly_amount", "１２０００", "monthly_amount", 12_000),
+        ("salary_day", "31", "salary_day", 31),
+        ("salary_day", "月底", "salary_day", 31),
+        ("salary_day", "10號", "salary_day", 10),
+        ("max_drawdown_tolerance", "30%", "max_drawdown_tolerance", 0.3),
+        ("max_drawdown_tolerance", "27.5", "max_drawdown_tolerance", 0.275),
+        ("horizon_years", "20年", "horizon_years", 20),
+    ],
+)
+def test_form_accepts_what_people_type(field, text, expected_key, expected):
+    assert parse_plan_form({**FORM, field: text})[expected_key] == expected
+
+
+def test_salary_day_31_falls_back_to_short_month_ends():
+    from datetime import date
+
+    from quant_platform.dashboard.v2 import next_contribution_day
+    from quant_platform.market_calendar import TradingCalendar
+
+    calendar = TradingCalendar("TW", covered_years=[2026])
+    # 2026-09-30 is the last day of September; February 2027 has 28 days.
+    assert next_contribution_day(calendar, date(2026, 9, 2), 31) == date(2026, 9, 30)
+    assert next_contribution_day(calendar, date(2027, 2, 1), 31) == date(2027, 3, 1)  # 02-28 is a Sunday
 
 
 def test_every_save_is_a_new_version(container):
@@ -74,8 +105,9 @@ def test_plan_page_saves_and_shows_errors(container):
     client = create_app(container).test_client()
     assert "建立你的投資計畫" in client.get("/plan").get_data(as_text=True)
 
-    bad = client.post("/plan", data={**FORM, "salary_day": "31"})
-    assert bad.status_code == 400 and "薪資日必須是 1～28" in bad.get_data(as_text=True)
+    bad = client.post("/plan", data={**FORM, "salary_day": "32"})
+    assert bad.status_code == 400 and "沒有儲存" in bad.get_data(as_text=True)
+    assert "薪資日請填 1～31" in bad.get_data(as_text=True)
 
     saved = client.post("/plan", data=FORM, follow_redirects=True)
     body = saved.get_data(as_text=True)
