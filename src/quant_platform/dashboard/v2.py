@@ -37,7 +37,7 @@ from quant_platform.research.reports import latest_reports, latest_stats, report
 logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.4.2"
+ASSET_VERSION = "2.4.3"
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {

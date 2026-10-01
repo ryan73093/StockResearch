@@ -379,7 +379,8 @@ td.wrap { white-space: normal; min-width: 180px; }
     display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
     padding: 0 !important; border: 0; white-space: normal; text-align: right; min-width: 0;
   }
-  .table--stack td::before { content: attr(data-label); color: var(--muted); font-size: 12px; text-align: left; flex: none; }
+  /* A long label wraps instead of widening the whole page on phones (10/01: 收盤資料時效 at 375 px). */
+  .table--stack td::before { content: attr(data-label); color: var(--muted); font-size: 12px; text-align: left; flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
   .table--stack td[data-primary] { grid-column: 1 / -1; justify-content: space-between; text-align: left; font-size: 15px; }
   .table--stack td[data-primary]::before { content: none; }
   .table--stack td[data-wide] { grid-column: 1 / -1; text-align: left; }

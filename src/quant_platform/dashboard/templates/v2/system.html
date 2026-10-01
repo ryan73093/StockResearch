@@ -73,7 +73,7 @@
       {% for row in close_rows %}
         <tr>
           <td data-primary><strong>{{ row.day }}</strong></td>
-          {% for key, label in close_sources.items() %}<td data-label="{{ label }}">{{ row.sources[key] }}</td>{% endfor %}
+          {% for key, label in close_sources.items() %}<td data-label="{{ label }}" data-wide>{{ row.sources[key] }}</td>{% endfor %}
         </tr>
       {% endfor %}
       </tbody>
