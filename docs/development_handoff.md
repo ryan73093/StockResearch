@@ -1,6 +1,6 @@
 # 盤後決策台 — 當前開發交接
 
-記錄時間：2026-10-01 16:45（Asia/Taipei；16:41 依使用者要求停止服務）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
+記錄時間：2026-10-01 19:05（Asia/Taipei；18:16 使用者重開機後部署新版）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
 
 ## 接手前必讀
 
@@ -51,7 +51,7 @@
 
 | 時間 | 事項 | 看哪裡 |
 |---|---|---|
-| 使用者重開機後 | 確認服務已自動啟動（`/health`）；部署新版（`scripts\deploy.ps1`，避開 13:30–14:40 與 22:00 AI 研究員）後驗收：教學 `/help`、今日頁開始使用清單與異常提示、計畫預覽、持倉（回撤、每月底對照、任一天查詢、股利、大跌情境、回報成交帶入）、研究頁本週報告、系統頁除息資料；本機與外網、桌面與 375 px。快速檢查腳本可照 `GET /`、`/help`、`/holdings`、`/plan`、`/research`、`/system` 找關鍵字 | 開發歷程「部署」一筆 |
+| 使用者登入 Access 後 | 外網（`https://stockresearch.pimi-sunsun.com`）驗收同一版：`/help`、今日、持倉、計畫、研究、系統，桌面與 375 px；結果補進開發歷程「重開機後部署」一筆 | 瀏覽器窗格 |
 | 10/01 22:00 | AI 研究員第一晚（見上方） | 研究頁、`instance\research\journal.jsonl` |
 | 10/02 13:50 | 部署後第一次台股流程：官方收盤等待（不再逐檔問 Yahoo）、yfinance 不再出現 curl 77 或 possibly delisted；4 檔新 ETF 已有 2020 年起日線 | `scheduler_job_runs`、`instance\worker.stderr.log` |
 | 10/02 起 | 除權除息預告每 12 小時更新 | `instance\events\ex_dividends.json`、系統頁背景工作 |
@@ -62,12 +62,12 @@
 | 項目 | 狀態 |
 |---|---|
 | 監督程序 | 排程工作 `StockResearchLocalServices`（使用者登入時觸發），含 Tunnel；紀錄 `instance\supervisor.log` |
-| 網站 | **16:41 依使用者要求停止全部服務**（使用者稍後重開機，登入後排程工作會自動啟動）；Waitress 127.0.0.1:5000、`AUTH_MODE=cloudflare-access`；已安裝的是 12:05 部署的版本，之後的提交都還沒部署——先 `scripts\deploy.ps1`，再依下表驗收 |
+| 網站 | Waitress 127.0.0.1:5000、`AUTH_MODE=cloudflare-access`；18:59 部署 `dbf45fe`（使用教學與 10/01 下午的功能，見開發歷程），本機驗收完成，外網內容驗收待使用者登入 Access |
 | 資料庫 | `instance\quant_platform.db` 約 9.7 GiB；`research_universe` 新增 4 檔 ETF（id 555–558）；每日備份 `instance\backups\daily\`；兩個 22.29 GiB 暫存備份待使用者刪除 |
 | 研究資料 | `instance\research\`：history（10 個序列）、reports、trials.jsonl、stats、forward、promotions.jsonl |
 | 憑證副本 | `C:\ProgramData\StockResearch\cacert.pem`（yfinance 用，見開發歷程） |
-| 主機記憶體外洩（10/01 17:40 診斷） | 開機 116 小時後核心非分頁記憶體池 6.5 GB、核心程序物件 10.6 萬個（實際只有 348 個程序）：**每個結束的程序都沒被釋放**（測試：30 個 `cmd /c exit` 後 `Proc` +30 且不回落），每個約佔 130 KB（VAD、權杖、分頁表），合計約 13 GB。不是本專案或 Codex 本身造成，而是核心層（Windows 26H1 build 28000.2956 或某個監看程序建立的驅動）的 bug；AI 工具大量開程序會加速累積。重開機可清掉；重開機後先複測（以池標籤 `Proc` 前後數量比較）。最可能的元兇：內顯 AMD Radeon 驅動 31.0.24002.92（2024-01-11），正是已知「每個程序都留下殭屍、約 64 KB」的 AMD Adrenalin 版本範圍（23.12～24.6，24.7.1 起修正）；主力顯卡是 RTX 5070 Ti，請使用者在 BIOS 關閉內顯或手動更新 AMD 驅動後複測 |
-| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；388 通過、1 略過 |
+| 主機記憶體外洩（10/01 17:40 診斷） | 開機 116 小時後核心非分頁記憶體池 6.5 GB、核心程序物件 10.6 萬個（實際只有 348 個程序）：**每個結束的程序都沒被釋放**（測試：30 個 `cmd /c exit` 後 `Proc` +30 且不回落），每個約佔 130 KB（VAD、權杖、分頁表），合計約 13 GB。不是本專案或 Codex 本身造成，而是核心層（Windows 26H1 build 28000.2956 或某個監看程序建立的驅動）的 bug；AI 工具大量開程序會加速累積。重開機可清掉，但 18:51 複測仍外洩（每個程序 `Proc` +1 不回落），會再慢慢累積。最可能的元兇：內顯 AMD Radeon 驅動 31.0.24002.92（2024-01-11），正是已知「每個程序都留下殭屍、約 64 KB」的 AMD Adrenalin 版本範圍（23.12～24.6，24.7.1 起修正）；主力顯卡是 RTX 5070 Ti，請使用者在 BIOS 關閉內顯或手動更新 AMD 驅動後複測 |
+| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；390 通過、1 略過 |
 | 同主機其他服務 | VectorDB 5001 與其 Tunnel、PimiServices 共用 cloudflared 服務（YtSummary／AutoLayout）。一律不操作 |
 
 ## 待使用者確認或操作
