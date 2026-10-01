@@ -18,7 +18,7 @@ from flask import Blueprint, abort, flash, jsonify, redirect, render_template, r
 
 from quant_platform.application.close_availability import SOURCES as CLOSE_SOURCES
 from quant_platform.application.actual_account import FLOW_KINDS, ActualAccountError
-from quant_platform.application.investment_plan import InvestmentPlanError, strategy_name
+from quant_platform.application.investment_plan import InvestmentPlanError, parse_plan_form, strategy_name
 from quant_platform.application.plan_decision import clamped_date
 from quant_platform.research.costs import BROKERS
 from quant_platform.research.spec import BASELINES
@@ -506,21 +506,76 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         flash("已作廢該筆紀錄。" if done else "找不到該筆紀錄或已作廢。", "success" if done else "error")
         return redirect(url_for("v2.holdings"))
 
+    def plan_preview(current, values: dict, catalog: dict, research: dict) -> dict[str, object]:
+        """What a new plan version changes (S6-W03), shown before it is saved."""
+        changes = []
+
+        def compare(label: str, before: str, after: str) -> None:
+            if before != after:
+                changes.append({"label": label, "before": before, "after": after})
+
+        def name(key: str) -> str:
+            return catalog[key].name if key in catalog else key
+
+        compare("每月投入", f"{current.monthly_amount:,.0f} 元", f"{values['monthly_amount']:,.0f} 元")
+        compare("薪資日", f"每月 {current.salary_day} 日", f"每月 {values['salary_day']} 日")
+        compare("採用策略", name(current.strategy_key), name(values["strategy_key"]))
+        compare("券商", BROKERS.get(current.broker, BROKERS["conservative"]).name, BROKERS[values["broker"]].name)
+        compare("可承受回撤", f"{current.max_drawdown_tolerance:.0%}", f"{values['max_drawdown_tolerance']:.0%}")
+        compare("預計投資年數", f"{current.horizon_years or '—'}", f"{values['horizon_years'] or '—'}")
+        compare("目標", current.goal or "—", values["goal"] or "—")
+        impacts = []
+        calendar = dependencies.market_calendar.calendar("TW")
+        today = datetime.now(TAIPEI).date()
+        before = next_contribution_day(calendar, today, current.salary_day)
+        after = next_contribution_day(calendar, today, values["salary_day"])
+        if before != after:
+            impacts.append(f"下次薪資入帳日 {before:%m/%d} → {after:%m/%d}（遇休市順延）")
+        if values["monthly_amount"] != current.monthly_amount:
+            impacts.append(
+                f"每年投入 {current.monthly_amount * 12:,.0f} → {values['monthly_amount'] * 12:,.0f} 元"
+            )
+        if values["strategy_key"] != current.strategy_key:
+            for key in (current.strategy_key, values["strategy_key"]):
+                row = research.get(name(key))
+                if row and row.get("xirr") is not None:
+                    three = row.get("three_year") or {}
+                    impacts.append(
+                        f"{name(key)}：歷史全期間 XIRR {row['xirr']:.2%}、最大回撤 {row['drawdown']:.0%}"
+                        + (f"、3 年勝過定期定額 {three['win_ratio']:.0%}" if three.get("win_ratio") is not None else "")
+                    )
+        if values["broker"] != current.broker:
+            impacts.append(f"今日建議的手續費、成交回報的預設手續費與影子帳戶改用{BROKERS[values['broker']].name}的費率")
+        return {"changes": changes, "impacts": impacts, "version": current.version + 1}
+
     @blueprint.route("/plan", methods=["GET", "POST"])
     def plan():
         service = dependencies.investment_plan_service
         error = None
+        preview = None
         form = dict(request.form) if request.method == "POST" else {}
+        action = form.pop("action", "save")
+        current = service.current()
+        catalog = service.strategies()
+        reports_dir = _instance_dir(dependencies.settings.database_url) / "research" / "reports"
+        research = {
+            row["name"]: row
+            for row in report_rows(latest_reports(reports_dir, limit=20, period="full", kind="baseline"))
+        }
         if request.method == "POST":
             try:
-                saved = service.save(form)
+                if action == "preview" and current is not None:
+                    # Changes are shown first; the confirmation posts the same values with action=save.
+                    preview = plan_preview(current, parse_plan_form(form, catalog), catalog, research)
+                else:
+                    saved = service.save(form)
             except InvestmentPlanError as exc:
                 error = str(exc)
                 logger.info("Plan form rejected: %s", error)
             else:
-                flash(f"已儲存投資計畫第 {saved.version} 版。", "success")
-                return redirect(url_for("v2.plan"))
-        current = service.current()
+                if preview is None:
+                    flash(f"已儲存投資計畫第 {saved.version} 版。", "success")
+                    return redirect(url_for("v2.plan"))
         defaults = {
             "monthly_amount": f"{current.monthly_amount:.0f}" if current else "10000",
             "salary_day": str(current.salary_day) if current else "5",
@@ -531,12 +586,6 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "note": "",
             "broker": current.broker if current else "conservative",
         }
-        reports_dir = _instance_dir(dependencies.settings.database_url) / "research" / "reports"
-        research = {
-            row["name"]: row
-            for row in report_rows(latest_reports(reports_dir, limit=20, period="full", kind="baseline"))
-        }
-        catalog = service.strategies()
         return render_template(
             "v2/plan.html",
             active_nav="plan",
@@ -551,6 +600,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             current_broker=BROKERS.get(current.broker) if current else None,
             values={**defaults, **form},
             error=error,
+            preview=preview,
             research=research,
         ), (400 if error else 200)
 

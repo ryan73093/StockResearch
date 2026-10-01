@@ -14,6 +14,29 @@
 {% if error %}<p class="form-error" role="alert"><strong>沒有儲存：</strong>{{ error }}</p>{% endif %}
 <div class="grid grid--main-side">
   <div class="stack">
+    {% if preview %}
+    <section class="card card--highlight order-1" id="plan-preview">
+      <div class="card__head"><h2>確認變更 <span class="badge badge--accent">將存成第 {{ preview.version }} 版</span></h2></div>
+      {% if preview.changes %}
+      <dl class="facts">
+        {% for change in preview.changes %}
+          <div><dt>{{ change.label }}</dt><dd><span class="muted">{{ change.before }}</span> → <strong>{{ change.after }}</strong></dd></div>
+        {% endfor %}
+      </dl>
+      {% else %}
+      <p class="muted" style="margin:0">內容沒有變更；仍可存成新版本（例如只記錄修改原因）。</p>
+      {% endif %}
+      {% if preview.impacts %}
+      <ul class="reasons" style="margin-top:12px">{% for item in preview.impacts %}<li>{{ item }}</li>{% endfor %}</ul>
+      {% endif %}
+      <form method="post" class="actions-row" style="margin-top:12px">
+        {% for key, value in values.items() %}<input type="hidden" name="{{ key }}" value="{{ value if value is not none else '' }}">{% endfor %}
+        <button class="btn btn--primary" type="submit" name="action" value="save">確認儲存</button>
+        <a class="btn" href="#plan-form">繼續修改</a>
+        <span class="muted small">舊版本會保留</span>
+      </form>
+    </section>
+    {% endif %}
     {% if current %}
     <section class="card order-1">
       <div class="card__head"><h2>目前的計畫 <span class="badge badge--accent">第 {{ current.version }} 版</span></h2><span class="muted small">{{ current.created_at.astimezone(taipei).strftime('%Y-%m-%d %H:%M') }}</span></div>
@@ -38,7 +61,7 @@
     </section>
     {% endif %}
 
-    <section class="card order-2">
+    <section class="card order-2" id="plan-form">
       <div class="card__head"><h2>{{ '修改計畫（存成新版本）' if current else '填寫計畫' }}</h2></div>
       <form method="post" class="form">
         <div class="form__row">
@@ -76,7 +99,13 @@
         </div>
         <label>目標（選填）<input name="goal" maxlength="200" value="{{ values.goal }}" placeholder="例如：退休金、子女教育"></label>
         <label>這次修改的原因（選填）<textarea name="note" maxlength="1000" rows="2">{{ values.note }}</textarea></label>
-        <div class="actions-row"><button class="btn btn--primary" type="submit">儲存為新版本</button><span class="muted small">不會刪除舊版本</span></div>
+        <div class="actions-row">
+          {% if current %}
+          <button class="btn btn--primary" type="submit" name="action" value="preview">預覽變更</button><span class="muted small">先看改了什麼，確認後才存成新版本</span>
+          {% else %}
+          <button class="btn btn--primary" type="submit" name="action" value="save">儲存為第 1 版</button><span class="muted small">之後每次修改都會留下新版本</span>
+          {% endif %}
+        </div>
       </form>
     </section>
   </div>

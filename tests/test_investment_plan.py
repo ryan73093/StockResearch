@@ -174,6 +174,30 @@ def test_today_action_card_shows_the_window_copy_text_and_attention(container):
     assert "今日收盤資料尚未齊全" in missing
 
 
+def test_changing_the_plan_shows_the_changes_before_saving(container):
+    client = create_app(container).test_client()
+    container.investment_plan_service.save(FORM)                        # version 1: 15,000, day 10, ma_value
+    changed = {**FORM, "monthly_amount": "2萬", "salary_day": "5", "strategy_key": "benchmark_dca",
+               "broker": "taishin", "note": "加薪"}
+
+    preview = client.post("/plan", data={**changed, "action": "preview"})
+    body = preview.get_data(as_text=True)
+
+    assert preview.status_code == 200 and "確認變更" in body and "將存成第 2 版" in body
+    assert "15,000 元</span> → <strong>20,000 元" in body
+    assert "定期不定額（200 日均線）</span> → <strong>定期定額基準" in body
+    assert "台新證券" in body and "每年投入 180,000 → 240,000 元" in body
+    assert [plan.version for plan in container.investment_plan_service.history()] == [1]   # nothing saved yet
+
+    saved = client.post("/plan", data={**changed, "action": "save"}, follow_redirects=True)
+    assert "已儲存投資計畫第 2 版" in saved.get_data(as_text=True)
+    current = container.investment_plan_service.current()
+    assert (current.version, current.monthly_amount, current.broker) == (2, 20_000, "taishin")
+
+    bad = client.post("/plan", data={**changed, "salary_day": "40", "action": "preview"})
+    assert bad.status_code == 400 and "沒有儲存" in bad.get_data(as_text=True)
+
+
 def test_plan_page_saves_and_shows_errors(container):
     client = create_app(container).test_client()
     assert "建立你的投資計畫" in client.get("/plan").get_data(as_text=True)
