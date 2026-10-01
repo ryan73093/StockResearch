@@ -355,6 +355,29 @@ class ActualAccountService:
         }, dict(zip(result.days, result.values))
 
 
+STRESS_DROPS = (0.20, 0.30, 0.55)  # 0.55 ≈ 0050 in 2008
+
+
+def stress_scenarios(overview: ActualAccountOverview, tolerance: float | None = None) -> list[dict[str, object]]:
+    """Account value if Taiwan equity ETFs fell 20%, 30% or 55% (S7-W06).
+
+    Simplification: stock ETFs fall by the full amount; bond ETFs and cash do
+    not move. ``tolerance`` is the plan's acceptable drawdown.
+    """
+    if overview.total_value <= 0:
+        return []
+    equity = sum(item.value for item in overview.holdings if tax_kind(item.symbol) != "bond_etf")
+    rows = []
+    for drop in STRESS_DROPS:
+        loss = equity * drop
+        share = loss / overview.total_value
+        rows.append({
+            "drop": drop, "loss": loss, "after": overview.total_value - loss, "share": share,
+            "over_tolerance": tolerance is not None and share > tolerance,
+        })
+    return rows
+
+
 def _month_ends(history: dict[str, object], shadow: dict[date, float], months: int = 12) -> list[dict[str, object]]:
     """The last session of each month: real account against the DCA shadow, newest first."""
     last: dict[str, tuple[date, float]] = {}

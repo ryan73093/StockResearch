@@ -70,6 +70,28 @@
   </section>
 </div>
 
+{% if scenarios %}
+<section class="card">
+  <div class="card__head"><h2>如果台股大跌</h2><span class="muted small">股票型 ETF 照幅度下跌；債券 ETF 與現金不變（簡化）</span></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>情境</th><th class="num">帳戶剩下（元）</th><th class="num">少掉（元）</th><th class="num">占總資產</th></tr></thead>
+      <tbody>
+      {% for row in scenarios %}
+        <tr>
+          <td data-primary><strong>台股跌 {{ '{:.0%}'.format(row.drop) }}</strong>{% if row.drop >= 0.5 %}<span class="muted small">接近 2008 年金融海嘯</span>{% endif %}{% if row.over_tolerance %}<span class="badge badge--warn">超過可承受回撤</span>{% endif %}</td>
+          <td class="num" data-label="帳戶剩下">{{ '{:,.0f}'.format(row.after) }}</td>
+          <td class="num down" data-label="少掉">{{ '{:,.0f}'.format(row.loss) }}</td>
+          <td class="num" data-label="占總資產">{{ '{:.0%}'.format(row.share) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">{% if tolerance is not none %}你在計畫設定的可承受回撤是 {{ '{:.0%}'.format(tolerance) }}；超過時代表這種跌幅可能讓你想停止投入，建議事先想好怎麼做。{% else %}建立計畫並設定可承受回撤後，這裡會標出超過的情境。{% endif %}定期定額在下跌時用同樣的錢買到更多股數，歷史上恢復時間從數月到數年不等。</p>
+</section>
+{% endif %}
+
 {% if actual.monthly %}
 <details class="card">
   <summary><h2>每月底對照 <span class="badge">最近 {{ actual.monthly|length }} 個月</span></h2></summary>

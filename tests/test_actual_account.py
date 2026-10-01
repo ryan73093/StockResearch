@@ -98,6 +98,24 @@ def test_drawdown_and_month_ends_by_hand(tmp_path):
     assert september["difference"] == pytest.approx(990.0)
 
 
+def test_stress_scenarios_by_hand():
+    from quant_platform.application.actual_account import ActualAccountOverview, Holding, stress_scenarios
+
+    overview = ActualAccountOverview(
+        cash=5_000, holdings=[Holding("0050", 100, 90.0, 100.0, 10_000, 1_000), Holding("00679B", 200, 25.0, 25.0, 5_000, 0)],
+        market_value=15_000, total_value=20_000, net_deposits=20_000, dividends=0, fees=0, taxes=0, realized=0,
+        xirr=None, shadow=None, flows=[], trades=[],
+    )
+
+    rows = stress_scenarios(overview, tolerance=0.25)
+
+    # Only the 10,000 in 0050 falls; the bond ETF and the cash stay.
+    assert [(row["drop"], row["loss"], row["after"], row["share"]) for row in rows] == [
+        (0.20, 2_000, 18_000, 0.10), (0.30, 3_000, 17_000, 0.15), (0.55, 5_500, 14_500, 0.275),
+    ]
+    assert [row["over_tolerance"] for row in rows] == [False, False, True]
+
+
 def test_invalid_entries_are_rejected(service):
     service.record_cash_flow({"kind": "deposit", "day": "2026-09-01", "amount": "5000"})
     service.record_trade({"day": "2026-09-01", "symbol": "0050", "side": "BUY", "shares": "10", "price": "100"})

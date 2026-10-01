@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
 from quant_platform.application.close_availability import SOURCES as CLOSE_SOURCES
-from quant_platform.application.actual_account import FLOW_KINDS, ActualAccountError
+from quant_platform.application.actual_account import FLOW_KINDS, ActualAccountError, stress_scenarios
 from quant_platform.application.investment_plan import InvestmentPlanError, parse_plan_form, strategy_name
 from quant_platform.application.plan_decision import clamped_date
 from quant_platform.research.costs import BROKERS
@@ -457,11 +457,15 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         symbols = [item.position.symbol for item in overview.positions]
         symbols += [f"{item.symbol}.{suffix}" for item in actual.holdings for suffix in ("TW", "TWO")]
         names = names_for(symbols)
+        investment_plan = dependencies.investment_plan_service.current()
+        tolerance = investment_plan.max_drawdown_tolerance if investment_plan else None
         return render_template(
             "v2/holdings.html",
             active_nav="holdings",
             overview=overview,
             actual=actual,
+            scenarios=stress_scenarios(actual, tolerance) if actual.holdings else [],
+            tolerance=tolerance,
             names=names,
             code_names={symbol.split(".")[0]: name for symbol, name in names.items()},
             flow_kinds=FLOW_KINDS,
