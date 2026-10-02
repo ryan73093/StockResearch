@@ -1,6 +1,6 @@
 # 盤後決策台 — 當前開發交接
 
-記錄時間：2026-10-02 02:30（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
+記錄時間：2026-10-02 10:45（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前工作包；完成後把紀錄移到 `DEVELOPMENT_HISTORY.md`，再換成下一個工作包。
 
 ## 接手前必讀
 
@@ -9,7 +9,9 @@
 3. `DEVELOPMENT_HISTORY.md` 最上方幾筆（10/01 下午）：服務中的 Yahoo 全部失敗的根本原因（`PYTHONUTF8=1` 與中文路徑）、股利提醒、任一天查詢、測試誤寫正式資料庫、今日頁一鍵回報成交、情境模擬、每週研究報告、使用教學。
 4. 使用者要求：所有回覆與進度說明用繁體中文。研究 CLI 一律在專案根目錄以 `$env:PYTHONPATH="src"` 從原始碼執行（`.venv` 裡安裝的是部署版）。UI 預覽用暫存資料庫（不要用預設設定連正式資料庫）。
 
-## 最新狀態（2026-10-02 02:30）
+## 最新狀態（2026-10-02 10:45）
+
+- 今日建議的限價改為收盤 ±1%（盤後零股單一價格撮合，限價只決定買不買得到；0050 成交比例 85% → 99%），股數以限價計算。10/05 投入日是第一次以新限價產生委託。
 
 - 02:3x 部署 `b7aa88c`，本機驗收通過；外網以 `scripts\check-public.ps1` 確認（Tunnel 4 條連線、公開網址由 Access 把關）。外網驗收不再請使用者登入（AGENTS.md）。
 - 舊版挑戰者評估完成（研究頁新卡片；開發歷程 10/02 一筆）。全股票池「每月換前 10 名」勝過 0050（+74%，3 年勝率 87%，回撤 −54% 對 −34%）；但只用 2021 年就已很大的股票重算時落後（前 200 大 −116%），優勢來自後來長大的公司（倖存者偏差），不足以晉級為候選。舊版程式與每日預測不受影響。
@@ -69,7 +71,7 @@
 | 研究資料 | `instance\research\`：history（10 個序列）、reports、trials.jsonl、stats、forward、promotions.jsonl |
 | 憑證副本 | `C:\ProgramData\StockResearch\cacert.pem`（yfinance 用，見開發歷程） |
 | 主機記憶體 | 10/01 診斷出「每個結束的程序都留下殭屍」（開機 5 天約 13 GB），元凶是 AMD 內顯驅動 31.0.24002.92（2024-01）；使用者 22:5x 更新到 32.0.21045.5002 後複測已不再外洩。系統頁「主機記憶體」持續監看（殭屍 2 萬個以上偏高、5 萬個以上或可用不到 10% 建議重開機） |
-| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；418 通過、1 略過（10/02 02:2x） |
+| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；422 通過、1 略過（10/02 10:4x） |
 | 同主機其他服務 | VectorDB 5001 與其 Tunnel、PimiServices 共用 cloudflared 服務（YtSummary／AutoLayout）。一律不操作 |
 
 ## 待使用者確認或操作

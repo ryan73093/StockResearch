@@ -98,6 +98,15 @@ def main() -> int:
                     f"不高於收盤 {entry['at_or_below_close']:.0%}",
                     flush=True,
                 )
+                recent = entry.get("recent") or {}
+                if recent.get("traded_sessions"):
+                    rates = recent["fill_rates"]
+                    print(
+                        f"        {recent['since']} 起抽樣 {recent['sampled_sessions']} 天：中位 {recent['median_bps']:+.1f} bps、"
+                        f"P95 {recent['p95_bps']:+.1f}、最高 {recent['max_bps']:+.1f}；買進限價收盤加 0.2% 成交 {rates['20']:.0%}、"
+                        f"加 0.5% {rates['50']:.0%}、加 1% {rates['100']:.0%}、加 1.5% {rates['150']:.0%}",
+                        flush=True,
+                    )
         print(f"報告：{base / 'odd_lot.json'}")
         return 0
 

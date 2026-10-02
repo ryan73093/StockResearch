@@ -163,6 +163,7 @@ def plan_advice_text(decision, public_url: str = "") -> str:
             f"・{order.symbol} {side} {order.shares:,} 股，限價 {order.limit_price:,.2f}"
             f"（收盤 {order.reference_close:,.2f}），約 {order.amount:,.0f} 元，手續費 {order.fee} 元"
             + (f"、稅 {order.tax} 元" if order.tax else "")
+            + (f"；以限價成交最多 {order.worst_case:,.0f} 元" if order.side == "BUY" and order.worst_case else "")
         )
     lines.append("盤後零股 13:40–14:30 委託，14:30 撮合。")
     lines.append(f"計畫第 {decision.plan_version} 版・{decision.strategy}")

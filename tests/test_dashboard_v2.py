@@ -119,3 +119,25 @@ def test_market_session_names_the_holiday_and_the_next_session():
     assert holiday["label"] == "休市（國慶日補假）"
     assert holiday["detail"] == "下一個交易日 10/12"
     assert weekend["label"] == "休市（週末）"
+
+
+def test_today_order_card_shows_the_limit_and_the_most_it_can_cost(tmp_path):
+    from quant_platform.application.plan_decision import PlanDecision, PlanOrder
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}", scheduler_in_web=False))
+    order = PlanOrder("0050", "BUY", 98, 101.00, 100.0, 98 * 100.2, 20, 0, 100.2, 9_918)
+
+    class Decide:
+        def decide(self, now=None):
+            return PlanDecision("invest", "今天依計畫投入：買進 0050 98 股", 1, "定期定額基準", date(2026, 10, 5),
+                                orders=[order], reasons=["限價＝收盤加 1%"], budget=10_000, data_time="10/05 收盤")
+
+    container.investment_plan_service.save({
+        "monthly_amount": "10000", "salary_day": "5", "strategy_key": "benchmark_dca", "broker": "cathay",
+        "max_drawdown_tolerance": "30", "horizon_years": "20", "goal": "退休金", "note": "",
+    })
+    container.plan_decision_service = Decide()
+    body = create_app(container).test_client().get("/").get_data(as_text=True)
+
+    assert "限價 101.00（盤後零股）" in body and "最多也只需 9,918 元" in body
+    assert "shares=98&amp;price=100.20#trade" in body   # the report form starts from the expected fill

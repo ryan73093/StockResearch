@@ -126,6 +126,35 @@ def fill_price(close: float, side: str, slippage_bps: float, tick_size=etf_tick)
     return round(rounded * tick, 2)
 
 
+ORDER_LIMIT = 0.01   # today's order limit: close ± 1% (2026-10-02, S4-W05 限價與成交率)
+PRICE_LIMIT = 0.10   # daily price limit around the previous close
+
+
+def _to_tick(price: float, up: bool, tick_size) -> float:
+    tick = tick_size(price)
+    steps = price / tick
+    return round((math.ceil(steps - 1e-9) if up else math.floor(steps + 1e-9)) * tick, 2)
+
+
+def order_limit(close: float, side: str, previous_close: float | None = None, premium: float = ORDER_LIMIT,
+                tick_size=etf_tick) -> float:
+    """Limit price for today's after-hours odd-lot order. The 14:30 call auction fills every order
+    at one price, so the limit decides whether the order fills, not what it pays (that is modelled
+    by ``fill_price``). Close ± ``premium`` rounded against the trader, kept inside the day's price
+    limit when the previous close is known. Of 144 sessions sampled since 2020-10-26, 0050's
+    auction cleared within 1% above the close on 99% and within 0.2% on 85%
+    (instance/research/history/odd_lot.json, ``recent``)."""
+    if side == "BUY":
+        price = _to_tick(close * (1 + premium), True, tick_size)
+        if previous_close:
+            price = min(price, _to_tick(previous_close * (1 + PRICE_LIMIT), False, tick_size))
+        return max(price, close)
+    price = _to_tick(close * (1 - premium), False, tick_size)
+    if previous_close:
+        price = max(price, _to_tick(previous_close * (1 - PRICE_LIMIT), True, tick_size))
+    return min(price, close)
+
+
 def affordable_shares(cash: float, price: float, costs: CostModel) -> int:
     """Largest whole number of shares whose cost plus fee fits in ``cash``."""
     if price <= 0 or cash <= 0:

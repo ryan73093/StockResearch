@@ -62,7 +62,7 @@
       <div class="table-wrap table-wrap--stack">
         <table class="table--stack">
           <thead><tr>
-            <th>標的</th><th>買賣</th><th class="num">股數</th><th class="num">限價（元）</th>
+            <th>標的</th><th class="num">股數</th><th class="num">限價（元）</th>
             <th class="num">收盤（元）</th><th class="num">預估金額（元）</th><th>成交後</th>
           </tr></thead>
           <tbody>
@@ -70,14 +70,13 @@
             <tr>
               <td data-primary>
                 <span class="symbol"><strong>{{ order.symbol }}</strong><span>{{ names.get(order.symbol ~ '.TW', names.get(order.symbol ~ '.TWO', '')) }}</span></span>
-                <span class="badge {{ 'badge--buy' if order.side == 'BUY' else 'badge--sell' }} stack-only">{{ '買進' if order.side == 'BUY' else '賣出' }}</span>
+                <span class="badge {{ 'badge--buy' if order.side == 'BUY' else 'badge--sell' }}">{{ '買進' if order.side == 'BUY' else '賣出' }}</span>
               </td>
-              <td data-label="買賣" class="table-only"><span class="badge {{ 'badge--buy' if order.side == 'BUY' else 'badge--sell' }}">{{ '買進' if order.side == 'BUY' else '賣出' }}</span></td>
               <td class="num" data-label="股數">{{ '{:,}'.format(order.shares) }}</td>
               <td class="num" data-label="限價">{{ '{:,.2f}'.format(order.limit_price) }}</td>
               <td class="num" data-label="收盤">{{ '{:,.2f}'.format(order.reference_close) }}</td>
               <td class="num" data-label="預估金額">{{ '{:,.0f}'.format(order.amount) }}</td>
-              <td data-label="成交後" data-wide><a class="btn btn--small" href="/holdings?symbol={{ order.symbol }}&amp;side={{ order.side }}&amp;shares={{ order.shares }}&amp;price={{ '%.2f'|format(order.limit_price) }}#trade">回報成交</a></td>
+              <td data-label="成交後" data-wide><a class="btn btn--small" href="/holdings?symbol={{ order.symbol }}&amp;side={{ order.side }}&amp;shares={{ order.shares }}&amp;price={{ '%.2f'|format(order.expected_price or order.limit_price) }}#trade">回報成交</a></td>
             </tr>
           {% endfor %}
           </tbody>
@@ -88,7 +87,8 @@
           data-orders="{% for order in decision.orders %}{{ order.symbol }} {{ '買' if order.side == 'BUY' else '賣' }} {{ order.shares }} 股 限價 {{ '%.2f'|format(order.limit_price) }}（盤後零股）{% if not loop.last %}&#10;{% endif %}{% endfor %}">{{ icon('copy') }}複製委託</button>
         <span class="muted small" id="copy-status" role="status"></span>
       </div>
-      <p class="note">限價 = 收盤價加滑價後進位到升降單位（假設寫在「為什麼」）；成交後到「持倉」依對帳單回報成交。系統不會自動下單。</p>
+      {% set most = decision.orders|selectattr('side', 'equalto', 'BUY')|sum(attribute='worst_case') %}
+      <p class="note">限價＝收盤加 1%：盤後零股以單一價格撮合，成交價通常接近收盤，限價高一點是為了確保買得到（說明在「為什麼」）。{% if most %}就算以限價成交，最多也只需 {{ '{:,.0f}'.format(most) }} 元（含手續費）。{% endif %}成交後到「持倉」依對帳單回報成交。系統不會自動下單。</p>
     </section>
     {% endif %}
 

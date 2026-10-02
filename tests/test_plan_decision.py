@@ -85,8 +85,10 @@ def test_dca_invest_day_by_hand():
 
     assert decision.kind == "invest"
     order = decision.orders[0]
-    # Limit = close 100 + 20 bps rounded up to the 0.05 tick; 99 × 100.20 + fee 20 fits in 10,000.
-    assert (order.symbol, order.side, order.shares, order.limit_price) == ("0050", "BUY", 99, 100.20)
+    # Limit = close 100 + 1% = 101.00 (0.05 tick); even at the limit 98 × 101 + fee 20 = 9,918 fits in
+    # 10,000 (99 × 101 + 20 = 10,019 does not). Estimates use the expected fill 100.20 (close + 20 bps).
+    assert (order.symbol, order.side, order.shares, order.limit_price) == ("0050", "BUY", 98, 101.00)
+    assert (order.expected_price, order.amount, order.fee, order.worst_case) == (100.20, pytest.approx(98 * 100.2), 20, 9_918)
     assert decision.budget == 10_000  # the month's deposit is not recorded yet, so the plan amount is used
     assert any("本月入金尚未記錄" in reason for reason in decision.reasons)
 
@@ -99,8 +101,9 @@ def test_the_plans_broker_sets_the_fee_estimate():
     decision = PlanDecisionService(plans, Account(), Bars(closes), Calendars()).decide(at(date(2026, 10, 5)))
 
     order = decision.orders[0]
-    # 99 × 100.20 = 9,919.80; fee floor(9,919.80 × 0.1425%) = 14 at list price (the conservative profile charges 20).
-    assert (order.shares, order.fee) == (99, 14)
+    # At the limit 98 × 101 = 9,898 + fee 14 fits (99 × 101 + 14 = 10,013 does not); the estimate
+    # 98 × 100.20 = 9,819.60 pays floor(9,819.60 × 0.1425%) = 13 at list price (conservative: 20).
+    assert (order.shares, order.fee) == (98, 13)
     assert any("台新證券" in reason and "月退的退佣不計入" in reason for reason in decision.reasons)
 
 
@@ -108,7 +111,7 @@ def test_recorded_deposit_is_not_counted_twice():
     flows = [ActualCashFlow(1, date(2026, 10, 5), "deposit", Decimal(10_000))]
     decision = service(account=Account(cash=10_000.0, flows=flows)).decide(at(date(2026, 10, 5)))
 
-    assert decision.budget == 10_000 and decision.orders[0].shares == 99
+    assert decision.budget == 10_000 and decision.orders[0].shares == 98
 
 
 def test_moving_average_doubles_below_the_average():
@@ -137,3 +140,31 @@ def test_band_rebalance_sells_the_overweight_asset():
     assert decision.kind == "rebalance"
     sides = {order.symbol: order.side for order in decision.orders}
     assert sides == {"0050": "SELL", "00679B": "BUY"}
+
+
+def test_order_limit_lets_the_auction_fill_inside_the_price_limits():
+    from quant_platform.research.costs import order_limit
+
+    # Close + 1% rounded up to the tick (0.05 from 50, 0.01 below); sells close − 1% rounded down.
+    assert order_limit(100.0, "BUY") == 101.00 and order_limit(113.0, "BUY") == 114.15
+    assert order_limit(36.13, "BUY") == 36.50 and order_limit(100.0, "SELL") == 99.00
+    # Never beyond the day's limit around the previous close: 110.60 → limit-up 110.00, 89.55 → limit-down 90.00.
+    assert order_limit(109.5, "BUY", previous_close=100.0) == 110.00
+    assert order_limit(90.5, "SELL", previous_close=100.0) == 90.00
+
+
+def test_rebalance_buys_only_with_what_the_sale_brings_at_its_limit():
+    days = sessions_until(date(2026, 10, 5), 30)
+    closes = {"0050.TW": [(day, 100.0) for day in days], "00679B.TWO": [(day, 25.0) for day in days]}
+    holdings = [SimpleNamespace(symbol="0050", shares=1_000), SimpleNamespace(symbol="00679B", shares=0)]
+    decision = service("rebalance_80_20", closes=closes, account=Account(cash=0.0, holdings=holdings)).decide(
+        at(date(2026, 10, 5))
+    )
+    sell = next(order for order in decision.orders if order.side == "SELL")
+    buy = next(order for order in decision.orders if order.side == "BUY")
+    # Sell 120 × 0050 (excess 12,000 at the expected 99.80); at its limit 99.00 it brings
+    # 11,880 − fee 20 − tax 11 = 11,849. The buy gets the unrecorded month's 10,000 + 11,849 = 21,849:
+    # 864 × 25.25 + fee 31 = 21,847 even if both orders fill at their limits.
+    assert (sell.shares, sell.limit_price, sell.worst_case) == (120, 99.00, 11_849)
+    assert (buy.shares, buy.limit_price, buy.worst_case) == (864, 25.25, 21_847)
+    assert buy.worst_case <= 10_000 + sell.worst_case

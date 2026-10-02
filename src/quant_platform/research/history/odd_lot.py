@@ -3,7 +3,11 @@
 Samples one session in every ``every`` sessions of the TWSE after-hours
 odd-lot report (TWT53U) and compares each catalog ETF's odd-lot price with
 the regular close of the same day. The distribution sets the slippage the
-engine charges and shows how often a limit order at the close would fill.
+engine charges; the fill rates of buy limits at close + 0 to 150 bps (the auction
+fills every order at one price, so a limit only decides whether an order fills)
+set today's order limit (research/costs.py ORDER_LIMIT). ``recent`` repeats the
+summary from 2020-10-26, when intraday odd-lot trading began and odd-lot volume
+grew.
 """
 
 from __future__ import annotations
@@ -15,11 +19,14 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from quant_platform.research.costs import order_limit
 from quant_platform.research.history.catalog import SERIES
 from quant_platform.research.history.dataset import read_series
 from quant_platform.research.history.official import OfficialHistoryClient, integer, number
 
 TAIPEI = ZoneInfo("Asia/Taipei")
+RECENT = date(2020, 10, 26)
+LIMIT_PREMIUMS_BPS = (0, 10, 20, 30, 50, 100, 150)
 
 
 def parse_odd_lot(payload: object, codes: set[str]) -> dict[str, dict[str, float | int | None]]:
@@ -45,9 +52,22 @@ def _percentile(values: list[float], share: float) -> float:
     return ordered[index]
 
 
-def summarize(premiums: list[float], sampled: int) -> dict[str, object]:
+def fill_rates(fills: list[tuple[float, float]], sampled: int) -> dict[str, float]:
+    """Share of sampled sessions on which a buy limit at close + x bps would have filled: the
+    auction price (``fills`` holds close, price) at or below the limit. No trade counts as unfilled."""
+    if not sampled:
+        return {}
+    return {
+        str(bps): round(sum(1 for close, price in fills
+                            if order_limit(close, "BUY", premium=bps / 10_000) >= price - 1e-9) / sampled, 4)
+        for bps in LIMIT_PREMIUMS_BPS
+    }
+
+
+def summarize(premiums: list[float], sampled: int, fills: list[tuple[float, float]] | None = None) -> dict[str, object]:
     if not premiums:
         return {"sampled_sessions": sampled, "traded_sessions": 0}
+    rates = {"fill_rates": fill_rates(fills, sampled)} if fills is not None else {}
     return {
         "sampled_sessions": sampled,
         "traded_sessions": len(premiums),
@@ -59,6 +79,9 @@ def summarize(premiums: list[float], sampled: int) -> dict[str, object]:
         "p90_bps": round(_percentile(premiums, 0.90) * 10_000, 2),
         "at_or_below_close": round(sum(1 for value in premiums if value <= 1e-12) / len(premiums), 4),
         "within_10bps": round(sum(1 for value in premiums if abs(value) <= 0.001) / len(premiums), 4),
+        "p95_bps": round(_percentile(premiums, 0.95) * 10_000, 2),
+        "max_bps": round(max(premiums) * 10_000, 2),
+        **rates,
     }
 
 
@@ -79,24 +102,29 @@ def build_odd_lot_report(
     first = min((min(values) for values in closes.values() if values), default=None)
     sample = [day for index, day in enumerate(day for day in sessions if first and day >= first) if index % every == 0]
     say(f"盤後零股抽樣 {len(sample)} 個交易日")
-    premiums: dict[str, list[float]] = {key: [] for key in closes}
-    sampled: dict[str, int] = {key: 0 for key in closes}
+    observed: dict[str, list[tuple[date, float, float | None]]] = {key: [] for key in closes}
     for index, day in enumerate(sample, 1):
         rows = parse_odd_lot(client.twse_odd_lot_day(day), set(closes))
         for key, values in closes.items():
             close = values.get(day)
             if close is None:
                 continue
-            sampled[key] += 1
             row = rows.get(key)
-            if row and row["price"] and row["shares"]:
-                premiums[key].append(row["price"] / close - 1)
+            observed[key].append((day, close, row["price"] if row and row["price"] and row["shares"] else None))
         if index % 100 == 0:
             say(f"  {day} ({index}/{len(sample)})")
     report = {
         "generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"),
         "every_n_sessions": every,
-        "series": {key: summarize(premiums[key], sampled[key]) for key in closes},
+        "series": {key: _summary(observed[key]) for key in closes},
     }
     (base / "odd_lot.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
+
+
+def _summary(observed: list[tuple[date, float, float | None]]) -> dict[str, object]:
+    def part(rows: list[tuple[date, float, float | None]]) -> dict[str, object]:
+        fills = [(close, price) for _day, close, price in rows if price is not None]
+        return summarize([price / close - 1 for close, price in fills], len(rows), fills)
+
+    return {**part(observed), "recent": {"since": RECENT.isoformat(), **part([row for row in observed if row[0] >= RECENT])}}

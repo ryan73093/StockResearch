@@ -224,3 +224,18 @@ def test_crosscheck_uses_official_splits_when_yahoo_omits_the_event(tmp_path):
     assert entry["split_source"] == "official"
     assert entry["splits"] == [{"date": "2025-06-18", "ratio": 4.0}]
     assert entry["over_0_5pct"] == 0 and entry["common_days"] == 2
+
+
+def test_odd_lot_fill_rates_count_the_auction_price_against_the_limit():
+    from quant_platform.research.history.odd_lot import _summary, fill_rates
+
+    # Closes of 100: auction prices +0, +0.3% and +1.2% above; one session without a trade.
+    fills = [(100.0, 100.0), (100.0, 100.3), (100.0, 101.2)]
+    rates = fill_rates(fills, sampled=4)
+    # close + 0.2% = 100.20 fills only the first; + 0.5% = 100.50 also the second; + 1.5% = 101.50 all three.
+    assert (rates["20"], rates["50"], rates["100"], rates["150"]) == (0.25, 0.5, 0.5, 0.75)
+
+    observed = [(date(2019, 1, 2), 100.0, 101.2), (date(2021, 1, 4), 100.0, 100.0), (date(2021, 1, 5), 100.0, None)]
+    summary = _summary(observed)
+    assert summary["sampled_sessions"] == 3 and summary["recent"]["sampled_sessions"] == 2
+    assert summary["recent"]["fill_rates"]["20"] == 0.5 and summary["recent"]["since"] == "2020-10-26"

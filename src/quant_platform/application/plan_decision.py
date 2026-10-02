@@ -18,7 +18,7 @@ from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from quant_platform.research.allocation import adjust_gaps, describe_target, target_weights
-from quant_platform.research.costs import BROKERS, CostModel, affordable_shares, fill_price
+from quant_platform.research.costs import BROKERS, ORDER_LIMIT, CostModel, affordable_shares, fill_price, order_limit
 from quant_platform.research.spec import BASELINES, StrategySpec
 
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -28,6 +28,11 @@ SUFFIXES = ("TW", "TWO")
 
 @dataclass(frozen=True, slots=True)
 class PlanOrder:
+    """``limit_price`` is what the investor enters (close ± 1%, so the order fills); ``amount``, fee
+    and tax are estimated at the expected fill (close ± slippage, like the research engine);
+    ``worst_case`` is the amount at the limit: the most a buy costs with its fee, or the least a
+    sell brings after fee and tax."""
+
     symbol: str
     side: str
     shares: int
@@ -36,6 +41,8 @@ class PlanOrder:
     amount: float
     fee: int
     tax: int
+    expected_price: float = 0.0
+    worst_case: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -118,6 +125,7 @@ class PlanDecisionService:
             )
 
         prices: dict[str, float] = {}
+        previous: dict[str, float | None] = {}
         histories: dict[str, list[tuple[date, float]]] = {}
         for code in sorted(set(spec.assets) | {spec.signal} | spec.signals):
             symbol, history = self._closes(code, now)
@@ -129,6 +137,7 @@ class PlanDecisionService:
                 )
             histories[code] = history
             prices[code] = history[-1][1]
+            previous[code] = history[-2][1] if len(history) > 1 else None
 
         broker = BROKERS.get(getattr(plan, "broker", "") or "conservative", BROKERS["conservative"])
         costs = self._fixed_costs or broker.cost_model()
@@ -177,13 +186,17 @@ class PlanDecisionService:
                     excess = values[code] - weights[code] * target_total
                     if excess > 0 and code in holdings:
                         price = fill_price(prices[code], "SELL", costs.slippage_bps)
+                        limit = order_limit(prices[code], "SELL", previous[code])
                         shares = min(holdings[code].shares, math.floor(excess / price))
                         if shares > 0:
                             amount = shares * price
                             fee = costs.fee(amount)
                             tax = costs.tax(amount, _tax_kind(code), "SELL")
-                            orders.append(PlanOrder(code, "SELL", shares, price, prices[code], amount, fee, tax))
-                            budget += amount - fee - tax
+                            lowest = shares * limit
+                            least = lowest - costs.fee(lowest) - costs.tax(lowest, _tax_kind(code), "SELL")
+                            orders.append(PlanOrder(code, "SELL", shares, limit, prices[code], amount, fee, tax,
+                                                    price, least))
+                            budget += least  # buy only with what the sale brings even at its limit
                             values[code] -= shares * prices[code]
         budget = max(0.0, budget)
         target_total = sum(values.values()) + budget
@@ -194,15 +207,22 @@ class PlanDecisionService:
             allowance = budget * gaps[code] / gap_total if gap_total > 0 else budget * weights[code]
             allowance = min(allowance, remaining)
             price = fill_price(prices[code], "BUY", costs.slippage_bps)
-            shares = affordable_shares(allowance, price, costs)
+            limit = order_limit(prices[code], "BUY", previous[code])
+            shares = affordable_shares(allowance, limit, costs)  # still within the cash if it fills at the limit
             if shares > 0:
                 amount = shares * price
                 fee = costs.fee(amount)
-                orders.append(PlanOrder(code, "BUY", shares, price, prices[code], amount, fee, 0))
-                remaining -= amount + fee
+                most = shares * limit + costs.fee(shares * limit)
+                orders.append(PlanOrder(code, "BUY", shares, limit, prices[code], amount, fee, 0, price, most))
+                remaining -= most
         fee_terms = "原價" if costs.fee_discount >= 1 else f"{costs.fee_discount * 10:g} 折"
         reasons.append(
-            f"限價＝收盤加 {costs.slippage_bps:g} bps 進位到升降單位（盤後零股成交價中位數約高於收盤 13–18 bps）；"
+            f"限價＝收盤{'加' if not any(order.side == 'SELL' for order in orders) else '加減'} {ORDER_LIMIT:.0%}"
+            "（進位到升降單位、不超過漲跌停）：盤後零股 14:30 以單一價格撮合，所有成交都是同一個價格，"
+            "限價只決定買不買得到。2020-10 起抽樣 144 天，0050 限價收盤加 0.2% 約 85% 成交、加 1% 約 99%；"
+            f"股數依限價計算，以限價成交也不超過可用資金。預估金額以收盤加減 {costs.slippage_bps:g} bps 計。"
+        )
+        reasons.append(
             f"手續費以{broker.name}估算（{fee_terms}、每筆最低 {costs.minimum_fee} 元"
             f"{'；月退的退佣不計入' if '月退' in broker.rebate else ''}），實際以對帳單為準。"
         )
