@@ -54,7 +54,7 @@
 - 測試一律用暫存資料庫；`tests/conftest.py` 會讓開啟 `instance/quant_platform.db` 的測試直接失敗。模組不可在 import 時建立容器或連線資料庫。
 - UI 變更實際開頁查看（桌面與 375 px 寬）。
 - 研究與回測變更需有手算或已知結果的測試案例；結果記錄資料版本與指紋。
-- S2 完成後，每輪交付在本機（`http://127.0.0.1:5000`）與 Cloudflare 子網域兩端以瀏覽器驗收同一版內容，並記錄時間與證據。Access 出現登入畫面時請使用者完成登入。
+- 每輪交付在本機（`http://127.0.0.1:5000`）以瀏覽器驗收內容，再跑 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-public.ps1` 確認外網：本專案 Tunnel 已連線，且公開網址由 Cloudflare Access 把關（Tunnel 轉送的就是這個本機來源，內容相同）。記錄時間與證據。不要為了驗收請使用者登入 Access（使用者 2026-10-02 要求）；瀏覽器窗格已在登入狀態時才順便開外網頁面看。不代替使用者輸入 Google 帳號或密碼。
 
 ## 秘密與外部資料
 

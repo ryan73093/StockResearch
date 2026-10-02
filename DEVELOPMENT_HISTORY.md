@@ -44,7 +44,11 @@
 - 回復：`git revert`。評估只讀資料庫、只寫 `instance/research/legacy/`。
 - 02:3x 部署 `b7aa88c`（`scripts\deploy.ps1`；部署前確認沒有執行中的排程工作，只剩已知的 #3631）。
   - 本機 8 項檢查通過：研究頁有「舊版挑戰者評估」卡片、讀到正式報告的結論與縮小股票池；`v2.css?v=2.4.4`。
-  - 外網開啟時出現 Google 登入（Access 工作階段已過期），外網驗收待使用者登入後補做。
+  - 外網：瀏覽器窗格出現 Google 登入（Access 工作階段已過期）。使用者要求不要再為驗收請他登入。
+- 外網驗收改為不需登入（AGENTS.md「測試與驗收」）：新增 `scripts/check-public.ps1`，確認兩件事：
+  - 本專案的 cloudflared（以命令列中的 Tunnel 名稱辨識）在 metrics `/ready` 有連線；
+  - `https://stockresearch.pimi-sunsun.com/` 回 302 到 Cloudflare Access 登入頁。
+  - 03:0x 結果：Tunnel PID 34760、4 條連線；公開網址由 Access 把關。內容以本機驗收為準，Tunnel 轉送的就是 127.0.0.1:5000。
 
 ## 2026-10-01 — 主機記憶體外洩解決；AI 研究員第一晚驗收（S4-W04 done）；重開機後補完舊版流程
 
