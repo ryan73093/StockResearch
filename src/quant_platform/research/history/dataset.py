@@ -17,6 +17,7 @@ import hashlib
 import json
 from collections import Counter
 from collections.abc import Callable, Iterable
+import statistics
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -166,6 +167,12 @@ class HistoryDataset:
             if item.key not in collected:
                 continue
             rows, quality = clean(collected[item.key], sessions, with_ohlc=item.kind != "taiex_tr")
+            if item.backfill is not None:
+                source_path = self.base / "total_return" / f"{item.backfill.source}.parquet"
+                if source_path.is_file():
+                    synthetic, info = synthesize_backfill(item.backfill, rows, read_series(source_path))
+                    rows = synthetic + rows
+                    quality.update(info)
             path = self.parquet_path(item.key)
             write_parquet(rows, path)
             entries[item.key] = {
@@ -227,6 +234,55 @@ def clean(
             if row.low > min(row.open, row.close) + 1e-9 or row.high < max(row.open, row.close) - 1e-9:
                 quality.ohlc_inconsistent.append(row.day.isoformat())
     return output, _quality_dict(quality)
+
+
+def synthesize_backfill(
+    backfill: "Backfill", official: list[DailyRow], source_total_return: list[dict[str, object]],
+) -> tuple[list[DailyRow], dict[str, object]]:
+    """Closes before the first official row, chained backward from it with the backfill rule, and
+    how the rule tracks the official closes where both exist (annualised mean residual = the drag
+    the real series implies; stdev = tracking error)."""
+    index = {row["date"]: float(row["total_return_index"]) for row in source_total_return
+             if row.get("total_return_index")}
+    days = sorted(index)
+    info: dict[str, object] = {
+        "synthetic_days": 0, "synthetic_from": backfill.source, "synthetic_rule": backfill.rule,
+        "synthetic_until": None, "calibration": None,
+    }
+    if not official or len(days) < 2:
+        return [], info
+    first = official[0]
+    daily_drag = backfill.annual_drag / 252
+    growth = {day: index[day] / index[previous] - 1 for previous, day in zip(days, days[1:])}
+    residuals = []
+    previous_close = None
+    for row in official:
+        if previous_close and row.day in growth and row.close:
+            residuals.append(row.close / previous_close - 1 - backfill.leverage * growth[row.day])
+        previous_close = row.close
+    if len(residuals) > 20:
+        info["calibration"] = {
+            "overlap_days": len(residuals),
+            "implied_annual_drag": round(-statistics.fmean(residuals) * 252, 5),
+            "tracking_error_annual": round(statistics.pstdev(residuals) * 252 ** 0.5, 5),
+        }
+    synthetic: list[DailyRow] = []
+    close = first.close
+    for previous, day in reversed(list(zip(days, days[1:]))):
+        if day > first.day:
+            continue
+        if day == first.day:
+            close = first.close
+            continue
+        # close[previous] from close[day]: close[day] = close[previous] × (1 + L·g[day] − drag)
+        close = close / (1 + backfill.leverage * growth[day] - daily_drag)
+        synthetic.append(DailyRow(previous, close, close, close, close, source="synthetic"))
+    synthetic.reverse()
+    synthetic = [DailyRow(row.day, round(row.open, 4), round(row.high, 4), round(row.low, 4), round(row.close, 4),
+                          source="synthetic") for row in synthetic]
+    info["synthetic_days"] = len(synthetic)
+    info["synthetic_until"] = synthetic[-1].day.isoformat() if synthetic else None
+    return synthetic, info
 
 
 def write_parquet(rows: list[DailyRow], path: Path) -> None:

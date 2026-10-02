@@ -108,4 +108,68 @@ def second_batch() -> list[StrategySpec]:
     return specs
 
 
-BATCHES = {"first": first_batch, "second": second_batch}
+SECTORS = ["0051", "0052", "0053", "0055", "0056", "0057"]   # style and sector ETFs listed 2006–2008
+
+
+def third_batch() -> list[StrategySpec]:
+    """Where a higher return could plausibly come from (2026-10-02, after the first two batches found
+    nothing): rotation across the sector and style ETFs, and the daily-2x ETF 00631L (synthetic
+    before its 2014 listing, see history/catalog.py). Sector trials start when the last candidate
+    listed (2008-02); the leveraged ones run from 2004."""
+    specs: list[StrategySpec] = []
+    pool = ["0050", *SECTORS]
+    for lookback, mode, top, rebalance in product((63, 126, 252), ("momentum", "reversal"), (1, 3),
+                                                  ("with_new_money", "band")):
+        pick = "最強" if mode == "momentum" else "最弱"
+        action = "持股一起換" if rebalance == "band" else "只有新資金"
+        specs.append(StrategySpec(
+            name=f"板塊 {lookback} 日：7 檔中買{pick}的 {top} 檔（{action}）",
+            description=f"每個投入日依 0050 與六檔板塊／風格 ETF 過去 {lookback} 個交易日的報酬，買{pick}的 {top} 檔平均分配；"
+                        "候選行情不足時買 0050。",
+            allocation=Allocation(
+                weights={"0050": 1.0}, rebalance=rebalance,
+                rotation=Rotation(candidates=pool, lookback_sessions=lookback, top=top, mode=mode),
+            ),
+        ))
+    for lookback, top in product((126, 252), (1, 2)):
+        specs.append(StrategySpec(
+            name=f"核心 0050 80%＋板塊衛星 20%：{lookback} 日最強 {top} 檔",
+            description=f"0050 固定 80%；其餘依六檔板塊／風格 ETF 過去 {lookback} 個交易日的報酬買最強的 {top} 檔。",
+            allocation=Allocation(
+                weights={"0050": 1.0},
+                rotation=Rotation(candidates=SECTORS, lookback_sessions=lookback, top=top, mode="momentum",
+                                  core={"0050": 0.8}),
+            ),
+        ))
+    specs.append(StrategySpec(
+        name="槓桿：入帳日全數買進 00631L",
+        description="與基準相同的投入方式，標的改為單日兩倍的 00631L；2014-10 上市前為合成序列。",
+        allocation=_single("00631L"),
+    ))
+    for share in (0.2, 0.5):
+        specs.append(StrategySpec(
+            name=f"槓桿：0050 {1 - share:.0%}＋00631L {share:.0%}（區間再平衡）",
+            description="固定比例，偏離超過 5 個百分點時賣高買低回到目標。",
+            allocation=Allocation(weights={"0050": 1 - share, "00631L": share}, rebalance="band", band=0.05),
+        ))
+    for sessions in (60, 120, 200):
+        specs.append(StrategySpec(
+            name=f"槓桿：00631L 在 0050 跌破 {sessions} 日均線時改現金（持股一起換）",
+            description=f"全部買 00631L；0050 收盤低於 {sessions} 日均線時賣出持現金，站回均線再買回。",
+            allocation=Allocation(
+                weights={"00631L": 1.0}, rebalance="band",
+                defensive=Defensive(weights={}, signal_asset="0050", ma_sessions=sessions),
+            ),
+        ))
+    specs.append(StrategySpec(
+        name="槓桿：00631L 在 0050 跌破 200 日均線時改 0050（持股一起換）",
+        description="全部買 00631L；0050 收盤低於 200 日均線時換成 0050，站回均線再換回。",
+        allocation=Allocation(
+            weights={"00631L": 1.0}, rebalance="band",
+            defensive=Defensive(weights={"0050": 1.0}, signal_asset="0050", ma_sessions=200),
+        ),
+    ))
+    return specs
+
+
+BATCHES = {"first": first_batch, "second": second_batch, "third": third_batch}

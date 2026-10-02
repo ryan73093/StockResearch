@@ -12,6 +12,22 @@ TAIEX_START = date(2003, 1, 2)            # MI_5MINS_HIST / MFI94U
 
 
 @dataclass(frozen=True, slots=True)
+class Backfill:
+    """Synthetic closes before a series listed, chained backward from its first official close:
+    daily return = ``leverage`` × the source's total return − ``annual_drag`` / 252. Rows carry
+    source "synthetic"; the manifest reports how many and how the rule tracks the real series
+    where they overlap. Used so a leveraged ETF can be researched over 2004–2016 at all."""
+
+    source: str
+    leverage: float
+    annual_drag: float  # expense ratio plus futures financing, fixed a priori (no look-ahead)
+
+    @property
+    def rule(self) -> str:
+        return f"{self.leverage:g} × {self.source} 含息日報酬 − {self.annual_drag:.1%}／年"
+
+
+@dataclass(frozen=True, slots=True)
 class HistorySeries:
     key: str
     name: str
@@ -20,6 +36,7 @@ class HistorySeries:
     yahoo: str | None = None
     note: str = ""
     tax_kind: str = "stock_etf"  # securities transaction tax class (research/costs.py)
+    backfill: Backfill | None = None
 
     @property
     def tradable(self) -> bool:
@@ -33,6 +50,20 @@ SERIES: tuple[HistorySeries, ...] = (
     ),
     HistorySeries("006208", "富邦台50", "twse_etf", date(2012, 7, 1), "006208.TW"),
     HistorySeries("0056", "元大高股息", "twse_etf", date(2007, 12, 1), "0056.TW"),
+    # Sector and style ETFs listed 2006–2008 (rotation research, 2026-10-02): the 2004–2009 ETF
+    # daily report in the cache already carries them.
+    HistorySeries("0051", "元大中型100", "twse_etf", date(2006, 8, 1), "0051.TW", "上市 2006-08-31"),
+    HistorySeries("0052", "富邦科技", "twse_etf", date(2006, 9, 1), "0052.TW", "上市 2006-09-12"),
+    HistorySeries("0053", "元大電子", "twse_etf", date(2007, 7, 1), "0053.TW", "上市 2007-07-16"),
+    HistorySeries("0055", "元大MSCI金融", "twse_etf", date(2007, 7, 1), "0055.TW", "上市 2007-07-16"),
+    HistorySeries("0057", "富邦摩台", "twse_etf", date(2008, 2, 1), "0057.TW", "上市 2008-02-27"),
+    HistorySeries(
+        "00631L", "元大台灣50正2", "twse_etf", date(2014, 10, 1), "00631L.TW",
+        "上市 2014-10-31；單日兩倍的台灣50指數，無配息；上市前以 0050 含息報酬合成（經理費 1% + 保管費 0.04% + "
+        "期貨融資約 1%）", backfill=Backfill("0050", 2.0, 0.02),
+    ),
+    HistorySeries("00646", "元大S&P500", "twse_etf", date(2015, 12, 1), "00646.TW", "上市 2015-12-14"),
+    HistorySeries("00662", "富邦NASDAQ", "twse_etf", date(2016, 6, 1), "00662.TW", "上市 2016-06-17"),
     HistorySeries("00713", "元大台灣高息低波", "twse_etf", date(2017, 9, 1), "00713.TW"),
     HistorySeries("00878", "國泰永續高股息", "twse_etf", date(2020, 7, 1), "00878.TW"),
     HistorySeries("00919", "群益台灣精選高息", "twse_etf", date(2022, 10, 1), "00919.TW"),

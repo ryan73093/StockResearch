@@ -23,6 +23,7 @@ class MarketData:
     unit_ratios: dict[str, dict[date, float]] = field(default_factory=dict)  # splits, stock dividends
     tax_kind: dict[str, str] = field(default_factory=dict)
     fingerprint: str = ""
+    notes: dict[str, str] = field(default_factory=dict)  # e.g. a synthetic backfill before listing
 
     def __post_init__(self) -> None:
         ordered = {asset: sorted(values) for asset, values in self.closes.items()}
@@ -147,6 +148,13 @@ def load_market(assets: list[str], base_dir: str | Path = DEFAULT_BASE) -> Marke
             digests.append((f"{asset}:actions", entry.get("sha256", "")))
             digests.append((f"{asset}:action_list", json.dumps(entry.get("actions") or [], sort_keys=True)))
     fingerprint = hashlib.sha256(json.dumps(digests, sort_keys=True).encode("utf-8")).hexdigest()
+    notes = {}
+    manifest_path = base / "manifest.json"
+    if manifest_path.is_file():
+        for asset, entry in (json.loads(manifest_path.read_text(encoding="utf-8")).get("series") or {}).items():
+            quality = entry.get("quality") or {}
+            if asset in closes and quality.get("synthetic_days"):
+                notes[asset] = f"{quality.get('synthetic_until')} 以前為合成（{quality.get('synthetic_rule')}）"
     return MarketData(
         sessions=sessions,
         closes=closes,
@@ -154,4 +162,5 @@ def load_market(assets: list[str], base_dir: str | Path = DEFAULT_BASE) -> Marke
         unit_ratios=ratios,
         tax_kind={asset: SERIES_BY_KEY[asset].tax_kind for asset in closes if asset in SERIES_BY_KEY},
         fingerprint=fingerprint,
+        notes=notes,
     )

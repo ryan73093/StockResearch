@@ -141,7 +141,9 @@ class ResearchAgent:
         )
         assets = self.eligible_assets(market)
         names = "、".join(
-            f"{key}（{SERIES_BY_KEY[key].name}，{first.isoformat()} 起）" for key, first in assets.items()
+            f"{key}（{SERIES_BY_KEY[key].name}，{first.isoformat()} 起"
+            + (f"，{market.notes[key]}" if key in market.notes else "") + "）"
+            for key, first in assets.items()
         )
         current, older = current_basis(self.registry.records(), PERIOD)
 
