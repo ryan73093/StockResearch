@@ -34,7 +34,7 @@ from quant_platform.research.legacy_challenger import challenger_view
 from quant_platform.research.legacy_challenger import latest_report as latest_challenger
 from quant_platform.research.forward import STANDARD_PLAN as FORWARD_PLAN
 from quant_platform.research.periods import ResearchGateError
-from quant_platform.research.promotion import PromotionPipeline
+from quant_platform.research.promotion import PromotionPipeline, promotion_limits
 from quant_platform.research.weekly import weekly_report
 from quant_platform.research.summary import round_summary
 from quant_platform.research.reports import latest_reports, latest_stats, report_rows, trial_ranking
@@ -627,7 +627,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             try:
                 if action == "preview" and current is not None:
                     # Changes are shown first; the confirmation posts the same values with action=save.
-                    preview = plan_preview(current, parse_plan_form(form, catalog), catalog, research)
+                    preview = plan_preview(
+                        current, parse_plan_form(form, catalog, service.required_tolerance()), catalog, research)
                 else:
                     saved = service.save(form)
             except InvestmentPlanError as exc:
@@ -683,7 +684,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "v2/research.html",
             active_nav="research",
             agent=agent_status(dependencies.settings, research_dir),
-            promotion=PromotionPipeline(research_dir, FORWARD_PLAN).overview(),
+            promotion=PromotionPipeline(
+                research_dir, FORWARD_PLAN, **promotion_limits(dependencies.investment_plan_service.current()),
+            ).overview(),
             weekly=weekly_report(research_dir, datetime.now(TAIPEI).date()),
             tool_groups=TOOL_GROUPS,
             forward_rows=forward_rows,
@@ -706,7 +709,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         if request.form.get("confirm") != "yes":
             flash("請先勾選「我已看過證據」。", "error")
             return redirect(target)
-        pipeline = PromotionPipeline(_instance_dir(dependencies.settings.database_url) / "research", FORWARD_PLAN)
+        pipeline = PromotionPipeline(
+            _instance_dir(dependencies.settings.database_url) / "research", FORWARD_PLAN,
+            **promotion_limits(dependencies.investment_plan_service.current()),
+        )
         note = str(request.form.get("note", ""))
         try:
             event = pipeline.approve(spec_hash, note) if action == "approve" else pipeline.revoke(spec_hash, note)

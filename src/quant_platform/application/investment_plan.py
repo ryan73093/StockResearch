@@ -52,7 +52,8 @@ def parse_amount(text: object) -> Decimal:
         raise InvestmentPlanError(f"看不懂每月投入金額「{text}」；請輸入數字，例如 10000 或 1萬") from exc
 
 
-def parse_plan_form(form: dict[str, str], strategies: dict | None = None) -> dict[str, object]:
+def parse_plan_form(form: dict[str, str], strategies: dict | None = None,
+                    required_tolerance: dict[str, float] | None = None) -> dict[str, object]:
     """Validate raw form text; raises InvestmentPlanError with a readable message.
 
     Salary days 29–31 fall back to the month's last day in shorter months
@@ -83,6 +84,11 @@ def parse_plan_form(form: dict[str, str], strategies: dict | None = None) -> dic
         raise InvestmentPlanError("可承受回撤請填百分比數字，例如 30") from exc
     if not 0.05 <= drawdown <= 0.8:
         raise InvestmentPlanError("可承受回撤需在 5%～80% 之間")
+    needed = (required_tolerance or {}).get(strategy_key)
+    if needed is not None and round(drawdown, 4) < needed:
+        raise InvestmentPlanError(
+            f"這個進攻型策略在歷史上的最深回撤是 {needed:.1%}；可承受回撤要填到至少這個數字，或改選其他策略"
+        )
     horizon_text = _clean(form.get("horizon_years", ""), "年")
     horizon = None
     if horizon_text:
@@ -105,9 +111,14 @@ def parse_plan_form(form: dict[str, str], strategies: dict | None = None) -> dic
 
 
 class InvestmentPlanService:
-    def __init__(self, repository, strategies=None) -> None:
+    def __init__(self, repository, strategies=None, required_tolerance=None) -> None:
         self._repository = repository
         self._strategies = strategies or (lambda: dict(BASELINES))
+        self._required_tolerance = required_tolerance or (lambda: {})
+
+    def required_tolerance(self) -> dict[str, float]:
+        """Approved aggressive strategies and the acceptable drawdown each needs."""
+        return self._required_tolerance()
 
     def strategies(self) -> dict:
         """Baselines plus candidates the user approved (S4-W06)."""
@@ -121,4 +132,5 @@ class InvestmentPlanService:
 
     def save(self, form: dict[str, str], now: datetime | None = None) -> InvestmentPlan:
         """Validate the form and store it as the next version."""
-        return self._repository.add_version(parse_plan_form(form, self.strategies()), now or datetime.now(UTC))
+        return self._repository.add_version(
+            parse_plan_form(form, self.strategies(), self.required_tolerance()), now or datetime.now(UTC))

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from quant_platform.research.registry import TrialRegistry, current_basis
+from quant_platform.research.registry import TrialRegistry, current_basis, distinct_rules
 
 WIN_RATIO_GATE = 0.60
 DSR_GATE = 0.95
@@ -72,12 +72,12 @@ def round_summary(registry_path: str | Path, period: str, stats: dict | None) ->
         values = [item["dsr"]["deflated_sharpe"] for item in stats.get("candidates") or [] if item["dsr"]["deflated_sharpe"] == item["dsr"]["deflated_sharpe"]]
         best_dsr = max(values) if values else None
         pbo = (stats.get("pbo") or {}).get("pbo")
-    attempts = (stats or {}).get("trials") or len(records) + len(older)
+    attempts = (stats or {}).get("trials") or distinct_rules(records + older)
     reasons = []
     if not passing:
         reasons.append(f"沒有設定在開發期同時達到 3 年勝率 ≥ {WIN_RATIO_GATE:.0%} 且中位超額 > 0")
     if best_dsr is not None and best_dsr < DSR_GATE:
-        reasons.append(f"扣除 {attempts} 次試驗的多重檢定後，最佳 DSR {best_dsr:.2f} 未達 {DSR_GATE}")
+        reasons.append(f"扣除 {attempts} 個不同設定的多重檢定後，最佳 DSR {best_dsr:.2f} 未達 {DSR_GATE}")
     if pbo is not None and pbo > PBO_GATE:
         reasons.append(f"過度擬合機率 PBO {pbo:.0%} 高於 {PBO_GATE:.0%}")
     if stats is None:

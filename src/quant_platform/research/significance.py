@@ -1,10 +1,11 @@
 """Significance of candidate trials in one period (S4-W03).
 
-Every candidate trial registered for the period counts towards the number of
-trials, so the Deflated Sharpe Ratio reflects all attempts, failures
-included, also those on an older data basis (conservative). The DSR of each
-candidate and the PBO use only the trials on the current data basis
-(registry.current_basis): results on corrected-away data are not evidence.
+The number of trials in the Deflated Sharpe Ratio is the number of different
+specs ever registered for the period (registry.distinct_rules): failures
+count, a rule that only ran on an older data basis counts, and a rule re-run
+after the data changed counts once (owner's decision 2026-10-02). The DSR of
+each candidate and the PBO use one record per spec on the current data basis
+(registry.one_per_rule): results on corrected-away data are not evidence.
 PBO compares the candidates' monthly active returns on the months they share.
 """
 
@@ -15,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from quant_platform.research.registry import TrialRegistry, current_basis
+from quant_platform.research.registry import TrialRegistry, current_basis, distinct_rules, one_per_rule
 from quant_platform.research.statistics import (
     block_bootstrap_mean,
     deflated_sharpe,
@@ -39,10 +40,10 @@ def significance(
     registry: TrialRegistry, reports_dir: str | Path, period: str, fingerprint: str | None = None
 ) -> dict[str, object]:
     current, older = current_basis(registry.records(), period, fingerprint=fingerprint)
-    records = current + older  # every attempt counts towards the number of trials
+    attempts = distinct_rules(current + older)  # every different rule ever tried in this period
     series: dict[int, dict[str, float]] = {}
     names: dict[int, str] = {}
-    for record in current:
+    for record in one_per_rule(current):
         path = Path(reports_dir) / record.report_file
         try:
             report = json.loads(path.read_text(encoding="utf-8"))
@@ -54,7 +55,9 @@ def significance(
             names[record.trial_id] = record.spec_name
     output: dict[str, object] = {
         "period": period,
-        "trials": len(records),
+        "trials": attempts,
+        "counting": "spec_hash",
+        "records": len(current) + len(older),
         "current_trials": len(current),
         "older_trials": len(older),
         "basis": current[0].data_fingerprint if current else fingerprint,
@@ -70,7 +73,7 @@ def significance(
             "trial_id": trial_id,
             "name": names[trial_id],
             "months": len(returns),
-            "dsr": deflated_sharpe(returns, n_trials=len(records), sharpe_variance=variance),
+            "dsr": deflated_sharpe(returns, n_trials=attempts, sharpe_variance=variance),
             "bootstrap": block_bootstrap_mean(returns),
         })
     common = sorted(set.intersection(*(set(values) for values in series.values())))

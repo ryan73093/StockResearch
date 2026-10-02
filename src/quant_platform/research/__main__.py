@@ -31,6 +31,29 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 RESEARCH = Path("instance") / "research"
 
 
+def _saved_tolerance() -> tuple[float, int] | None:
+    """(acceptable drawdown, version) of the latest plan, read-only; None when there is no plan."""
+    import sqlite3
+    from contextlib import closing
+
+    from quant_platform.config.settings import Settings
+
+    url = Settings.from_env().database_url
+    if not url.startswith("sqlite:///"):
+        return None
+    path = Path(url.removeprefix("sqlite:///")).resolve()
+    if not path.is_file():
+        return None
+    with closing(sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)) as db:
+        try:
+            row = db.execute(
+                "SELECT max_drawdown_tolerance, version FROM investment_plans ORDER BY version DESC LIMIT 1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+    return (float(row[0]), int(row[1])) if row else None
+
+
 def _line(report: dict) -> str:
     strategy, benchmark = report["strategy"], report["benchmark"]
     windows = "；".join(
@@ -198,7 +221,13 @@ def main() -> int:
         from quant_platform.research.forward import STANDARD_PLAN
         from quant_platform.research.promotion import PromotionPipeline
 
-        pipeline = PromotionPipeline(RESEARCH, STANDARD_PLAN)
+        saved = _saved_tolerance()
+        pipeline = PromotionPipeline(
+            RESEARCH, STANDARD_PLAN,
+            drawdown_tolerance=saved[0] if saved else None, plan_version=saved[1] if saved else None,
+        )
+        print("進攻型賽道：" + (f"可承受回撤 {saved[0]:.0%}（計畫第 {saved[1]} 版）" if saved else "未啟用（還沒有投資計畫）"),
+              flush=True)
         events = pipeline.advance(load_market(available_assets(args.base), args.base))
         for event in events:
             print(f"{event.name}：{event.stage} {event.outcome} {event.evidence.get('reasons') or ''}", flush=True)
@@ -223,8 +252,8 @@ def main() -> int:
         if report.get("pbo"):
             print(f"PBO {report['pbo']['pbo']:.2f}（{report['pbo']['combinations']} 種切分）")
         print(
-            f"資料版本 {basis[:12]}：目前 {report['current_trials']} 筆；舊版 {report['older_trials']} 筆不列入，"
-            f"但計入多重檢定試驗數 {report['trials']}"
+            f"資料版本 {basis[:12]}：目前 {report['current_trials']} 筆、舊版 {report['older_trials']} 筆紀錄；"
+            f"多重檢定以 {report['trials']} 個不同設定計（同一設定重跑只算一次）"
         )
         print(f"報告：{path}")
         return 0

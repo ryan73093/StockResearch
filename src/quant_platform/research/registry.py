@@ -54,9 +54,10 @@ def current_basis(
 
     All trials of a period see the same data (the whole catalog up to the
     period's end), so they share one fingerprint until the history is
-    corrected. The basis is ``fingerprint`` when given (computed from the
-    dataset), else the newest trial's. Older trials stay in the registry and
-    still count as attempts in the multiple-testing correction.
+    corrected or the catalog grows. The basis is ``fingerprint`` when given
+    (computed from the dataset), else the newest trial's. Older trials stay in
+    the registry; a rule that only ran on an older basis still counts as an
+    attempt (``distinct_rules``), a rule re-run on a new basis counts once.
     """
     selected = [record for record in records if record.kind == kind and record.period == period]
     if not selected:
@@ -66,6 +67,26 @@ def current_basis(
         [record for record in selected if record.data_fingerprint == basis],
         [record for record in selected if record.data_fingerprint != basis],
     )
+
+
+def distinct_rules(records: list[TrialRecord]) -> int:
+    """The number of attempts for the multiple-testing correction (owner's decision 2026-10-02):
+    every different spec counts once, however many data bases or cost variants it ran on. A spec
+    renamed or re-described has another hash and counts again (the conservative side)."""
+    return len({record.spec_hash for record in records})
+
+
+def _is_variant(record: TrialRecord) -> bool:
+    return record.metrics.get("execution_lag") not in (None, 0) or record.metrics.get("cost_scale") not in (None, 1, 1.0)
+
+
+def one_per_rule(records: list[TrialRecord]) -> list[TrialRecord]:
+    """One record per spec: the main run (standard costs, no execution lag) before robustness
+    variants, the earliest first. Only these carry a DSR and can become promotion candidates."""
+    chosen: dict[str, TrialRecord] = {}
+    for record in sorted(records, key=lambda item: (_is_variant(item), item.trial_id)):
+        chosen.setdefault(record.spec_hash, record)
+    return sorted(chosen.values(), key=lambda item: item.trial_id)
 
 
 class TrialRegistry:

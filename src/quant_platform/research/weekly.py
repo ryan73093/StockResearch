@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from quant_platform.research.registry import TrialRegistry, current_basis
+from quant_platform.research.registry import TrialRegistry, current_basis, distinct_rules
 from quant_platform.research.summary import passes_development_gate
 
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -105,7 +105,7 @@ def weekly_report(research_dir: str | Path, day: date) -> dict[str, object]:
         "top_rejections": reasons.most_common(3),
         "new_trials": len(new),
         "development_trials": len(current),
-        "attempts": len(current) + len(older),
+        "attempts": distinct_rules(current + older),
         "passing_new": passing,
         "best_new": None if best is None else {
             "name": best.spec_name, "trial_id": best.trial_id,

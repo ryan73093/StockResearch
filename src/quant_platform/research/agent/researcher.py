@@ -33,7 +33,7 @@ from quant_platform.research.costs import broker_costs
 from quant_platform.research.history.catalog import SERIES_BY_KEY
 from quant_platform.research.market import MarketData
 from quant_platform.research.periods import PERIODS, ResearchGateError, period_basis, run_trial
-from quant_platform.research.registry import TrialRegistry, current_basis
+from quant_platform.research.registry import TrialRegistry, current_basis, distinct_rules
 from quant_platform.research.spec import BASELINES, TRADABLE, StrategySpec, json_schema
 from quant_platform.research.summary import DSR_GATE, PBO_GATE, WIN_RATIO_GATE, passes_development_gate
 
@@ -85,10 +85,10 @@ INSTRUCTIONS = """你是台股盤後投資研究員，只負責提出並檢驗�
 規範（違反的設定會被拒絕並記錄）：
 1. 只能用 StrategySpec v1（使用者訊息中的 JSON Schema）描述規則；不得指名個股；配置與訊號標的只能從「可用標的」清單選。除了投入時點與金額倍數，也可以用 allocation.defensive（趨勢控制：訊號收盤跌破均線時改用防守配置）與 allocation.rotation（ETF 輪動；搭配 core 就是核心＋衛星）；訊號一律使用還原分割後的收盤價。
 2. 你只會看到開發期（2004-02-11～2016-12-31）的結果；驗證期與保留期的結果不提供，也不要推測或引用 2017 年以後的行情。
-3. 每個新設定都計入多重檢定的試驗次數，試越多越難證明有效。每輪最多提出 {specs_per_round} 個設定；只提出有明確經濟機制的假設，不要做參數掃描、不要只微調已失敗設定的數字。
+3. 每個不同的設定都計入多重檢定（同一設定在資料更新後重跑只算一次），試越多越難證明有效。每輪最多提出 {specs_per_round} 個設定；只提出有明確經濟機制的假設，不要做參數掃描、不要只微調已失敗設定的數字。
 4. 不要重複已測過的規則（名稱與說明不同但規則相同也算重複）。
 5. 成本：手續費不打折、每筆最低 20 元；盤後零股成交價＝收盤加 20 bps 進位；賣出 ETF 證交稅 0.1%（債券 ETF 免）；現金股利除息後 25 天入帳。
-6. 門檻：開發期 3 年滾動視窗勝率 ≥ {win_gate:.0%} 且中位超額 > 0；扣除多重檢定後 DSR ≥ {dsr_gate}、PBO ≤ {pbo_gate:.0%}。勝率只是參考，主要看相同現金流下的超額與最差期間。
+6. 門檻：開發期 3 年滾動視窗勝率 ≥ {win_gate:.0%} 且中位超額 > 0；扣除多重檢定後 DSR ≥ {dsr_gate}、PBO ≤ {pbo_gate:.0%}；最大回撤不比定期定額深超過 5 個百分點（一般賽道），更深的只能走進攻型賽道（回撤須在使用者計畫的可承受範圍內，其餘門檻相同）。勝率只是參考，主要看相同現金流下的超額與最差期間。
 7. 名稱格式「方向：說明」（例如「回撤：…」「配置：…」「時點：…」），40 字以內。
 
 只輸出一個 JSON 物件，欄位如下：
@@ -191,7 +191,7 @@ class ResearchAgent:
             benchmark_line,
             f"已測設定（開發期、目前資料版本 {len(current)} 個，依 3 年中位超額排序；超額以投入金額計）：",
             *lines,
-            f"多重檢定：本期間累計 {len(current) + len(older)} 次試驗"
+            f"多重檢定：本期間累計 {distinct_rules(current + older)} 個不同設定"
             + (f"；最佳 DSR {stats['best_dsr']:.2f}、PBO {stats['pbo']:.0%}" if stats else "") + "。",
             "最近研究日誌：" if journal_lines else "研究日誌：尚無（這是第一輪）。",
             *journal_lines,

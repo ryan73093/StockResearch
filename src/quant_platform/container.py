@@ -17,7 +17,7 @@ from quant_platform.application.dividends import DividendCalendar
 from quant_platform.application.investment_plan import InvestmentPlanService
 from quant_platform.application.notifications import NotificationService
 from quant_platform.application.plan_decision import PlanDecisionService
-from quant_platform.research.promotion import strategy_catalog
+from quant_platform.research.promotion import required_tolerance, strategy_catalog
 from quant_platform.application.database_backup import DatabaseBackupService
 from quant_platform.application.prediction_archive import (
     PredictionArchiveService,
@@ -487,6 +487,7 @@ def build_container(settings: Settings | None = None) -> Container:
         SqlAlchemyInvestmentPlanRepository(database.session_factory),
         # Built-in baselines plus candidates the user approved (S4-W06).
         strategies=lambda: strategy_catalog(research_dir),
+        required_tolerance=lambda: required_tolerance(research_dir),
     )
     def plan_broker() -> str:
         plan = investment_plan_service.current()

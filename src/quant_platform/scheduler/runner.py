@@ -330,7 +330,7 @@ def run_research_agent(container: "Container") -> object | None:
     from quant_platform.research.market import available_assets, load_market
 
     from quant_platform.research.forward import STANDARD_PLAN
-    from quant_platform.research.promotion import PromotionPipeline
+    from quant_platform.research.promotion import PromotionPipeline, promotion_limits
 
     research = _instance_dir(container.settings.database_url) / "research"
     base = research / "history"
@@ -346,7 +346,9 @@ def run_research_agent(container: "Container") -> object | None:
             [entry.get("status") for entry in entries],
         )
     # S4-W06: candidates that pass every gate move on (validation, holdout once, forward).
-    events = PromotionPipeline(research, STANDARD_PLAN).advance(market)
+    # The aggressive track's drawdown limit is the owner's current plan tolerance (none: closed).
+    limits = promotion_limits(container.investment_plan_service.current())
+    events = PromotionPipeline(research, STANDARD_PLAN, **limits).advance(market)
     if events:
         logger.info("Promotion: %s", [(event.name, event.stage, event.outcome) for event in events])
     return len(entries)

@@ -156,7 +156,7 @@ def test_fingerprint_covers_only_data_up_to_the_end():
     assert period_basis(MARKET, "development") == MARKET.fingerprint_until(end)
 
 
-def test_trials_on_corrected_data_replace_old_ones_in_the_ranking_but_all_attempts_count(tmp_path):
+def test_trials_on_corrected_data_replace_old_ones_and_each_rule_counts_once(tmp_path):
     from quant_platform.research.periods import period_basis
     from quant_platform.research.reports import trial_ranking
     from quant_platform.research.significance import significance
@@ -184,9 +184,11 @@ def test_trials_on_corrected_data_replace_old_ones_in_the_ranking_but_all_attemp
     assert registry.count("candidate") == 4
     assert ranking["total"] == 2 and ranking["older"] == 2
     assert {row["trial_id"] for row in ranking["rows"]} == {3, 4}
-    assert stats["current_trials"] == 2 and stats["older_trials"] == 2 and stats["trials"] == 4
+    # Two rules, each run on two data bases: four records, two attempts (owner's decision 2026-10-02).
+    assert stats["current_trials"] == 2 and stats["older_trials"] == 2 and stats["records"] == 4
+    assert stats["trials"] == 2 and stats["counting"] == "spec_hash"
     assert {item["trial_id"] for item in stats["candidates"]} == {3, 4}
-    assert all(item["dsr"]["trials"] == 4 for item in stats["candidates"])  # every attempt counts
+    assert all(item["dsr"]["trials"] == 2 for item in stats["candidates"])
 
 
 def test_round_summary_states_an_honest_verdict(tmp_path):
@@ -280,3 +282,42 @@ def test_rerunning_a_trial_reuses_the_record_and_baselines_may_use_full(tmp_path
     assert first.report_path.is_file()
     with pytest.raises(ResearchGateError):
         run_trial(**{**kwargs, "spec": CANDIDATE})  # a non-built-in spec is not a baseline
+
+
+def test_trial_count_is_distinct_rules_and_variants_are_not_candidates(tmp_path):
+    import json
+
+    from quant_platform.research.registry import distinct_rules, one_per_rule
+    from quant_platform.research.significance import significance
+    from quant_platform.research.statistics import expected_max_sharpe
+
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    (tmp_path / "reports").mkdir()
+
+    def add(spec_hash, basis, months, **metrics):
+        index = registry.count("candidate") + 1
+        (tmp_path / "reports" / f"{index}.json").write_text(json.dumps({
+            "monthly_active_returns": {f"2010-{month:02d}": value for month, value in enumerate(months, 1)},
+        }), encoding="utf-8")
+        return registry.register(
+            kind="candidate", period="development", spec_hash=spec_hash, spec_name=spec_hash, input_hash=f"in-{index}",
+            data_fingerprint=basis, metrics=metrics, report_file=f"{index}.json",
+        )
+
+    add("a", "old", [0.0, 0.0])                                   # 1: rule a on the old basis
+    add("c", "old", [0.0, 0.0])                                   # 2: rule c only ever ran on the old basis
+    add("a", "new", [0.5, 0.5, 0.5, 0.5], cost_scale=2.0)         # 3: a robustness variant of a
+    add("a", "new", [0.03, 0.01, 0.03, 0.01], cost_scale=1.0, execution_lag=0)   # 4: a's main run
+    add("b", "new", [0.01, -0.01, 0.01, -0.01])                   # 5
+    records = registry.records()
+
+    assert distinct_rules(records) == 3                            # a, b, c: five records, three rules
+    assert [record.trial_id for record in one_per_rule(records[2:])] == [4, 5]   # the main run, not the variant
+    stats = significance(registry, tmp_path / "reports", "development", fingerprint="new")
+    assert (stats["trials"], stats["records"], stats["current_trials"], stats["older_trials"]) == (3, 5, 3, 2)
+    assert {item["trial_id"] for item in stats["candidates"]} == {4, 5}
+    # Monthly Sharpe of trial 4: mean 0.02 / sample stdev 0.011547 = √3; of trial 5: 0. Variance of (√3, 0) = 1.5.
+    dsr = next(item["dsr"] for item in stats["candidates"] if item["trial_id"] == 4)
+    assert dsr["trials"] == 3 and dsr["expected_max_sharpe"] == pytest.approx(expected_max_sharpe(3, 1.5))
+    # Fewer trials lower the bar a Sharpe ratio has to clear.
+    assert expected_max_sharpe(2, 0.01) < expected_max_sharpe(4, 0.01)

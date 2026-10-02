@@ -56,7 +56,7 @@
     {% for hypothesis in weekly.hypotheses %}<li>假設：{{ hypothesis }}</li>{% endfor %}
     {% if weekly.top_rejections %}<li>拒絕原因：{% for reason, count in weekly.top_rejections %}{{ reason }}（{{ count }}）{% if not loop.last %}、{% endif %}{% endfor %}</li>{% endif %}
     {% for event in weekly.promotions %}<li>晉級：{{ event.name }} {{ event.stage }} {{ event.outcome }}</li>{% endfor %}
-    <li>多重檢定：開發期目前資料版本 {{ weekly.development_trials }} 個設定、累計 {{ weekly.attempts }} 次試驗{% if weekly.best_dsr is not none %}；最佳 DSR {{ '%.2f' % weekly.best_dsr }}{% endif %}{% if weekly.pbo is not none %}、PBO {{ '{:.0%}'.format(weekly.pbo) }}{% endif %}</li>
+    <li>多重檢定：開發期目前資料版本 {{ weekly.development_trials }} 個設定、累計 {{ weekly.attempts }} 個不同設定{% if weekly.best_dsr is not none %}；最佳 DSR {{ '%.2f' % weekly.best_dsr }}{% endif %}{% if weekly.pbo is not none %}、PBO {{ '{:.0%}'.format(weekly.pbo) }}{% endif %}</li>
     {% for idea in weekly.next_ideas %}<li>下一步構想：{{ idea }}</li>{% endfor %}
   </ul>
 </section>
@@ -101,7 +101,7 @@
 <section class="card{% if round_view.passing and round_view.best_dsr and round_view.best_dsr >= round_view.gates.dsr %} card--highlight{% endif %}">
   <div class="card__head">
     <h2>第一批研究結論 <span class="badge">開發期 2004–2016</span></h2>
-    <span class="muted small">{% if round_view.older_trials %}目前資料版本 {{ round_view.trials }} 個設定；舊版資料的 {{ round_view.older_trials }} 筆不列入，但多重檢定以 {{ round_view.attempts }} 次計{% else %}{{ round_view.trials }} 個設定，全部計入多重檢定{% endif %}</span>
+    <span class="muted small">{% if round_view.older_trials %}目前資料版本 {{ round_view.trials }} 個設定；多重檢定以 {{ round_view.attempts }} 個不同設定計（同一設定在舊資料版本的 {{ round_view.older_trials }} 筆重跑不重複計）{% else %}{{ round_view.trials }} 個設定，全部計入多重檢定{% endif %}</span>
   </div>
   <p style="margin:0 0 12px"><strong>{{ round_view.verdict }}</strong></p>
   <div class="table-wrap table-wrap--stack">
@@ -198,7 +198,7 @@
       <tbody>
       {% for row in promotion.pipeline %}
         <tr>
-          <td data-primary><strong>{{ row.name }}</strong></td>
+          <td data-primary><strong>{{ row.name }}</strong>{% if row.track == 'aggressive' %} <span class="badge badge--warn">進攻型</span>{% endif %}{% if row.over_tolerance %}<span class="muted small">最深回撤 {{ '{:.1%}'.format(row.deepest_drawdown) if row.deepest_drawdown is not none else '未知' }}，超過目前計畫的可承受回撤</span>{% endif %}</td>
           <td data-label="關卡">{{ row.stage_label }}</td>
           <td data-label="結果"><span class="badge {{ 'badge--ok' if row.outcome in ('passed', 'approved') else ('badge--bad' if row.outcome == 'failed' else '') }}">{{ {'passed': '通過', 'failed': '未通過', 'started': '進行中', 'approved': '已核准', 'revoked': '已撤銷'}.get(row.outcome, row.outcome) }}</span>{% if row.evidence.reasons %}<span class="muted small">{{ row.evidence.reasons|join('；') }}</span>{% endif %}</td>
           <td class="small" data-label="時間">{{ row.at[:10] }}</td>
@@ -220,7 +220,13 @@
   <p style="margin:0 0 8px"><strong>目前沒有候選進入晉級流程。</strong></p>
   <p class="muted" style="margin:0">開發期 {{ promotion.candidates }} 個設定中，{{ promotion.window_ok }} 個通過 3 年與 5 年滾動視窗門檻；{% if promotion.best_dsr %}但扣除多重檢定後最佳 DSR {{ '%.2f' % promotion.best_dsr.dsr }}（{{ promotion.best_dsr.name }}）未達 {{ promotion.gates.dsr }}{% else %}統計檢定尚未完成{% endif %}，所以沒有設定可以進驗證期。</p>
   {% endif %}
-  <p class="note">門檻：滾動 3／5 年勝率 ≥ {{ '{:.0%}'.format(promotion.gates.win) }} 且中位超額 > 0、回撤不比定期定額深超過 {{ '%.0f' % (promotion.gates.drawdown * 100) }} 個百分點、DSR ≥ {{ promotion.gates.dsr }}、PBO ≤ {{ '{:.0%}'.format(promotion.gates.pbo) }}；驗證期另需成本加倍與晚一天執行仍有 ≥ {{ '{:.0%}'.format(promotion.gates.robust) }} 勝率；保留期只評估一次；前向模擬至少 {{ promotion.gates.forward }} 個交易日。核准後才會出現在計畫頁。</p>
+  {% if promotion.deep_drawdown %}
+  <p class="small" style="margin:10px 0 4px"><strong>回撤比一般門檻深、只能走進攻型賽道的設定</strong>（視窗門檻已過，仍須通過 DSR 等其餘關卡）：</p>
+  <ul class="reasons" style="margin-bottom:6px">
+    {% for item in promotion.deep_drawdown %}<li>{{ item.name }}：最大回撤 {{ '{:.1%}'.format(item.max_drawdown) }}，{% if item.needed > 80 %}超過計畫可填的上限 80%，無法晉級{% else %}需要可承受回撤至少 {{ item.needed }}%{% if promotion.gates.aggressive_drawdown is not none %}（{{ '符合' if item.within else '不符合' }}目前計畫）{% endif %}{% endif %}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p class="note">門檻：滾動 3／5 年勝率 ≥ {{ '{:.0%}'.format(promotion.gates.win) }} 且中位超額 > 0、回撤不比定期定額深超過 {{ '%.0f' % (promotion.gates.drawdown * 100) }} 個百分點（一般賽道；更深的走進攻型賽道，回撤上限是你計畫的可承受回撤{% if promotion.gates.aggressive_drawdown is not none %} {{ '{:.0%}'.format(promotion.gates.aggressive_drawdown) }}{% else %}——<a href="/plan">尚未建立投資計畫，進攻型賽道未啟用</a>{% endif %}，其餘門檻相同）、DSR ≥ {{ promotion.gates.dsr }}、PBO ≤ {{ '{:.0%}'.format(promotion.gates.pbo) }}；驗證期另需成本加倍與晚一天執行仍有 ≥ {{ '{:.0%}'.format(promotion.gates.robust) }} 勝率；保留期只評估一次；前向模擬至少 {{ promotion.gates.forward }} 個交易日。核准後才會出現在計畫頁。</p>
 </section>
 
 <section class="card">
@@ -260,7 +266,7 @@
   </div>
   {% if stats %}
   <div class="kpis kpis--four" style="margin-bottom:14px">
-    <div class="kpi"><div class="kpi__label">試驗數（多重檢定）</div><div class="kpi__value">{{ stats.trials }}</div></div>
+    <div class="kpi"><div class="kpi__label">不同設定數（多重檢定）</div><div class="kpi__value">{{ stats.trials }}</div></div>
     <div class="kpi"><div class="kpi__label">過度擬合機率 PBO</div><div class="kpi__value">{{ '{:.0%}'.format(stats.pbo.pbo) if stats.pbo else '—' }}</div></div>
     <div class="kpi"><div class="kpi__label">最佳 DSR</div><div class="kpi__value">{{ '{:.2f}'.format(best_dsr.value) if best_dsr else '—' }}</div></div>
     <div class="kpi"><div class="kpi__label">門檻</div><div class="kpi__value" style="font-size:14px">PBO ≤ 20%、DSR ≥ 0.95</div></div>
