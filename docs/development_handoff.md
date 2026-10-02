@@ -5,11 +5,13 @@
 ## 接手前必讀
 
 1. `AGENTS.md`：開發規則。部署一律 `scripts\deploy.ps1`；只停服務用 `scripts\stop-services.ps1`，只啟動用 `scripts\start-services.ps1`；還原資料庫步驟在「資料庫安全」。測試一律用暫存資料庫（`tests/conftest.py` 會擋下開啟正式資料庫的測試）。
-2. `docs/development_roadmap.md`：S6 done；S5 基準版 doing（S5-W07 LINE 等使用者設定）；S4-W04 done，S4-W03、W05 doing；S1-W05 量測到 10/07。
+2. `docs/development_roadmap.md`：S6 done；S5 基準版 doing（S5-W07 LINE 等使用者設定）；S4-W04、W05 done，S4-W03 doing；S1-W05 量測到 10/07。
 3. `DEVELOPMENT_HISTORY.md` 最上方幾筆（10/01 下午）：服務中的 Yahoo 全部失敗的根本原因（`PYTHONUTF8=1` 與中文路徑）、股利提醒、任一天查詢、測試誤寫正式資料庫、今日頁一鍵回報成交、情境模擬、每週研究報告、使用教學。
 4. 使用者要求：所有回覆與進度說明用繁體中文。研究 CLI 一律在專案根目錄以 `$env:PYTHONPATH="src"` 從原始碼執行（`.venv` 裡安裝的是部署版）。UI 預覽用暫存資料庫（不要用預設設定連正式資料庫）。
 
-## 最新狀態（2026-10-02 10:45）
+## 最新狀態（2026-10-02 10:55）
+
+- S4-W05 第一批研究完成：趨勢控制、ETF 輪動、核心＋衛星 28 個設定（#144～#171）在開發期都沒有勝過定期定額；累計 165 次試驗、最佳 DSR 0.35。冠軍仍是定期定額。
 
 - 10:3x 部署 `e0e589e`：今日建議的限價改為收盤 ±1%（盤後零股單一價格撮合，限價只決定買不買得到；0050 成交比例 85% → 99%），股數以限價計算。10/05 投入日是第一次以新限價產生委託。#3631 已在部署的停止步驟關閉。
 
@@ -71,7 +73,7 @@
 | 研究資料 | `instance\research\`：history（10 個序列）、reports、trials.jsonl、stats、forward、promotions.jsonl |
 | 憑證副本 | `C:\ProgramData\StockResearch\cacert.pem`（yfinance 用，見開發歷程） |
 | 主機記憶體 | 10/01 診斷出「每個結束的程序都留下殭屍」（開機 5 天約 13 GB），元凶是 AMD 內顯驅動 31.0.24002.92（2024-01）；使用者 22:5x 更新到 32.0.21045.5002 後複測已不再外洩。系統頁「主機記憶體」持續監看（殭屍 2 萬個以上偏高、5 萬個以上或可用不到 10% 建議重開機） |
-| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；422 通過、1 略過（10/02 10:4x） |
+| 測試 | `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp <可寫目錄>`；424 通過、1 略過（10/02 10:35） |
 | 同主機其他服務 | VectorDB 5001 與其 Tunnel、PimiServices 共用 cloudflared 服務（YtSummary／AutoLayout）。一律不操作 |
 
 ## 待使用者確認或操作

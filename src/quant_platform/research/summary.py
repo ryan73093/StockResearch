@@ -18,11 +18,14 @@ DSR_GATE = 0.95
 PBO_GATE = 0.20
 
 
+DIRECTION_PREFIXES = {"均線": "均線", "回撤": "回撤", "趨勢": "趨勢控制", "輪動": "ETF 輪動", "核心": "核心＋衛星"}
+
+
 def _direction(name: str) -> str:
     head = name.split("：", 1)[0]
-    for prefix in ("均線", "回撤"):
+    for prefix, label in DIRECTION_PREFIXES.items():
         if head.startswith(prefix):
-            return prefix
+            return label
     return head
 
 

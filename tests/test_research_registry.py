@@ -231,6 +231,27 @@ def test_first_batch_is_a_fixed_list_of_distinct_valid_specs():
     assert all(set(spec.assets) <= {"0050", "0056", "006208"} for spec in specs)
 
 
+def test_directions_group_the_batch_names():
+    from quant_platform.research.batches import second_batch
+    from quant_platform.research.summary import _direction
+
+    assert {_direction(spec.name) for spec in second_batch()} == {"趨勢控制", "ETF 輪動", "核心＋衛星"}
+    assert _direction("均線 60 日：弱勢 ×2、強勢 ×0.5") == "均線" and _direction("時點：每月 6 日全數買進 0050") == "時點"
+
+
+def test_second_batch_covers_trend_rotation_and_core_satellite_with_new_rules():
+    from quant_platform.research.batches import first_batch, second_batch
+
+    specs = second_batch()
+
+    assert len(specs) == 28 and len({spec.spec_hash for spec in specs}) == 28 and len({spec.name for spec in specs}) == 28
+    assert all(set(spec.assets) <= {"0050", "0056"} for spec in specs)   # what the development period trades
+    assert sum(spec.allocation.defensive is not None for spec in specs) == 12
+    assert sum(spec.allocation.rotation is not None and not spec.allocation.rotation.core for spec in specs) == 12
+    assert sum(bool(spec.allocation.rotation and spec.allocation.rotation.core) for spec in specs) == 4
+    assert not {spec.spec_hash for spec in specs} & {spec.spec_hash for spec in first_batch()}
+
+
 def test_rerunning_a_trial_reuses_the_record_and_baselines_may_use_full(tmp_path):
     registry = TrialRegistry(tmp_path / "trials.jsonl")
     kwargs = dict(kind="baseline", spec=BASELINES["ma_value"], period="full", market=MARKET, plan=PLAN,
