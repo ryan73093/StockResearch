@@ -160,6 +160,20 @@ def test_plan_advice_job_sends_on_invest_days_inside_the_window():
     assert notify_plan_advice(FakeContainer(decision(), closed=True), at(13, 50)) is None
 
 
+def test_catch_up_advice_is_sent_once_per_missed_invest_day():
+    from quant_platform.scheduler.runner import notify_plan_advice
+
+    catch_up = replace(decision(headline="10/01 投入日沒有買進紀錄，今天補買：買進 0050 99 股"),
+                       missed_day=date(2026, 10, 1))
+    container = FakeContainer(catch_up)
+    assert notify_plan_advice(container, at(13, 50)) == "sent"
+    key, title, text = container.sent[0]
+    assert (key, title) == ("plan-catch-up:2026-10-01", "補買提醒") and text.startswith("【盤後決策台】10/05（一） 補買")
+
+    waiting = FakeContainer(replace(decision("missing_data", "0050 今日收盤尚未取得"), missed_day=date(2026, 10, 1)))
+    assert notify_plan_advice(waiting, at(14, 20)) is None            # no daily problem message on catch-up days
+
+
 def test_failed_workflow_sends_one_failure_message():
     from quant_platform.scheduler.runner import run_scheduled_workflow
 

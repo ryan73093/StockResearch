@@ -56,6 +56,7 @@ class PlanDecision:
     reasons: list[str] = field(default_factory=list)
     budget: float = 0.0
     data_time: str = ""
+    missed_day: date | None = None  # the invest session this catch-up advice makes up for
 
 
 def clamped_date(year: int, month: int, day: int) -> date:
@@ -110,16 +111,19 @@ class PlanDecisionService:
             )
         calendar = self._calendar_store.calendar("TW")
         session = invest_session(spec, plan.salary_day, today, calendar)
-        base = dict(plan_version=plan.version, strategy=spec.name, invest_day=session)
-        if session != today:
+        missed = self._missed_session(spec, plan.salary_day, today, calendar) if session != today else None
+        base = dict(plan_version=plan.version, strategy=spec.name, invest_day=session if missed is None else today,
+                    missed_day=missed)
+        if session != today and missed is None:
             return PlanDecision(
                 "idle", f"今天不需操作：下次投入日 {session:%m/%d}", reasons=[
                     f"「{spec.name}」只在投入日操作；每月投入 {plan.monthly_amount:,.0f} 元。"
                 ], **base,
             )
+        label = "今天是投入日" if missed is None else f"{missed:%m/%d} 投入日之後還沒有買進紀錄"
         if now.time() < MARKET_CLOSE:
             return PlanDecision(
-                "wait_close", "今天是投入日：13:30 收盤後產生委託", reasons=[
+                "wait_close", f"{label}：13:30 收盤後產生{'補買' if missed else ''}委託", reasons=[
                     "盤後零股 13:40 開始收單；委託以今日收盤價計算。"
                 ], **base,
             )
@@ -149,6 +153,11 @@ class PlanDecisionService:
         new_money = float(plan.monthly_amount)
         cash = account.cash + (0.0 if deposited else new_money)
         reasons = [] if deposited else [f"本月入金尚未記錄，先以計畫金額 {new_money:,.0f} 元計算。"]
+        if missed is not None:
+            reasons.append(
+                f"本月入金已記錄，但 {missed:%m/%d} 投入日之後沒有買進紀錄（可能沒成交或還沒下單），今天補買；"
+                "如果其實已經買了，到持倉頁回報成交，這則就不會再出現。"
+            )
         multiplier, why = self._multiplier(spec, histories[spec.signal])
         if why:
             reasons.append(why)
@@ -227,18 +236,38 @@ class PlanDecisionService:
             f"{'；月退的退佣不計入' if '月退' in broker.rebate else ''}），實際以對帳單為準。"
         )
         if not orders:
+            if missed is not None:  # nothing to catch up after all: back to the usual idle day
+                return PlanDecision(
+                    "idle", f"今天不需操作：下次投入日 {session:%m/%d}", reasons=reasons,
+                    **{**base, "invest_day": session, "missed_day": None},
+                )
             headline = ("今天是投入日：依規則保留現金、暫不買進" if not any(weights.values())
                         else "今天是投入日，但可用資金不足以買進 1 股")
             return PlanDecision(
                 "idle", headline, reasons=reasons, budget=budget, data_time=f"{today:%m/%d} 收盤", **base,
             )
-        headline = "今天依計畫投入：" + "、".join(
+        headline = ("今天依計畫投入：" if missed is None else f"{missed:%m/%d} 投入日沒有買進紀錄，今天補買：") + "、".join(
             f"{'買進' if order.side == 'BUY' else '賣出'} {order.symbol} {order.shares:,} 股" for order in orders
         )
         return PlanDecision(
             kind, headline, orders=orders, reasons=reasons, budget=budget,
             data_time=f"{today:%m/%d} 收盤", **base,
         )
+
+    def _missed_session(self, spec: StrategySpec, salary_day: int, today: date, calendar) -> date | None:
+        """This month's invest session once it has passed with the month's deposit recorded but no
+        buy since: the money still waits (the order did not fill, or was not placed), so the
+        advice repeats on the following sessions of the month until a buy is reported."""
+        missed = invest_session(spec, salary_day, today.replace(day=1), calendar)
+        if not (missed < today and (missed.year, missed.month) == (today.year, today.month)):
+            return None
+        account = self._account.overview(include_shadow=False)
+        deposited = any(
+            flow.kind == "deposit" and (flow.day.year, flow.day.month) == (today.year, today.month)
+            for flow in account.flows
+        )
+        bought = any(trade.side == "BUY" and trade.day >= missed for trade in account.trades)
+        return missed if deposited and not bought and account.cash > 0 else None
 
     @staticmethod
     def _multiplier(spec: StrategySpec, history: list[tuple[date, float]]) -> tuple[float, str]:

@@ -28,8 +28,8 @@ class Plans:
 
 
 class Account:
-    def __init__(self, cash=0.0, holdings=(), flows=()):
-        self.value = SimpleNamespace(cash=cash, holdings=list(holdings), flows=list(flows))
+    def __init__(self, cash=0.0, holdings=(), flows=(), trades=()):
+        self.value = SimpleNamespace(cash=cash, holdings=list(holdings), flows=list(flows), trades=list(trades))
 
     def overview(self, include_shadow=True):
         return self.value
@@ -168,3 +168,22 @@ def test_rebalance_buys_only_with_what_the_sale_brings_at_its_limit():
     assert (sell.shares, sell.limit_price, sell.worst_case) == (120, 99.00, 11_849)
     assert (buy.shares, buy.limit_price, buy.worst_case) == (864, 25.25, 21_847)
     assert buy.worst_case <= 10_000 + sell.worst_case
+
+
+def test_a_missed_invest_day_is_caught_up_until_a_buy_is_reported():
+    closes = {"0050.TW": [(item, 100.0) for item in sessions_until(date(2026, 10, 7), 300)]}
+    deposit = [ActualCashFlow(1, date(2026, 10, 5), "deposit", Decimal(10_000))]
+
+    # 10/05 passed with the deposit recorded and no buy since: on 10/07 the same order comes back.
+    decision = service(closes=closes, account=Account(cash=10_000.0, flows=deposit)).decide(at(date(2026, 10, 7)))
+    assert decision.kind == "invest" and decision.headline.startswith("10/05 投入日沒有買進紀錄，今天補買")
+    assert decision.invest_day == date(2026, 10, 7) and decision.orders[0].shares == 98
+    assert any("到持倉頁回報成交" in reason for reason in decision.reasons)
+    early = service(closes=closes, account=Account(cash=10_000.0, flows=deposit)).decide(at(date(2026, 10, 7), 11))
+    assert early.kind == "wait_close" and "補買" in early.headline
+
+    # A buy reported since 10/05, or no deposit recorded (nothing is known): the usual idle day.
+    bought = [SimpleNamespace(side="BUY", day=date(2026, 10, 6))]
+    done = service(closes=closes, account=Account(cash=72.0, flows=deposit, trades=bought)).decide(at(date(2026, 10, 7)))
+    unknown = service(closes=closes, account=Account(cash=0.0)).decide(at(date(2026, 10, 7)))
+    assert done.kind == unknown.kind == "idle" and "下次投入日 11/05" in done.headline

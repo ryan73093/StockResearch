@@ -273,9 +273,12 @@ def notify_plan_advice(container: "Container", now: datetime | None = None) -> s
         if decision.kind == "idle" and container.settings.line_daily_summary:
             return service.send(f"daily:{today}", "今日不需操作", idle_text(decision, today, public_url))
         return None
+    missed = getattr(decision, "missed_day", None)
     if decision.kind in {"invest", "rebalance"}:
+        if missed is not None:  # once per missed invest day, not every session until a buy is reported
+            return service.send(f"plan-catch-up:{missed}", "補買提醒", plan_advice_text(decision, public_url))
         return service.send(f"plan:{today}", "今日投入建議", plan_advice_text(decision, public_url))
-    if decision.kind in {"missing_data", "idle"} and local_now.time() >= clock(14, 15):
+    if missed is None and decision.kind in {"missing_data", "idle"} and local_now.time() >= clock(14, 15):
         return service.send(f"plan-problem:{today}", "投入日提醒", plan_problem_text(decision, public_url))
     return None
 

@@ -156,7 +156,8 @@ def _day_label(day) -> str:
 
 
 def plan_advice_text(decision, public_url: str = "") -> str:
-    lines = [f"【盤後決策台】{_day_label(decision.invest_day)} 投入日", decision.headline]
+    kind = "補買" if getattr(decision, "missed_day", None) else "投入日"
+    lines = [f"【盤後決策台】{_day_label(decision.invest_day)} {kind}", decision.headline]
     for order in decision.orders:
         side = "買進" if order.side == "BUY" else "賣出"
         lines.append(
