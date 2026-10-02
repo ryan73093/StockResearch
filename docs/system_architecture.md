@@ -264,3 +264,7 @@ flowchart LR
 | `dashboard/cloudflare_access.py` | Cloudflare Access JWT 驗證、擁有者允許清單、本機 loopback 例外、安全標頭（S2-W01） |
 | `application/prediction_archive.py` | 預測保留政策與 Parquet 封存（S1-W03） |
 | `application/listing_reconciliation.py` | 官方名冊比對與下市處理（S1-W02） |
+
+## 2026-10-02 — Home 統一登入整合
+
+身份驗證 adapter 見 [Home 整合](home_sso.md)。Home 只管理身份、系統授權、服務憑證與使用稽核；業務 DB、Qdrant／模型與 AI 呼叫留在原系統。

@@ -95,6 +95,15 @@ def _is_local_request() -> bool:
 
 def register_cloudflare_access(app: Flask, settings, validator=None) -> None:
     """Install the Access gate when ``AUTH_MODE=cloudflare-access``."""
+    import os
+    from pathlib import Path
+    from .pimi_sso.client import register_flask
+    def home_identity(identity):
+        if identity["role"] != "admin" and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            return False
+        g.access_user = AccessUser(identity["email"], identity["name"], "home-sso")
+    home_client = register_flask(app, Path(os.environ.get("HOME_SSO_CONFIG") or ".runtime/sso-disabled/no-config.json"),
+                                 home_identity, allow_loopback=True)
     if settings.auth_mode != "cloudflare-access":
         return
     access = validator or CloudflareAccessValidator(
@@ -117,6 +126,8 @@ def register_cloudflare_access(app: Flask, settings, validator=None) -> None:
 
     @app.before_request
     def cloudflare_access_gate():
+        if getattr(g, "home_sso_active", False):
+            return None
         g.access_user = None
         if request.path in EXEMPT_PATHS:
             return None

@@ -1,4 +1,4 @@
-# Public-side check that needs no sign-in (AGENTS.md「測試與驗收」): this project's tunnel is
+# Public-side check that needs no sign-in (AGENTS.md): this project's tunnel is
 # connected and the public hostname is answered by Cloudflare Access. Page content is verified on
 # 127.0.0.1:5000, which is the origin the tunnel serves.
 $ErrorActionPreference = 'Stop'
@@ -25,8 +25,20 @@ Write-Output "OK   tunnel: PID $($tunnel.ProcessId), $($ready.readyConnections) 
 
 $answer = & curl.exe -sS -o NUL -w '%{http_code} %{redirect_url}' --max-time 15 "https://$hostname/"
 $code, $location = "$answer" -split ' ', 2
-if ($code -ne '302' -or $location -notlike 'https://*.cloudflareaccess.com/*') {
-    Write-Output "FAIL public: https://$hostname/ answered $answer"
-    exit 1
+if ($code -eq '302' -and $location -like 'https://*.cloudflareaccess.com/*') {
+    Write-Output "OK   public: https://$hostname/ is behind Cloudflare Access ($code)"
+    exit 0
 }
-Write-Output "OK   public: https://$hostname/ is behind Cloudflare Access ($code)"
+$clientFile = Join-Path $PSScriptRoot '..\.runtime\home-sso.json'
+if (Test-Path -LiteralPath $clientFile) {
+    $client = Get-Content -LiteralPath $clientFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($client.enabled -eq $true -and $code -eq '302' -and $location.StartsWith($client.home_url.TrimEnd('/') + '/sso/authorize?')) {
+        $apiCode = & curl.exe -sS -o NUL -w '%{http_code}' --max-time 15 "https://$hostname/api/status"
+        if ($apiCode -eq '401') {
+            Write-Output 'OK   public: home-sso native origin rejects anonymous data API.'
+            exit 0
+        }
+    }
+}
+Write-Output "FAIL public: https://$hostname/ did not show verified login protection."
+exit 1

@@ -166,3 +166,7 @@ PPO／DQN 使用統一 Agent Adapter 與相同 walk-forward 分段。PPO 輸出 
 ## 原則
 
 研究結果不代表未來績效。平台目標是建立可重現、可審計、能正確處理偏誤的研究流程，而非保證超越大盤。目前架構與路線圖見 [系統架構](docs/system_architecture.md) 與 [開發路線圖](docs/development_roadmap.md)。
+
+## 2026-10-02 — Home 統一登入整合
+
+登入與 API／服務操作新模式見 [Home 整合](docs/home_sso.md)。一般使用者僅能讀取盤後決策台；寫入仍限 Home 管理員。內部 8000 API 的既有權杖保持原規則。此次只用 `scripts/deploy.ps1 -HomeAuthOnly` 更新已安裝的登入模組，不部署研究 WIP、不重算統計。

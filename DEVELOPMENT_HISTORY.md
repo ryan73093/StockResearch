@@ -2,6 +2,15 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-02 — Home 統一登入來源驗收
+
+- 使用者要求：Home 帳密登入、系統進入權限、管理員啟停、機器 API 憑證與離線部署。
+- 來源驗收（2026-10-02 22:19:54）：公開 Host／loopback origin，未登入頁面 302 到 Home、API 401；固定 callback＋PKCE 交換成功，Secure／HttpOnly／SameSite／host-only Cookie；登入後首頁 200。Home 登出後舊 app token 的 API 401。使用短暫驗收 session，未讀取密碼，結束已撤銷。
+- 機器憑證：實際效能監控讀取 200，超範圍寫入 401，撤銷後 401。只回報狀態碼，不保存業務回應。
+- 外網仍保留原 Cloudflare Access；取消額外登入層的切換待確認。離線可停用私有 SSO config，或改接內部 HTTPS Home；公司 LDAP／HR 與 AI 設定不變。
+- 回復：先確認原 Access 規則，再停用 Home SSO config、透過正式腳本載入舊模式；原檔及私有設定備份在 Home 的 `.runtime/sso-backups/`。業務資料庫不遷移。
+- 測試：原 Access 11 項與 adapter 契約（共享 28 項中的 7 項）通過。登入專用 `deploy.ps1 -HomeAuthOnly` 完成，web／api 健康 200，worker／Tunnel 恢復。研究 WIP 未透過 pip 重新部署、不重算統計。外網 check-public：4 連線、Access 302。
+
 ## 2026-10-02 — 擴大研究範圍：板塊 ETF、槓桿 00631L（含合成回填）、第三批 35 個設定
 
 - 使用者要求（10/02 中午）：不要只在 0050 上調時點與金額，去找績效更高的策略。
