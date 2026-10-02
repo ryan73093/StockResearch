@@ -229,3 +229,23 @@ def test_yahoo_dividend_check_divides_pre_split_dividends_by_the_split(tmp_path)
     assert entry["splits"] == [{"date": "2025-06-18", "ratio": 4.0}]
     assert entry["yahoo_dividend_check"]["amount_mismatches"] == []
     assert entry["reference_mismatches"] == []
+
+
+def test_declared_splits_come_from_the_catalog_and_must_match_the_closes():
+    from datetime import date
+
+    import pytest
+
+    from quant_platform.research.history.actions import declared_splits
+    from quant_platform.research.history.catalog import HistorySeries
+
+    rows = [{"date": date(2026, 3, 24), "close": 443.15}, {"date": date(2026, 3, 31), "close": 19.26}]
+    item = HistorySeries("00631L", "x", "twse_etf", date(2014, 10, 1), declared_splits=((date(2026, 3, 31), 22.0),))
+    (action,) = declared_splits(item, rows)
+    assert (action.day, action.kind, action.ratio, action.pre_close, action.source) == (
+        date(2026, 3, 31), "split", 22.0, 443.15, "catalog")
+
+    wrong = HistorySeries("00631L", "x", "twse_etf", date(2014, 10, 1), declared_splits=((date(2026, 3, 31), 4.0),))
+    with pytest.raises(ValueError, match="與收盤不符"):
+        declared_splits(wrong, rows)
+    assert declared_splits(HistorySeries("0050", "x", "twse_etf", date(2003, 6, 1)), rows) == []

@@ -252,6 +252,22 @@ def test_second_batch_covers_trend_rotation_and_core_satellite_with_new_rules():
     assert not {spec.spec_hash for spec in specs} & {spec.spec_hash for spec in first_batch()}
 
 
+def test_third_batch_rotates_sectors_and_tests_the_leveraged_etf():
+    from quant_platform.research.batches import SECTORS, first_batch, second_batch, third_batch
+    from quant_platform.research.summary import _direction
+
+    specs = third_batch()
+    assert len(specs) == 35 and len({spec.spec_hash for spec in specs}) == 35 and len({spec.name for spec in specs}) == 35
+    assert {_direction(spec.name) for spec in specs} == {"板塊輪動", "核心＋衛星", "槓桿型"}
+    rotating = [spec for spec in specs if spec.allocation.rotation is not None]
+    assert len(rotating) == 28 and all(set(spec.allocation.rotation.candidates) <= {"0050", *SECTORS} for spec in rotating)
+    leveraged = [spec for spec in specs if "00631L" in spec.assets]
+    assert len(leveraged) == 7
+    assert all(spec.allocation.defensive is None or spec.allocation.defensive.signal_asset == "0050" for spec in leveraged)
+    earlier = {spec.spec_hash for spec in first_batch()} | {spec.spec_hash for spec in second_batch()}
+    assert not earlier & {spec.spec_hash for spec in specs}
+
+
 def test_rerunning_a_trial_reuses_the_record_and_baselines_may_use_full(tmp_path):
     registry = TrialRegistry(tmp_path / "trials.jsonl")
     kwargs = dict(kind="baseline", spec=BASELINES["ma_value"], period="full", market=MARKET, plan=PLAN,

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -239,3 +239,44 @@ def test_odd_lot_fill_rates_count_the_auction_price_against_the_limit():
     summary = _summary(observed)
     assert summary["sampled_sessions"] == 3 and summary["recent"]["sampled_sessions"] == 2
     assert summary["recent"]["fill_rates"]["20"] == 0.5 and summary["recent"]["since"] == "2020-10-26"
+
+
+def test_synthetic_backfill_chains_backward_from_the_first_official_close():
+    from quant_platform.research.history.catalog import Backfill
+    from quant_platform.research.history.dataset import synthesize_backfill
+
+    days = [date(2014, 10, 27), date(2014, 10, 28), date(2014, 10, 29), date(2014, 10, 30)]
+    source = [{"date": day, "total_return_index": level} for day, level in zip(days, (100.0, 110.0, 99.0, 108.9))]
+    official = [DailyRow(days[2], 50.0, 50.0, 50.0, 50.0, source="twse"), DailyRow(days[3], 60.0, 60.0, 60.0, 60.0, source="twse")]
+
+    rows, info = synthesize_backfill(Backfill("0050", 2.0, 0.0), official, source)
+    # 10-29 is the first official close (50). 10-28 → 10-29 the source fell 10%, so 2× is −20%:
+    # close[10-28] = 50 / 0.8 = 62.5; 10-27 → 10-28 rose 10%: close[10-27] = 62.5 / 1.2 = 52.0833.
+    assert [(row.day, row.close, row.source) for row in rows] == [
+        (days[0], 52.0833, "synthetic"), (days[1], 62.5, "synthetic")]
+    assert (info["synthetic_days"], info["synthetic_until"], info["calibration"]) == (2, "2014-10-28", None)
+
+    # A 2.52% annual drag (0.01% a day) is taken out of each synthetic day's return.
+    with_drag, _info = synthesize_backfill(Backfill("0050", 2.0, 0.0252), official, source)
+    assert with_drag[1].close == pytest.approx(50 / (1 - 0.2 - 0.0001), abs=1e-4)
+    assert synthesize_backfill(Backfill("0050", 2.0, 0.02), [], source) == ([], {
+        "synthetic_days": 0, "synthetic_from": "0050", "synthetic_rule": "2 × 0050 含息日報酬 − 2.0%／年",
+        "synthetic_until": None, "calibration": None})
+
+
+def test_backfill_calibration_reports_the_drag_the_real_series_implies():
+    from quant_platform.research.history.catalog import Backfill
+    from quant_platform.research.history.dataset import synthesize_backfill
+
+    days = [date(2015, 1, 1) + timedelta(days=offset) for offset in range(40)]
+    source = [{"date": day, "total_return_index": 100.0 * 1.001 ** index} for index, day in enumerate(days)]
+    # The real series returns exactly 2 × 0.1% − 0.004% every day: an implied drag of 0.004% × 252.
+    close = 100.0
+    official = []
+    for day in days:
+        official.append(DailyRow(day, close, close, close, close, source="twse"))
+        close *= 1 + 2 * 0.001 - 0.00004
+    _rows, info = synthesize_backfill(Backfill("0050", 2.0, 0.02), official, source)
+    assert info["calibration"]["overlap_days"] == 39
+    assert info["calibration"]["implied_annual_drag"] == pytest.approx(0.00004 * 252, abs=1e-5)
+    assert info["calibration"]["tracking_error_annual"] == pytest.approx(0.0, abs=1e-6)

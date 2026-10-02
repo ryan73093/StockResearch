@@ -37,6 +37,8 @@ class HistorySeries:
     note: str = ""
     tax_kind: str = "stock_etf"  # securities transaction tax class (research/costs.py)
     backfill: Backfill | None = None
+    # Splits the official STOCK_DAY rows do not mark: (first day after the split, units after / before).
+    declared_splits: tuple[tuple[date, float], ...] = ()
 
     @property
     def tradable(self) -> bool:
@@ -59,8 +61,10 @@ SERIES: tuple[HistorySeries, ...] = (
     HistorySeries("0057", "富邦摩台", "twse_etf", date(2008, 2, 1), "0057.TW", "上市 2008-02-27"),
     HistorySeries(
         "00631L", "元大台灣50正2", "twse_etf", date(2014, 10, 1), "00631L.TW",
-        "上市 2014-10-31；單日兩倍的台灣50指數，無配息；上市前以 0050 含息報酬合成（經理費 1% + 保管費 0.04% + "
-        "期貨融資約 1%）", backfill=Backfill("0050", 2.0, 0.02),
+        "上市 2014-10-31；單日兩倍的台灣50指數，無配息；上市前以 0050 含息報酬合成，成本 3.5%／年取自 2014–2026 "
+        "實際追蹤差（manifest calibration：隱含 3.7%、追蹤誤差 8.8%／年）；2026-03-31 一拆二十二（停牌 4 日後恢復；"
+        "證交所日資料無註記，比率依 Yahoo 還原因子 443.15 ÷ 20.1432 = 22.00）",
+        backfill=Backfill("0050", 2.0, 0.035), declared_splits=((date(2026, 3, 31), 22.0),),
     ),
     HistorySeries("00646", "元大S&P500", "twse_etf", date(2015, 12, 1), "00646.TW", "上市 2015-12-14"),
     HistorySeries("00662", "富邦NASDAQ", "twse_etf", date(2016, 6, 1), "00662.TW", "上市 2016-06-17"),

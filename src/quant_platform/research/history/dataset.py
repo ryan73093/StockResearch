@@ -173,6 +173,10 @@ class HistoryDataset:
                     synthetic, info = synthesize_backfill(item.backfill, rows, read_series(source_path))
                     rows = synthetic + rows
                     quality.update(info)
+                    quality["official_rows"], quality["official_first"] = quality["rows"], quality["first"]
+                    quality["rows"] = len(rows)
+                    if rows:
+                        quality["first"] = rows[0].day.isoformat()
             path = self.parquet_path(item.key)
             write_parquet(rows, path)
             entries[item.key] = {
@@ -254,15 +258,20 @@ def synthesize_backfill(
     first = official[0]
     daily_drag = backfill.annual_drag / 252
     growth = {day: index[day] / index[previous] - 1 for previous, day in zip(days, days[1:])}
-    residuals = []
+    residuals, jumps = [], []
+    limit = backfill.leverage * 0.10 + 0.05  # beyond the leveraged daily limit: a split, not a return
     previous_close = None
     for row in official:
         if previous_close and row.day in growth and row.close:
-            residuals.append(row.close / previous_close - 1 - backfill.leverage * growth[row.day])
+            move = row.close / previous_close - 1
+            if abs(move) > limit:
+                jumps.append(row.day.isoformat())  # unadjusted split or capital change in the official closes
+            else:
+                residuals.append(move - backfill.leverage * growth[row.day])
         previous_close = row.close
     if len(residuals) > 20:
         info["calibration"] = {
-            "overlap_days": len(residuals),
+            "overlap_days": len(residuals), "skipped_jumps": jumps,
             "implied_annual_drag": round(-statistics.fmean(residuals) * 252, 5),
             "tracking_error_annual": round(statistics.pstdev(residuals) * 252 ** 0.5, 5),
         }
@@ -270,9 +279,6 @@ def synthesize_backfill(
     close = first.close
     for previous, day in reversed(list(zip(days, days[1:]))):
         if day > first.day:
-            continue
-        if day == first.day:
-            close = first.close
             continue
         # close[previous] from close[day]: close[day] = close[previous] × (1 + L·g[day] − drag)
         close = close / (1 + backfill.leverage * growth[day] - daily_drag)

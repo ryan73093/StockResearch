@@ -83,6 +83,23 @@ def splits_from_markers(key: str, rows: list[dict[str, object]]) -> list[Corpora
     return actions
 
 
+def declared_splits(item, rows: list[dict[str, object]]) -> list[CorporateAction]:
+    """Splits declared in the catalog (no marker in the official rows), checked against the closes:
+    the move across the split must be within the daily limit once the ratio is applied."""
+    actions = []
+    for day, ratio in item.declared_splits:
+        previous = max((row for row in rows if row["date"] < day), key=lambda row: row["date"], default=None)
+        first = next((row for row in rows if row["date"] >= day), None)
+        if previous is None or first is None or not previous["close"] or not first["close"]:
+            continue
+        implied = float(previous["close"]) / float(first["close"]) / ratio
+        if not 0.7 < implied < 1.3:
+            raise ValueError(f"{item.key} {day} 宣告的分割比率 {ratio:g} 與收盤不符（前收 ÷ 後收 ÷ 比率 = {implied:.2f}）")
+        actions.append(CorporateAction(day, item.key, "split", ratio=ratio, pre_close=float(previous["close"]),
+                                       source="catalog"))
+    return actions
+
+
 def actions_from_ex_rights(events) -> list[CorporateAction]:
     output = []
     for event in events:
@@ -214,6 +231,7 @@ def build_actions(
         actions = [action for action in official_actions if action.key == item.key]
         if item.kind == "twse_etf":
             actions += splits_from_markers(item.key, rows)
+        actions += declared_splits(item, rows)
         actions.sort(key=lambda action: (action.day, action.kind))
         yahoo_check = None
         if item.yahoo and yahoo_fetch is not None:

@@ -184,6 +184,15 @@ def test_prompt_shows_only_development_results(tmp_path):
     assert str(validation.metrics["xirr"]) not in user_input
 
 
+def test_prompt_notes_a_synthetic_backfill(tmp_path):
+    from dataclasses import replace
+
+    researcher = agent(tmp_path)
+    noted = replace(MARKET, notes={"0050": "2014-10-30 以前為合成（2 × 0050 含息日報酬 − 3.5%／年）"})
+    _instructions, user_input = researcher.build_prompt(noted)
+    assert "0050（元大台灣50，2013-01-02 起，2014-10-30 以前為合成（2 × 0050 含息日報酬 − 3.5%／年））" in user_input
+
+
 def test_night_stops_at_limits_and_errors_and_saves_stats(tmp_path):
     second = {**GOOD, "name": "回撤：跌 12% 三倍", "sizing": {**GOOD["sizing"], "drawdown_threshold": 0.12,
                                                             "weak_multiplier": 3.0}}
