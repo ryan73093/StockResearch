@@ -2,7 +2,9 @@ from datetime import date, timedelta
 
 import pytest
 
-from quant_platform.application.actual_account import ActualAccountError, ActualAccountService, compare_on
+from quant_platform.application.actual_account import (
+    ActualAccountError, ActualAccountService, compare_on, drawdown_alert,
+)
 from quant_platform.config import Settings
 from quant_platform.container import build_container
 from quant_platform.dashboard.app import create_app
@@ -207,3 +209,31 @@ def test_holdings_page_records_and_reports_errors(tmp_path):
     )
     body = response.get_data(as_text=True)
     assert "已記錄 2026-09-01 買進 0050 150 股" in body and "帳務明細" in body
+
+
+def test_current_drawdown_and_the_plans_reminder(tmp_path):
+    database = Database(f"sqlite:///{tmp_path / 'fall.db'}")
+    database.create_schema()
+    sessions = [day for day in (TODAY - timedelta(days=offset) for offset in range(40, -1, -1)) if day.weekday() < 5]
+
+    def close(day):
+        return 100.0 if day < date(2026, 9, 21) else 74.0
+
+    service = ActualAccountService(
+        SqlAlchemyActualAccountRepository(database.session_factory),
+        price_lookup=lambda symbols: {"0050.TW": 74.0}, research_dir=tmp_path / "research", today=lambda: TODAY,
+        bar_history=lambda symbol: [(day, close(day)) for day in sessions] if symbol == "0050.TW" else [],
+    )
+    service.record_cash_flow({"kind": "deposit", "day": "2026-09-01", "amount": "10000"})
+    service.record_trade({"day": "2026-09-01", "symbol": "0050", "side": "BUY", "shares": "99", "price": "100",
+                          "fee": "20"})
+
+    # 9,980 at the peak (80 cash + 99 × 100); 80 + 99 × 74 = 7,406 now: down 25.79% in unit value.
+    overview = service.overview(include_shadow=False, include_history=True)
+    assert overview.current_drawdown == pytest.approx(7_406 / 9_980 - 1)
+    assert service.overview(include_shadow=False).current_drawdown is None   # history only when asked
+
+    assert drawdown_alert(overview, 0.40) is None                            # 25.8% is under 80% of 40%
+    assert "接近計畫的可承受回撤 30%" in drawdown_alert(overview, 0.30)         # from 24%
+    assert "回落 25.8%，已超過計畫的可承受回撤 25%" in drawdown_alert(overview, 0.25)
+    assert "不會自動賣出" in drawdown_alert(overview, 0.25)

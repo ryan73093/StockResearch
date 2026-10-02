@@ -18,7 +18,9 @@ from flask import Blueprint, abort, flash, jsonify, redirect, render_template, r
 
 from quant_platform.application import host_memory
 from quant_platform.application.close_availability import SOURCES as CLOSE_SOURCES
-from quant_platform.application.actual_account import FLOW_KINDS, ActualAccountError, compare_on, stress_scenarios
+from quant_platform.application.actual_account import (
+    FLOW_KINDS, ActualAccountError, compare_on, drawdown_alert, stress_scenarios,
+)
 from quant_platform.application.investment_plan import InvestmentPlanError, parse_plan_form, strategy_name
 from quant_platform.application.plan_decision import clamped_date
 from quant_platform.research.costs import BROKERS
@@ -445,14 +447,17 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "invest": "trade", "rebalance": "trade", "idle": "idle",
         }.get(decision.kind, "hold")
         dividends_due = 0  # "需要留意" points to the holdings page's dividend card (S5-W03)
+        drawdown_note = None  # the plan's acceptable drawdown: remind, never sell
         if investment_plan is not None:
-            books = dependencies.actual_account_service.overview(include_shadow=False)
+            books = dependencies.actual_account_service.overview(include_shadow=False, include_history=True)
             if books.trades:
                 dividends_due = len(dependencies.dividend_calendar.account_view(books.flows, books.trades, day)["due"])
+            drawdown_note = drawdown_alert(books, investment_plan.max_drawdown_tolerance)
         return render_template(
             "v2/today.html",
             active_nav="today",
             dividends_due=dividends_due,
+            drawdown_note=drawdown_note,
             onboarding=onboarding_steps(investment_plan),
             alerts=system_alerts(now),
             plan=plan,

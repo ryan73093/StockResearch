@@ -60,6 +60,7 @@ class ActualAccountOverview:
     trades: list[ActualTrade]
     notes: list[str] = field(default_factory=list)
     max_drawdown: float | None = None  # unit-value drawdown of the real account
+    current_drawdown: float | None = None  # today's unit value against its peak (0 at a new high)
     monthly: list[dict[str, object]] = field(default_factory=list)  # month-end real vs shadow
     history: dict[str, object] | None = None  # session closes: {"days", "values"}
     shadow_series: dict[date, float] = field(default_factory=dict)  # DCA shadow by session
@@ -204,8 +205,9 @@ class ActualAccountService:
         return self._repository.void(kind, entry_id, reason.strip()[:500], datetime.now(UTC))
 
     # --- overview -----------------------------------------------------------
-    def overview(self, include_shadow: bool = True) -> ActualAccountOverview:
-        """Books as of today; ``include_shadow=False`` skips the DCA replay."""
+    def overview(self, include_shadow: bool = True, include_history: bool | None = None) -> ActualAccountOverview:
+        """Books as of today; ``include_shadow=False`` skips the DCA replay and, unless
+        ``include_history`` asks for it, the day-by-day value."""
         flows = self._repository.list_cash_flows()
         trades = self._repository.list_trades()
         cash = 0.0
@@ -258,6 +260,7 @@ class ActualAccountService:
         history = None
         if include_shadow:
             shadow, shadow_series = self._shadow(flows, total, rate, notes)
+        if include_shadow if include_history is None else include_history:
             history = self._history(flows, trades)
         return ActualAccountOverview(
             cash=cash, holdings=holdings, market_value=market_value, total_value=total,
@@ -267,6 +270,7 @@ class ActualAccountService:
             shadow=shadow,
             flows=flows, trades=trades, notes=notes,
             max_drawdown=history["max_drawdown"] if history else None,
+            current_drawdown=history["current_drawdown"] if history else None,
             monthly=_month_ends(history, shadow_series) if history else [],
             history=history, shadow_series=shadow_series,
         )
@@ -316,8 +320,11 @@ class ActualAccountService:
                     last_price[symbol] = closes[symbol][session]
             values.append(cash + sum(count * last_price.get(symbol, 0.0) for symbol, count in shares.items()))
             external.append(arrived)
-        drawdown, _peak, _trough = max_drawdown(unit_values(values, external))
-        return {"days": sessions, "values": values, "max_drawdown": drawdown}
+        units = unit_values(values, external)
+        drawdown, _peak, _trough = max_drawdown(units)
+        peak = max(units)
+        return {"days": sessions, "values": values, "max_drawdown": drawdown,
+                "current_drawdown": units[-1] / peak - 1 if peak > 0 else None}
 
     def _shadow(self, flows, total, rate, notes) -> tuple[dict[str, object] | None, dict[date, float]]:
         deposits = [(flow.day, float(flow.amount)) for flow in flows if flow.kind == "deposit"]
@@ -359,6 +366,19 @@ class ActualAccountService:
 
 
 STRESS_DROPS = (0.20, 0.30, 0.55)  # 0.55 ≈ 0050 in 2008
+NEAR_TOLERANCE = 0.8  # remind from 80% of the plan's acceptable drawdown
+
+
+def drawdown_alert(overview: ActualAccountOverview, tolerance: float | None) -> str | None:
+    """The plan page promises a reminder, never a sale, when the real account falls past the
+    plan's acceptable drawdown: from 80% of it the Today page says so (unit value, so deposits
+    do not hide a fall)."""
+    fall = overview.current_drawdown
+    if fall is None or not tolerance or -fall < tolerance * NEAR_TOLERANCE:
+        return None
+    state = "已超過" if -fall >= tolerance else "接近"
+    return (f"帳戶從高點回落 {-fall:.1%}，{state}計畫的可承受回撤 {tolerance:.0%}。系統不會自動賣出，"
+            "依計畫照常投入；想調整的話先到計畫頁修改。")
 
 
 def stress_scenarios(overview: ActualAccountOverview, tolerance: float | None = None) -> list[dict[str, object]]:

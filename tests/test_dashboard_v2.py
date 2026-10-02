@@ -141,3 +141,18 @@ def test_today_order_card_shows_the_limit_and_the_most_it_can_cost(tmp_path):
 
     assert "限價 101.00（盤後零股）" in body and "最多也只需 9,918 元" in body
     assert "shares=98&amp;price=100.20#trade" in body   # the report form starts from the expected fill
+
+
+def test_today_reminds_when_the_account_falls_past_the_plans_tolerance(tmp_path):
+    from types import SimpleNamespace
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}", scheduler_in_web=False))
+    container.investment_plan_service.save({
+        "monthly_amount": "10000", "salary_day": "5", "strategy_key": "benchmark_dca", "broker": "cathay",
+        "max_drawdown_tolerance": "30", "horizon_years": "20", "goal": "退休金", "note": "",
+    })
+    books = SimpleNamespace(current_drawdown=-0.32, trades=[], flows=[], cash=0.0, holdings=[])
+    container.actual_account_service.overview = lambda include_shadow=True, include_history=None: books
+    body = create_app(container).test_client().get("/").get_data(as_text=True)
+
+    assert "需要留意" in body and "帳戶從高點回落 32.0%，已超過計畫的可承受回撤 30%" in body

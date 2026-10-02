@@ -110,6 +110,7 @@
     {% set attention = [] %}
     {% if status.quality_badge in ('badge--warn', 'badge--bad') %}{% set _ = attention.append('資料品質' ~ status.quality_label ~ (('，今日排除 %d 檔（可能停牌）' % status.excluded) if status.excluded else '') ~ '；細節在「系統」頁。') %}{% endif %}
     {% if decision.kind == 'missing_data' %}{% set _ = attention.append('今日收盤資料尚未齊全，委託會在資料到齊後產生；盤後零股收單到 14:30。') %}{% endif %}
+    {% if drawdown_note %}{% set _ = attention.append(drawdown_note) %}{% endif %}
     {% if attention or dividends_due %}
     <section class="card card--highlight order-2">
       <div class="card__head"><h2>需要留意</h2></div>
