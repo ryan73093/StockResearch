@@ -1,6 +1,7 @@
 import json
 from datetime import date, timedelta
 
+import numpy as np
 import pytest
 
 from quant_platform.research.costs import CostModel
@@ -117,3 +118,26 @@ def test_buffer_keeps_a_holding_until_it_drops_far_enough():
     picks = rankings(panel, buffered, days[0], days[-1])
     assert all(len(choice) == 5 for choice in picks.values() if choice)
     assert len(second_batch()) == 12 and all(rule.buffer == 3 and rule.top == 30 for rule in second_batch())
+
+
+def test_composite_ranks_average_percentiles_and_lump_sum_invests_once():
+    from quant_platform.research.stock_rules import LumpSumPlan, _percentile, sweep_batch
+
+    assert list(_percentile(np.array([3.0, np.nan, 1.0, 2.0]))[[0, 2, 3]]) == [1.0, 0.0, 0.5]
+    days = weekdays(date(2023, 1, 2), 300)
+    closes = {"A.TW": [20 * 1.001 ** i for i in range(300)], "B.TW": [20.0] * 300,
+              "C.TW": [20 * (1.002 if i % 2 else 0.999) ** i for i in range(300)], "0050.TW": [100.0] * 300}
+    panel = Panel(panel_data(days, closes))
+    # Momentum alone ranks C (fastest) first; momentum + low volatility (equal weight) lifts A: its
+    # momentum rank is 0.5 and volatility rank 0.5 → 1.0, C is 1.0 + 0.0, B is 0.0 + 1.0.
+    alone = StockRule(name="m", factor="momentum_6", top=5, min_history=20)
+    mixed = StockRule(name="mv", factor="momentum_6", top=5, min_history=20, extra={"low_volatility_60": 1.0})
+    assert panel.ranked(alone, days[-1])[0] == "C.TW"
+    ranked = panel.ranked(mixed, days[-1])
+    assert ranked[0] == "A.TW" and set(ranked[1:]) == {"B.TW", "C.TW"}
+    assert mixed.rule_hash != alone.rule_hash and "6 個月動能＋60 日低波動×1" == mixed.label
+
+    plan = LumpSumPlan(300_000)
+    assert plan.schedule(days, days[5], days[-1]) == [(days[5], 300_000.0)]
+    rules = sweep_batch()
+    assert len(rules) == 492 and len({rule.rule_hash for rule in rules}) == 492

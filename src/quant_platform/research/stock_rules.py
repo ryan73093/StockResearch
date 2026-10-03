@@ -55,13 +55,24 @@ class StockRule(BaseModel):
     top: int = Field(default=20, ge=5, le=50)
     rebalance: Literal["monthly", "quarterly"] = "monthly"
     buffer: int = Field(default=1, ge=1, le=5)   # keep a holding while it still ranks within buffer × top
+    # Composite ranking (2026-10-03): the main factor's percentile rank plus these factors' ranks
+    # weighted; empty means the single factor. Left out of the hash when empty so older hashes stay.
+    extra: dict[str, float] = Field(default_factory=dict)
     min_turnover: float = Field(default=20_000_000, ge=0)   # 20-session average NT$ traded
     min_price: float = Field(default=10.0, ge=0)
     min_history: int = Field(default=252, ge=20, le=504)   # sessions listed before a stock is ranked
     universe: Literal["twse"] = "twse"
 
     def canonical(self) -> dict[str, object]:
-        return self.model_dump(mode="json")
+        data = self.model_dump(mode="json")
+        if not data.get("extra"):
+            data.pop("extra", None)
+        return data
+
+    @property
+    def label(self) -> str:
+        parts = [FACTORS[self.factor]] + [f"{FACTORS[name]}×{weight:g}" for name, weight in self.extra.items()]
+        return "＋".join(parts)
 
     @property
     def rule_hash(self) -> str:
@@ -166,6 +177,10 @@ class Panel:
             & (position - self.first >= rule.min_history)
         )
         score = self._score(rule.factor, position)
+        if rule.extra:
+            score = _percentile(score)
+            for name, weight in rule.extra.items():
+                score = score + weight * _percentile(self._score(name, position))
         eligible &= ~np.isnan(score)
         order = [index for index in np.argsort(-score, kind="stable") if eligible[index]]
         return [self.symbols[index] for index in order]
@@ -194,6 +209,30 @@ class Panel:
             paid = self.cash[:, max(0, position - 252):position + 1].sum(axis=1)
             return paid / self.close[:, position]
         raise ValueError(factor)
+
+
+def _percentile(values: np.ndarray) -> np.ndarray:
+    """Rank of each value among the non-NaN ones, scaled to 0–1 (NaN stays NaN)."""
+    output = np.full(values.shape, np.nan)
+    mask = ~np.isnan(values)
+    if mask.sum() > 1:
+        order = np.argsort(np.argsort(values[mask]))
+        output[mask] = order / (mask.sum() - 1)
+    elif mask.sum() == 1:
+        output[mask] = 1.0
+    return output
+
+
+class LumpSumPlan:
+    """One contribution at the first session, nothing after: what NT$300,000 invested once becomes."""
+
+    def __init__(self, amount: float) -> None:
+        self.monthly_amount = amount
+        self.day_of_month = 1
+
+    def schedule(self, sessions: list[date], start: date, end: date) -> list[tuple[date, float]]:
+        first = next((day for day in sessions if start <= day <= end), None)
+        return [(first, float(self.monthly_amount))] if first else []
 
 
 def _forward_fill(values: np.ndarray) -> np.ndarray:
@@ -267,15 +306,17 @@ def _monthly_active(run, benchmark) -> dict[str, float]:
 
 def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: TrialRegistry, reports_dir: Path,
                     costs: CostModel | None = None, data: LegacyData | None = None, panel: Panel | None = None,
-                    generated_at: str | None = None) -> tuple[object, dict]:
+                    generated_at: str | None = None, plan=STANDARD_PLAN) -> tuple[object, dict]:
     """Evaluate one rule on one research period and register it (reused when already run)."""
     if period not in ("development", "validation", "holdout"):
         raise ResearchGateError("個股規則只能用開發、驗證或保留期評估")
     start, end = PERIODS[period]
     costs = costs or CostModel()
     fingerprint = stock_fingerprint(base, start.year - WARMUP_YEARS, end.year)
+    cash_flow = {"monthly_amount": plan.monthly_amount, "day_of_month": plan.day_of_month,
+                 "kind": type(plan).__name__}
     payload = {"rule": rule.canonical(), "period": period, "costs": costs.as_dict(), "data": fingerprint,
-               "engine": ENGINE_VERSION}
+               "engine": ENGINE_VERSION, "plan": cash_flow}
     input_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
     existing = registry.find("candidate", period, input_hash)
     if existing is not None:
@@ -289,8 +330,9 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
     # Two years before the period warm the factors and the listing age up; trades start at ``start``.
     data = data or load_stock_data(base, start.year - WARMUP_YEARS, end.year)
     panel = panel or Panel(data)
-    report = evaluate_rule(data, panel, rule, costs, start, end)
+    report = evaluate_rule(data, panel, rule, costs, start, end, plan=plan)
     report["data_fingerprint"] = fingerprint
+    report["plan"] = cash_flow
     stamp = generated_at or datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     reports_dir.mkdir(parents=True, exist_ok=True)
     report_file = f"{period}-stocks-{rule.rule_hash[:8]}-{stamp}.json"
@@ -305,7 +347,7 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
             "benchmark_xirr": benchmark["xirr"], "benchmark_max_drawdown": benchmark["max_drawdown"],
             "trades": strategy["trades"], "costs": strategy["fees"] + strategy["taxes"],
             "full_period_excess": report["full_period_excess"], "windows": report["windows"],
-            "cost_scale": 1.0, "execution_lag": 0,
+            "cost_scale": 1.0, "execution_lag": 0, "plan": cash_flow,
         },
     )
     return record, report
@@ -352,4 +394,27 @@ def high52_family() -> list[StockRule]:
     return [rule for rule in first_batch() + second_batch() if rule.factor == "high_52w"]
 
 
-BATCHES = {"first": first_batch, "second": second_batch, "high52": high52_family}
+def sweep_batch() -> list[StockRule]:
+    """The wide search the owner asked for (2026-10-03): every single factor, pair and triple
+    (equal weights), top 20/30/50, with or without the buffer, monthly or quarterly: 41 × 12 = 492
+    rules. Each one is an attempt in the multiple-testing count."""
+    from itertools import combinations
+
+    names = list(FACTORS)
+    combos = [(name,) for name in names] + list(combinations(names, 2)) + list(combinations(names, 3))
+    rules = []
+    for combo in combos:
+        main, rest = combo[0], combo[1:]
+        label = "＋".join(FACTORS[name] for name in combo)
+        for top in (20, 30, 50):
+            for buffer in (1, 3):
+                for rebalance, word in (("monthly", "每月"), ("quarterly", "每季")):
+                    hold = f"、留到跌出前 {top * buffer}" if buffer > 1 else ""
+                    rules.append(StockRule(
+                        name=f"個股 {label}：前 {top} 名、{word}換股{hold}"[:80], factor=main, top=top,
+                        rebalance=rebalance, buffer=buffer, extra={name: 1.0 for name in rest},
+                    ))
+    return rules
+
+
+BATCHES = {"first": first_batch, "second": second_batch, "high52": high52_family, "sweep": sweep_batch}

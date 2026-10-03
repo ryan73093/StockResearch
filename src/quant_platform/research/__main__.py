@@ -176,6 +176,7 @@ def main() -> int:
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks"),
     )
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
+    parser.add_argument("--lump-sum", type=float, default=0, help="stocks：一次投入的金額（0＝每月投入）")
     parser.add_argument("--dry-run", action="store_true", help="agent：只印出提示內容，不呼叫模型")
     parser.add_argument("--check", action="store_true", help="agent：極小的連線檢查呼叫（金鑰、模型、JSON 格式）")
     parser.add_argument("--name", default="first", help="batch：批次名稱")
@@ -219,7 +220,9 @@ def main() -> int:
         return _legacy(args)
     if args.command == "stocks":
         from quant_platform.research.stock_rules import BATCHES as STOCK_BATCHES
-        from quant_platform.research.stock_rules import WARMUP_YEARS, Panel, describe, load_stock_data, run_stock_trial
+        from quant_platform.research.stock_rules import (
+            STANDARD_PLAN, WARMUP_YEARS, LumpSumPlan, Panel, describe, load_stock_data, run_stock_trial,
+        )
 
         if args.period not in ("development", "validation", "holdout"):
             raise SystemExit("stocks：--period 只能是 development、validation 或 holdout")
@@ -231,12 +234,14 @@ def main() -> int:
               f"成本：{BROKERS[args.broker].name}", flush=True)
         panel = Panel(data)
         stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
+        stock_plan = LumpSumPlan(args.lump_sum) if args.lump_sum else STANDARD_PLAN
+        print("現金流：" + (f"一次投入 {args.lump_sum:,.0f} 元" if args.lump_sum else "每月 5 日投入 10,000 元"), flush=True)
         if args.name not in STOCK_BATCHES:
             raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(STOCK_BATCHES)}")
         for rule in STOCK_BATCHES[args.name]():
             try:
                 record, report = run_stock_trial(rule, args.period, base, registry, RESEARCH / "reports", costs,
-                                                 data=data, panel=panel, generated_at=stamp)
+                                                 data=data, panel=panel, generated_at=stamp, plan=stock_plan)
             except ResearchGateError as exc:
                 print(f"{rule.name}：研究規則不允許 — {exc}", file=sys.stderr)
                 continue
