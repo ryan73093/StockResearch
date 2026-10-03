@@ -245,7 +245,7 @@ def main() -> int:
             # Second stage: the rules whose screening run (no windows) did best, by full-period excess.
             best: dict[str, float] = {}
             for record in registry.records():
-                if record.period == args.period and record.data_fingerprint.startswith("stocks:"):
+                if record.period == "development" and record.data_fingerprint.startswith("stocks:"):
                     best[record.spec_hash] = max(best.get(record.spec_hash, float("-inf")),
                                                  record.metrics.get("full_period_excess") or float("-inf"))
             rules = sorted((rule for rule in rules if rule.rule_hash in best), key=lambda r: -best[r.rule_hash])[:args.top]
