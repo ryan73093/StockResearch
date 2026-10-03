@@ -1,0 +1,81 @@
+{% extends "v2/base.html" %}
+{% block title %}研究選手池 · 盤後決策台{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>研究選手池</h1>
+    <p class="page-head__sub">每一個試過的規則、它走到哪一關、為什麼被淘汰或還在場上</p>
+  </div>
+  <div class="page-head__meta">{{ generated }} 產生・<a href="/research/pool.json">JSON</a>・<a href="/research">回研究頁</a>・<a href="/system#project">研究方法</a></div>
+</header>
+{% endblock %}
+{% block content %}
+{% set c = pool.counts %}
+<section class="card">
+  <div class="card__head"><h2>現況</h2></div>
+  <p style="margin:0 0 12px">
+    累計 {{ pool.total }} 個不同規則（ETF 規則 {{ pool.families['ETF 規則'] }}、個股規則 {{ pool.families['個股規則'] }}），
+    多重檢定以 {{ pool.attempts or pool.total }} 個不同設定計。已核准 {{ c.approved }}、前向模擬中 {{ c.forward }}、保留期通過 {{ c.holdout_passed }}、
+    驗證期通過 {{ c.validation_passed }}、驗證期未通過 {{ c.validation_failed }}、開發期通過視窗待驗證 {{ c.window_ok }}、開發期淘汰 {{ c.eliminated }}。
+    {% if pool.best_dsr and pool.best_dsr[1] %}最佳 DSR {{ '%.2f' % pool.best_dsr[0] }}（{{ pool.best_dsr[1] }}），門檻 0.95{% if pool.pbo is not none %}；PBO {{ '{:.0%}'.format(pool.pbo) }}{% endif %}。{% endif %}
+    門檻：開發期 3 年與 5 年滾動視窗勝率 ≥ 60% 且中位超額 &gt; 0、回撤不比定期定額深超過 5 個百分點（或進攻型賽道以計畫可承受回撤為上限）；驗證期同樣視窗與回撤門檻；保留期每個規則只評估一次；前向模擬 40 個交易日；最後由使用者核准。
+  </p>
+  <div class="kpis kpis--four">
+    <div class="kpi"><div class="kpi__label">兩段期間都贏</div><div class="kpi__value">{{ pool.both_periods|length }}</div></div>
+    <div class="kpi"><div class="kpi__label">驗證期未通過</div><div class="kpi__value">{{ c.validation_failed }}</div></div>
+    <div class="kpi"><div class="kpi__label">待驗證</div><div class="kpi__value">{{ c.window_ok }}</div></div>
+    <div class="kpi"><div class="kpi__label">開發期淘汰</div><div class="kpi__value">{{ c.eliminated }}</div></div>
+  </div>
+</section>
+
+{% macro rule_table(rows, show_validation=True) %}
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>規則</th><th>狀態</th><th class="num">開發期比 0050</th><th class="num">3 年勝率／中位</th><th class="num">最大回撤</th>{% if show_validation %}<th class="num">驗證期比 0050</th><th class="num">驗證期 3 年勝率／中位</th>{% endif %}<th>說明</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      {% set d = row.development %}{% set v = row.validation %}
+      <tr>
+        <td data-primary><strong>{{ row.name }}</strong><span class="muted small"> {{ row.family }}・{{ row.source }}</span></td>
+        <td data-label="狀態"><span class="badge {{ 'badge--ok' if row.status in ('approved', 'forward', 'holdout_passed', 'validation_passed') else ('badge--bad' if row.status in ('validation_failed', 'holdout_failed') else '') }}">{{ row.status_label }}</span>{% if row.track and row.track != '一般' %} <span class="badge badge--warn">{{ row.track }}</span>{% endif %}</td>
+        <td class="num {{ 'up' if (d.excess or 0) > 0 else ('down' if (d.excess or 0) < 0 else '') }}" data-label="開發期比 0050">{{ '{:+.0%}'.format(d.excess) if d.excess is not none else '—' }}</td>
+        <td class="num" data-label="3 年勝率／中位">{{ '{:.0%}'.format(d.win_3y) if d.win_3y is not none else '—' }}／{{ '{:+.1%}'.format(d.median_3y) if d.median_3y is not none else '—' }}</td>
+        <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(d.max_drawdown) if d.max_drawdown is not none else '—' }}</td>
+        {% if show_validation %}
+        <td class="num {{ 'up' if v and (v.excess or 0) > 0 else ('down' if v and (v.excess or 0) < 0 else '') }}" data-label="驗證期比 0050">{{ '{:+.0%}'.format(v.excess) if v and v.excess is not none else '—' }}</td>
+        <td class="num" data-label="驗證期 3 年">{{ ('{:.0%}'.format(v.win_3y) ~ '／' ~ '{:+.1%}'.format(v.median_3y)) if v and v.win_3y is not none else '—' }}</td>
+        {% endif %}
+        <td class="small" data-label="說明" data-wide>{% if v and v.reasons %}驗證期：{{ v.reasons|join('；') }}{% elif d.reasons %}{{ d.reasons|join('；') }}{% elif d.dsr is not none %}DSR {{ '%.2f' % d.dsr }}{% else %}—{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+<section class="card" id="both">
+  <div class="card__head"><h2>兩段獨立期間都贏 <span class="badge">開發期 2004–2016 與驗證期 2017–2021</span></h2></div>
+  {% if pool.both_periods %}{{ rule_table(pool.both_periods) }}{% else %}<p class="muted" style="margin:0">還沒有規則在兩段期間都通過門檻。</p>{% endif %}
+  <p class="note">這些規則的保留期（2022–2026-09）還沒用；每個規則只能評估一次，由使用者決定何時用。</p>
+</section>
+
+<section class="card" id="high-win">
+  <div class="card__head"><h2>開發期高勝率榜 <span class="badge">前 {{ pool.high_win|length }}</span></h2></div>
+  {{ rule_table(pool.high_win) }}
+  <p class="note">開發期勝率高不等於有效：大掃描裡開發期最好的規則多半在驗證期輸。看「驗證期比 0050」那一欄。</p>
+</section>
+
+{% if pool.ai_rounds %}
+<details class="card">
+  <summary><h2>AI 研究員的輪次 <span class="badge">{{ pool.ai_rounds|length }} 輪</span></h2></summary>
+  <ul class="reasons">
+    {% for r in pool.ai_rounds %}<li><strong>{{ r.round_id }}</strong>（{{ r.status }}）假設：{{ r.hypothesis or '—' }}{% if r.accepted %}；試驗：{{ r.accepted|join('、') }}{% endif %}{% if r.rejected %}；拒絕：{{ r.rejected|join('；') }}{% endif %}</li>{% endfor %}
+  </ul>
+</details>
+{% endif %}
+
+<details class="card" id="all">
+  <summary><h2>全部規則 <span class="badge">{{ pool.total }}</span></h2></summary>
+  {{ rule_table(pool.rules) }}
+</details>
+{% endblock %}

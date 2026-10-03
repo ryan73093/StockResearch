@@ -34,6 +34,7 @@ from quant_platform.research.legacy_challenger import challenger_view
 from quant_platform.research.legacy_challenger import latest_report as latest_challenger
 from quant_platform.research.forward import STANDARD_PLAN as FORWARD_PLAN
 from quant_platform.research.periods import ResearchGateError
+from quant_platform.research.pool import pool_view
 from quant_platform.research.promotion import PromotionPipeline, promotion_limits
 from quant_platform.research.weekly import weekly_report
 from quant_platform.research.summary import round_summary
@@ -53,6 +54,7 @@ DOCS = {
     "handoff": ("交接", "docs/development_handoff.md"),
     "history": ("開發歷程", "DEVELOPMENT_HISTORY.md"),
     "line": ("LINE 設定", "docs/line-notifications.md"),
+    "research_method": ("研究方法", "docs/research_method.md"),
 }
 JOB_LABELS = {
     "daily_market_data": "日線行情",
@@ -700,6 +702,20 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             # Baselines run on the full period; candidates never may (periods.check_gate).
             baseline_rows=report_rows(latest_reports(reports_dir, limit=20, period="full", kind="baseline")),
         )
+
+    @blueprint.get("/research/pool")
+    def research_pool():
+        """Every rule ever tried and where it stands (研究選手池); /research/pool.json is the same data."""
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        return render_template("v2/research_pool.html", active_nav="research", pool=pool_view(research_dir),
+                               generated=datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M"))
+
+    @blueprint.get("/research/pool.json")
+    def research_pool_json():
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        view = pool_view(research_dir)
+        view["generated_at"] = datetime.now(TAIPEI).isoformat(timespec="seconds")
+        return jsonify(view)
 
     @blueprint.post("/research/promotions/<spec_hash>/<action>")
     def research_promotion(spec_hash: str, action: str):
