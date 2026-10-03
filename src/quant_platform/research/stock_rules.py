@@ -247,13 +247,13 @@ def _forward_fill(values: np.ndarray) -> np.ndarray:
     return output
 
 
-def rankings(panel: Panel, rule: StockRule, start: date, end: date,
-             plan: ContributionPlan = STANDARD_PLAN) -> dict[date, list[str]]:
-    """Picks on each contribution day; a quarterly rule repeats its picks on the two months between."""
+def rankings(panel: Panel, rule: StockRule, start: date, end: date) -> dict[date, list[str]]:
+    """Picks on each rank day (the 5th of every month, whatever the cash flow); a quarterly rule
+    repeats its picks on the two months between."""
     sessions = [day for day in panel.sessions if start <= day <= end]
     output: dict[date, list[str]] = {}
     current: list[str] = []
-    for count, (day, _amount) in enumerate(plan.schedule(sessions, start, end)):
+    for count, (day, _amount) in enumerate(STANDARD_PLAN.schedule(sessions, start, end)):
         if rule.rebalance == "monthly" or count % 3 == 0 or not current:
             ranked = panel.ranked(rule, day)
             keep_zone = set(ranked[: rule.top * rule.buffer])
@@ -267,11 +267,11 @@ def rankings(panel: Panel, rule: StockRule, start: date, end: date,
 # --- evaluation ---------------------------------------------------------------------
 def evaluate_rule(data: LegacyData, panel: Panel, rule: StockRule, costs: CostModel, start: date, end: date,
                   plan: ContributionPlan = STANDARD_PLAN, window_months: tuple[int, ...] = (36, 60)) -> dict:
-    ranks = rankings(panel, rule, start, end, plan)
+    ranks = rankings(panel, rule, start, end)
     first = next((day for day in sorted(ranks) if ranks[day]), None)
     if first is None:
         raise ResearchGateError("期間內沒有任何一天有合格的股票")
-    variant = Variant(rule.rule_hash[:12], rule.name, rule.top, "monthly")
+    variant = Variant(rule.rule_hash[:12], rule.name, rule.top, "on_rank_days")
     run = simulate(data, variant, costs, first, end, ranks, plan)
     benchmark = simulate(data, None, costs, first, end, plan=plan)
     cache: dict = {}

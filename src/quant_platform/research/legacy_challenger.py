@@ -58,7 +58,7 @@ class Variant:
     key: str
     name: str
     top: int
-    rebalance: str       # never | every_5 | monthly
+    rebalance: str       # never | every_5 | monthly | on_rank_days (every day that has a ranking)
     order: str = "best"  # best | worst | random (controls)
     seed: int = 0
 
@@ -388,7 +388,8 @@ def simulate(data: LegacyData, variant: Variant | None, costs: CostModel, start:
         else:
             ranked = ranks.get(day, [])
             rebalance = variant.rebalance == "monthly" and pending or (
-                variant.rebalance == "every_5" and (pending or index % 5 == 0))
+                variant.rebalance == "every_5" and (pending or index % 5 == 0)) or (
+                variant.rebalance == "on_rank_days" and day in ranks)
             if ranked and (pending or rebalance):
                 picks = picks_for(ranked, variant, day, previous, model_previous)
                 previous, model_previous = picks, ranked[: variant.top]
