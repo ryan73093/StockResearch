@@ -37,7 +37,7 @@
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(run.max_drawdown) if run.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(run.benchmark_max_drawdown) if run.benchmark_max_drawdown is not none else '—' }}）</span></td>
           <td class="num" data-label="3 年勝率／中位">{% if run.three.count %}{{ '{:.0%}'.format(run.three.win_ratio) }}／{{ '{:+.1%}'.format(run.three.median_excess) }}{% else %}—{% endif %}</td>
           <td class="num" data-label="費稅・下單">{{ '{:.0%}'.format(run.cost_share) if run.cost_share is not none else '—' }}{% if run.orders_per_month %}<span class="muted small">・{{ '%.0f' % run.orders_per_month }} 筆</span>{% endif %}</td>
-          <td class="small" data-label="結果" data-wide>{% if run.screen %}快篩：只算全期間{% elif run.reasons %}{{ run.reasons|join('；') }}{% else %}<span class="badge badge--ok">過門檻</span>{% endif %}</td>
+          <td class="small" data-label="結果" data-wide>{% if run.since_2020_excess is not none %}2020-10 起比 0050 {{ '{:+.0%}'.format(run.since_2020_excess) }}{% if run.one.count %}、1 年視窗勝率 {{ '{:.0%}'.format(run.one.win_ratio) }}{% endif %}；{% endif %}{% if run.screen %}快篩：只算全期間{% elif run.reasons %}{{ run.reasons|join('；') }}{% else %}<span class="badge badge--ok">過門檻</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

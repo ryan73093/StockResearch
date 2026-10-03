@@ -12,6 +12,35 @@
 {% block content %}
 {% include "v2/_research_tabs.html" %}
 {% set c = pool.counts %}
+<section class="card" id="daily">
+  <div class="card__head"><h2>新設計：2015-06 起、每天決策 <span class="badge">{{ pool.daily|length }} 個規則・{{ pool.daily_passed }} 個過門檻</span></h2></div>
+  <p class="muted small" style="margin:0 0 10px">帳戶：啟動資金 30 萬、每月 5 日再投入 1 萬，整個帳戶都能買賣；每個交易日收盤後檢查，掉出保留區才賣、新進榜才買；比同樣的錢買 0050。門檻：2015-06 起與 2020-10 起都贏 0050、3 年視窗勝率 ≥ 60% 且中位為正、1 年視窗勝率 ≥ 50%、回撤不比 0050 深超過 5 個百分點。最後以 2026-10-05 起的前向觀察判斷。</p>
+  {% if pool.daily %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th>結果</th><th class="num">2015-06 起期末（0050）</th><th class="num">比 0050</th><th class="num">2020-10 起比 0050</th><th class="num">1 年／3 年視窗勝率</th><th class="num">最大回撤（0050）</th><th class="num">費稅佔投入・每月下單</th></tr></thead>
+      <tbody>
+      {% for row in pool.daily %}
+        <tr data-name="{{ row.name }}">
+          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong>{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
+          <td data-label="結果" data-wide>{% if row.passed %}<span class="badge badge--ok">過門檻</span>{% else %}<span class="small">{{ row.reasons|join('；') }}</span>{% endif %}</td>
+          <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
+          <td class="num {{ 'up' if (row.excess or 0) > 0 else 'down' }}" data-label="比 0050">{{ '{:+.0%}'.format(row.excess) if row.excess is not none else '—' }}</td>
+          <td class="num {{ 'up' if (row.since_2020_excess or 0) > 0 else 'down' }}" data-label="2020-10 起">{{ '{:+.0%}'.format(row.since_2020_excess) if row.since_2020_excess is not none else '—' }}</td>
+          <td class="num" data-label="1 年／3 年勝率">{{ '{:.0%}'.format(row.win_1y) if row.win_1y is not none else '—' }}／{{ '{:.0%}'.format(row.win_3y) if row.win_3y is not none else '—' }}</td>
+          <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
+          <td class="num" data-label="費稅・下單">{{ '{:.0%}'.format(row.cost_share) if row.cost_share is not none else '—' }}{% if row.orders_per_month %}<span class="muted small">・{{ '%.0f' % row.orders_per_month }} 筆</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin:0">還沒有結果；回測在跑時看<a href="/research?tab=jobs">執行中的程式</a>。</p>
+  {% endif %}
+</section>
+
+<h2 style="margin:24px 0 12px">舊設計（2005 起、每月檢查）<span class="muted small" style="font-weight:normal">：留著備查，不再用來挑規則</span></h2>
 <section class="card">
   <div class="card__head"><h2>現況</h2></div>
   <div class="basis-switch">

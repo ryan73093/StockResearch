@@ -260,15 +260,48 @@ def _stocks_body(args, registry: TrialRegistry, job) -> int:
     return 0
 
 
+def _daily(args, registry: TrialRegistry) -> int:
+    """Daily-decision rules on the recent market (S9-W02); the run shows on the website."""
+    from quant_platform.research import daily as daily_research
+    from quant_platform.research.jobs import JobLog
+
+    if args.name not in daily_research.BATCHES:
+        raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(daily_research.BATCHES)}")
+    rules = daily_research.BATCHES[args.name]()
+    costs = broker_costs(args.broker)
+    command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+    with JobLog(RESEARCH).start(f"每天決策規則・{args.name}（2015-06 起、啟動資金 30 萬＋每月 1 萬）", command,
+                                total=len(rules)) as job:
+        job.update(current="載入 2013 年起全市場行情", force=True)
+        data, fp = daily_research.load(Path(args.base))
+        fingerprint = daily_research.fingerprint(Path(args.base))
+        cache: dict = {}
+        stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
+        passed = 0
+        for index, rule in enumerate(rules):
+            job.update(done=index, current=rule.name)
+            record, report = daily_research.run_trial(rule, args.base, registry, RESEARCH / "reports", costs, data, fp,
+                                                      fingerprint, cache, stamp)
+            reasons = record.metrics.get("reasons") or []
+            passed += not reasons
+            verdict = "過門檻" if not reasons else "；".join(reasons)
+            print(f"{rule.name}：2015-06 起比 0050 {report['full_period_excess']:+.1%}、"
+                  f"2020-10 起 {report['since_2020']['excess']:+.1%}；{verdict}", flush=True)
+        job.update(done=len(rules), force=True)
+        job.payload["summary"] = f"{len(rules)} 個規則、{passed} 個過門檻"
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors"),
+                            "forward", "factors", "daily"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
     parser.add_argument("--family", default="etf", choices=("etf", "stocks"), help="stats：ETF 規則或個股規則")
+    parser.add_argument("--recent", action="store_true", help="factors：新設計（2015-06 起、每週排名、看 20 個交易日）")
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--lump-sum", type=float, default=0, help="stocks：一次投入的金額（0＝每月投入）")
     parser.add_argument("--initial", type=float, default=0,
@@ -342,16 +375,20 @@ def main() -> int:
         from quant_platform.research import factors as factor_strength
         from quant_platform.research.jobs import JobLog
 
-        with JobLog(RESEARCH).start("因子強弱分析（全市場、2005 起每月）",
-                                    "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
-            path = factor_strength.run(Path(args.base), RESEARCH / "factors", job=job)
+        title = "因子強弱分析（2015-06 起、每週、19 個因子）" if args.recent else "因子強弱分析（全市場、2005 起每月）"
+        with JobLog(RESEARCH).start(title, "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+            run = factor_strength.run_recent if args.recent else factor_strength.run
+            path = run(Path(args.base), RESEARCH / "factors", job=job)
         report = json.loads(path.read_text(encoding="utf-8"))
         for key, item in report["factors"].items():
-            dev = item["periods"].get("development", {})
-            print(f"{item['label']}：{item['verdict']}；開發期 IC {dev.get('ic')}（t={dev.get('t')}），"
-                  f"前五分之一減後五分之一每年 {dev.get('spread_year')}", flush=True)
+            first = next(iter(item["periods"].values()), {})
+            print(f"{item['label']}：{item['verdict']}；{first.get('label')} 排序相關 {first.get('ic')}（t={first.get('t')}），"
+                  f"前段比平均每年 {first.get('top_excess_year')}、比 0050 {first.get('top_vs_0050_year')}", flush=True)
         print(f"已寫入 {path}")
         return 0
+
+    if args.command == "daily":
+        return _daily(args, registry)
 
     if args.command == "forward":
         from quant_platform.research.stock_forward import StockForwardTracker, reconcile

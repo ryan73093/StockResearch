@@ -61,6 +61,30 @@ def plan_of(item: dict[str, object]):
     return STANDARD_PLAN
 
 
+def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:
+    """Daily-decision rules (S9-W02) that pass the new design's gate on 2015-06..2026-09."""
+    from quant_platform.research.daily import DailyRule
+    from quant_platform.research.daily import gate as daily_gate
+
+    base = Path(research_dir)
+    latest: dict[str, object] = {}
+    for record in TrialRegistry(base / "trials.jsonl").records():
+        if record.kind == "candidate" and record.period == "recent":
+            latest[record.spec_hash] = record
+    output = []
+    for record in latest.values():
+        if daily_gate(record.metrics):
+            continue
+        try:
+            spec = json.loads((base / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        except (OSError, ValueError, KeyError):
+            continue
+        reason = (f"新設計過門檻：2015-06 起比 0050 {record.metrics.get('full_period_excess'):+.1%}、"
+                  f"2020-10 起 {record.metrics.get('since_2020_excess'):+.1%}（試驗 #{record.trial_id}）")
+        output.append((DailyRule.model_validate(spec), reason))
+    return output
+
+
 def qualifying_rules(research_dir: str | Path, plan_kind: str = "SeedPlan") -> list[tuple[StockRule, str]]:
     """Stock rules whose development and validation runs on that cash flow both pass the window and
     drawdown gates."""
@@ -120,6 +144,14 @@ class StockForwardTracker:
                           "since": max(FORWARD_START, today).isoformat(), "reason": "兩段期間都贏：" + reason,
                           "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
             known.add(rule.rule_hash)
+        for rule, reason in qualifying_daily(self._base):
+            if rule.rule_hash in known:
+                continue
+            added.append({"rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.model_dump(mode="json"),
+                          "kind": "daily", "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
+                          "since": max(FORWARD_START, today).isoformat(), "reason": reason,
+                          "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
+            known.add(rule.rule_hash)
         if added:
             self._folder.mkdir(parents=True, exist_ok=True)
             self.tracked_path.write_text(json.dumps(items + added, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -159,6 +191,7 @@ class StockForwardTracker:
         if not any(todo.values()):
             return []
         panel = Panel(data)
+        factor_panel = None
         names = _names(self._history, today.year)
         fingerprint = stock_fingerprint(self._history, first_year, today.year)
         moment = (now or datetime.now(TAIPEI)).astimezone(TAIPEI)
@@ -167,14 +200,23 @@ class StockForwardTracker:
             days = todo[item["rule_hash"]]
             if not days:
                 continue
-            rule = StockRule.model_validate(item["rule"])
             start, last = date.fromisoformat(item["since"]), days[-1]
             ledger: list[dict[str, object]] = []
             snapshots: dict = {}
             plan = plan_of(item)
-            run = simulate(data, rule_variant(rule), self._costs, start, last, rankings(panel, rule, start, last),
-                           plan, ledger=ledger, snapshots=snapshots)
-            benchmark = simulate(data, None, self._costs, start, last, plan=plan)
+            if item.get("kind") == "daily":
+                from quant_platform.research.daily import DailyRule, FactorPanel, daily_rankings, simulate_daily
+
+                rule = DailyRule.model_validate(item["rule"])
+                factor_panel = factor_panel or FactorPanel(panel)
+                run = simulate_daily(data, rule, self._costs, start, last, daily_rankings(factor_panel, rule, start, last),
+                                     plan, ledger=ledger, snapshots=snapshots)
+                benchmark = simulate_daily(data, None, self._costs, start, last, plan=plan)
+            else:
+                rule = StockRule.model_validate(item["rule"])
+                run = simulate(data, rule_variant(rule), self._costs, start, last, rankings(panel, rule, start, last),
+                               plan, ledger=ledger, snapshots=snapshots)
+                benchmark = simulate(data, None, self._costs, start, last, plan=plan)
             values, benchmark_values = dict(zip(run.days, run.values)), dict(zip(benchmark.days, benchmark.values))
             replayed = _replay_check(earlier, rule.rule_hash, values)
             for day in days:

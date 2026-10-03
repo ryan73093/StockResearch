@@ -201,12 +201,128 @@ def table(report: dict[str, object] | None) -> list[dict[str, object]]:
     if not report:
         return []
     rows = []
+    keys = [key for key, _label in columns(report)]
+    recent = report.get("design") == "recent"
     for key, item in (report.get("factors") or {}).items():
         periods = item.get("periods") or {}
-        rows.append({"factor": key, "label": item.get("label", key), "verdict": verdict(periods),
-                     "dev": periods.get("development"), "val": periods.get("validation"), "final": periods.get("final"),
-                     "before": periods.get("before_2020"), "after": periods.get("after_2020"),
-                     "recent": periods.get("since_2024"), "by_year": item.get("spread_by_year") or {}})
+        cells = [periods.get(column) for column in keys]
+        rows.append({"factor": key, "label": item.get("label", key),
+                     "verdict": recent_verdict(periods) if recent else verdict(periods), "cells": cells,
+                     "ic": cells[0], "by_year": item.get("spread_by_year") or {}})
     rows.sort(key=lambda row: (VERDICT_ORDER.index(row["verdict"]) if row["verdict"] in VERDICT_ORDER else 9,
-                               -sum(((row[key] or {}).get("top_excess_year") or 0) for key in ("dev", "val", "final"))))
+                               -sum(((cell or {}).get("top_excess_year") or 0) for cell in row["cells"][1:3])))
     return rows
+
+
+# --- the recent market, daily data (roadmap S9-W02, owner's decision 2026-10-04) ------------------
+RECENT_COLUMNS = (
+    ("recent_all", "2015-06 起", date(2015, 6, 1), date(2026, 9, 30)),
+    ("before_regime", "2015-06～2020-10", date(2015, 6, 1), date(2020, 10, 25)),
+    ("regime", "2020-10 起", date(2020, 10, 26), date(2026, 9, 30)),
+    ("since_2024", "2024 起", date(2024, 1, 1), date(2026, 9, 30)),
+)
+HORIZON = 20     # sessions ahead
+STEP = 5         # a ranking every week
+
+
+def recent_verdict(periods: dict[str, dict[str, object]]) -> str:
+    """The top fifth against the average stock before and after the 2020-10 rule changes."""
+    tops = [periods.get(key, {}).get("top_excess_year") for key in ("before_regime", "regime")]
+    if any(value is None for value in tops):
+        return "弱"
+    if all(value >= EDGE for value in tops):
+        return "強"
+    if all(value <= -EDGE for value in tops):
+        return "反向"
+    if any(value >= EDGE for value in tops) and any(value <= -EDGE for value in tops):
+        return "不穩"
+    return "弱"
+
+
+def run_recent(history: str | Path, out_dir: str | Path, job=None) -> Path:
+    """Every factor of the daily engine, ranked every week from 2015-06, against the next 20 sessions."""
+    from quant_platform.research import daily
+    from quant_platform.research.legacy_challenger import BENCHMARK
+
+    if job:
+        job.update(current="載入 2013 年起全市場行情", force=True)
+    data, fp = daily.load(history)
+    growth, benchmark = 1.0, {}
+    for day in sorted(data.closes.get(BENCHMARK, {})):
+        growth *= data.factors.get(BENCHMARK, {}).get(day, 1.0)
+        benchmark[day] = data.closes[BENCHMARK][day] * growth
+    eligibility = daily.DailyRule(name="資格", factors={"momentum_3": 1.0})
+    factors = list(daily.FACTOR_LABELS)
+    sessions = fp.sessions
+    positions = [index for index, day in enumerate(sessions)
+                 if daily.RECENT_START <= day <= daily.RECENT_END and index + HORIZON < len(sessions)][::STEP]
+    if job:
+        job.update(total=len(factors), done=0, force=True)
+    rows = []
+    for count, factor in enumerate(factors):
+        if job:
+            job.update(done=count, current=daily.FACTOR_LABELS[factor])
+        matrix = fp.matrix(factor)
+        for position in positions:
+            day, later = sessions[position], sessions[position + HORIZON]
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                forward = fp.panel.filled[:, position + HORIZON] / fp.panel.filled[:, position] - 1
+            score = matrix[:, position].astype(float)
+            mask = fp.eligible(eligibility, position) & np.isfinite(score) & np.isfinite(forward)
+            usable = int(mask.sum())
+            if usable < 50:
+                continue
+            s, r = score[mask], forward[mask]
+            ic = float(np.corrcoef(_ranks(s), _ranks(r))[0, 1])
+            order = np.argsort(-s, kind="stable")
+            fifth = max(1, usable // 5)
+            top, bottom = r[order[:fifth]], r[order[-fifth:]]
+            index_return = benchmark[later] / benchmark[day] - 1 if day in benchmark and later in benchmark else None
+            rows.append({"date": day.isoformat(), "factor": factor, "ic": ic, "spread": float(top.mean() - bottom.mean()),
+                         "top_excess": float(top.mean() - r.mean()),
+                         "top_vs_0050": None if index_return is None else float(top.mean() - index_return)})
+    scale = 252 / HORIZON
+    summary: dict[str, object] = {}
+    for factor in factors:
+        mine = [row for row in rows if row["factor"] == factor]
+        periods = {}
+        for key, label, start, end in RECENT_COLUMNS:
+            chosen = [row for row in mine if start.isoformat() <= row["date"] <= end.isoformat()]
+            if len(chosen) < 10:
+                continue
+            ics = [row["ic"] for row in chosen]
+            versus = [row["top_vs_0050"] for row in chosen if row["top_vs_0050"] is not None]
+            deviation = statistics.stdev(ics) if len(ics) > 1 else 0.0
+            periods[key] = {"label": label, "observations": len(chosen), "ic": round(statistics.fmean(ics), 4),
+                            "t": round(statistics.fmean(ics) / (deviation / math.sqrt(len(ics))), 2) if deviation else None,
+                            "positive": round(sum(value > 0 for value in ics) / len(ics), 3),
+                            "spread_year": round(statistics.fmean(row["spread"] for row in chosen) * scale, 4),
+                            "top_excess_year": round(statistics.fmean(row["top_excess"] for row in chosen) * scale, 4),
+                            "top_vs_0050_year": round(statistics.fmean(versus) * scale, 4) if versus else None}
+        by_year: dict[str, list[float]] = {}
+        for row in mine:
+            by_year.setdefault(row["date"][:4], []).append(row["top_excess"])
+        summary[factor] = {"label": daily.FACTOR_LABELS[factor], "periods": periods, "verdict": recent_verdict(periods),
+                           "spread_by_year": {year: round(statistics.fmean(values) * scale, 4)
+                                              for year, values in sorted(by_year.items())}}
+    report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "design": "recent",
+              "universe": "證交所上市普通股（含後來下市），資格同規則；每週排名一次，看之後 20 個交易日",
+              "columns": [[key, label] for key, label, _start, _end in RECENT_COLUMNS], "factors": summary,
+              "months": len({row["date"] for row in rows}), "horizon": HORIZON, "step": STEP}
+    folder = Path(out_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"strength-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}-recent.json"
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    if job:
+        job.update(done=len(factors), force=True)
+        job.payload["summary"] = f"{len(factors)} 個因子、{report['months']} 次排名（每週）"
+    return path
+
+
+DEFAULT_COLUMNS = [["development", "開發期 2005–2016"], ["validation", "驗證期 2017–2021"],
+                   ["final", "最終驗證期 2022–2026"], ["since_2024", "2024 後"]]
+
+
+def columns(report: dict[str, object] | None) -> list[list[str]]:
+    return list((report or {}).get("columns") or DEFAULT_COLUMNS)

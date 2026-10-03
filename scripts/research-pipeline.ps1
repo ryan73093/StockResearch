@@ -1,4 +1,4 @@
-param([ValidateSet("seed", "factors", "finmind")][string]$Name = "seed")
+param([ValidateSet("daily", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with
 #   Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scripts\research-pipeline.ps1','-Name','seed'
@@ -21,6 +21,12 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
 }
 
 switch ($Name) {
+    "daily" {
+        # The new design (S9-W02): 2015-06 onward, decisions every trading day, the owner's account.
+        Invoke-Step "factors" @("-m", "quant_platform.research", "daily", "--name", "factors", "--broker", "cathay")
+    }
+    "factors-recent" { Invoke-Step "factors-recent" @("-m", "quant_platform.research", "factors", "--recent") }
+    "archive" { Invoke-Step "archive" @("scripts/archive_legacy_tables.py") }
     "seed" {
         # The owner's account: NT$300,000 to start, then NT$10,000 on the 5th of every month (2026-10-04).
         $flow = @("--broker", "cathay", "--initial", "300000", "--monthly", "10000")

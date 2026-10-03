@@ -65,9 +65,13 @@ def _activity(metrics: dict) -> dict[str, object]:
 def _sources(research_dir: Path) -> dict[str, str]:
     """spec_hash → where the rule came from (批次名稱 or AI 研究員)."""
     from quant_platform.research.batches import BATCHES
+    from quant_platform.research.daily import BATCHES as DAILY_BATCHES
     from quant_platform.research.stock_rules import BATCHES as STOCK_BATCHES
 
     origin: dict[str, str] = {}
+    for name, batch in DAILY_BATCHES.items():
+        for rule in batch():
+            origin.setdefault(rule.rule_hash, f"每天決策批次 {name}")
     for name, batch in STOCK_BATCHES.items():
         for rule in batch():
             origin.setdefault(rule.rule_hash, f"個股批次 {name}")
@@ -187,8 +191,44 @@ def rule_rows(research_dir: str | Path, basis: str = "seed") -> list[dict[str, o
     return rows
 
 
-PERIOD_LABELS = {"development": "開發期", "validation": "驗證期", "holdout": "最終驗證期", "full": "全期間"}
-PERIOD_ORDER = ("development", "validation", "holdout", "full")
+PERIOD_LABELS = {"recent": "近期 2015-06 起・每天決策", "development": "開發期", "validation": "驗證期",
+                 "holdout": "最終驗證期", "full": "全期間"}
+PERIOD_ORDER = ("recent", "development", "validation", "holdout", "full")
+
+
+def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
+    """The new design (S9-W02): every daily-decision rule's latest run on 2015-06..2026-09 with the
+    owner's account, passed rules first."""
+    from quant_platform.research.daily import gate as daily_gate
+    from quant_platform.research.stock_forward import StockForwardTracker
+
+    base = Path(research_dir)
+    latest: dict[str, object] = {}
+    for record in TrialRegistry(base / "trials.jsonl").records():
+        if record.kind == "candidate" and record.period == "recent":
+            latest[record.spec_hash] = record
+    origin = _sources(base) if latest else {}
+    since = {item["rule_hash"]: item["since"] for item in StockForwardTracker(base).tracked()}
+    rows = []
+    for spec_hash, record in latest.items():
+        metrics = record.metrics
+        reasons = daily_gate(metrics)
+        one, three = _window(metrics, "1y"), _window(metrics, "3y")
+        rows.append({
+            "spec_hash": spec_hash, "name": record.spec_name, "source": origin.get(spec_hash, "其他"),
+            "trial_id": record.trial_id, "passed": not reasons, "reasons": reasons,
+            "final_value": metrics.get("final_value"), "benchmark_final_value": metrics.get("benchmark_final_value"),
+            "excess": metrics.get("full_period_excess"), "since_2020_excess": metrics.get("since_2020_excess"),
+            "since_2020_final_value": metrics.get("since_2020_final_value"),
+            "since_2020_benchmark_final_value": metrics.get("since_2020_benchmark_final_value"),
+            "win_1y": one.get("win_ratio"), "win_3y": three.get("win_ratio"), "median_3y": three.get("median_excess"),
+            "max_drawdown": metrics.get("max_drawdown"), "benchmark_max_drawdown": metrics.get("benchmark_max_drawdown"),
+            "xirr": metrics.get("xirr"), "benchmark_xirr": metrics.get("benchmark_xirr"),
+            "cost_share": metrics.get("cost_share"), "orders_per_month": metrics.get("orders_per_month"),
+            "forward_since": since.get(spec_hash),
+        })
+    rows.sort(key=lambda row: (not row["passed"], -(row["excess"] if row["excess"] is not None else -9)))
+    return rows
 
 
 def plan_label(plan: dict) -> str:
@@ -274,6 +314,12 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
         for month, value in (report.get("monthly_active_returns") or {}).items():
             yearly[month[:4]] = yearly.get(month[:4], 0.0) + value
         has_windows = bool(_window(metrics, "3y").get("count"))
+        if record.period == "recent":
+            from quant_platform.research.daily import gate as daily_gate
+
+            reasons = daily_gate(metrics)
+        else:
+            reasons = _gate(metrics) if has_windows else None
         runs.append({
             "trial_id": record.trial_id, "created_at": str(record.created_at)[:16].replace("T", " "),
             "period": record.period, "period_label": PERIOD_LABELS.get(record.period, record.period),
@@ -286,7 +332,8 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
             "max_drawdown": metrics.get("max_drawdown"), "benchmark_max_drawdown": metrics.get("benchmark_max_drawdown"),
             "excess": metrics.get("full_period_excess"), "three": _window(metrics, "3y"), "five": _window(metrics, "5y"),
             "trades": metrics.get("trades"), "costs": metrics.get("costs"), **_activity(metrics),
-            "reasons": _gate(metrics) if has_windows else None, "screen": not has_windows,
+            "reasons": reasons, "screen": not has_windows and record.period != "recent",
+            "one": _window(metrics, "1y"), "since_2020_excess": metrics.get("since_2020_excess"),
             "yearly": {year: round(value, 4) for year, value in sorted(yearly.items())},
             "chart": _svg(report.get("curve") or {}), "report_file": record.report_file,
         })
@@ -322,6 +369,7 @@ def pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> d
     """What the pool page shows: counts, the lists an owner asks about, and every rule, on one basis
     (lump sum, the owner's strategy account since 2026-10-04, or the monthly plan)."""
     rows = rule_rows(research_dir, basis)
+    daily_rules = daily_rows(research_dir)
     counts = {status: sum(1 for row in rows if row["status"] == status) for status in STATUS_ORDER}
     families = {family: sum(1 for row in rows if row["family"] == family) for family in ("ETF 規則", "個股規則")}
     ranked = [row for row in rows if row["development"]["win_3y"] is not None]
@@ -342,5 +390,6 @@ def pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> d
         "stock_pbo": (stock_stats.get("pbo") or {}).get("pbo"),
         "high_win": high_win, "both_periods": both, "ai_rounds": ai_rounds(research_dir),
         "forward_stocks": StockForwardTracker(research_dir).summary(),
+        "daily": daily_rules, "daily_passed": sum(1 for row in daily_rules if row["passed"]),
         "status_labels": STATUS_LABELS, "basis": basis, "basis_label": BASIS_LABELS[basis], "bases": BASIS_LABELS,
     }

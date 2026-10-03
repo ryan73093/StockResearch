@@ -119,3 +119,27 @@ def test_rules_that_win_both_periods_are_tracked_from_the_day_they_qualify(tmp_p
     assert [item["rule_hash"] for item in added] == [RULE.rule_hash] and added[0]["since"] == "2026-10-07"
     assert "兩段期間都贏" in added[0]["reason"] and added[0]["plan"] == "seed" and added[0]["initial"] == 300_000
     assert tracker.sync(date(2026, 10, 8)) == [] and len(tracker.tracked()) == 1
+
+
+def test_daily_rules_that_pass_the_new_design_are_tracked_and_recorded_every_day(tmp_path):
+    from quant_platform.research.daily import DailyRule
+
+    days = weekdays(date(2024, 1, 1), date(2026, 10, 9))
+    build(tmp_path, days)
+    rule = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3)
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "d.json").write_text(json.dumps({"spec": rule.canonical()}, ensure_ascii=False), encoding="utf-8")
+    TrialRegistry(tmp_path / "trials.jsonl").register(
+        kind="candidate", period="recent", spec_hash=rule.rule_hash, spec_name=rule.name, input_hash="d1",
+        data_fingerprint="daily:x", report_file="d.json",
+        metrics={"full_period_excess": 0.4, "since_2020_excess": 0.2, "max_drawdown": -0.2, "benchmark_max_drawdown": -0.3,
+                 "windows": {"1y": {"count": 50, "win_ratio": 0.7}, "3y": {"count": 30, "win_ratio": 0.8, "median_excess": 0.1}}})
+    tracker = StockForwardTracker(tmp_path, min_quotes=1)
+    written = tracker.record(date(2026, 10, 2), now=at(date(2026, 10, 2)))
+    item = tracker.tracked()[0]
+    assert item["kind"] == "daily" and item["plan"] == "seed" and "新設計過門檻" in item["reason"]
+    # the account starts on 10-02 with NT$300,000 and buys the three strongest trends the same day
+    assert len(written) == 1 and written[0]["contributed"] == 300_000 and len(written[0]["holdings"]) == 3
+    tracker.record(date(2026, 10, 5), now=at(date(2026, 10, 5)))
+    records = tracker.records()
+    assert records[-1]["contributed"] == 310_000 and reconcile(records) == {}

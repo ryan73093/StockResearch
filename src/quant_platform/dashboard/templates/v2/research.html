@@ -20,8 +20,8 @@
   {% if overview %}{% set c = overview.counts %}
   <div class="kpis kpis--four">
     <div class="kpi"><div class="kpi__label">試過的不同規則</div><div class="kpi__value">{{ overview.attempts }}</div></div>
-    <div class="kpi"><div class="kpi__label">開發期與驗證期都贏</div><div class="kpi__value">{{ overview.both_periods|length }}</div></div>
-    <div class="kpi"><div class="kpi__label">最終驗證通過</div><div class="kpi__value">{{ c.holdout_passed }}</div></div>
+    <div class="kpi"><div class="kpi__label">新設計（每天決策）過門檻</div><div class="kpi__value">{{ overview.daily_passed }}／{{ overview.daily|length }}</div></div>
+    <div class="kpi"><div class="kpi__label">前向觀察中</div><div class="kpi__value">{{ overview.forward_stocks|length }}</div></div>
     <div class="kpi"><div class="kpi__label">執行中的程式</div><div class="kpi__value">{{ running_count }}</div></div>
   </div>
   {% endif %}
@@ -45,25 +45,25 @@
   <p class="muted small" style="margin:0 0 10px">每月 5 日把合格的上市股票依因子排名，看分數最高的五分之一（規則只買前段）下個月漲多少。每格上面是「比所有合格股票平均」、下面是「比 0050」，一年大約多或少幾個百分點（未扣手續費與稅）。「排序相關」看整體排得準不準，t ≥ 2 才算明顯。</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>因子</th><th>判定</th><th class="num">開發期 2005–2016<br>比平均／比 0050</th><th class="num">驗證期 2017–2021</th><th class="num">最終驗證期 2022–2026</th><th class="num">2024 後</th><th class="num">排序相關<br>開發期（t）</th></tr></thead>
+      <thead><tr><th>因子</th><th>判定</th>{% for key, label in factor_columns %}<th class="num">{{ label }}{% if loop.first %}<br>比平均／比 0050{% endif %}</th>{% endfor %}<th class="num">排序相關<br>{{ factor_columns[0][1] }}（t）</th></tr></thead>
       <tbody>
       {% for row in factor_rows %}
         <tr>
           <td data-primary><strong>{{ row.label }}</strong></td>
           <td data-label="判定"><span class="badge {{ 'badge--ok' if row.verdict == '強' else ('badge--bad' if row.verdict == '反向' else ('badge--warn' if row.verdict == '不穩' else '')) }}">{{ row.verdict }}</span></td>
-          {% for item in (row.dev, row.val, row.final, row.recent) %}
-          <td class="num" data-label="{{ ('開發期', '驗證期', '最終驗證期', '2024 後')[loop.index0] }}">
+          {% for item in row.cells %}
+          <td class="num" data-label="{{ factor_columns[loop.index0][1] }}">
             {% if item and item.top_excess_year is defined and item.top_excess_year is not none %}<span class="{{ 'up' if item.top_excess_year > 0 else 'down' }}">{{ '{:+.1%}'.format(item.top_excess_year) }}</span>{% else %}—{% endif %}<br>
             {% if item and item.top_vs_0050_year is defined and item.top_vs_0050_year is not none %}<span class="small {{ 'up' if item.top_vs_0050_year > 0 else 'down' }}">0050 {{ '{:+.1%}'.format(item.top_vs_0050_year) }}</span>{% endif %}
           </td>
           {% endfor %}
-          <td class="num" data-label="排序相關（t）">{{ '%+.3f' % row.dev.ic if row.dev else '—' }}{% if row.dev and row.dev.t is not none %}<span class="muted small">（{{ '%.1f' % row.dev.t }}）</span>{% endif %}</td>
+          <td class="num" data-label="排序相關（t）">{{ '%+.3f' % row.ic.ic if row.ic else '—' }}{% if row.ic and row.ic.t is not none %}<span class="muted small">（{{ '%.1f' % row.ic.t }}）</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="note">判定看前段比平均：強＝三段期間每年都多 2 個百分點以上；反向＝三段都少 2 個百分點以上；不穩＝有的期間多、有的少；弱＝差不多。比 0050 那一行才是能不能贏 0050 的關鍵：2024 年後 0050 被台積電帶著漲，前段比平均很好的因子也可能輸 0050。這是描述，不是規則試驗；三段歷史都已看過，用它組出的規則只能靠前向觀察證明。籌碼與基本面因子（外資持股、融資、三大法人、本益比、月營收）的資料正在下載，下載完會加進這張表。</p>
+  <p class="note">判定看前段比平均：強＝{{ '2015-06～2020-10 與 2020-10 起' if factor_report and factor_report.design == 'recent' else '開發期、驗證期、最終驗證期' }}每年都多 2 個百分點以上；反向＝都少 2 個百分點以上；不穩＝有的期間多、有的少；弱＝差不多。比 0050 那一行才是能不能贏 0050 的關鍵：2024 年後 0050 被台積電帶著漲，前段比平均很好的因子也可能輸 0050。這是描述，不是規則試驗；三段歷史都已看過，用它組出的規則只能靠前向觀察證明。籌碼與基本面因子（外資持股、融資、三大法人、本益比、月營收）的資料正在下載，下載完會加進這張表。</p>
   {% else %}
   <p class="muted" style="margin:0">還沒有分析結果。程式在跑時會出現在「執行中的程式」。</p>
   {% endif %}

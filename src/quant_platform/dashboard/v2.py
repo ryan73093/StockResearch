@@ -35,6 +35,7 @@ from quant_platform.research.legacy_challenger import latest_report as latest_ch
 from quant_platform.research.forward import STANDARD_PLAN as FORWARD_PLAN
 from quant_platform.research.periods import ResearchGateError
 from quant_platform.research.factors import latest as latest_factor_strength
+from quant_platform.research.factors import columns as factor_columns
 from quant_platform.research.factors import table as factor_table
 from quant_platform.research.jobs import JobLog
 from quant_platform.research.pool import basis_counts, pool_view, rule_detail
@@ -711,6 +712,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             stock_forward=StockForwardTracker(research_dir).summary(),
             research_tab=tab, jobs=JobLog(research_dir).jobs(), factor_report=latest_factor_strength(research_dir / "factors"),
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
+            factor_columns=factor_columns(latest_factor_strength(research_dir / "factors")),
             overview=pool_view(research_dir, basis=_default_basis(research_dir)) if tab == "overview" else None,
             round_view=round_view,
             legacy=challenger_view(latest_challenger(research_dir / "legacy")),
