@@ -696,7 +696,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             round_view=round_view,
             legacy=challenger_view(latest_challenger(research_dir / "legacy")),
             ranking=ranking,
-            stock_rules=stock_rule_rows(research_dir / "trials.jsonl", "development"),
+            stock_rules=stock_rule_rows(research_dir / "trials.jsonl", "development")[:25],  # the pool page has them all
             stats=stats,
             best_dsr=best_dsr,
             # Baselines run on the full period; candidates never may (periods.check_gate).
