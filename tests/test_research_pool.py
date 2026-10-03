@@ -58,3 +58,40 @@ def test_pool_page_and_json(tmp_path):
     payload = client.get("/research/pool.json").get_json()
     assert payload["total"] == 4 and payload["status_labels"]["eliminated"] == "開發期淘汰"
     assert client.get("/system/docs/research_method").status_code in (200, 404)
+
+
+def test_pool_and_research_page_show_costs_and_forward_tracking(tmp_path):
+    from quant_platform.research.stock_rules import StockRule
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
+    research = tmp_path / "research"
+    registry = seed(research)
+    # a run from before cost shares were stored: 2005-02 to 2016-12 is 143 contributions of NT$10,000
+    registry.register(kind="candidate", report_file="r.json", period="development", spec_hash="stock-old",
+                      spec_name="個股 舊紀錄", input_hash="8", data_fingerprint="stocks:a",
+                      metrics={**GOOD, "plan": {"kind": "ContributionPlan", "monthly_amount": 10_000},
+                               "start": "2005-02-07", "end": "2016-12-30", "costs": 143_000})
+    folder = research / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    rule = StockRule(name="個股 52 週高點", factor="high_52w", top=30, buffer=3)
+    (folder / "tracked.json").write_text(json.dumps([{
+        "rule_hash": "stock-both", "name": rule.name, "rule": rule.model_dump(mode="json"), "since": "2026-10-05",
+        "reason": "兩段期間都贏"}], ensure_ascii=False), encoding="utf-8")
+    (folder / "log.jsonl").write_text(json.dumps({
+        "date": "2026-10-05", "rule_hash": "stock-both", "name": rule.name, "since": "2026-10-05", "value": 9_990.0,
+        "cash": 90.0, "contributed": 10_000.0, "benchmark_value": 9_995.0, "excess": -0.0005,
+        "holdings": [{"code": "2330", "name": "台積電", "units": 9.0, "close": 1_100.0, "value": 9_900.0}],
+        "trades_today": [{"code": "2330", "name": "台積電", "side": "BUY", "shares": 9, "price": 1_100.0, "fee": 14, "tax": 0}],
+        "adjustments_today": [], "trades_total": 1, "fees_total": 14, "taxes_total": 0,
+        "replay_check": {"days": 0, "mismatches": []}, "late": False}, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    rows = {row["spec_hash"]: row for row in rule_rows(research)}
+    assert rows["stock-old"]["development"]["cost_share"] == 0.1
+    assert rows["stock-both"]["forward_since"] == "2026-10-05" and rows["etf-win"]["forward_since"] is None
+    client = create_app(container).test_client()
+    page = client.get("/research").get_data(as_text=True)
+    assert "個股規則前向模擬" in page and "台積電" in page and "正常" in page
+    pool = client.get("/research/pool").get_data(as_text=True)
+    assert "前向觀察中的個股規則" in pool and "費稅佔投入" in pool and "前向觀察 10-05 起" in pool
+    payload = client.get("/research/pool.json").get_json()
+    assert payload["forward_stocks"][0]["sessions"] == 1 and payload["forward_stocks"][0]["problems"] == []

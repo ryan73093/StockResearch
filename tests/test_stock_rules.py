@@ -91,7 +91,7 @@ def test_rule_trial_registers_once_and_counts_as_a_candidate(tmp_path):
     assert report["strategy"]["trades"] > 0 and "monthly_active_returns" in report and report["picks_per_day"] == 3.0
     again, _ = run_stock_trial(rule, "development", base, registry, base / "reports", CostModel())
     assert again.trial_id == record.trial_id and registry.count("candidate") == 1
-    with pytest.raises(Exception, match="保留期前"):
+    with pytest.raises(Exception, match="最終驗證期前"):
         run_stock_trial(rule, "holdout", base, registry, base / "reports", CostModel())
 
 
@@ -141,3 +141,106 @@ def test_composite_ranks_average_percentiles_and_lump_sum_invests_once():
     assert plan.schedule(days, days[5], days[-1]) == [(days[5], 300_000.0)]
     rules = sweep_batch()
     assert len(rules) == 492 and len({rule.rule_hash for rule in rules}) == 492
+
+
+def test_new_trading_settings_keep_old_hashes():
+    champion = StockRule(name="a", factor="high_52w", top=30, buffer=3)
+    spelled = StockRule(name="b", factor="high_52w", top=30, buffer=3, min_hold=0, band=0.0, min_trade=0.0)
+    assert champion.rule_hash == spelled.rule_hash and champion.rule_hash.startswith("31db01cdce2c")
+    assert not {"min_hold", "band", "min_trade"} & set(champion.canonical())
+    held = StockRule(name="c", factor="high_52w", top=30, buffer=3, min_hold=3)
+    assert held.rule_hash != champion.rule_hash and held.canonical()["min_hold"] == 3
+
+
+class ScriptedPanel:
+    """Rank lists by hand: rankings() only needs the sessions and ranked()."""
+
+    def __init__(self, sessions, script):
+        self.sessions, self.script = sessions, script
+
+    def ranked(self, rule, day):
+        return list(self.script[day])
+
+
+def test_min_hold_keeps_new_buys_until_their_time_unless_ineligible():
+    days = weekdays(date(2024, 1, 1), 80)
+    rank_days = [date(2024, 1, 5), date(2024, 2, 5), date(2024, 3, 5), date(2024, 4, 5)]   # the 5th, all weekdays
+    panel = ScriptedPanel(days, dict(zip(rank_days, [["A", "B", "C", "D"], ["C", "D", "A", "B"], ["C", "D", "A", "B"],
+                                                     ["C", "D", "A", "B"]])))
+
+    def run(**settings):
+        # top 2 is below the model's minimum of 5; model_construct skips validation for the hand case
+        rule = StockRule.model_construct(**{**StockRule(name="x", factor="high_52w").model_dump(), "top": 2, **settings})
+        picks = rankings(panel, rule, days[0], days[-1])
+        assert sorted(picks) == rank_days
+        return [picks[day] for day in rank_days]
+
+    assert run() == [["A", "B"], ["C", "D"], ["C", "D"], ["C", "D"]]
+    # bought at the first check, kept through the second (1 < 2), sold at the third (2 checks held)
+    assert run(min_hold=2) == [["A", "B"], ["A", "B"], ["C", "D"], ["C", "D"]]
+    # B is no longer eligible at the second check: min_hold does not keep it
+    panel.script[rank_days[1]] = ["C", "D", "A"]
+    assert run(min_hold=6)[1] == ["A", "C"]
+
+
+def test_band_and_minimum_order_skip_small_top_ups():
+    from quant_platform.research.cashflow import ContributionPlan
+    from quant_platform.research.legacy_challenger import Variant, simulate
+
+    days = weekdays(date(2024, 1, 1), 30)
+    first, second = date(2024, 1, 5), date(2024, 2, 5)
+    a = {day: (10.0 if day < second else 15.0) for day in days}       # A gains 50% before the second buy
+    data = LegacyData(sessions=days, closes={"A.TW": a, "B.TW": {day: 10.0 for day in days},
+                                            "0050.TW": {day: 100.0 for day in days}},
+                      traded_value={}, factors={}, predictions={})
+    costs = CostModel(fee_rate=0.0, minimum_fee=0, slippage_bps=0.0)
+    plan = ContributionPlan(monthly_amount=10_000, day_of_month=5)
+    ranks = {first: ["A.TW", "B.TW"], second: ["A.TW", "B.TW"]}
+
+    def run(**settings):
+        ledger, snapshots = [], {}
+        result = simulate(data, Variant("v", "v", 2, "on_rank_days", **settings), costs, days[0], days[-1], ranks, plan,
+                          ledger=ledger, snapshots=snapshots)
+        buys = [(entry["symbol"], entry["shares"]) for entry in ledger if entry["day"] == second]
+        return buys, snapshots[days[-1]][0], result
+
+    # second check: 10,000 new + A 500 × 15 + B 500 × 10 = 22,500 → target 11,250; A is 3,750 short, B 6,250
+    buys, cash, result = run()
+    assert buys == [("A.TW", 250), ("B.TW", 625)] and cash == 0 and result.bought == 20_000   # two months put in
+    buys, cash, _ = run(band=0.4)            # A's gap 3,750 is within 40% of target (4,500): left alone
+    assert buys == [("B.TW", 625)] and cash == 3_750
+    buys, cash, _ = run(min_trade=5_000)     # biggest gap first; A's 3,750 is below the minimum order
+    assert buys == [("B.TW", 625)] and cash == 3_750
+
+
+def test_cost_batch_is_the_52_week_high_family_with_less_trading():
+    from quant_platform.research.stock_rules import cost_batch, second_batch, sweep_batch
+
+    rules = cost_batch()
+    earlier = {rule.rule_hash for rule in second_batch() + sweep_batch()}
+    assert len(rules) == len({rule.rule_hash for rule in rules}) == 40
+    assert sum(rule.rule_hash in earlier for rule in rules) == 4
+    assert all(rule.factor == "high_52w" and len(rule.name) <= 80 for rule in rules)
+    assert not any(rule.rebalance == "quarterly" and rule.min_hold == 3 for rule in rules)
+
+
+def test_fingerprint_ignores_sessions_after_the_period_end(tmp_path):
+    from quant_platform.research.history.dataset import write_parquet
+    from quant_platform.research.history.official import DailyRow
+    from quant_platform.research.stock_rules import stock_fingerprint
+
+    write_parquet([DailyRow(date(2026, 9, 30), 1.0, 1.0, 1.0, 1.0, source="t")], tmp_path / "daily" / "0050.parquet")
+
+    def quote(day, close=10.0):
+        return {"date": day, "code": "2330", "name": "台積電", "open": close, "high": close, "low": close, "close": close,
+                "volume": 1, "turnover": 1, "trades": 1}
+
+    path = tmp_path / "stocks" / "twse" / "2026.parquet"
+    write_year([quote(date(2026, 9, 30)), quote(date(2026, 10, 2))], path)
+    end = date(2026, 9, 30)
+    before = stock_fingerprint(tmp_path, 2026, 2026, until=end)
+    write_year([quote(date(2026, 9, 30)), quote(date(2026, 10, 2)), quote(date(2026, 10, 5))], path)   # the daily append
+    assert stock_fingerprint(tmp_path, 2026, 2026, until=end) == before
+    assert stock_fingerprint(tmp_path, 2026, 2026) != before                    # the forward record sees the whole file
+    write_year([quote(date(2026, 9, 30), 11.0), quote(date(2026, 10, 2))], path)                     # a revision inside the period
+    assert stock_fingerprint(tmp_path, 2026, 2026, until=end) != before

@@ -16,7 +16,7 @@
     <h2>AI 研究員 <span class="badge {{ 'badge--ok' if agent.enabled and agent.configured else 'badge--warn' }}">{{ ('每晚 %d:00' % agent.hour) if agent.enabled and agent.configured else ('未設定金鑰' if agent.enabled else '已關閉') }}</span></h2>
     <span class="muted small">{{ agent.model }}・本月 US${{ '%.4f' % agent.spent_usd }}／上限 US${{ '%.2f' % agent.budget_usd }}</span>
   </div>
-  <p class="muted" style="margin:0 0 10px">模型讀開發期（2004–2016）的結果與研究日誌，提出假設與策略設定檔；通過驗證的設定只在開發期回測並計入多重檢定。每晚最多 {{ agent.limits.rounds }} 輪、每輪 {{ agent.limits.specs }} 個、共 {{ agent.limits.trials }} 個試驗；看不到驗證期與保留期，也不會下單。</p>
+  <p class="muted" style="margin:0 0 10px">模型讀開發期（2004–2016）的結果與研究日誌，提出假設與策略設定檔；通過驗證的設定只在開發期回測並計入多重檢定。每晚最多 {{ agent.limits.rounds }} 輪、每輪 {{ agent.limits.specs }} 個、共 {{ agent.limits.trials }} 個試驗；看不到驗證期與最終驗證期，也不會下單。</p>
   {% if agent.recent %}
   <ul class="timeline">
     {% for entry in agent.recent %}
@@ -189,7 +189,7 @@
 
 <section class="card" id="promotion">
   <div class="card__head">
-    <h2>晉級流程 <span class="badge">開發 → 驗證 → 保留 → 前向 → 你核准</span></h2>
+    <h2>晉級流程 <span class="badge">開發 → 驗證 → 最終驗證 → 前向 → 你核准</span></h2>
     {% if not promotion.chain_ok %}<span class="badge badge--bad">晉級紀錄雜湊鏈異常</span>{% endif %}
   </div>
   {% if promotion.pipeline %}
@@ -227,7 +227,7 @@
     {% for item in promotion.deep_drawdown %}<li>{{ item.name }}：最大回撤 {{ '{:.1%}'.format(item.max_drawdown) }}，{% if item.needed > 80 %}超過計畫可填的上限 80%，無法晉級{% else %}需要可承受回撤至少 {{ item.needed }}%{% if promotion.gates.aggressive_drawdown is not none %}（{{ '符合' if item.within else '不符合' }}目前計畫）{% endif %}{% endif %}</li>{% endfor %}
   </ul>
   {% endif %}
-  <p class="note">門檻：滾動 3／5 年勝率 ≥ {{ '{:.0%}'.format(promotion.gates.win) }} 且中位超額 > 0、回撤不比定期定額深超過 {{ '%.0f' % (promotion.gates.drawdown * 100) }} 個百分點（一般賽道；更深的走進攻型賽道，回撤上限是你計畫的可承受回撤{% if promotion.gates.aggressive_drawdown is not none %} {{ '{:.0%}'.format(promotion.gates.aggressive_drawdown) }}{% else %}——<a href="/plan">尚未建立投資計畫，進攻型賽道未啟用</a>{% endif %}，其餘門檻相同）、DSR ≥ {{ promotion.gates.dsr }}、PBO ≤ {{ '{:.0%}'.format(promotion.gates.pbo) }}；驗證期另需成本加倍與晚一天執行仍有 ≥ {{ '{:.0%}'.format(promotion.gates.robust) }} 勝率；保留期只評估一次；前向模擬至少 {{ promotion.gates.forward }} 個交易日。核准後才會出現在計畫頁。</p>
+  <p class="note">門檻：滾動 3／5 年勝率 ≥ {{ '{:.0%}'.format(promotion.gates.win) }} 且中位超額 > 0、回撤不比定期定額深超過 {{ '%.0f' % (promotion.gates.drawdown * 100) }} 個百分點（一般賽道；更深的走進攻型賽道，回撤上限是你計畫的可承受回撤{% if promotion.gates.aggressive_drawdown is not none %} {{ '{:.0%}'.format(promotion.gates.aggressive_drawdown) }}{% else %}——<a href="/plan">尚未建立投資計畫，進攻型賽道未啟用</a>{% endif %}，其餘門檻相同）、DSR ≥ {{ promotion.gates.dsr }}、PBO ≤ {{ '{:.0%}'.format(promotion.gates.pbo) }}；驗證期另需成本加倍與晚一天執行仍有 ≥ {{ '{:.0%}'.format(promotion.gates.robust) }} 勝率；最終驗證期只評估一次；前向模擬至少 {{ promotion.gates.forward }} 個交易日。核准後才會出現在計畫頁。</p>
 </section>
 
 <section class="card">
@@ -256,6 +256,56 @@
   <p class="note">晉級門檻要求至少 8 週前向模擬且流程無異常；前向績效只作觀察，不單獨決定晉級。</p>
   {% else %}
   <p class="muted" style="margin:0">尚無紀錄。長歷史研究資料建立後，每個交易日 15:30 會記錄內建基準（之後加上晉級中的候選）的當日狀態。</p>
+  {% endif %}
+</section>
+
+<section class="card" id="stock-forward">
+  <div class="card__head">
+    <h2>個股規則前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>
+    <span class="muted small">兩段期間都贏的規則自動加入、從加入那天起算；每月 5 日投入 10,000 元、國泰手續費；每個交易日 15:30 記錄，只追加不改寫</span>
+  </div>
+  {% if stock_forward %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th class="num">已記錄交易日</th><th class="num">投入（元）</th><th class="num">目前資產</th><th class="num">0050 定期定額</th><th class="num">相對 0050</th><th class="num">持股／費稅</th><th>對帳</th></tr></thead>
+      <tbody>
+      {% for row in stock_forward %}
+        <tr>
+          <td data-primary><strong>{{ row.name }}</strong><span class="muted small"> {{ row.since }} 起</span></td>
+          <td class="num" data-label="已記錄交易日">{{ row.sessions }}{% if row.late %}<span class="muted small">（補記 {{ row.late }}）</span>{% endif %}</td>
+          <td class="num" data-label="投入">{{ '{:,.0f}'.format(row.contributed) }}</td>
+          <td class="num" data-label="目前資產">{{ '{:,.0f}'.format(row.value) }}</td>
+          <td class="num" data-label="0050 定期定額">{{ '{:,.0f}'.format(row.benchmark_value) }}</td>
+          <td class="num {{ 'up' if (row.excess or 0) > 0 else ('down' if (row.excess or 0) < 0 else '') }}" data-label="相對 0050">{{ '{:+.2%}'.format(row.excess) if row.excess is not none else '—' }}</td>
+          <td class="num" data-label="持股／費稅">{{ row.holdings|length }} 檔／{{ '{:,}'.format(row.costs) }} 元</td>
+          <td data-label="對帳">{% if row.problems or row.replay_mismatches %}<span class="badge badge--bad">{{ row.problems|length + row.replay_mismatches }} 項不符</span>{% elif row.sessions %}<span class="badge badge--ok">正常</span>{% else %}<span class="muted small">等第一個交易日</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% for row in stock_forward if row.holdings or row.problems %}
+  <details style="margin-top:10px">
+    <summary class="small">{{ row.name }}：{{ row.date }} 持股 {{ row.holdings|length }} 檔、現金 {{ '{:,.0f}'.format(row.cash) }} 元{% if row.last_trade_day %}；最近交易 {{ row.last_trade_day }}（{{ row.last_trades|length }} 筆）{% endif %}</summary>
+    {% if row.problems %}<ul class="reasons">{% for problem in row.problems %}<li>{{ problem }}</li>{% endfor %}</ul>{% endif %}
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>股票</th><th class="num">股數</th><th class="num">收盤</th><th class="num">市值（元）</th></tr></thead>
+        <tbody>
+        {% for item in row.holdings %}
+          <tr><td data-primary><strong>{{ item.code }}</strong> {{ item.name }}</td><td class="num" data-label="股數">{{ '{:,.2f}'.format(item.units) }}</td><td class="num" data-label="收盤">{{ item.close }}</td><td class="num" data-label="市值">{{ '{:,.0f}'.format(item.value) }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if row.last_trades %}
+    <p class="small" style="margin:8px 0 0">{{ row.last_trade_day }} 的交易：{% for trade in row.last_trades %}{{ '買' if trade.side == 'BUY' else '賣' }} {{ trade.code }} {{ trade.name }} {{ '{:,.0f}'.format(trade.shares) }} 股 @ {{ trade.price }}{% if not loop.last %}；{% endif %}{% endfor %}</p>
+    {% endif %}
+  </details>
+  {% endfor %}
+  <p class="note">相對 0050 ＝（規則資產 − 0050 定期定額資產）÷ 投入。股利以再投入的股數計（和研究回測相同），所以股數會有小數。對帳：每天的股數與現金都要能從前一天加當天的交易算出來，重算過去的日子也要和當天寫下的一致。前向結果只觀察，不拿來挑規則；機器可讀版在<a href="/research/pool.json">選手池 JSON</a> 的 forward_stocks。</p>
+  {% else %}
+  <p class="muted" style="margin:0">尚無追蹤中的個股規則。兩段期間都贏的規則會在下一個交易日 15:30 自動加入。</p>
   {% endif %}
 </section>
 
@@ -296,7 +346,7 @@
       </tbody>
     </table>
   </div>
-  <p class="note">只用開發期（2004-02～2016-12）資料評估；排名第一不代表有效——要同時通過多重檢定（DSR）與過度擬合檢查（PBO），再經驗證期與一次保留期才會成為候選。</p>
+  <p class="note">只用開發期（2004-02～2016-12）資料評估；排名第一不代表有效——要同時通過多重檢定（DSR）與過度擬合檢查（PBO），再經驗證期與最終驗證（每個規則只跑一次）才會成為候選。</p>
 </section>
 {% endif %}
 
@@ -308,7 +358,7 @@
   </div>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th class="num">XIRR</th><th class="num">比 0050</th><th class="num">最大回撤</th><th class="num">3 年勝率</th><th class="num">3 年中位超額</th><th class="num">最差 3 年</th><th class="num">費稅（元）</th></tr></thead>
+      <thead><tr><th>規則</th><th class="num">XIRR</th><th class="num">比 0050</th><th class="num">最大回撤</th><th class="num">3 年勝率</th><th class="num">3 年中位超額</th><th class="num">最差 3 年</th><th class="num">費稅（佔投入）</th></tr></thead>
       <tbody>
       {% for row in stock_rules %}
         {% set cls = 'up' if (row.excess or 0) > 0 else ('down' if (row.excess or 0) < 0 else '') %}
@@ -320,7 +370,7 @@
           <td class="num" data-label="3 年勝率">{{ '{:.0%}'.format(row.three_year.win_ratio) if row.three_year and row.three_year.count else '—' }}</td>
           <td class="num" data-label="3 年中位超額">{{ '{:+.2%}'.format(row.three_year.median_excess) if row.three_year and row.three_year.count else '—' }}</td>
           <td class="num" data-label="最差 3 年">{{ '{:+.1%}'.format(row.three_year.worst_excess) if row.three_year and row.three_year.count else '—' }}</td>
-          <td class="num" data-label="費稅">{{ '{:,.0f}'.format(row.costs) if row.costs is not none else '—' }}</td>
+          <td class="num" data-label="費稅（佔投入）">{{ '{:,.0f}'.format(row.costs) if row.costs is not none else '—' }}{% if row.cost_share is not none %}<span class="muted small">（{{ '{:.0%}'.format(row.cost_share) }}）</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

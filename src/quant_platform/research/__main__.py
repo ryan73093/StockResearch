@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -173,8 +173,12 @@ def _legacy(args) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
-        "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks"),
+        "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
+                            "forward"),
     )
+    parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
+    parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
+    parser.add_argument("--family", default="etf", choices=("etf", "stocks"), help="stats：ETF 規則或個股規則")
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--lump-sum", type=float, default=0, help="stocks：一次投入的金額（0＝每月投入）")
     parser.add_argument("--screen", action="store_true", help="stocks：只算全期間、不算滾動視窗（大掃描第一階段）")
@@ -241,6 +245,14 @@ def main() -> int:
         if args.name not in STOCK_BATCHES:
             raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(STOCK_BATCHES)}")
         rules = STOCK_BATCHES[args.name]()
+        if args.passed:
+            from quant_platform.research.pool import _best_records, _gate
+
+            stock_records = [record for record in registry.records() if record.data_fingerprint.startswith("stocks:")]
+            passed = {spec_hash for spec_hash, record in _best_records(stock_records, "development").items()
+                      if (record.metrics.get("windows") or {}).get("3y", {}).get("count") and not _gate(record.metrics)}
+            rules = [rule for rule in rules if rule.rule_hash in passed]
+            print(f"開發期已通過門檻的規則：{len(rules)} 個", flush=True)
         if args.top:
             # Second stage: the rules whose screening run (no windows) did best, by full-period excess.
             best: dict[str, float] = {}
@@ -279,6 +291,39 @@ def main() -> int:
         overview = pipeline.overview()
         print(f"開發期 {overview['candidates']} 個設定，{overview['window_ok']} 個過視窗門檻，"
               f"{overview['eligible']} 個全部關卡通過；新事件 {len(events)} 筆")
+        return 0
+
+    if args.command == "forward":
+        from quant_platform.research.stock_forward import StockForwardTracker, reconcile
+
+        day = date.fromisoformat(args.date) if args.date else datetime.now(TAIPEI).date()
+        tracker = StockForwardTracker(RESEARCH)
+        written = tracker.record(day)
+        print(f"{day}：寫入 {len(written)} 筆個股規則前向紀錄", flush=True)
+        for row in tracker.summary():
+            print(f"{row['name']}（{row['since']} 起）：{row['sessions']} 個交易日、投入 {row['contributed']:,.0f}、"
+                  f"資產 {row['value']:,.0f}、0050 {row['benchmark_value']:,.0f}、持股 {len(row['holdings'])} 檔、"
+                  f"費稅 {row['costs']:,}；對帳 {'正常' if not row['problems'] else '；'.join(row['problems'])}")
+        return 0 if not reconcile(tracker.records()) else 1
+
+    if args.command == "stats" and args.family == "stocks":
+        from quant_platform.research.stock_rules import WARMUP_YEARS, stock_fingerprint
+
+        start, end = PERIODS[args.period]
+        basis = stock_fingerprint(args.base, start.year - WARMUP_YEARS, end.year, until=end)
+        report = significance(registry, RESEARCH / "reports", args.period, fingerprint=basis)
+        if not report["candidates"]:
+            print(f"{args.period} 沒有目前資料版本的個股規則試驗")
+            return 1
+        path = save_stats(report, RESEARCH / "stats", f"stocks-{args.period}", datetime.now(TAIPEI))
+        best = sorted(report["candidates"], key=lambda item: -(item["dsr"]["deflated_sharpe"] or 0))[:10]
+        for item in best:
+            print(f"#{item['trial_id']} {item['name']}：月超額平均 {item['bootstrap']['mean']:+.3%}"
+                  f"（95% 區間 {item['bootstrap']['low']:+.3%}～{item['bootstrap']['high']:+.3%}），"
+                  f"DSR {item['dsr']['deflated_sharpe']:.2f}（試驗數 {item['dsr']['trials']}）")
+        if report.get("pbo"):
+            print(f"PBO {report['pbo']['pbo']:.2f}（{report['pbo']['combinations']} 種切分、{len(report['candidates'])} 個規則）")
+        print(f"已寫入 {path}")
         return 0
 
     if args.command == "stats":

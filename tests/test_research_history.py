@@ -311,3 +311,39 @@ def test_all_market_quotes_keep_only_common_stocks_with_a_trade(tmp_path):
     # 2331 last traded on 01-04, before the last session: it counts as no longer trading.
     assert summary["twse"]["codes"] == 2 and summary["twse"]["no_longer_trading"] == 1
     assert summary["twse"]["last_day"] == "2005-01-05" and summary["tpex"]["rows"] == 0
+
+
+def test_daily_append_requests_only_the_missing_sessions(tmp_path, monkeypatch):
+    from quant_platform.research.history import stocks
+    from quant_platform.research.history.dataset import write_parquet
+    from quant_platform.research.history.official import DailyRow
+
+    days = [date(2026, 9, 30), date(2026, 10, 1), date(2026, 10, 2)]
+    write_parquet([DailyRow(day, 1.0, 1.0, 1.0, 1.0, source="t") for day in days], tmp_path / "daily" / "TAIEX.parquet")
+    stocks.write_year([{"date": days[0], "code": "2330", "name": "台積電", "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0,
+                        "volume": 1, "turnover": 1, "trades": 1}], tmp_path / "stocks" / "twse" / "2026.parquet")
+
+    class Client:
+        requests = 0
+
+        def __init__(self):
+            self.asked = []
+
+        def _today(self):
+            return date(2026, 10, 2)
+
+        def _cached(self, key, url, final, period_end=None):
+            self.asked.append(key)
+            self.requests += 1
+            return {"stat": "OK", "tables": [{
+                "fields": ["證券代號", "證券名稱", "成交股數", "成交筆數", "成交金額", "開盤價", "最高價", "最低價", "收盤價", "漲跌(+/-)"],
+                "data": [["2330", "台積電", "1,000", "10", "500,000", "499.00", "501.00", "498.00", "500.00", "+"]]}]}
+
+    monkeypatch.setattr(stocks, "quiet_now", lambda now=None: False)   # never wait for the auction in a test
+    client = Client()
+    result = stocks.append_current_year(tmp_path, client, date(2026, 10, 2))
+    assert client.asked == ["twse_stock_all/2026/20261001", "twse_stock_all/2026/20261002"]
+    assert result["today_rows"] == 1 and result["last_day"] == date(2026, 10, 2)
+    client.asked = []
+    stocks.append_current_year(tmp_path, client, date(2026, 10, 2))
+    assert client.asked == []                                          # nothing missing, nothing asked

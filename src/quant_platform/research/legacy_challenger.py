@@ -61,6 +61,11 @@ class Variant:
     rebalance: str       # never | every_5 | monthly | on_rank_days (every day that has a ranking)
     order: str = "best"  # best | worst | random (controls)
     seed: int = 0
+    # Less trading (stock rules R3, 2026-10-03): top a pick up only when it is more than ``band`` ×
+    # its target below the target, biggest gaps first, and never buy less than ``min_trade`` NT$.
+    # Both zero (the default) keeps the original equal-weight top-up in pick order.
+    band: float = 0.0
+    min_trade: float = 0.0
 
 
 VARIANTS = (
@@ -304,6 +309,8 @@ class RunResult:
     trades: int = 0
     fees: int = 0
     taxes: int = 0
+    bought: float = 0.0     # NT$ of shares bought (before fees)
+    sold: float = 0.0       # NT$ of shares sold (before fees and tax)
 
     @property
     def final_value(self) -> float:
@@ -335,8 +342,14 @@ def _tax_kind(symbol: str) -> str:
 
 
 def simulate(data: LegacyData, variant: Variant | None, costs: CostModel, start: date, end: date,
-             ranks: dict[date, list[str]] | None = None, plan: ContributionPlan = STANDARD_PLAN) -> RunResult:
-    """``variant=None`` is the benchmark: every contribution buys 0050 the same day."""
+             ranks: dict[date, list[str]] | None = None, plan: ContributionPlan = STANDARD_PLAN,
+             ledger: list[dict[str, object]] | None = None,
+             snapshots: dict[date, tuple[float, dict[str, float]]] | None = None) -> RunResult:
+    """``variant=None`` is the benchmark: every contribution buys 0050 the same day.
+
+    ``ledger`` (when given) receives every trade and every units adjustment (ex-rights, splits) and
+    ``snapshots`` the cash and units at each session's end — the forward simulation's records
+    (research/stock_forward.py). Neither changes the result."""
     sessions = [day for day in data.sessions if start <= day <= end]
     contributions = plan.schedule(sessions, start, end)
     by_day = dict(contributions)
@@ -360,23 +373,36 @@ def simulate(data: LegacyData, variant: Variant | None, costs: CostModel, start:
             units[symbol] += shares
             result.trades += 1
             result.fees += fee
+            result.bought += shares * price
+            if ledger is not None:
+                ledger.append({"day": day, "symbol": symbol, "side": "BUY", "shares": shares, "price": price,
+                               "fee": fee, "tax": 0})
 
     def sell_all(symbol: str) -> None:
         nonlocal cash
         close = data.closes.get(symbol, {}).get(day)
         if close is None or units[symbol] <= 0:
             return  # no trade that session (suspended): keep it
-        amount = units[symbol] * fill_price(close, "SELL", costs.slippage_bps, _tick(symbol))
+        shares, price = units[symbol], fill_price(close, "SELL", costs.slippage_bps, _tick(symbol))
+        amount = shares * price
         fee, tax = costs.fee(amount), costs.tax(amount, _tax_kind(symbol), "SELL")
         cash += amount - fee - tax
         units[symbol] = 0.0
         result.trades += 1
         result.fees += fee
         result.taxes += tax
+        result.sold += amount
+        if ledger is not None:
+            ledger.append({"day": day, "symbol": symbol, "side": "SELL", "shares": shares, "price": price,
+                           "fee": fee, "tax": tax})
 
     for index, day in enumerate(sessions):
         for symbol in [held for held, count in units.items() if count > 0]:
-            units[symbol] *= data.factors.get(symbol, {}).get(day, 1.0)
+            factor = data.factors.get(symbol, {}).get(day, 1.0)
+            if factor != 1.0:
+                units[symbol] *= factor
+                if ledger is not None:
+                    ledger.append({"day": day, "symbol": symbol, "side": "ADJUST", "factor": factor})
         contribution = by_day.get(day, 0.0)
         cash += contribution
         if contribution:
@@ -397,9 +423,16 @@ def simulate(data: LegacyData, variant: Variant | None, costs: CostModel, start:
                     for symbol in [held for held, count in units.items() if count > 0 and held not in picks]:
                         sell_all(symbol)
                     total = cash + sum(units[symbol] * (data.last_close(symbol, day) or 0.0) for symbol in units)
-                    for symbol in picks:
-                        held_value = units[symbol] * (data.last_close(symbol, day) or 0.0)
-                        buy(symbol, total / len(picks) - held_value)  # no close today: buy() skips it
+                    target = total / len(picks)
+                    gaps = [(symbol, target - units[symbol] * (data.last_close(symbol, day) or 0.0))
+                            for symbol in picks]
+                    if variant.band or variant.min_trade:
+                        gaps = sorted(((symbol, gap) for symbol, gap in gaps if gap > variant.band * target),
+                                      key=lambda item: -item[1])
+                    for symbol, gap in gaps:
+                        if variant.min_trade and min(gap, cash) < variant.min_trade:
+                            continue
+                        buy(symbol, gap)  # no close today: buy() skips it
                 else:
                     budget = cash / len(picks)
                     for symbol in picks:
@@ -408,6 +441,8 @@ def simulate(data: LegacyData, variant: Variant | None, costs: CostModel, start:
         value = cash + sum(count * (data.last_close(symbol, day) or 0.0) for symbol, count in units.items())
         result.values.append(value)
         result.flows.append(contribution)
+        if snapshots is not None:
+            snapshots[day] = (cash, {symbol: count for symbol, count in units.items() if count > 0})
     return result
 
 
@@ -686,7 +721,7 @@ def _verdict(results: list[dict], variants: tuple[Variant, ...], brokers: tuple[
     market = (f"期間 {period['years']:.1f} 年、0050 含息漲了 {period['benchmark_growth']:.1f} 倍，結果偏向上漲行情；"
               if period else "")
     parts.append(f"0050 定期定額的最大回撤是 {benchmark['max_drawdown']:.0%}。其他限制：{market}"
-                 f"個股盤後零股成交假設偏樂觀；{len(variants)} 種用法同時比較、尚未做多重檢定與保留期。")
+                 f"個股盤後零股成交假設偏樂觀；{len(variants)} 種用法同時比較、尚未做多重檢定與最終驗證期。")
     return parts, headline
 
 

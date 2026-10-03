@@ -35,6 +35,7 @@ from quant_platform.research.legacy_challenger import latest_report as latest_ch
 from quant_platform.research.forward import STANDARD_PLAN as FORWARD_PLAN
 from quant_platform.research.periods import ResearchGateError
 from quant_platform.research.pool import pool_view
+from quant_platform.research.stock_forward import StockForwardTracker
 from quant_platform.research.promotion import PromotionPipeline, promotion_limits
 from quant_platform.research.weekly import weekly_report
 from quant_platform.research.summary import round_summary
@@ -693,6 +694,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             tool_groups=TOOL_GROUPS,
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
+            stock_forward=StockForwardTracker(research_dir).summary(),
             round_view=round_view,
             legacy=challenger_view(latest_challenger(research_dir / "legacy")),
             ranking=ranking,

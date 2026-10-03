@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 
-PERIOD_LABELS = {"full": "全期間", "development": "開發期", "validation": "驗證期", "holdout": "保留期"}
+PERIOD_LABELS = {"full": "全期間", "development": "開發期", "validation": "驗證期", "holdout": "最終驗證期"}
 
 
 def latest_reports(
@@ -73,6 +73,7 @@ def trial_ranking(registry_path: str | Path, period: str, limit: int = 10) -> di
 
 def stock_rule_rows(registry_path: str | Path, period: str) -> list[dict[str, object]]:
     """Stock-rule trials of one period (research/stock_rules.py), best 3-year median first."""
+    from quant_platform.research.pool import _activity
     from quant_platform.research.registry import TrialRegistry
 
     records = [record for record in TrialRegistry(registry_path).records()
@@ -92,6 +93,7 @@ def stock_rule_rows(registry_path: str | Path, period: str) -> list[dict[str, ob
             "xirr": record.metrics.get("xirr"), "benchmark_xirr": record.metrics.get("benchmark_xirr"),
             "drawdown": record.metrics.get("max_drawdown"), "benchmark_drawdown": record.metrics.get("benchmark_max_drawdown"),
             "costs": record.metrics.get("costs"), "trades": record.metrics.get("trades"),
+            "cost_share": _activity(record.metrics)["cost_share"],
             "three_year": (record.metrics.get("windows") or {}).get("3y"),
             "five_year": (record.metrics.get("windows") or {}).get("5y"),
         }

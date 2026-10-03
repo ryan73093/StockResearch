@@ -63,13 +63,13 @@ def check_gate(registry: TrialRegistry, kind: str, spec: StrategySpec, period: s
     if kind != "candidate":
         raise ResearchGateError(f"未知試驗類型：{kind}")
     if period not in CANDIDATE_PERIODS:
-        raise ResearchGateError("候選策略不能用全期間評估（會看到保留期）")
+        raise ResearchGateError("候選策略不能用全期間評估（會看到最終驗證期）")
     if period == "holdout":
         records = [record for record in registry.records() if record.spec_hash == spec.spec_hash]
         if not any(record.kind == "candidate" and record.period == "validation" for record in records):
-            raise ResearchGateError("保留期前必須先有驗證期試驗")
+            raise ResearchGateError("最終驗證期前必須先有驗證期試驗")
         if any(record.kind == "candidate" and record.period == "holdout" for record in records):
-            raise ResearchGateError("此設定檔已評估過保留期，每個候選只能評估一次")
+            raise ResearchGateError("此設定檔已評估過最終驗證期，每個候選只能評估一次")
 
 
 def trial_hash(report: dict[str, object], benchmark: StrategySpec, windows: tuple[int, ...]) -> str:

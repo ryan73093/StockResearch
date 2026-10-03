@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import statistics
-from datetime import UTC, date, datetime, timedelta
+import warnings
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -28,7 +28,14 @@ from quant_platform.research.costs import CostModel
 from quant_platform.research.history.dataset import read_series, sha256
 from quant_platform.research.history.stocks import read_year
 from quant_platform.research.legacy_challenger import (
-    BENCHMARK, SPLIT_GAP, LegacyData, Variant, _excess, exchange_events, simulate, windows,
+    BENCHMARK,
+    SPLIT_GAP,
+    LegacyData,
+    Variant,
+    _excess,
+    exchange_events,
+    simulate,
+    windows,
 )
 from quant_platform.research.metrics import unit_values
 from quant_platform.research.periods import PERIODS, ResearchGateError
@@ -43,8 +50,14 @@ FACTORS = {
     "dividend_yield": "近 12 個月現金殖利率",
 }
 STANDARD_PLAN = ContributionPlan(monthly_amount=10_000, day_of_month=5)
-ENGINE_VERSION = "stocks-1.0.1"   # 1.0.1: two warm-up years before the period for factors and listing age
+# 1.0.1: two warm-up years before the period for factors and listing age.
+# 1.1.0 (R3): minimum holding period, top-up band and minimum order; trading activity in the
+# report. A rule without the new settings trades exactly as in 1.0.1.
+ENGINE_VERSION = "stocks-1.1.0"
 WARMUP_YEARS = 2
+# Settings left out of the canonical form (and so the hash) while at their default, so a rule
+# written before a setting existed keeps its hash.
+OMITTED_DEFAULTS = {"extra": {}, "min_hold": 0, "band": 0.0, "min_trade": 0.0}
 
 
 class StockRule(BaseModel):
@@ -58,6 +71,13 @@ class StockRule(BaseModel):
     # Composite ranking (2026-10-03): the main factor's percentile rank plus these factors' ranks
     # weighted; empty means the single factor. Left out of the hash when empty so older hashes stay.
     extra: dict[str, float] = Field(default_factory=dict)
+    # Less trading (R3, 2026-10-03). min_hold: a newly bought stock stays for this many monthly
+    # checks even if it drops out of the keep zone (still sold when it is no longer eligible).
+    # band: a held pick is topped up only when it is more than band x its target below target.
+    # min_trade: no buy smaller than this many NT$.
+    min_hold: int = Field(default=0, ge=0, le=12)
+    band: float = Field(default=0.0, ge=0, le=0.9)
+    min_trade: float = Field(default=0.0, ge=0, le=100_000)
     min_turnover: float = Field(default=20_000_000, ge=0)   # 20-session average NT$ traded
     min_price: float = Field(default=10.0, ge=0)
     min_history: int = Field(default=252, ge=20, le=504)   # sessions listed before a stock is ranked
@@ -65,8 +85,9 @@ class StockRule(BaseModel):
 
     def canonical(self) -> dict[str, object]:
         data = self.model_dump(mode="json")
-        if not data.get("extra"):
-            data.pop("extra", None)
+        for key, default in OMITTED_DEFAULTS.items():
+            if data.get(key) == default:
+                data.pop(key, None)
         return data
 
     @property
@@ -123,12 +144,29 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int) -> Legacy
                       notes={"symbols": len(closes) - 1, "years": [first_year, last_year]})
 
 
-def stock_fingerprint(base: str | Path, first_year: int, last_year: int) -> str:
+def _year_digest(path: Path, until: date | None) -> str:
+    """The file's hash, or - when it holds sessions after ``until`` (the current year grows every
+    day) - the hash of its rows up to ``until``, so a period's fingerprint stays put."""
+    if not path.is_file():
+        return "missing"
+    if until is None:
+        return sha256(path)
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(path)
+    if table.num_rows == 0 or pc.max(table["date"]).as_py() <= until:
+        return sha256(path)
+    table = table.filter(pc.less_equal(table["date"], until)).sort_by([("date", "ascending"), ("code", "ascending")])
+    return "rows:" + hashlib.sha256(json.dumps(table.to_pylist(), default=str).encode("utf-8")).hexdigest()
+
+
+def stock_fingerprint(base: str | Path, first_year: int, last_year: int, until: date | None = None) -> str:
     base = Path(base)
     digest = hashlib.sha256()
     for year in range(first_year, last_year + 1):
         path = base / "stocks" / "twse" / f"{year}.parquet"
-        digest.update(f"{year}:{sha256(path) if path.is_file() else 'missing'}".encode())
+        digest.update(f"{year}:{_year_digest(path, until if year == last_year else None)}".encode())
     digest.update(sha256(base / "daily" / "0050.parquet").encode())
     for path in sorted((base / "raw" / "twse_ex_rights").glob("*.json")):
         if path.stem.isdigit() and first_year <= int(path.stem) <= last_year:
@@ -169,6 +207,12 @@ class Panel:
         self.filled = _forward_fill(self.adjusted)
 
     def ranked(self, rule: StockRule, day: date) -> list[str]:
+        with warnings.catch_warnings():
+            # stocks not trading yet in the window give all-NaN rows; they are ineligible anyway
+            warnings.simplefilter("ignore", RuntimeWarning)
+            return self._ranked(rule, day)
+
+    def _ranked(self, rule: StockRule, day: date) -> list[str]:
         position = self.index[day]
         start = max(0, position - 19)
         turnover = np.nanmean(self.turnover[:, start:position + 1], axis=1)
@@ -253,13 +297,17 @@ def rankings(panel: Panel, rule: StockRule, start: date, end: date) -> dict[date
     sessions = [day for day in panel.sessions if start <= day <= end]
     output: dict[date, list[str]] = {}
     current: list[str] = []
+    bought: dict[str, int] = {}          # symbol -> the check (count) it was bought at
     for count, (day, _amount) in enumerate(STANDARD_PLAN.schedule(sessions, start, end)):
         if rule.rebalance == "monthly" or count % 3 == 0 or not current:
             ranked = panel.ranked(rule, day)
             keep_zone = set(ranked[: rule.top * rule.buffer])
-            kept = [symbol for symbol in current if symbol in keep_zone]       # still good enough: hold
+            eligible = set(ranked) if rule.min_hold else set()
+            kept = [symbol for symbol in current                                 # still good enough: hold
+                    if symbol in keep_zone or (symbol in eligible and count - bought[symbol] < rule.min_hold)]
             fresh = [symbol for symbol in ranked if symbol not in kept]
             current = kept + fresh[: max(0, rule.top - len(kept))]
+            bought = {symbol: bought.get(symbol, count) for symbol in current}
         output[day] = list(current)
     return output
 
@@ -271,7 +319,7 @@ def evaluate_rule(data: LegacyData, panel: Panel, rule: StockRule, costs: CostMo
     first = next((day for day in sorted(ranks) if ranks[day]), None)
     if first is None:
         raise ResearchGateError("期間內沒有任何一天有合格的股票")
-    variant = Variant(rule.rule_hash[:12], rule.name, rule.top, "on_rank_days")
+    variant = rule_variant(rule)
     run = simulate(data, variant, costs, first, end, ranks, plan)
     benchmark = simulate(data, None, costs, first, end, plan=plan)
     cache: dict = {}
@@ -284,8 +332,30 @@ def evaluate_rule(data: LegacyData, panel: Panel, rule: StockRule, costs: CostMo
         "windows": {f"{months // 12}y": windows(data, variant, costs, first, end, months, ranks, cache)
                     for months in window_months},
         "picks_per_day": round(statistics.fmean(len(picks) for picks in ranks.values()), 1),
+        "activity": activity(run), "benchmark_activity": activity(benchmark),
     }
     return report
+
+
+def rule_variant(rule: StockRule) -> Variant:
+    return Variant(rule.rule_hash[:12], rule.name, rule.top, "on_rank_days", band=rule.band, min_trade=rule.min_trade)
+
+
+def activity(run) -> dict[str, object]:
+    """How much a run trades: fees and tax against the money put in, a year's sales against the
+    average assets (turnover), the yearly cost against the average assets, and orders a month."""
+    if not run.days:
+        return {}
+    years = max((run.days[-1] - run.days[0]).days / 365.25, 1 / 12)
+    average = statistics.fmean(run.values) if run.values else 0.0
+    costs = run.fees + run.taxes
+    return {
+        "costs": costs, "contributed": round(run.contributed, 2),
+        "cost_share": round(costs / run.contributed, 6) if run.contributed else None,
+        "turnover": round(run.sold / average / years, 4) if average else None,
+        "cost_drag": round(costs / average / years, 6) if average else None,
+        "orders_per_month": round(run.trades / (years * 12), 2),
+    }
 
 
 def _monthly_active(run, benchmark) -> dict[str, float]:
@@ -310,10 +380,10 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
                     window_months: tuple[int, ...] = (36, 60)) -> tuple[object, dict]:
     """Evaluate one rule on one research period and register it (reused when already run)."""
     if period not in ("development", "validation", "holdout"):
-        raise ResearchGateError("個股規則只能用開發、驗證或保留期評估")
+        raise ResearchGateError("個股規則只能用開發、驗證或最終驗證期評估")
     start, end = PERIODS[period]
     costs = costs or CostModel()
-    fingerprint = stock_fingerprint(base, start.year - WARMUP_YEARS, end.year)
+    fingerprint = stock_fingerprint(base, start.year - WARMUP_YEARS, end.year, until=end)
     cash_flow = {"monthly_amount": plan.monthly_amount, "day_of_month": plan.day_of_month,
                  "kind": type(plan).__name__}
     payload = {"rule": rule.canonical(), "period": period, "costs": costs.as_dict(), "data": fingerprint,
@@ -325,9 +395,9 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
     if period == "holdout":
         mine = [record for record in registry.records() if record.spec_hash == rule.rule_hash]
         if not any(record.period == "validation" for record in mine):
-            raise ResearchGateError("保留期前必須先有驗證期試驗")
+            raise ResearchGateError("最終驗證期前必須先有驗證期試驗")
         if any(record.period == "holdout" for record in mine):
-            raise ResearchGateError("此規則已評估過保留期，每個候選只能評估一次")
+            raise ResearchGateError("此規則已評估過最終驗證期，每個候選只能評估一次")
     # Two years before the period warm the factors and the listing age up; trades start at ``start``.
     data = data or load_stock_data(base, start.year - WARMUP_YEARS, end.year)
     panel = panel or Panel(data)
@@ -349,6 +419,8 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
             "trades": strategy["trades"], "costs": strategy["fees"] + strategy["taxes"],
             "full_period_excess": report["full_period_excess"], "windows": report["windows"],
             "cost_scale": 1.0, "execution_lag": 0, "plan": cash_flow,
+            "contributed": report["activity"]["contributed"], "cost_share": report["activity"]["cost_share"],
+            "turnover": report["activity"]["turnover"], "orders_per_month": report["activity"]["orders_per_month"],
         },
     )
     return record, report
@@ -418,4 +490,31 @@ def sweep_batch() -> list[StockRule]:
     return rules
 
 
-BATCHES = {"first": first_batch, "second": second_batch, "high52": high52_family, "sweep": sweep_batch}
+def cost_batch() -> list[StockRule]:
+    """R3 (2026-10-03): the 52-week-high family with less trading. The rule that won both periods
+    pays fees and tax worth 23% of the money put in (development) - it sells about 3.5 times its
+    assets a year. Wider keep zones (top x 3 or x 5), a minimum holding period (3 or 6 checks;
+    quarterly rules only 6, as 3 checks is their own cycle), and topping up only picks more than 30%
+    below target with orders of at least NT$1,000: 2 x 2 x 5 x 2 = 40 rules, four of them already
+    run in earlier batches (same hash, no new attempt)."""
+    rules = []
+    for top in (30, 50):
+        for buffer in (3, 5):
+            for rebalance, word, holds in (("monthly", "每月", (0, 3, 6)), ("quarterly", "每季", (0, 6))):
+                for min_hold in holds:
+                    for band in (0.0, 0.3):
+                        parts = [f"前 {top} 名", f"{word}換股", f"留到跌出前 {top * buffer}"]
+                        if min_hold:
+                            parts.append(f"新買的至少留 {min_hold} 個月")
+                        if band:
+                            parts.append("落後目標三成以上才加碼、每筆至少 1,000 元")
+                        rules.append(StockRule(
+                            name=("個股 接近 52 週高點：" + "、".join(parts))[:80], factor="high_52w", top=top,
+                            rebalance=rebalance, buffer=buffer, min_hold=min_hold, band=band,
+                            min_trade=1000.0 if band else 0.0,
+                        ))
+    return rules
+
+
+BATCHES = {"first": first_batch, "second": second_batch, "high52": high52_family, "sweep": sweep_batch,
+           "cost": cost_batch}

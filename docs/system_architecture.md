@@ -25,7 +25,7 @@
 | D13 | 試驗的資料指紋只涵蓋期間結束日以前的資料（`MarketData.fingerprint_until`，逐日串接雜湊），研究 CLI 一次載入全部目錄序列；排行與 PBO 只用目前資料版本的試驗，舊版保留並計入試驗次數 | 每日新增行情不會把同一設定變成「新試驗」灌水試驗次數；歷史資料被修正時舊結果自動退出排行，但多重檢定仍保守計數 |
 | D14 | 成本以券商設定檔表示（`research/costs.py` 的 `BROKERS`：保守、國泰、台新），研究預設保守；計畫選定的券商用於今日建議、預設手續費與影子帳戶 | 研究不因樂觀費率高估多次交易的策略；實際操作的估算貼近使用者的券商 |
 | D15 | 通知走 LINE Messaging API push（使用者自己的官方帳號），以 `notification_deliveries` 記錄並以鍵去重；請求帶 `X-Line-Retry-Key` | LINE Notify 已停止；單人使用不需 webhook；重試不會重複送達，排程可每 5 分鐘重跑 |
-| D16 | AI 研究員是夜間的提案者：模型輸出經 StrategySpec 驗證的設定檔，由現有引擎在開發期回測並登錄；模型看不到驗證期與保留期，也不接觸下單與每日建議 | 研究可重現、每個提案都計入多重檢定；模型的錯誤只會產生被拒絕或失敗的試驗，不會影響資金 |
+| D16 | AI 研究員是夜間的提案者：模型輸出經 StrategySpec 驗證的設定檔，由現有引擎在開發期回測並登錄；模型看不到驗證期與最終驗證期，也不接觸下單與每日建議 | 研究可重現、每個提案都計入多重檢定；模型的錯誤只會產生被拒絕或失敗的試驗，不會影響資金 |
 
 ## 圖 1：目標架構總覽
 
@@ -149,13 +149,13 @@ flowchart TD
     CAND -->|否| LOG
     CAND -->|是| VAL[驗證期間評估<br/>DSR、PBO、成本加倍、晚一天執行、美股對照]
     VAL -->|未通過| LOG
-    VAL -->|通過| HOLD[鎖定保留期<br/>每個候選只評估一次]
+    VAL -->|通過| HOLD[鎖定最終驗證期<br/>每個候選只評估一次]
     HOLD -->|通過| FWD[前向模擬<br/>2026-10 起的新資料]
     FWD -->|達晉級條件| PROMO[晉級：決策引擎可使用]
     HOLD -->|未通過| LOG
 ```
 
-防護：AI 只輸出設定檔，不執行程式；看不到保留期資料；所有試驗（含失敗）都計入多重檢定；研究只在夜間執行並設每日試驗與 API 預算。保留期已在 2026-08 前的研究中被使用過的部分，於路線圖 S4-W02 記錄為已知限制；完全乾淨的驗證是前向模擬。
+防護：AI 只輸出設定檔，不執行程式；看不到最終驗證期資料；所有試驗（含失敗）都計入多重檢定；研究只在夜間執行並設每日試驗與 API 預算。最終驗證期已在 2026-08 前的研究中被使用過的部分，於路線圖 S4-W02 記錄為已知限制；完全乾淨的驗證是前向模擬。
 
 ## 圖 5：資料儲存分層
 
@@ -246,9 +246,10 @@ flowchart LR
 | 位置 | 內容 |
 |---|---|
 | `market_calendar/` | 官方交易日曆與臨時休市（已建立；CLI：`python -m quant_platform.market_calendar`） |
-| `research/` | 研究地基（S3，已建立）：`history/`（官方長歷史抓取、快取、Parquet 資料集、除權息依表頭解析與參考價檢查、總報酬、Yahoo 交叉核對、盤後零股成交分布與各限價成交率、目錄宣告的分割、00631L 上市前的合成回填 `synthesize_backfill`；CLI `python -m quant_platform.research.history`）、`costs.py`（手續費、證交稅、盤後零股成交價、今日委託限價 `order_limit`、券商設定檔）、`cashflow.py`（投入計畫）、`spec.py`（策略設定檔 v1 與四個基準）、`market.py`（資料載入與期間資料指紋）、`engine.py`（現金流回測）、`compare.py`（對定期定額的滾動視窗比較）、`registry.py`（試驗登錄與資料版本）、`periods.py`（期間與保留期關卡）、`statistics.py`、`significance.py`（DSR、PBO、bootstrap）、`batches.py`、`summary.py`、`forward.py`（前向模擬）、`metrics.py`、`reports.py`；CLI `python -m quant_platform.research baselines|trial|batch|trials|stats|schema|legacy`（`--broker`、`--cost-scale`、`--execution-lag`）。後續：AI 研究員（S4-W04） |
+| `research/` | 研究地基（S3，已建立）：`history/`（官方長歷史抓取、快取、Parquet 資料集、除權息依表頭解析與參考價檢查、總報酬、Yahoo 交叉核對、盤後零股成交分布與各限價成交率、目錄宣告的分割、00631L 上市前的合成回填 `synthesize_backfill`；CLI `python -m quant_platform.research.history`）、`costs.py`（手續費、證交稅、盤後零股成交價、今日委託限價 `order_limit`、券商設定檔）、`cashflow.py`（投入計畫）、`spec.py`（策略設定檔 v1 與四個基準）、`market.py`（資料載入與期間資料指紋）、`engine.py`（現金流回測）、`compare.py`（對定期定額的滾動視窗比較）、`registry.py`（試驗登錄與資料版本）、`periods.py`（期間與最終驗證期關卡）、`statistics.py`、`significance.py`（DSR、PBO、bootstrap）、`batches.py`、`summary.py`、`forward.py`（前向模擬）、`metrics.py`、`reports.py`；CLI `python -m quant_platform.research baselines|trial|batch|trials|stats|schema|legacy`（`--broker`、`--cost-scale`、`--execution-lag`）。後續：AI 研究員（S4-W04） |
 | `application/notifications.py` | LINE Messaging API push、去重與傳送紀錄、訊息內容（S5-W07；設定 `docs/line-notifications.md`） |
-| `research/history/stocks.py` | 證交所每日全市場行情（含後來下市的公司）一天一檔快取，每年一個 Parquet（`history/stocks/twse/`）；CLI `python -m quant_platform.research.history stocks`；櫃買待做 |
+| `research/history/stocks.py` | 證交所每日全市場行情（含後來下市的公司）一天一檔快取，每年一個 Parquet（`history/stocks/twse/`）；CLI `python -m quant_platform.research.history stocks`；worker 15:15 研究資料更新後 `append_current_year` 補當年缺的日子（R2）；櫃買待做 |
+| `research/stock_forward.py` | 個股規則前向模擬（R2）：`forward/stocks/tracked.json`（兩段期間都贏的規則自動加入、起始日）、worker 15:30 寫 `forward/stocks/log.jsonl`（持股、交易、除權息調整、0050 對照、重算檢查）、`reconcile` 對帳；CLI `python -m quant_platform.research forward [--date]` |
 | `research/stock_rules.py` | 個股因子規則（單一或混合因子、資格門檻、前 N 名等權、每月／每季、緩衝、一次投入）、兩階段大掃描、登錄為候選試驗（資料指紋 `stocks:…`）；CLI `python -m quant_platform.research stocks --period … --name first|second|sweep|high52 [--screen|--top N] [--lump-sum 300000]` |
 | `research/pool.py` | 研究選手池：從試驗登錄、晉級帳本、AI 日誌與統計檔組出每個規則的狀態與原因；`/research/pool` 與 `/research/pool.json` |
 | `docs/research_method.md` | 研究方法、架構圖、關卡流程圖、結論、淘汰方向、研究路線圖 R1–R12（系統頁專案資訊「研究方法」） |
@@ -259,7 +260,7 @@ flowchart LR
 | `scripts/close_interrupted_runs.py` | `stop-services.ps1` 停止全部服務後，把仍是「執行中」的紀錄標為中斷；worker 啟動時另關閉重開機前開始的紀錄 |
 | `application/dividends.py` | 股利（S5-W03）：證交所 TWT48U 與櫃買 `tpex_exright_prepost` 除權除息預告（worker `ex_dividend_refresh` 每小時檢查、每 12 小時更新），快取 `instance/events/ex_dividends.json`；持倉頁即將除息與待記錄的股利 |
 | `research/weekly.py` | 每週研究報告（S6-W04）：研究頁本週即時版本；worker 週日 23:30 存 `instance/research/weekly/<年>-W<週>.json` |
-| `research/promotion.py` | 晉級流程（S4-W06）：開發期／驗證期／保留期關卡、成本加倍與晚一天執行、前向模擬 40 個交易日、使用者核准與撤銷；只追加的雜湊串鏈紀錄 `instance/research/promotions.jsonl`；`strategy_catalog()` 提供計畫頁可選的策略（內建基準＋已核准） |
+| `research/promotion.py` | 晉級流程（S4-W06）：開發期／驗證期／最終驗證期關卡、成本加倍與晚一天執行、前向模擬 40 個交易日、使用者核准與撤銷；只追加的雜湊串鏈紀錄 `instance/research/promotions.jsonl`；`strategy_catalog()` 提供計畫頁可選的策略（內建基準＋已核准） |
 | `research/agent/` | AI 研究員（S4-W04）：`llm.py`（OpenAI Responses API、`store: false`、費用帳本與每月預算硬上限）、`researcher.py`（提示、設定檔驗證與去重、開發期試驗、研究日誌、每晚上限與鎖）；CLI `python -m quant_platform.research agent [--dry-run|--check]`；worker 工作 `research_agent`（每晚 22:00） |
 | `decision/` | 投資計畫、決策引擎、委託單、帳務與影子帳戶 |
 | `dashboard/v2.py`、`dashboard/templates/v2/`、`static/css/v2.css` | 新介面：今日、持倉、計畫、研究、系統（含專案資訊，直接讀 docs 原始檔）；電腦／iPad／手機三種版面、深色預設（S2-W03 第二版）；使用教學 `/help`（讀 `docs/user-guide.md`，S6-W06） |

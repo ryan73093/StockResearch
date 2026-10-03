@@ -303,6 +303,16 @@ def refresh_research_history(container: "Container", now: datetime | None = None
     manifest = HistoryDataset(base, client=OfficialHistoryClient(base / "raw")).build()
     build_actions(base, OfficialHistoryClient(base / "raw"))
     logger.info("Research history refreshed: %s", manifest.get("requests"))
+    if (base / "stocks" / "twse").is_dir():
+        # R2: today's all-market quotes for the stock-rule forward simulation (15:30).
+        try:
+            from quant_platform.research.history.stocks import append_current_year
+
+            appended = append_current_year(base, OfficialHistoryClient(base / "raw"), local_now.date())
+            logger.info("Stock quotes appended: last day %s, %s rows today", appended.get("last_day"),
+                        appended.get("today_rows"))
+        except Exception:  # the ETF refresh above stays done; the forward record waits for the quotes
+            logger.exception("Stock quotes append failed")
     return manifest.get("requests")
 
 
@@ -320,6 +330,15 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
         return None
     written = ForwardTracker(research).record(local_now.date())
     logger.info("Forward simulation recorded %s strategies", len(written))
+    if (research / "history" / "stocks" / "twse").is_dir():
+        try:
+            from quant_platform.research.stock_forward import StockForwardTracker
+
+            stocks = StockForwardTracker(research).record(local_now.date())
+            logger.info("Stock-rule forward simulation recorded %s rules", len(stocks))
+            written = written + stocks
+        except Exception:
+            logger.exception("Stock-rule forward simulation failed")
     return len(written)
 
 

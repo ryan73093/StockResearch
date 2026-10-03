@@ -143,7 +143,8 @@ def fetch_exchange(
         if all(day in have for day in days):
             say(f"{exchange} {year} 已完整（{len(existing):,} 列）")
             continue
-        rows = [row for row in existing if row["date"] in set(days)]
+        wanted = set(days)
+        rows = [row for row in existing if row["date"] in wanted]
         for index, day in enumerate(days, 1):
             if day in have:
                 continue
@@ -163,6 +164,22 @@ def fetch_exchange(
         written.append(year)
         say(f"{exchange} {year} 完成：{len(rows):,} 列、{len({row['code'] for row in rows})} 檔")
     return {"stopped": False, "years": written, "requests": client.requests - requests_before}
+
+
+def append_current_year(base: Path, client: OfficialHistoryClient, today: date,
+                        exchange: str = "twse") -> dict[str, object]:
+    """After the close (research roadmap R2): add the sessions of this year that the year file
+    lacks, today included once the exchange has published it. The sessions come from the index
+    series the nightly refresh has just rebuilt; earlier years and cached days are not requested."""
+    from quant_platform.research.history.dataset import read_series
+
+    sessions = [row["date"] for row in read_series(base / "daily" / "TAIEX.parquet")
+                if row["date"].year == today.year and row["date"] <= today]
+    result = fetch_exchange(exchange, client, sessions, base)
+    rows = read_year(base / "stocks" / exchange / f"{today.year}.parquet")
+    result["last_day"] = max((row["date"] for row in rows), default=None)
+    result["today_rows"] = sum(1 for row in rows if row["date"] == today)
+    return result
 
 
 def universe_summary(base: Path) -> dict[str, object]:

@@ -20,8 +20,8 @@ STATUS_ORDER = (
     "window_ok", "eliminated",
 )
 STATUS_LABELS = {
-    "approved": "已核准", "forward": "前向模擬中", "holdout_passed": "保留期通過", "validation_passed": "驗證期通過",
-    "holdout_failed": "保留期未通過", "validation_failed": "驗證期未通過",
+    "approved": "已核准", "forward": "前向模擬中", "holdout_passed": "最終驗證期通過", "validation_passed": "驗證期通過",
+    "holdout_failed": "最終驗證期未通過", "validation_failed": "驗證期未通過",
     "window_ok": "開發期通過視窗、待驗證", "eliminated": "開發期淘汰",
 }
 
@@ -32,6 +32,22 @@ def _window(metrics: dict, key: str) -> dict:
 
 def _gate(metrics: dict) -> list[str]:
     return window_gate(metrics) + drawdown_gate(metrics)
+
+
+def _activity(metrics: dict) -> dict[str, object]:
+    """Fees and tax against the money put in (R3). Runs before 2026-10-03 lack ``contributed``; with
+    the standard plan it is NT$10,000 for every month from the first contribution to the end."""
+    contributed = metrics.get("contributed")
+    plan = metrics.get("plan") or {}
+    if contributed is None and metrics.get("start") and metrics.get("end") and plan.get("kind", "ContributionPlan") == "ContributionPlan":
+        start, end = str(metrics["start"]), str(metrics["end"])
+        months = (int(end[:4]) * 12 + int(end[5:7])) - (int(start[:4]) * 12 + int(start[5:7])) + 1
+        contributed = months * float(plan.get("monthly_amount") or 10_000)
+    costs = metrics.get("costs")
+    share = metrics.get("cost_share")
+    if share is None and costs is not None and contributed:
+        share = round(costs / contributed, 6)
+    return {"cost_share": share, "turnover": metrics.get("turnover"), "orders_per_month": metrics.get("orders_per_month")}
 
 
 def _sources(research_dir: Path) -> dict[str, str]:
@@ -80,8 +96,13 @@ def rule_rows(research_dir: str | Path) -> list[dict[str, object]]:
     records = registry.records()
     ledger = PromotionLedger(base / "promotions.jsonl")
     origin = _sources(base)
-    stats = latest_stats(base / "stats", "development") or {}
-    dsr = {item["trial_id"]: item["dsr"]["deflated_sharpe"] for item in stats.get("candidates") or []}
+    dsr = {}
+    for family in ("development", "stocks-development"):
+        stats = latest_stats(base / "stats", family) or {}
+        dsr.update({item["trial_id"]: item["dsr"]["deflated_sharpe"] for item in stats.get("candidates") or []})
+    from quant_platform.research.stock_forward import StockForwardTracker
+
+    forward_since = {item["rule_hash"]: item["since"] for item in StockForwardTracker(base).tracked()}
     etf_current, _older = current_basis(records, "development")
     etf_basis = {record.spec_hash for record in etf_current}
     development = _best_records(records, "development")
@@ -116,6 +137,7 @@ def rule_rows(research_dir: str | Path) -> list[dict[str, object]]:
             "source": origin.get(spec_hash, "其他"), "status": status, "status_label": STATUS_LABELS[status],
             "track": TRACK_LABELS.get(ledger.track(spec_hash), "一般") if stage else None,
             "stage_label": STAGE_LABELS.get(stage, stage) if stage else None, "outcome": outcome,
+            "forward_since": forward_since.get(spec_hash),
             "development": {
                 "trial_id": dev.trial_id, "xirr": dev.metrics.get("xirr"), "benchmark_xirr": dev.metrics.get("benchmark_xirr"),
                 "max_drawdown": dev.metrics.get("max_drawdown"),
@@ -124,6 +146,7 @@ def rule_rows(research_dir: str | Path) -> list[dict[str, object]]:
                 "win_3y": three.get("win_ratio"), "median_3y": three.get("median_excess"), "worst_3y": three.get("worst_excess"),
                 "win_5y": five.get("win_ratio"), "median_5y": five.get("median_excess"),
                 "costs": dev.metrics.get("costs"), "trades": dev.metrics.get("trades"),
+                **_activity(dev.metrics),
                 "dsr": dsr.get(dev.trial_id), "reasons": dev_gate, "report": dev.report_file,
             },
             "validation": None if val is None else {
@@ -132,6 +155,7 @@ def rule_rows(research_dir: str | Path) -> list[dict[str, object]]:
                 "win_3y": _window(val.metrics, "3y").get("win_ratio"),
                 "median_3y": _window(val.metrics, "3y").get("median_excess"),
                 "worst_3y": _window(val.metrics, "3y").get("worst_excess"),
+                **_activity(val.metrics),
                 "reasons": val_gate, "report": val.report_file,
             },
             "holdout": None if hold is None else {
@@ -171,13 +195,20 @@ def pool_view(research_dir: str | Path, top: int = 20) -> dict[str, object]:
     ranked = [row for row in rows if row["development"]["win_3y"] is not None]
     high_win = sorted(ranked, key=lambda row: (-row["development"]["win_3y"], -(row["development"]["median_3y"] or 0)))[:top]
     both = [row for row in rows if row["validation"] and not row["development"]["reasons"] and not row["validation"]["reasons"]]
+    from quant_platform.research.stock_forward import StockForwardTracker
+
     stats = latest_stats(Path(research_dir) / "stats", "development") or {}
+    stock_stats = latest_stats(Path(research_dir) / "stats", "stocks-development") or {}
     attempts = distinct_rules([record for record in TrialRegistry(Path(research_dir) / "trials.jsonl").records()
                                if record.kind == "candidate" and record.period == "development"])
-    best_dsr = max((item["dsr"]["deflated_sharpe"] or 0, item["name"]) for item in stats.get("candidates") or [{"dsr": {"deflated_sharpe": 0}, "name": ""}])
+    best_dsr = max((item["dsr"]["deflated_sharpe"] or 0, item["name"])
+                   for item in (stats.get("candidates") or []) + (stock_stats.get("candidates") or [])
+                   or [{"dsr": {"deflated_sharpe": 0}, "name": ""}])
     return {
         "rules": rows, "counts": counts, "families": families, "total": len(rows),
         "attempts": attempts, "best_dsr": best_dsr, "pbo": (stats.get("pbo") or {}).get("pbo"),
+        "stock_pbo": (stock_stats.get("pbo") or {}).get("pbo"),
         "high_win": high_win, "both_periods": both, "ai_rounds": ai_rounds(research_dir),
+        "forward_stocks": StockForwardTracker(research_dir).summary(),
         "status_labels": STATUS_LABELS,
     }

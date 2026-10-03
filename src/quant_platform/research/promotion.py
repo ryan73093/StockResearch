@@ -53,7 +53,7 @@ FORWARD_SESSIONS = 40
 STAGES = ("development", "validation", "holdout", "forward", "approved")
 TRACK_LABELS = {"standard": "一般", "aggressive": "進攻型"}
 STAGE_LABELS = {
-    "development": "開發期", "validation": "驗證期", "holdout": "保留期", "forward": "前向模擬",
+    "development": "開發期", "validation": "驗證期", "holdout": "最終驗證期", "forward": "前向模擬",
     "approved": "已核准", "revoked": "已撤銷",
 }
 
