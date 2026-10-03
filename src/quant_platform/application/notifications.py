@@ -157,7 +157,7 @@ def _day_label(day) -> str:
 
 def plan_advice_text(decision, public_url: str = "") -> str:
     kind = "補買" if getattr(decision, "missed_day", None) else "投入日"
-    lines = [f"【盤後決策台】{_day_label(decision.invest_day)} {kind}", decision.headline]
+    lines = [f"【交易研究分析平台】{_day_label(decision.invest_day)} {kind}", decision.headline]
     for order in decision.orders:
         side = "買進" if order.side == "BUY" else "賣出"
         lines.append(
@@ -174,7 +174,7 @@ def plan_advice_text(decision, public_url: str = "") -> str:
 
 
 def idle_text(decision, today, public_url: str = "") -> str:
-    lines = [f"【盤後決策台】{_day_label(today)} 今天不需操作"]
+    lines = [f"【交易研究分析平台】{_day_label(today)} 今天不需操作"]
     if decision.invest_day:
         lines.append(f"下次投入日 {_day_label(decision.invest_day)}・{decision.strategy}")
     lines += decision.reasons[:1]
@@ -184,7 +184,7 @@ def idle_text(decision, today, public_url: str = "") -> str:
 
 
 def plan_problem_text(decision, public_url: str = "") -> str:
-    lines = [f"【盤後決策台】{_day_label(decision.invest_day)} 投入日：{decision.headline}"]
+    lines = [f"【交易研究分析平台】{_day_label(decision.invest_day)} 投入日：{decision.headline}"]
     lines += [f"・{reason}" for reason in decision.reasons[:3]]
     lines.append("請到網站確認；盤後零股收單到 14:30。")
     if public_url:
@@ -193,7 +193,7 @@ def plan_problem_text(decision, public_url: str = "") -> str:
 
 
 def failure_text(what: str, error: str | None, public_url: str = "") -> str:
-    lines = [f"【盤後決策台】{what}失敗", (error or "未知錯誤")[:500], "請到「系統」頁查看紀錄。"]
+    lines = [f"【交易研究分析平台】{what}失敗", (error or "未知錯誤")[:500], "請到「系統」頁查看紀錄。"]
     if public_url:
         lines.append(public_url.rstrip("/") + "/system")
     return "\n".join(lines)

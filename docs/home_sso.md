@@ -14,4 +14,4 @@
 
 回復：先確認 Cloudflare Access 原規則生效，再將 Home SSO 設為 `enabled:false` 並使用本專案正式啟停流程；來源原檔與私有設定備份在 Home 的 `.runtime/sso-backups/`。業務 DB 與 AI 設定不遷移。
 
-一般使用者僅能讀取盤後決策台；寫入仍限 Home 管理員。內部 8000 API 的既有權杖保持原規則。此次只用 `scripts/deploy.ps1 -HomeAuthOnly` 更新已安裝的登入模組，不部署研究 WIP、不重算統計。
+一般使用者僅能讀取交易研究分析平台；寫入仍限 Home 管理員。內部 8000 API 的既有權杖保持原規則。此次只用 `scripts/deploy.ps1 -HomeAuthOnly` 更新已安裝的登入模組，不部署研究 WIP、不重算統計。

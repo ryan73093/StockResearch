@@ -6,7 +6,7 @@
 
 ## 你需要做的設定（一次）
 
-1. 用 LINE 帳號登入 [LINE Official Account Manager](https://manager.line.biz/)，建立一個官方帳號（名稱例如「盤後決策台」；免費方案即可）。
+1. 用 LINE 帳號登入 [LINE Official Account Manager](https://manager.line.biz/)，建立一個官方帳號（名稱例如「交易研究分析平台」；免費方案即可）。
 2. 在該官方帳號的「設定 → Messaging API」按「啟用 Messaging API」，選擇或建立一個 Provider。
 3. 到 [LINE Developers Console](https://developers.line.biz/console/) 找到剛建立的 channel：
    - 「Messaging API」分頁最下方 **Channel access token (long-lived)** 按 Issue，複製 token。

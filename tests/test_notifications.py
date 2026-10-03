@@ -103,10 +103,10 @@ def decision(kind="invest", headline="今天依計畫投入：買進 0050 99 股
 def test_advice_text_lists_the_orders():
     text = plan_advice_text(decision(), "https://stockresearch.pimi-sunsun.com")
 
-    assert text.startswith("【盤後決策台】10/05（一） 投入日")
+    assert text.startswith("【交易研究分析平台】10/05（一） 投入日")
     assert "0050 買進 99 股，限價 100.20（收盤 100.00），約 9,920 元，手續費 3 元" in text
     assert "計畫第 1 版・定期定額基準" in text and text.endswith("https://stockresearch.pimi-sunsun.com/")
-    assert failure_text("夜間資料庫備份", "disk full").splitlines()[:2] == ["【盤後決策台】夜間資料庫備份失敗", "disk full"]
+    assert failure_text("夜間資料庫備份", "disk full").splitlines()[:2] == ["【交易研究分析平台】夜間資料庫備份失敗", "disk full"]
 
 
 class FakeContainer:
@@ -168,7 +168,7 @@ def test_catch_up_advice_is_sent_once_per_missed_invest_day():
     container = FakeContainer(catch_up)
     assert notify_plan_advice(container, at(13, 50)) == "sent"
     key, title, text = container.sent[0]
-    assert (key, title) == ("plan-catch-up:2026-10-01", "補買提醒") and text.startswith("【盤後決策台】10/05（一） 補買")
+    assert (key, title) == ("plan-catch-up:2026-10-01", "補買提醒") and text.startswith("【交易研究分析平台】10/05（一） 補買")
 
     waiting = FakeContainer(replace(decision("missing_data", "0050 今日收盤尚未取得"), missed_day=date(2026, 10, 1)))
     assert notify_plan_advice(waiting, at(14, 20)) is None            # no daily problem message on catch-up days

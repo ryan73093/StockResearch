@@ -886,7 +886,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         now = datetime.now(TAIPEI)
         status = dependencies.notification_service.send(
             f"test:{now:%Y%m%d%H%M%S}", "測試訊息",
-            f"【盤後決策台】測試訊息 {now:%Y-%m-%d %H:%M}\n收到這則代表 LINE 通知設定可用。", once=False,
+            f"【交易研究分析平台】測試訊息 {now:%Y-%m-%d %H:%M}\n收到這則代表 LINE 通知設定可用。", once=False,
         )
         messages = {
             "sent": ("已傳送測試訊息，請查看 LINE。", "success"),
