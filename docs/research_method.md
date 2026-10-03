@@ -11,7 +11,7 @@
 ```mermaid
 flowchart LR
   subgraph data[資料]
-    twse[證交所 / 櫃買官方<br/>ETF 日線、全市場日行情、除權息、盤後零股]
+    twse[證交所 / 櫃買官方<br/>ETF 日線、全市場日行情、除權息、盤後零股<br/>每個交易日 15:15 追加]
     yahoo[Yahoo 交叉核對]
     syn[合成回填<br/>00631L 上市前]
   end
@@ -28,7 +28,7 @@ flowchart LR
   subgraph gates[關卡]
     dev[開發期 2004–2016]
     val[驗證期 2017–2021]
-    hold[最終驗證期 2022–2026-09<br/>每個規則只評估一次]
+    hold[最終驗證期 2022–2026-09<br/>每個規則只跑一次、使用者說跑才跑]
     fwd[前向模擬 40 個交易日]
     user[使用者核准]
   end
@@ -38,6 +38,7 @@ flowchart LR
     stats[stats/*.json<br/>DSR、PBO]
     ledger[promotions.jsonl]
     pool[研究選手池頁 + JSON]
+    sfwd[forward/stocks/log.jsonl<br/>個股規則前向觀察]
   end
   twse --> engine
   yahoo -.核對.-> twse
@@ -50,9 +51,11 @@ flowchart LR
   gates --> ledger
   reg --> pool
   ledger --> pool
+  val -.兩段都贏的個股規則.-> sfwd
+  sfwd --> pool
 ```
 
-模組：`research/history/`（資料）、`research/spec.py`（ETF 規則）、`research/stock_rules.py`（個股規則）、`research/engine.py` 與 `research/legacy_challenger.py`（回測）、`research/compare.py`（對基準）、`research/registry.py`（試驗登錄）、`research/significance.py` 與 `statistics.py`（檢定）、`research/promotion.py`（關卡與帳本）、`research/pool.py`（選手池）、`research/agent/`（AI 研究員）、`research/forward.py`（前向模擬）。
+模組：`research/history/`（資料）、`research/spec.py`（ETF 規則）、`research/stock_rules.py`（個股規則）、`research/engine.py` 與 `research/legacy_challenger.py`（回測）、`research/compare.py`（對基準）、`research/registry.py`（試驗登錄）、`research/significance.py` 與 `statistics.py`（檢定）、`research/promotion.py`（關卡與帳本）、`research/pool.py`（選手池）、`research/agent/`（AI 研究員）、`research/forward.py`（ETF 前向模擬）、`research/stock_forward.py`（個股規則前向觀察）。
 
 ## 3. 資料
 
@@ -107,7 +110,8 @@ flowchart TD
 ```
 
 - 多重檢定：Deflated Sharpe Ratio 以「不同規則數」當試驗次數；PBO 以 CSCV 算。2026-10-03 累計 642 個不同規則，最佳 DSR 0.17，門檻 0.95——目前沒有規則通過統計門檻。
-- 驗證期可以在統計門檻之外先跑（檢查規則是否只在開發期有效），但最終驗證期只能跑一次，由使用者決定何時用。
+- 驗證期可以在統計門檻之外先跑（檢查規則是否只在開發期有效）。最終驗證（2022–2026-09）每個規則只跑一次：跑過就等於看過答案，之後改規則再跑就不算數，所以使用者說「跑」才跑。
+- 兩段期間都贏的個股規則自動進入前向觀察（R2），從加入那天起每個交易日記錄，不等最終驗證；這和關卡裡「前向模擬 40 個交易日」是同一份紀錄，但晉級仍要依序過關。
 - 前向模擬的結果只觀察，不用來挑規則。
 
 ## 7. 2026-10-03 的結論
@@ -154,10 +158,10 @@ flowchart TD
 
 - 試驗登錄：`instance/research/trials.jsonl`（只追加、雜湊串鏈；`python -m quant_platform.research trials` 可列）
 - 報告：`instance/research/reports/<期間>-…json`（含每月超額、視窗、設定檔）
-- 統計：`instance/research/stats/development-*.json`
+- 統計：ETF 規則 `instance/research/stats/development-*.json`；個股規則 `stats/stocks-development-*.json`（`python -m quant_platform.research stats --family stocks --period development`）
 - 晉級帳本：`instance/research/promotions.jsonl`
 - AI 研究日誌：`instance/research/journal.jsonl`；費用 `agent/usage.jsonl`
-- 前向模擬：`instance/research/forward/log.jsonl`
+- 前向模擬：ETF `instance/research/forward/log.jsonl`；個股規則 `forward/stocks/tracked.json`（追蹤中的規則與起始日）與 `forward/stocks/log.jsonl`（每日持股、交易、0050 對照、重算檢查；`python -m quant_platform.research forward [--date YYYY-MM-DD]` 補記並對帳）
 - 舊版挑戰者：`instance/research/legacy/challenger-*.json`
 - 網頁：研究頁（`/research`）、研究選手池（`/research/pool`、`/research/pool.json`）、本檔（系統頁 › 專案資訊 › 研究方法）
-- 指令：`python -m quant_platform.research batch|stats|promote|legacy|stocks`、`python -m quant_platform.research.history fetch|build|actions|crosscheck|oddlot|stocks`（在專案根目錄以 `$env:PYTHONPATH="src"` 執行，避開 13:30–14:40）
+- 指令：`python -m quant_platform.research batch|stats|promote|legacy|stocks|forward`（個股：`stocks --name cost --period development|validation [--passed]`）、`python -m quant_platform.research.history fetch|build|actions|crosscheck|oddlot|stocks`（在專案根目錄以 `$env:PYTHONPATH="src"` 執行，避開 13:30–14:40）

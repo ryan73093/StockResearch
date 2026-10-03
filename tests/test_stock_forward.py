@@ -79,19 +79,22 @@ def test_forward_records_follow_each_other_and_reconcile(tmp_path):
     assert late[0]["late"] and tracker.summary()[0]["late"] == 1
 
 
-def test_reconcile_catches_a_record_that_does_not_follow(tmp_path):
+def test_missed_days_are_caught_up_as_late_and_tampering_is_caught(tmp_path):
     days = weekdays(date(2024, 1, 1), date(2026, 10, 9))
     build(tmp_path, days)
     track(tmp_path)
     tracker = StockForwardTracker(tmp_path, min_quotes=1)
-    for day in (date(2026, 10, 5), date(2026, 10, 6)):
-        tracker.record(day, now=at(day))
+    # the computer was off from 10-01 to 10-05: the 10-06 run writes the missed sessions too
+    written = tracker.record(date(2026, 10, 6), now=at(date(2026, 10, 6)))
+    assert [(record["date"], record["late"]) for record in written] == [
+        ("2026-10-01", True), ("2026-10-02", True), ("2026-10-05", True), ("2026-10-06", False)]
     records = tracker.records()
-    records[1]["cash"] += 100
-    records[1]["value"] += 100
+    assert reconcile(records) == {} and len(records[2]["trades_today"]) == 5 and records[3]["trades_total"] == 5
+    records[-1]["cash"] += 100
+    records[-1]["value"] += 100
     problems = reconcile(records)[RULE.rule_hash]
     assert len(problems) == 1 and "現金" in problems[0]
-    records[1]["holdings"][0]["units"] += 1
+    records[-1]["holdings"][0]["units"] += 1
     assert any("股數" in problem for problem in reconcile(records)[RULE.rule_hash])
 
 

@@ -113,68 +113,87 @@ class StockForwardTracker:
         return [json.loads(line) for line in self.log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def record(self, today: date, now: datetime | None = None) -> list[dict[str, object]]:
-        """Append today's state for every tracked rule that has none yet; nothing when today's
-        quotes (stocks and 0050) are not on disk."""
+        """Append the state of every tracked rule for today and for any earlier session since its
+        start that has no record yet (the computer was off at 15:30, or the quotes came late): those
+        are marked ``late``. A day whose quotes (stocks and 0050) are not on disk is left for later."""
         if today < FORWARD_START:
             return []
         self.sync(today)
-        items = self.tracked()
+        items = [item for item in self.tracked() if date.fromisoformat(item["since"]) <= today]
         earlier = self.records()
         done = {(item["date"], item["rule_hash"]) for item in earlier}
-        pending = [item for item in items if (today.isoformat(), item["rule_hash"]) not in done
-                   and date.fromisoformat(item["since"]) <= today]
-        if not pending:
+        if not items:
             return []
-        data = load_stock_data(self._history, today.year - WARMUP_YEARS, today.year)
-        quoted = sum(1 for symbol, closes in data.closes.items() if symbol != BENCHMARK and today in closes)
-        if today not in data.sessions or today not in data.closes.get(BENCHMARK, {}) or quoted < self._min_quotes:
+        first_year = min(date.fromisoformat(item["since"]).year for item in items) - WARMUP_YEARS
+        data = load_stock_data(self._history, first_year, today.year)
+        start_all = min(date.fromisoformat(item["since"]) for item in items)
+        quoted = {day: 0 for day in data.sessions if start_all <= day <= today}
+        for symbol, closes in data.closes.items():
+            if symbol == BENCHMARK:
+                continue
+            for day in quoted:
+                if day in closes:
+                    quoted[day] += 1
+        ready = [day for day, count in sorted(quoted.items())
+                 if day >= FORWARD_START and count >= self._min_quotes and day in data.closes.get(BENCHMARK, {})]
+        todo = {item["rule_hash"]: [day for day in ready if day >= date.fromisoformat(item["since"])
+                                    and (day.isoformat(), item["rule_hash"]) not in done] for item in items}
+        if not any(todo.values()):
             return []
         panel = Panel(data)
         names = _names(self._history, today.year)
-        fingerprint = stock_fingerprint(self._history, today.year - WARMUP_YEARS, today.year)
+        fingerprint = stock_fingerprint(self._history, first_year, today.year)
         moment = (now or datetime.now(TAIPEI)).astimezone(TAIPEI)
         written = []
-        for item in pending:
+        for item in items:
+            days = todo[item["rule_hash"]]
+            if not days:
+                continue
             rule = StockRule.model_validate(item["rule"])
-            start = date.fromisoformat(item["since"])
+            start, last = date.fromisoformat(item["since"]), days[-1]
             ledger: list[dict[str, object]] = []
             snapshots: dict = {}
-            run = simulate(data, rule_variant(rule), self._costs, start, today, rankings(panel, rule, start, today),
+            run = simulate(data, rule_variant(rule), self._costs, start, last, rankings(panel, rule, start, last),
                            STANDARD_PLAN, ledger=ledger, snapshots=snapshots)
-            benchmark = simulate(data, None, self._costs, start, today, plan=STANDARD_PLAN)
-            if not run.days or run.days[-1] != today:
-                continue
-            cash, units = snapshots[today]
-            holdings = []
-            for symbol, count in units.items():
-                close = data.last_close(symbol, today) or 0.0
-                code = symbol.split(".")[0]
-                holdings.append({"code": code, "name": names.get(code, ""), "units": round(count, 6),
-                                 "close": close, "value": round(count * close, 2)})
-            holdings.sort(key=lambda row: -row["value"])
-            contributed = run.contributed
-            record = {
-                "date": today.isoformat(), "rule_hash": rule.rule_hash, "name": rule.name, "since": start.isoformat(),
-                "value": round(run.final_value, 2), "cash": round(cash, 2), "contributed": round(contributed, 2),
-                "benchmark_value": round(benchmark.final_value, 2),
-                "excess": round((run.final_value - benchmark.final_value) / contributed, 6) if contributed else None,
-                "holdings": holdings,
-                "trades_today": [_trade(entry, names) for entry in ledger
-                                 if entry["day"] == today and entry["side"] in ("BUY", "SELL")],
-                "adjustments_today": [{"code": str(entry["symbol"]).split(".")[0], "factor": entry["factor"]}
-                                      for entry in ledger if entry["day"] == today and entry["side"] == "ADJUST"],
-                "trades_total": run.trades, "fees_total": run.fees, "taxes_total": run.taxes,
-                "replay_check": _replay_check(earlier, rule.rule_hash, dict(zip(run.days, run.values))),
-                "costs": BROKER, "data_fingerprint": fingerprint, "engine": ENGINE_VERSION,
-                "recorded_at": moment.isoformat(timespec="seconds"), "late": moment.date() != today,
-            }
-            written.append(record)
+            benchmark = simulate(data, None, self._costs, start, last, plan=STANDARD_PLAN)
+            values, benchmark_values = dict(zip(run.days, run.values)), dict(zip(benchmark.days, benchmark.values))
+            replayed = _replay_check(earlier, rule.rule_hash, values)
+            for day in days:
+                written.append(self._day_record(rule, start, day, data, names, ledger, snapshots, values[day],
+                                                benchmark_values[day], run, replayed, fingerprint, moment))
         if written:
             self._folder.mkdir(parents=True, exist_ok=True)
             with self.log_path.open("a", encoding="utf-8") as handle:
                 for record in written:
                     handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         return written
+
+    def _day_record(self, rule, start, day, data, names, ledger, snapshots, value, benchmark_value, run, replayed,
+                    fingerprint, moment) -> dict[str, object]:
+        cash, units = snapshots[day]
+        holdings = []
+        for symbol, count in units.items():
+            close = data.last_close(symbol, day) or 0.0
+            code = symbol.split(".")[0]
+            holdings.append({"code": code, "name": names.get(code, ""), "units": round(count, 6),
+                             "close": close, "value": round(count * close, 2)})
+        holdings.sort(key=lambda row: -row["value"])
+        contributed = sum(amount for when, amount in run.contributions if when <= day)
+        trades = [entry for entry in ledger if entry["day"] <= day and entry["side"] in ("BUY", "SELL")]
+        return {
+            "date": day.isoformat(), "rule_hash": rule.rule_hash, "name": rule.name, "since": start.isoformat(),
+            "value": round(value, 2), "cash": round(cash, 2), "contributed": round(contributed, 2),
+            "benchmark_value": round(benchmark_value, 2),
+            "excess": round((value - benchmark_value) / contributed, 6) if contributed else None,
+            "holdings": holdings,
+            "trades_today": [_trade(entry, names) for entry in trades if entry["day"] == day],
+            "adjustments_today": [{"code": str(entry["symbol"]).split(".")[0], "factor": entry["factor"]}
+                                  for entry in ledger if entry["day"] == day and entry["side"] == "ADJUST"],
+            "trades_total": len(trades), "fees_total": sum(int(entry["fee"]) for entry in trades),
+            "taxes_total": sum(int(entry["tax"]) for entry in trades),
+            "replay_check": replayed, "costs": BROKER, "data_fingerprint": fingerprint, "engine": ENGINE_VERSION,
+            "recorded_at": moment.isoformat(timespec="seconds"), "late": moment.date() != day,
+        }
 
     def summary(self) -> list[dict[str, object]]:
         """Per tracked rule: the latest record, days recorded, the latest trades and any problem."""
