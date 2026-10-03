@@ -95,3 +95,28 @@ def test_pool_and_research_page_show_costs_and_forward_tracking(tmp_path):
     assert "前向觀察中的個股規則" in pool and "費稅佔投入" in pool and "前向觀察 10-05 起" in pool
     payload = client.get("/research/pool.json").get_json()
     assert payload["forward_stocks"][0]["sessions"] == 1 and payload["forward_stocks"][0]["problems"] == []
+
+
+def test_final_validation_result_shows_on_pool_and_forward_rows(tmp_path):
+    from quant_platform.research.stock_forward import StockForwardTracker
+    from quant_platform.research.stock_rules import StockRule
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
+    research = tmp_path / "research"
+    registry = seed(research)
+    registry.register(kind="candidate", report_file="r.json", period="holdout", spec_hash="stock-both",
+                      spec_name="個股 52 週高點", input_hash="9", data_fingerprint="stocks:h",
+                      metrics={**BAD, "full_period_excess": -0.71, "plan": {"kind": "ContributionPlan"}})
+    folder = research / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    rule = StockRule(name="個股 52 週高點", factor="high_52w", top=30, buffer=3)
+    (folder / "tracked.json").write_text(json.dumps([{"rule_hash": "stock-both", "name": rule.name,
+                                                       "rule": rule.model_dump(mode="json"), "since": "2026-10-03"}],
+                                                     ensure_ascii=False), encoding="utf-8")
+    rows = {row["spec_hash"]: row for row in rule_rows(research)}
+    assert rows["stock-both"]["status"] == "holdout_failed" and rows["stock-both"]["holdout"]["excess"] == -0.71
+    final = StockForwardTracker(research).summary()[0]["final"]
+    assert final["passed"] is False and final["excess"] == -0.71
+    client = create_app(container).test_client()
+    assert "最終驗證未通過 -71%" in client.get("/research").get_data(as_text=True)
+    assert "最終驗證比 0050 -71%" in client.get("/research/pool").get_data(as_text=True)

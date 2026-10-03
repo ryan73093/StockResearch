@@ -199,6 +199,7 @@ class StockForwardTracker:
         """Per tracked rule: the latest record, days recorded, the latest trades and any problem."""
         records = self.records()
         problems = reconcile(records)
+        finals = final_validation(self._base)
         rows = []
         for item in self.tracked():
             mine = [record for record in records if record["rule_hash"] == item["rule_hash"]]
@@ -219,8 +220,26 @@ class StockForwardTracker:
                 "last_trades": traded["trades_today"] if traded else [],
                 "late": sum(1 for record in mine if record.get("late")),
                 "problems": problems.get(item["rule_hash"], []), "replay_mismatches": mismatches,
+                "final": finals.get(item["rule_hash"]),
             })
         return rows
+
+
+def final_validation(research_dir: str | Path) -> dict[str, dict[str, object]]:
+    """Stock rules' final-validation (holdout) result: passed, the excess over 0050 and the reasons."""
+    from quant_platform.research.pool import _best_records, _gate
+
+    path = Path(research_dir) / "trials.jsonl"
+    if not path.is_file():
+        return {}
+    records = [record for record in TrialRegistry(path).records() if record.data_fingerprint.startswith("stocks:")]
+    output = {}
+    for spec_hash, record in _best_records(records, "holdout").items():
+        reasons = _gate(record.metrics)
+        output[spec_hash] = {"passed": not reasons, "excess": record.metrics.get("full_period_excess"),
+                             "xirr": record.metrics.get("xirr"), "benchmark_xirr": record.metrics.get("benchmark_xirr"),
+                             "reasons": reasons, "trial_id": record.trial_id}
+    return output
 
 
 def _trade(entry: dict[str, object], names: dict[str, str]) -> dict[str, object]:

@@ -46,7 +46,7 @@
         <td class="num {{ 'up' if v and (v.excess or 0) > 0 else ('down' if v and (v.excess or 0) < 0 else '') }}" data-label="驗證期比 0050">{{ '{:+.0%}'.format(v.excess) if v and v.excess is not none else '—' }}</td>
         <td class="num" data-label="驗證期 3 年">{{ ('{:.0%}'.format(v.win_3y) ~ '／' ~ '{:+.1%}'.format(v.median_3y)) if v and v.win_3y is not none else '—' }}</td>
         {% endif %}
-        <td class="small" data-label="說明" data-wide>{% if v and v.reasons %}驗證期：{{ v.reasons|join('；') }}{% elif d.reasons %}{{ d.reasons|join('；') }}{% elif d.dsr is not none %}DSR {{ '%.2f' % d.dsr }}{% else %}—{% endif %}</td>
+        <td class="small" data-label="說明" data-wide>{% if row.holdout %}最終驗證比 0050 {{ '{:+.0%}'.format(row.holdout.excess) if row.holdout.excess is not none else '—' }}{% if row.holdout.reasons %}：{{ row.holdout.reasons|join('；') }}{% endif %}{% elif v and v.reasons %}驗證期：{{ v.reasons|join('；') }}{% elif d.reasons %}{{ d.reasons|join('；') }}{% elif d.dsr is not none %}DSR {{ '%.2f' % d.dsr }}{% else %}—{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -57,14 +57,14 @@
 <section class="card" id="both">
   <div class="card__head"><h2>兩段獨立期間都贏 <span class="badge">開發期 2004–2016 與驗證期 2017–2021</span></h2></div>
   {% if pool.both_periods %}{{ rule_table(pool.both_periods) }}{% else %}<p class="muted" style="margin:0">還沒有規則在兩段期間都通過門檻。</p>{% endif %}
-  <p class="note">這些規則還沒跑最終驗證（2022–2026-09 的資料）。每個規則只跑一次：跑過就等於看過答案，之後再改規則重跑就不算數，所以由你說「跑」才跑。</p>
+  <p class="note">最終驗證用 2022–2026-09 的資料，每個規則只跑一次：跑過就等於看過答案，之後再改規則重跑就不算數。結果寫在說明欄；2026-10-04 跑的 4 個規則全部輸給 0050（台積電獨漲，見研究方法第 7 節）。</p>
 </section>
 
 {% if pool.forward_stocks %}
 <section class="card" id="forward">
   <div class="card__head"><h2>前向觀察中的個股規則 <span class="badge">{{ pool.forward_stocks|length }}</span></h2></div>
   <ul class="reasons">
-    {% for row in pool.forward_stocks %}<li><strong>{{ row.name }}</strong>：{{ row.since }} 起、已記錄 {{ row.sessions }} 個交易日{% if row.sessions %}，投入 {{ '{:,.0f}'.format(row.contributed) }} 元、資產 {{ '{:,.0f}'.format(row.value) }} 元（0050 {{ '{:,.0f}'.format(row.benchmark_value) }} 元）{% endif %}{% if row.problems %}，<span class="badge badge--bad">對帳 {{ row.problems|length }} 項不符</span>{% endif %}。{{ row.reason }}</li>{% endfor %}
+    {% for row in pool.forward_stocks %}<li><strong>{{ row.name }}</strong>{% if row.final %} <span class="badge {{ 'badge--ok' if row.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if row.final.passed else '未通過' }}</span>{% endif %}：{{ row.since }} 起、已記錄 {{ row.sessions }} 個交易日{% if row.sessions %}，投入 {{ '{:,.0f}'.format(row.contributed) }} 元、資產 {{ '{:,.0f}'.format(row.value) }} 元（0050 {{ '{:,.0f}'.format(row.benchmark_value) }} 元）{% endif %}{% if row.problems %}，<span class="badge badge--bad">對帳 {{ row.problems|length }} 項不符</span>{% endif %}。{{ row.reason }}</li>{% endfor %}
   </ul>
   <p class="note">持股與每日交易在<a href="/research#stock-forward">研究頁</a>。前向觀察只記錄、不拿來挑規則。</p>
 </section>

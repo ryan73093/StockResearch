@@ -271,7 +271,7 @@
       <tbody>
       {% for row in stock_forward %}
         <tr>
-          <td data-primary><strong>{{ row.name }}</strong><span class="muted small"> {{ row.since }} 起</span></td>
+          <td data-primary><strong>{{ row.name }}</strong><span class="muted small"> {{ row.since }} 起</span>{% if row.final %} <span class="badge {{ 'badge--ok' if row.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if row.final.passed else '未通過' }} {{ '{:+.0%}'.format(row.final.excess) }}</span>{% endif %}</td>
           <td class="num" data-label="已記錄交易日">{{ row.sessions }}{% if row.late %}<span class="muted small">（補記 {{ row.late }}）</span>{% endif %}</td>
           <td class="num" data-label="投入">{{ '{:,.0f}'.format(row.contributed) }}</td>
           <td class="num" data-label="目前資產">{{ '{:,.0f}'.format(row.value) }}</td>

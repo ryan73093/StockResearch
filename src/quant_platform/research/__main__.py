@@ -242,9 +242,18 @@ def main() -> int:
         stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
         stock_plan = LumpSumPlan(args.lump_sum) if args.lump_sum else STANDARD_PLAN
         print("現金流：" + (f"一次投入 {args.lump_sum:,.0f} 元" if args.lump_sum else "每月 5 日投入 10,000 元"), flush=True)
-        if args.name not in STOCK_BATCHES:
-            raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(STOCK_BATCHES)}")
-        rules = STOCK_BATCHES[args.name]()
+        if args.period == "holdout" and args.name != "qualified":
+            # The final validation runs once per rule: never a whole batch by accident.
+            raise SystemExit("最終驗證只跑兩段期間都贏的規則：用 --name qualified")
+        if args.name == "qualified":
+            from quant_platform.research.stock_forward import qualifying_rules
+
+            rules = [rule for rule, _reason in qualifying_rules(RESEARCH)]
+            print(f"兩段期間都贏的規則：{len(rules)} 個", flush=True)
+        elif args.name not in STOCK_BATCHES:
+            raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(STOCK_BATCHES)}、qualified")
+        else:
+            rules = STOCK_BATCHES[args.name]()
         if args.passed:
             from quant_platform.research.pool import _best_records, _gate
 
