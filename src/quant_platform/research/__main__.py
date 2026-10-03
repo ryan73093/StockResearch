@@ -173,7 +173,7 @@ def _legacy(args) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
-        "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy"),
+        "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks"),
     )
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--dry-run", action="store_true", help="agent：只印出提示內容，不呼叫模型")
@@ -217,6 +217,32 @@ def main() -> int:
         return _agent(args)
     if args.command == "legacy":
         return _legacy(args)
+    if args.command == "stocks":
+        from quant_platform.research.stock_rules import (
+            Panel, describe, first_batch, load_stock_data, run_stock_trial,
+        )
+
+        if args.period not in ("development", "validation", "holdout"):
+            raise SystemExit("stocks：--period 只能是 development、validation 或 holdout")
+        start, end = PERIODS[args.period]
+        base = Path(args.base)
+        costs = broker_costs(args.broker)
+        data = load_stock_data(base, start.year, end.year)
+        print(f"個股規則（{args.period}）：{data.notes['symbols']} 檔上市股票、{len(data.sessions)} 個交易日；"
+              f"成本：{BROKERS[args.broker].name}", flush=True)
+        panel = Panel(data)
+        stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
+        for rule in first_batch():
+            try:
+                record, report = run_stock_trial(rule, args.period, base, registry, RESEARCH / "reports", costs,
+                                                 data=data, panel=panel, generated_at=stamp)
+            except ResearchGateError as exc:
+                print(f"{rule.name}：研究規則不允許 — {exc}", file=sys.stderr)
+                continue
+            print(describe(report), flush=True)
+            print(f"  試驗 #{record.trial_id}；報告：{RESEARCH / 'reports' / record.report_file}")
+        return 0
+
     if args.command == "promote":
         from quant_platform.research.forward import STANDARD_PLAN
         from quant_platform.research.promotion import PromotionPipeline
