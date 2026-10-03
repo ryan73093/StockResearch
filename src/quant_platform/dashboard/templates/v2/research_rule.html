@@ -30,7 +30,7 @@
       <tbody>
       {% for run in rule.runs %}
         <tr>
-          <td data-primary><strong>{{ run.period_label }}</strong> <span class="small">{{ run.plan }}</span><span class="muted small"> {{ (run.start or '')[:7] }}～{{ (run.end or '')[:7] }}・試驗 #{{ run.trial_id }}・{{ run.created_at }}</span></td>
+          <td data-primary><strong style="white-space:nowrap">{{ run.period_label }}</strong> <span class="small" style="white-space:nowrap">{{ run.plan }}</span><span class="muted small"> {{ (run.start or '')[:7] }}～{{ (run.end or '')[:7] }}・試驗 #{{ run.trial_id }}・{{ run.created_at }}</span></td>
           <td class="num" data-label="期末">{% if run.final_value %}{{ '{:,.0f}'.format(run.final_value) }}{% if run.benchmark_final_value %}<span class="muted small">（{{ '{:,.0f}'.format(run.benchmark_final_value) }}）</span>{% endif %}{% else %}—{% endif %}</td>
           <td class="num {{ 'up' if (run.excess or 0) > 0 else ('down' if (run.excess or 0) < 0 else '') }}" data-label="比 0050">{{ '{:+.0%}'.format(run.excess) if run.excess is not none else '—' }}</td>
           <td class="num" data-label="年化">{{ '{:.1%}'.format(run.xirr) if run.xirr is not none else '—' }}<span class="muted small">（{{ '{:.1%}'.format(run.benchmark_xirr) if run.benchmark_xirr is not none else '—' }}）</span></td>
