@@ -62,7 +62,10 @@ def current_basis(
     selected = [record for record in records if record.kind == kind and record.period == period]
     if not selected:
         return [], []
-    basis = fingerprint or selected[-1].data_fingerprint
+    # Stock-rule trials (research/stock_rules.py) have their own data family ("stocks:…"); they
+    # count as attempts but never define the ETF basis the page and the statistics rank on.
+    etf = [record for record in selected if not record.data_fingerprint.startswith("stocks:")]
+    basis = fingerprint or (etf[-1].data_fingerprint if etf else selected[-1].data_fingerprint)
     return (
         [record for record in selected if record.data_fingerprint == basis],
         [record for record in selected if record.data_fingerprint != basis],

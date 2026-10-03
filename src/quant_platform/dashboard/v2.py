@@ -37,7 +37,7 @@ from quant_platform.research.periods import ResearchGateError
 from quant_platform.research.promotion import PromotionPipeline, promotion_limits
 from quant_platform.research.weekly import weekly_report
 from quant_platform.research.summary import round_summary
-from quant_platform.research.reports import latest_reports, latest_stats, report_rows, trial_ranking
+from quant_platform.research.reports import latest_reports, latest_stats, report_rows, stock_rule_rows, trial_ranking
 
 logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -694,6 +694,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             round_view=round_view,
             legacy=challenger_view(latest_challenger(research_dir / "legacy")),
             ranking=ranking,
+            stock_rules=stock_rule_rows(research_dir / "trials.jsonl", "development"),
             stats=stats,
             best_dsr=best_dsr,
             # Baselines run on the full period; candidates never may (periods.check_gate).

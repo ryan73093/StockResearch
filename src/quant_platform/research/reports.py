@@ -71,6 +71,34 @@ def trial_ranking(registry_path: str | Path, period: str, limit: int = 10) -> di
     }
 
 
+def stock_rule_rows(registry_path: str | Path, period: str) -> list[dict[str, object]]:
+    """Stock-rule trials of one period (research/stock_rules.py), best 3-year median first."""
+    from quant_platform.research.registry import TrialRegistry
+
+    records = [record for record in TrialRegistry(registry_path).records()
+               if record.kind == "candidate" and record.period == period
+               and record.data_fingerprint.startswith("stocks:")]
+    latest: dict[str, object] = {}
+    for record in records:                       # one row per rule: its newest run
+        latest[record.spec_hash] = record
+
+    def score(record) -> float:
+        value = ((record.metrics.get("windows") or {}).get("3y") or {}).get("median_excess")
+        return float(value) if value is not None else float("-inf")
+
+    return [
+        {
+            "trial_id": record.trial_id, "name": record.spec_name, "excess": record.metrics.get("full_period_excess"),
+            "xirr": record.metrics.get("xirr"), "benchmark_xirr": record.metrics.get("benchmark_xirr"),
+            "drawdown": record.metrics.get("max_drawdown"), "benchmark_drawdown": record.metrics.get("benchmark_max_drawdown"),
+            "costs": record.metrics.get("costs"), "trades": record.metrics.get("trades"),
+            "three_year": (record.metrics.get("windows") or {}).get("3y"),
+            "five_year": (record.metrics.get("windows") or {}).get("5y"),
+        }
+        for record in sorted(latest.values(), key=score, reverse=True)
+    ]
+
+
 def latest_stats(stats_dir: str | Path, period: str) -> dict[str, object] | None:
     folder = Path(stats_dir)
     files = sorted(folder.glob(f"{period}-*.json")) if folder.is_dir() else []

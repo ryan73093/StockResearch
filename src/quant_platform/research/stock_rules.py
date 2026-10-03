@@ -120,7 +120,7 @@ def stock_fingerprint(base: str | Path, first_year: int, last_year: int) -> str:
     for path in sorted((base / "raw" / "twse_ex_rights").glob("*.json")):
         if path.stem.isdigit() and first_year <= int(path.stem) <= last_year:
             digest.update(f"{path.stem}:{sha256(path)}".encode())
-    return digest.hexdigest()
+    return "stocks:" + digest.hexdigest()
 
 
 # --- ranking ------------------------------------------------------------------------

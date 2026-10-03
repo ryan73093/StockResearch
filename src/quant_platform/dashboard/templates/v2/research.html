@@ -299,6 +299,36 @@
 </section>
 {% endif %}
 
+{% if stock_rules %}
+<section class="card">
+  <div class="card__head">
+    <h2>個股規則 <span class="badge">開發期 2004–2016</span></h2>
+    <span class="muted small">無倖存者偏差的上市股票池（含後來下市的）；每月依單一因子換股，等權；與 0050 定期定額同現金流與成本</span>
+  </div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th class="num">XIRR</th><th class="num">比 0050</th><th class="num">最大回撤</th><th class="num">3 年勝率</th><th class="num">3 年中位超額</th><th class="num">最差 3 年</th><th class="num">費稅（元）</th></tr></thead>
+      <tbody>
+      {% for row in stock_rules %}
+        {% set cls = 'up' if (row.excess or 0) > 0 else ('down' if (row.excess or 0) < 0 else '') %}
+        <tr>
+          <td data-primary><strong>{{ row.name }}</strong><span class="stack-only num {{ cls }}">{{ '{:+.1%}'.format(row.excess or 0) }}</span></td>
+          <td class="num" data-label="XIRR">{{ '{:.2%}'.format(row.xirr) if row.xirr is not none else '—' }}<span class="muted small"> / {{ '{:.2%}'.format(row.benchmark_xirr) if row.benchmark_xirr is not none else '—' }}</span></td>
+          <td class="num {{ cls }}" data-label="比 0050">{{ '{:+.1%}'.format(row.excess) if row.excess is not none else '—' }}</td>
+          <td class="num" data-label="最大回撤">{{ '{:.1%}'.format(row.drawdown) if row.drawdown is not none else '—' }}<span class="muted small"> / {{ '{:.1%}'.format(row.benchmark_drawdown) if row.benchmark_drawdown is not none else '—' }}</span></td>
+          <td class="num" data-label="3 年勝率">{{ '{:.0%}'.format(row.three_year.win_ratio) if row.three_year and row.three_year.count else '—' }}</td>
+          <td class="num" data-label="3 年中位超額">{{ '{:+.2%}'.format(row.three_year.median_excess) if row.three_year and row.three_year.count else '—' }}</td>
+          <td class="num" data-label="最差 3 年">{{ '{:+.1%}'.format(row.three_year.worst_excess) if row.three_year and row.three_year.count else '—' }}</td>
+          <td class="num" data-label="費稅">{{ '{:,.0f}'.format(row.costs) if row.costs is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">資格：收盤 ≥ 10 元、近 20 日日均成交值 ≥ 2,000 萬元、上市滿 252 個交易日；個股賣出證交稅 0.3%；下市的股票以最後成交價計。每個規則都計入多重檢定；通過視窗門檻的才會進驗證期。</p>
+</section>
+{% endif %}
+
 <div class="grid grid--half">
   {% for group in tool_groups if not group.paused %}
   <section class="card">

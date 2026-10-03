@@ -321,3 +321,21 @@ def test_trial_count_is_distinct_rules_and_variants_are_not_candidates(tmp_path)
     assert dsr["trials"] == 3 and dsr["expected_max_sharpe"] == pytest.approx(expected_max_sharpe(3, 1.5))
     # Fewer trials lower the bar a Sharpe ratio has to clear.
     assert expected_max_sharpe(2, 0.01) < expected_max_sharpe(4, 0.01)
+
+
+def test_stock_rule_trials_never_define_the_etf_basis(tmp_path):
+    from quant_platform.research.registry import current_basis, distinct_rules
+    from quant_platform.research.reports import stock_rule_rows
+
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    registry.register(kind="candidate", period="development", spec_hash="etf-a", spec_name="ETF", input_hash="1",
+                      data_fingerprint="etfbasis", metrics={"windows": {"3y": {"count": 1, "median_excess": 0.01}}},
+                      report_file="a.json")
+    registry.register(kind="candidate", period="development", spec_hash="stock-m", spec_name="個股 動能", input_hash="2",
+                      data_fingerprint="stocks:abc", metrics={"xirr": 0.1, "windows": {"3y": {"count": 1, "median_excess": 0.02}}},
+                      report_file="b.json")
+    current, older = current_basis(registry.records(), "development")
+    assert [r.spec_hash for r in current] == ["etf-a"] and [r.spec_hash for r in older] == ["stock-m"]
+    assert distinct_rules(current + older) == 2                       # the stock rule still counts as an attempt
+    rows = stock_rule_rows(registry.path, "development")
+    assert [row["name"] for row in rows] == ["個股 動能"] and rows[0]["xirr"] == 0.1
