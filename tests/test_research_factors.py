@@ -35,8 +35,10 @@ def test_a_factor_that_predicts_returns_has_a_high_ic_and_its_opposite_a_low_one
 
 
 def test_verdicts():
-    strong = {"development": {"t": 3.1, "ic": 0.04}, "validation": {"ic": 0.02}, "final": {"ic": 0.01}}
-    flipped = {"development": {"t": 3.1, "ic": 0.04}, "validation": {"ic": 0.02}, "final": {"ic": -0.03}}
-    negative = {"development": {"t": -2.5, "ic": -0.03}, "validation": {"ic": -0.01}, "final": {"ic": -0.02}}
-    weak = {"development": {"t": 1.2, "ic": 0.01}, "validation": {"ic": 0.02}, "final": {"ic": 0.01}}
-    assert [verdict(item) for item in (strong, flipped, negative, weak)] == ["強", "不穩", "反向", "弱"]
+    def periods(*tops):
+        return {key: {"top_excess_year": top} for key, top in zip(("development", "validation", "final"), tops)}
+
+    # the top fifth against the average eligible stock, a year: what a long-only rule buys
+    cases = [periods(0.07, 0.05, 0.09), periods(0.05, -0.04, 0.03), periods(-0.03, -0.05, -0.02),
+             periods(0.01, -0.01, 0.03), periods(0.05, 0.05)]
+    assert [verdict(item) for item in cases] == ["強", "不穩", "反向", "弱", "弱"]

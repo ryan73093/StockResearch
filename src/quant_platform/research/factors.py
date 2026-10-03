@@ -52,8 +52,10 @@ def _ranks(values: np.ndarray) -> np.ndarray:
     return ranks
 
 
-def monthly_factor_table(panel: Panel, factors: list[str], start: date, end: date) -> list[dict[str, object]]:
-    """One row per rank day and factor: IC, top-minus-bottom and top-minus-all of next month's return."""
+def monthly_factor_table(panel: Panel, factors: list[str], start: date, end: date,
+                         benchmark: dict[date, float] | None = None) -> list[dict[str, object]]:
+    """One row per rank day and factor: IC, top-minus-bottom and top-minus-all of next month's return,
+    and the top fifth against 0050 (``benchmark``: 0050's adjusted close per session)."""
     eligibility = StockRule(name="資格", factor="high_52w")
     sessions = [day for day in panel.sessions if start <= day <= end]
     days = [day for day, _amount in STANDARD_PLAN.schedule(sessions, start, end)]
@@ -66,6 +68,8 @@ def monthly_factor_table(panel: Panel, factors: list[str], start: date, end: dat
             eligible = ((panel.close[:, position] >= eligibility.min_price) & (turnover >= eligibility.min_turnover)
                         & (position - panel.first >= eligibility.min_history))
             forward = panel.filled[:, later] / panel.filled[:, position] - 1
+            index_return = (benchmark[following] / benchmark[current] - 1
+                            if benchmark and current in benchmark and following in benchmark else None)
             for factor in factors:
                 score = panel._score(factor, position)
                 mask = eligible & np.isfinite(score) & np.isfinite(forward)
@@ -78,7 +82,8 @@ def monthly_factor_table(panel: Panel, factors: list[str], start: date, end: dat
                 fifth = max(1, count // 5)
                 top, bottom = r[order[:fifth]], r[order[-fifth:]]
                 rows.append({"date": current.isoformat(), "factor": factor, "n": count, "ic": ic,
-                             "spread": float(top.mean() - bottom.mean()), "top_excess": float(top.mean() - r.mean())})
+                             "spread": float(top.mean() - bottom.mean()), "top_excess": float(top.mean() - r.mean()),
+                             "top_vs_0050": None if index_return is None else float(top.mean() - index_return)})
     return rows
 
 
@@ -97,12 +102,14 @@ def summarize(rows: list[dict[str, object]], factors: list[str]) -> dict[str, ob
             deviation = statistics.stdev(ics) if len(ics) > 1 else 0.0
             spreads = [row["spread"] for row in chosen]
             tops = [row["top_excess"] for row in chosen]
+            versus = [row["top_vs_0050"] for row in chosen if row.get("top_vs_0050") is not None]
             periods[key] = {
                 "label": label, "months": len(chosen), "ic": round(mean, 4),
                 "t": round(mean / (deviation / math.sqrt(len(ics))), 2) if deviation else None,
                 "positive": round(sum(value > 0 for value in ics) / len(ics), 3),
                 "spread_year": round(statistics.fmean(spreads) * 12, 4),
                 "top_excess_year": round(statistics.fmean(tops) * 12, 4),
+                "top_vs_0050_year": round(statistics.fmean(versus) * 12, 4) if versus else None,
             }
         by_year: dict[str, list[float]] = {}
         for row in mine:
@@ -112,18 +119,21 @@ def summarize(rows: list[dict[str, object]], factors: list[str]) -> dict[str, ob
     return output
 
 
+EDGE = 0.02   # 2 percentage points a year
+
+
 def verdict(periods: dict[str, dict[str, object]]) -> str:
-    """強: positive and significant in development and the same sign in both later periods;
-    反向: significantly negative in development; 不穩: significant in development but flipped later;
-    弱: otherwise."""
-    dev = periods.get("development") or {}
-    t = dev.get("t") or 0.0
-    later = [periods.get(key, {}).get("ic") for key in ("validation", "final")]
-    if t >= STRONG_T and all(value is not None and value > 0 for value in later):
+    """Judged on what a long-only rule buys, the top fifth against the average eligible stock, in the
+    three periods: 強 = at least 2 points a year better in all three; 反向 = at least 2 points worse in
+    all three (the bottom is where to look); 不穩 = better in some and worse in others; 弱 = otherwise."""
+    tops = [periods.get(key, {}).get("top_excess_year") for key in ("development", "validation", "final")]
+    if any(value is None for value in tops):
+        return "弱"
+    if all(value >= EDGE for value in tops):
         return "強"
-    if t <= -STRONG_T and all(value is not None and value < 0 for value in later):
+    if all(value <= -EDGE for value in tops):
         return "反向"
-    if abs(t) >= STRONG_T:
+    if any(value >= EDGE for value in tops) and any(value <= -EDGE for value in tops):
         return "不穩"
     return "弱"
 
@@ -138,6 +148,12 @@ def run(history: str | Path, out_dir: str | Path, job=None, factors: list[str] |
         job.update(current="載入 2003 年起全市場行情", force=True)
     data = load_stock_data(history, first_year, last_year)
     panel = Panel(data)
+    from quant_platform.research.legacy_challenger import BENCHMARK
+
+    growth, benchmark = 1.0, {}
+    for day in sorted(data.closes.get(BENCHMARK, {})):
+        growth *= data.factors.get(BENCHMARK, {}).get(day, 1.0)
+        benchmark[day] = data.closes[BENCHMARK][day] * growth
     rows = []
     years = list(range(2005, last_year + 1))
     if job:
@@ -145,7 +161,7 @@ def run(history: str | Path, out_dir: str | Path, job=None, factors: list[str] |
     for index, year in enumerate(years):
         if job:
             job.update(done=index, current=f"{year} 年")
-        rows += monthly_factor_table(panel, factors, date(year, 1, 1), date(year + 1, 1, 10))
+        rows += monthly_factor_table(panel, factors, date(year, 1, 1), date(year + 1, 1, 10), benchmark)
     # the year boundaries overlap by one rank day; keep the first copy of each (date, factor)
     seen, unique = set(), []
     for row in rows:
@@ -187,10 +203,10 @@ def table(report: dict[str, object] | None) -> list[dict[str, object]]:
     rows = []
     for key, item in (report.get("factors") or {}).items():
         periods = item.get("periods") or {}
-        rows.append({"factor": key, "label": item.get("label", key), "verdict": item.get("verdict", "弱"),
+        rows.append({"factor": key, "label": item.get("label", key), "verdict": verdict(periods),
                      "dev": periods.get("development"), "val": periods.get("validation"), "final": periods.get("final"),
                      "before": periods.get("before_2020"), "after": periods.get("after_2020"),
                      "recent": periods.get("since_2024"), "by_year": item.get("spread_by_year") or {}})
     rows.sort(key=lambda row: (VERDICT_ORDER.index(row["verdict"]) if row["verdict"] in VERDICT_ORDER else 9,
-                               -((row["dev"] or {}).get("t") or 0)))
+                               -sum(((row[key] or {}).get("top_excess_year") or 0) for key in ("dev", "val", "final"))))
     return rows

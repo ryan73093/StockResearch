@@ -42,27 +42,28 @@
     <span class="muted small">{{ factor_report.universe if factor_report else '' }}</span>
   </div>
   {% if factor_rows %}
-  <p class="muted small" style="margin:0 0 10px">每月 5 日把合格的上市股票依因子排名，看分數高的股票下個月是不是漲得比較多。「排序相關」大於 0 表示有預測力，t ≥ 2 才算明顯；「前減後」是分數最高五分之一減最低五分之一，一年大約差幾個百分點（未扣手續費與稅）。</p>
+  <p class="muted small" style="margin:0 0 10px">每月 5 日把合格的上市股票依因子排名，看分數最高的五分之一（規則只買前段）下個月漲多少。每格上面是「比所有合格股票平均」、下面是「比 0050」，一年大約多或少幾個百分點（未扣手續費與稅）。「排序相關」看整體排得準不準，t ≥ 2 才算明顯。</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>因子</th><th>判定</th><th class="num">開發期 2005–2016<br>排序相關（t）</th><th class="num">驗證期 2017–2021</th><th class="num">最終驗證期 2022–2026</th><th class="num">前減後每年<br>2020 前</th><th class="num">2020 後</th><th class="num">2024 後</th></tr></thead>
+      <thead><tr><th>因子</th><th>判定</th><th class="num">開發期 2005–2016<br>比平均／比 0050</th><th class="num">驗證期 2017–2021</th><th class="num">最終驗證期 2022–2026</th><th class="num">2024 後</th><th class="num">排序相關<br>開發期（t）</th></tr></thead>
       <tbody>
       {% for row in factor_rows %}
         <tr>
           <td data-primary><strong>{{ row.label }}</strong></td>
           <td data-label="判定"><span class="badge {{ 'badge--ok' if row.verdict == '強' else ('badge--bad' if row.verdict == '反向' else ('badge--warn' if row.verdict == '不穩' else '')) }}">{{ row.verdict }}</span></td>
-          <td class="num" data-label="開發期">{{ '%+.3f' % row.dev.ic if row.dev else '—' }}{% if row.dev and row.dev.t is not none %}<span class="muted small">（{{ '%.1f' % row.dev.t }}）</span>{% endif %}</td>
-          <td class="num" data-label="驗證期">{{ '%+.3f' % row.val.ic if row.val else '—' }}</td>
-          <td class="num" data-label="最終驗證期">{{ '%+.3f' % row.final.ic if row.final else '—' }}</td>
-          {% for item in (row.before, row.after, row.recent) %}
-          <td class="num {{ 'up' if item and item.spread_year > 0 else ('down' if item and item.spread_year < 0 else '') }}" data-label="{{ ('2020 前', '2020 後', '2024 後')[loop.index0] }}">{{ '{:+.1%}'.format(item.spread_year) if item else '—' }}</td>
+          {% for item in (row.dev, row.val, row.final, row.recent) %}
+          <td class="num" data-label="{{ ('開發期', '驗證期', '最終驗證期', '2024 後')[loop.index0] }}">
+            {% if item and item.top_excess_year is defined and item.top_excess_year is not none %}<span class="{{ 'up' if item.top_excess_year > 0 else 'down' }}">{{ '{:+.1%}'.format(item.top_excess_year) }}</span>{% else %}—{% endif %}<br>
+            {% if item and item.top_vs_0050_year is defined and item.top_vs_0050_year is not none %}<span class="small {{ 'up' if item.top_vs_0050_year > 0 else 'down' }}">0050 {{ '{:+.1%}'.format(item.top_vs_0050_year) }}</span>{% endif %}
+          </td>
           {% endfor %}
+          <td class="num" data-label="排序相關（t）">{{ '%+.3f' % row.dev.ic if row.dev else '—' }}{% if row.dev and row.dev.t is not none %}<span class="muted small">（{{ '%.1f' % row.dev.t }}）</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="note">判定：強＝開發期明顯有預測力，驗證期與最終驗證期也同方向；不穩＝開發期明顯但後來反過來；反向＝明顯負向；弱＝看不出來。這是描述，不是規則試驗；三段歷史都已看過，用它組出的規則只能靠前向觀察證明。籌碼與基本面因子（外資持股、融資、三大法人、本益比、月營收）的資料正在下載，下載完會加進這張表。</p>
+  <p class="note">判定看前段比平均：強＝三段期間每年都多 2 個百分點以上；反向＝三段都少 2 個百分點以上；不穩＝有的期間多、有的少；弱＝差不多。比 0050 那一行才是能不能贏 0050 的關鍵：2024 年後 0050 被台積電帶著漲，前段比平均很好的因子也可能輸 0050。這是描述，不是規則試驗；三段歷史都已看過，用它組出的規則只能靠前向觀察證明。籌碼與基本面因子（外資持股、融資、三大法人、本益比、月營收）的資料正在下載，下載完會加進這張表。</p>
   {% else %}
   <p class="muted" style="margin:0">還沒有分析結果。程式在跑時會出現在「執行中的程式」。</p>
   {% endif %}

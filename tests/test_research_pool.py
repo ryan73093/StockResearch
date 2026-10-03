@@ -155,7 +155,8 @@ def test_rule_page_jobs_and_factor_tabs(tmp_path):
     (research / "factors" / "strength-20261004-000000.json").write_text(json.dumps({
         "generated_at": "2026-10-04T02:00:00+08:00", "months": 260, "universe": "上市",
         "factors": {"high_52w": {"label": "接近 52 週高點", "verdict": "強", "spread_by_year": {"2015": 0.02},
-                                 "periods": {"development": {"ic": 0.05, "t": 3.2, "spread_year": 0.08}}}}},
+                                 "periods": {"development": {"ic": 0.05, "t": 3.2, "spread_year": 0.08,
+                                                             "top_excess_year": 0.07, "top_vs_0050_year": 0.02}}}}},
         ensure_ascii=False), encoding="utf-8")
     client = create_app(container).test_client()
     page = client.get("/research/rules/stock-both").get_data(as_text=True)
