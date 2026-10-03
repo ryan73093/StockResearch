@@ -51,7 +51,9 @@ def _summary(manifest: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
-    parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck"))
+    parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks"))
+    parser.add_argument("--exchange", default="twse,tpex", help="stocks：twse、tpex 或兩者")
+    parser.add_argument("--from-year", type=int, default=2004, help="stocks：起始年")
     parser.add_argument("--every", type=int, default=5, help="oddlot：每幾個交易日抽樣一次")
     parser.add_argument("--series", help="逗號分隔，預設全部")
     parser.add_argument("--base", default=str(DEFAULT_BASE))
@@ -108,6 +110,26 @@ def main() -> int:
                         flush=True,
                     )
         print(f"報告：{base / 'odd_lot.json'}")
+        return 0
+
+    if args.command == "stocks":
+        from datetime import date as _date
+
+        from quant_platform.research.history.dataset import read_series
+        from quant_platform.research.history.stocks import TWSE_ALL_START, fetch_exchange, save_summary
+
+        sessions = [row["date"] for row in read_series(base / "daily" / "TAIEX.parquet")]
+        sessions = [day for day in sessions if day >= max(TWSE_ALL_START, _date(args.from_year, 1, 1))]
+        client = OfficialHistoryClient(base / "raw")
+        for exchange in [item.strip() for item in args.exchange.split(",") if item.strip()]:
+            try:
+                result = fetch_exchange(exchange, client, sessions, base, progress=lambda m: print(m, flush=True))
+            except SourceRefused as exc:
+                print(f"{exchange}：官方來源拒絕連線，已停止：{exc}", file=sys.stderr)
+                return 2
+            print(f"{exchange}：請求 {result['requests']} 次、寫入年份 {result['years']}", flush=True)
+        path = save_summary(base)
+        print(json.dumps(json.loads(path.read_text(encoding="utf-8")), ensure_ascii=False))
         return 0
 
     if args.command == "actions":

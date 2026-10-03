@@ -280,3 +280,34 @@ def test_backfill_calibration_reports_the_drag_the_real_series_implies():
     assert info["calibration"]["overlap_days"] == 39
     assert info["calibration"]["implied_annual_drag"] == pytest.approx(0.00004 * 252, abs=1e-5)
     assert info["calibration"]["tracking_error_annual"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_all_market_quotes_keep_only_common_stocks_with_a_trade(tmp_path):
+    from quant_platform.research.history.stocks import (
+        parse_tpex_all_day, parse_twse_all_day, read_year, universe_summary, write_year,
+    )
+
+    twse = {"stat": "OK", "tables": [
+        {"fields": ["成交統計", "成交金額(元)"], "data": [["x", "1"]]},
+        {"fields": ["證券代號", "證券名稱", "成交股數", "成交筆數", "成交金額", "開盤價", "最高價", "最低價", "收盤價", "漲跌(+/-)"],
+         "data": [["0050", "元大台灣50", "1", "1", "1", "1", "1", "1", "100.00", ""],
+                  ["2330", "台積電", "1,000", "10", "500,000", "499.00", "501.00", "498.00", "500.00", "+"],
+                  ["2331", "停牌", "0", "0", "0", "--", "--", "--", "--", ""],
+                  ["9110", "TDR", "1", "1", "1", "1", "1", "1", "1", ""]]},
+    ]}
+    rows = parse_twse_all_day(twse, date(2005, 1, 4))
+    assert [(row["code"], row["close"], row["volume"]) for row in rows] == [("2330", 500.0, 1000)]
+    tpex = {"stat": "ok", "tables": [{"fields": ["代號", "名稱", "收盤", "漲跌", "開盤", "最高", "最低", "成交股數", "成交金額(元)", "成交筆數"],
+                                      "data": [["6488", "環球晶", "400.00", "1.00", "399", "401", "398", "2,000", "800,000", "20"],
+                                               ["00679B", "債券ETF", "30", "0", "30", "30", "30", "1", "1", "1"]]}]}
+    assert [row["code"] for row in parse_tpex_all_day(tpex, date(2020, 1, 6))] == ["6488"]
+    assert parse_twse_all_day({"stat": "很抱歉，沒有符合條件的資料!"}, date(2005, 1, 1)) == []
+
+    base = tmp_path
+    write_year(rows + [{**rows[0], "date": date(2005, 1, 5)}, {**rows[0], "code": "2331", "date": date(2005, 1, 4)}],
+               base / "stocks" / "twse" / "2005.parquet")
+    assert len(read_year(base / "stocks" / "twse" / "2005.parquet")) == 3
+    summary = universe_summary(base)
+    # 2331 last traded on 01-04, before the last session: it counts as no longer trading.
+    assert summary["twse"]["codes"] == 2 and summary["twse"]["no_longer_trading"] == 1
+    assert summary["twse"]["last_day"] == "2005-01-05" and summary["tpex"]["rows"] == 0
