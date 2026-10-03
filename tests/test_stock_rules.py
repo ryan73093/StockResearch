@@ -244,3 +244,22 @@ def test_fingerprint_ignores_sessions_after_the_period_end(tmp_path):
     assert stock_fingerprint(tmp_path, 2026, 2026) != before                    # the forward record sees the whole file
     write_year([quote(date(2026, 9, 30), 11.0), quote(date(2026, 10, 2))], path)                     # a revision inside the period
     assert stock_fingerprint(tmp_path, 2026, 2026, until=end) != before
+
+
+def test_lump_sum_windows_put_the_whole_amount_in_at_each_window_start():
+    from quant_platform.research.cashflow import ContributionPlan
+    from quant_platform.research.legacy_challenger import Variant, windows
+    from quant_platform.research.stock_rules import LumpSumPlan
+
+    days = weekdays(date(2024, 1, 1), 522)                       # 2024-01-01 .. 2025-12-30: 12 full windows
+    data = LegacyData(sessions=days, closes={"A.TW": {day: 10 * 1.001 ** i for i, day in enumerate(days)},
+                                            "0050.TW": {day: 100.0 for day in days}},
+                      traded_value={}, factors={}, predictions={})
+    costs = CostModel(fee_rate=0.0, minimum_fee=0, slippage_bps=0.0)
+    ranks = {day: ["A.TW"] for day in days if day.day >= 5 and (day.day == 5 or days[days.index(day) - 1].day < 5)}
+    variant = Variant("a", "a", 1, "on_rank_days")
+    lump = windows(data, variant, costs, days[0], days[-1], 12, ranks, plan=LumpSumPlan(300_000))
+    # A gains 0.1% a session: about 1.001^255 - 1 ≈ 29% over a year from the first rank day, on the full 300,000
+    assert lump["count"] == 12 and lump["win_ratio"] == 1.0 and 0.27 < lump["median_excess"] < 0.30
+    monthly = windows(data, variant, costs, days[0], days[-1], 12, ranks, plan=ContributionPlan(monthly_amount=10_000, day_of_month=5))
+    assert 0.10 < monthly["median_excess"] < 0.16                 # money put in monthly is invested for half a year on average

@@ -709,13 +709,16 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     def research_pool():
         """Every rule ever tried and where it stands (研究選手池); /research/pool.json is the same data."""
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        return render_template("v2/research_pool.html", active_nav="research", pool=pool_view(research_dir),
+        basis = request.args.get("basis", "lump_sum")
+        basis = basis if basis in ("lump_sum", "dca") else "lump_sum"
+        return render_template("v2/research_pool.html", active_nav="research", pool=pool_view(research_dir, basis=basis),
                                generated=datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M"))
 
     @blueprint.get("/research/pool.json")
     def research_pool_json():
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        view = pool_view(research_dir)
+        basis = request.args.get("basis", "lump_sum")
+        view = pool_view(research_dir, basis=basis if basis in ("lump_sum", "dca") else "lump_sum")
         view["generated_at"] = datetime.now(TAIPEI).isoformat(timespec="seconds")
         return jsonify(view)
 

@@ -462,18 +462,21 @@ def _month_starts(sessions: list[date], start: date, end: date, months: int) -> 
 
 
 def windows(data: LegacyData, variant: Variant, costs: CostModel, start: date, end: date, months: int,
-            ranks: dict[date, list[str]], benchmarks: dict | None = None) -> dict[str, object]:
+            ranks: dict[date, list[str]], benchmarks: dict | None = None,
+            plan: ContributionPlan = STANDARD_PLAN) -> dict[str, object]:
     """Rolling windows starting each month: excess = (legacy − 0050) ÷ the window's contributions.
-    ``benchmarks`` caches the 0050 runs per window (the same for every variant of a cost profile)."""
+    Each window uses ``plan``: monthly contributions, or one lump sum at the window's first session
+    (stock rules' lump-sum basis, 2026-10-04). ``benchmarks`` caches the 0050 runs per window and plan."""
     benchmarks = benchmarks if benchmarks is not None else {}
+    plan_key = (type(plan).__name__, plan.monthly_amount, plan.day_of_month)
     excesses = []
     for first in _month_starts(data.sessions, start, end, months):
         total = first.year * 12 + first.month - 1 + months
         last = date(total // 12, total % 12 + 1, 1) - timedelta(days=1)
-        legacy = simulate(data, variant, costs, first, last, ranks)
-        if (first, last) not in benchmarks:
-            benchmarks[(first, last)] = simulate(data, None, costs, first, last)
-        benchmark = benchmarks[(first, last)]
+        legacy = simulate(data, variant, costs, first, last, ranks, plan)
+        if (first, last, plan_key) not in benchmarks:
+            benchmarks[(first, last, plan_key)] = simulate(data, None, costs, first, last, plan=plan)
+        benchmark = benchmarks[(first, last, plan_key)]
         if legacy.contributed > 0:
             excesses.append((legacy.final_value - benchmark.final_value) / legacy.contributed)
     if not excesses:

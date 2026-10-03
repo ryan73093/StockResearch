@@ -35,14 +35,14 @@ def seed(research):
 
 def test_pool_classifies_every_rule(tmp_path):
     seed(tmp_path)
-    rows = {row["spec_hash"]: row for row in rule_rows(tmp_path)}
+    rows = {row["spec_hash"]: row for row in rule_rows(tmp_path, "dca")}
 
     assert rows["etf-win"]["status"] == "window_ok" and rows["etf-win"]["family"] == "ETF 規則"
     assert rows["etf-lose"]["status"] == "eliminated" and "3 年勝率 30% < 60%" in rows["etf-lose"]["development"]["reasons"]
     assert rows["stock-both"]["status"] == "validation_passed" and rows["stock-both"]["validation"]["excess"] == 0.2
     assert rows["stock-fail"]["status"] == "validation_failed" and rows["stock-fail"]["validation"]["reasons"]
     assert "stock-lump" not in rows
-    view = pool_view(tmp_path)
+    view = pool_view(tmp_path, basis="dca")
     assert view["total"] == 4 and view["attempts"] == 5 and view["families"] == {"ETF 規則": 2, "個股規則": 2}
     assert [row["spec_hash"] for row in view["both_periods"]] == ["stock-both"]
     assert view["counts"]["validation_failed"] == 1 and view["counts"]["eliminated"] == 1
@@ -53,9 +53,9 @@ def test_pool_page_and_json(tmp_path):
     container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
     seed(tmp_path / "research")
     client = create_app(container).test_client()
-    body = client.get("/research/pool").get_data(as_text=True)
+    body = client.get("/research/pool?basis=dca").get_data(as_text=True)
     assert "研究選手池" in body and "個股 52 週高點" in body and "驗證期未通過" in body and "兩段獨立期間都贏" in body
-    payload = client.get("/research/pool.json").get_json()
+    payload = client.get("/research/pool.json?basis=dca").get_json()
     assert payload["total"] == 4 and payload["status_labels"]["eliminated"] == "開發期淘汰"
     assert client.get("/system/docs/research_method").status_code in (200, 404)
 
@@ -85,15 +85,15 @@ def test_pool_and_research_page_show_costs_and_forward_tracking(tmp_path):
         "adjustments_today": [], "trades_total": 1, "fees_total": 14, "taxes_total": 0,
         "replay_check": {"days": 0, "mismatches": []}, "late": False}, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    rows = {row["spec_hash"]: row for row in rule_rows(research)}
+    rows = {row["spec_hash"]: row for row in rule_rows(research, "dca")}
     assert rows["stock-old"]["development"]["cost_share"] == 0.1
     assert rows["stock-both"]["forward_since"] == "2026-10-05" and rows["etf-win"]["forward_since"] is None
     client = create_app(container).test_client()
     page = client.get("/research").get_data(as_text=True)
     assert "個股規則前向模擬" in page and "台積電" in page and "正常" in page
-    pool = client.get("/research/pool").get_data(as_text=True)
+    pool = client.get("/research/pool?basis=dca").get_data(as_text=True)
     assert "前向觀察中的個股規則" in pool and "費稅佔投入" in pool and "前向觀察 10-05 起" in pool
-    payload = client.get("/research/pool.json").get_json()
+    payload = client.get("/research/pool.json?basis=dca").get_json()
     assert payload["forward_stocks"][0]["sessions"] == 1 and payload["forward_stocks"][0]["problems"] == []
 
 
@@ -113,10 +113,24 @@ def test_final_validation_result_shows_on_pool_and_forward_rows(tmp_path):
     (folder / "tracked.json").write_text(json.dumps([{"rule_hash": "stock-both", "name": rule.name,
                                                        "rule": rule.model_dump(mode="json"), "since": "2026-10-03"}],
                                                      ensure_ascii=False), encoding="utf-8")
-    rows = {row["spec_hash"]: row for row in rule_rows(research)}
+    rows = {row["spec_hash"]: row for row in rule_rows(research, "dca")}
     assert rows["stock-both"]["status"] == "holdout_failed" and rows["stock-both"]["holdout"]["excess"] == -0.71
     final = StockForwardTracker(research).summary()[0]["final"]
     assert final["passed"] is False and final["excess"] == -0.71
     client = create_app(container).test_client()
     assert "最終驗證未通過 -71%" in client.get("/research").get_data(as_text=True)
-    assert "最終驗證比 0050 -71%" in client.get("/research/pool").get_data(as_text=True)
+    assert "最終驗證比 0050 -71%" in client.get("/research/pool?basis=dca").get_data(as_text=True)
+
+
+def test_pool_defaults_to_the_lump_sum_account(tmp_path):
+    registry = seed(tmp_path)
+    lump = {**GOOD, "plan": {"kind": "LumpSumPlan", "monthly_amount": 300_000}, "engine": "stocks-1.2.0",
+            "final_value": 1_210_000.0, "benchmark_final_value": 679_000.0}
+    registry.register(kind="candidate", report_file="r.json", period="development", spec_hash="stock-both",
+                      spec_name="個股 52 週高點", input_hash="10", data_fingerprint="stocks:a", metrics=lump)
+    rows = {row["spec_hash"]: row for row in rule_rows(tmp_path)}
+    # only lump-sum runs of engine 1.2.0 count: the older lump-sum run (monthly windows) is left out
+    assert set(rows) == {"stock-both"} and rows["stock-both"]["development"]["final_value"] == 1_210_000.0
+    assert rows["stock-both"]["status"] == "window_ok"
+    view = pool_view(tmp_path)
+    assert view["basis"] == "lump_sum" and "30 萬" in view["basis_label"]

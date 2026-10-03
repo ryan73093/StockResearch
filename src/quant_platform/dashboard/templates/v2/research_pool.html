@@ -13,6 +13,7 @@
 {% set c = pool.counts %}
 <section class="card">
   <div class="card__head"><h2>現況</h2></div>
+  <p style="margin:0 0 8px"><strong>比較方式：{{ pool.basis_label }}</strong>。{% for key, label in pool.bases.items() if key != pool.basis %}<a href="/research/pool?basis={{ key }}">改看「{{ label }}」</a>{% endfor %}</p>
   <p style="margin:0 0 12px">
     累計 {{ pool.total }} 個不同規則（ETF 規則 {{ pool.families['ETF 規則'] }}、個股規則 {{ pool.families['個股規則'] }}），
     多重檢定以 {{ pool.attempts or pool.total }} 個不同設定計。已核准 {{ c.approved }}、前向模擬中 {{ c.forward }}、最終驗證期通過 {{ c.holdout_passed }}、
@@ -31,13 +32,14 @@
 {% macro rule_table(rows, show_validation=True) %}
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
-    <thead><tr><th>規則</th><th>狀態</th><th class="num">開發期比 0050</th><th class="num">3 年勝率／中位</th><th class="num">最大回撤</th><th class="num">費稅佔投入</th>{% if show_validation %}<th class="num">驗證期比 0050</th><th class="num">驗證期 3 年勝率／中位</th>{% endif %}<th>說明</th></tr></thead>
+    <thead><tr><th>規則</th><th>狀態</th><th class="num">開發期期末（0050）</th><th class="num">開發期比 0050</th><th class="num">3 年勝率／中位</th><th class="num">最大回撤</th><th class="num">費稅佔投入</th>{% if show_validation %}<th class="num">驗證期比 0050</th><th class="num">驗證期 3 年勝率／中位</th>{% endif %}<th>說明</th></tr></thead>
     <tbody>
     {% for row in rows %}
       {% set d = row.development %}{% set v = row.validation %}
       <tr>
         <td data-primary><strong>{{ row.name }}</strong><span class="muted small"> {{ row.family }}・{{ row.source }}</span></td>
         <td data-label="狀態"><span class="badge {{ 'badge--ok' if row.status in ('approved', 'forward', 'holdout_passed', 'validation_passed') else ('badge--bad' if row.status in ('validation_failed', 'holdout_failed') else '') }}">{{ row.status_label }}</span>{% if row.track and row.track != '一般' %} <span class="badge badge--warn">{{ row.track }}</span>{% endif %}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
+        <td class="num" data-label="開發期期末（0050）">{% if d.final_value %}{{ '{:,.0f}'.format(d.final_value / 10000) }} 萬（{{ '{:,.0f}'.format(d.benchmark_final_value / 10000) }} 萬）{% else %}—{% endif %}</td>
         <td class="num {{ 'up' if (d.excess or 0) > 0 else ('down' if (d.excess or 0) < 0 else '') }}" data-label="開發期比 0050">{{ '{:+.0%}'.format(d.excess) if d.excess is not none else '—' }}</td>
         <td class="num" data-label="3 年勝率／中位">{{ '{:.0%}'.format(d.win_3y) if d.win_3y is not none else '—' }}／{{ '{:+.1%}'.format(d.median_3y) if d.median_3y is not none else '—' }}</td>
         <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(d.max_drawdown) if d.max_drawdown is not none else '—' }}</td>

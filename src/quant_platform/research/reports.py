@@ -71,14 +71,18 @@ def trial_ranking(registry_path: str | Path, period: str, limit: int = 10) -> di
     }
 
 
-def stock_rule_rows(registry_path: str | Path, period: str) -> list[dict[str, object]]:
-    """Stock-rule trials of one period (research/stock_rules.py), best 3-year median first."""
+def stock_rule_rows(registry_path: str | Path, period: str, plan_kind: str = "LumpSumPlan") -> list[dict[str, object]]:
+    """Stock-rule trials of one period and cash flow (research/stock_rules.py), best 3-year median
+    first. The owner's strategy account is a lump sum (2026-10-04); runs before engine 1.2.0 had monthly
+    windows and are left out of the lump-sum list."""
     from quant_platform.research.pool import _activity
     from quant_platform.research.registry import TrialRegistry
 
     records = [record for record in TrialRegistry(registry_path).records()
                if record.kind == "candidate" and record.period == period
-               and record.data_fingerprint.startswith("stocks:")]
+               and record.data_fingerprint.startswith("stocks:")
+               and (record.metrics.get("plan") or {}).get("kind", "ContributionPlan") == plan_kind
+               and (plan_kind != "LumpSumPlan" or str(record.metrics.get("engine") or "") >= "stocks-1.2.0")]
     latest: dict[str, object] = {}
     for record in records:                       # one row per rule: its newest run
         latest[record.spec_hash] = record
@@ -94,6 +98,7 @@ def stock_rule_rows(registry_path: str | Path, period: str) -> list[dict[str, ob
             "drawdown": record.metrics.get("max_drawdown"), "benchmark_drawdown": record.metrics.get("benchmark_max_drawdown"),
             "costs": record.metrics.get("costs"), "trades": record.metrics.get("trades"),
             "cost_share": _activity(record.metrics)["cost_share"],
+            "final_value": record.metrics.get("final_value"), "benchmark_final_value": record.metrics.get("benchmark_final_value"),
             "three_year": (record.metrics.get("windows") or {}).get("3y"),
             "five_year": (record.metrics.get("windows") or {}).get("5y"),
         }

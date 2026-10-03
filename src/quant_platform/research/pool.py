@@ -15,6 +15,8 @@ from quant_platform.research.promotion import PromotionLedger, STAGE_LABELS, TRA
 from quant_platform.research.registry import TrialRegistry, current_basis, distinct_rules
 from quant_platform.research.reports import latest_stats
 
+BASES = {"lump_sum": "LumpSumPlan", "dca": "ContributionPlan"}
+BASIS_LABELS = {"lump_sum": "一次投入 30 萬、獲利再投入，對同樣 30 萬放 0050", "dca": "每月 5 日投入 1 萬，對 0050 定期定額"}
 STATUS_ORDER = (
     "approved", "forward", "holdout_passed", "validation_passed", "holdout_failed", "validation_failed",
     "window_ok", "eliminated",
@@ -75,14 +77,17 @@ def _sources(research_dir: Path) -> dict[str, str]:
     return origin
 
 
-def _best_records(records: list, period: str) -> dict[str, object]:
-    """One record per rule for the period: the newest that has rolling windows, else the newest."""
+def _best_records(records: list, period: str, plan_kind: str = "ContributionPlan") -> dict[str, object]:
+    """One record per rule for the period and cash flow (monthly or lump sum): the newest that has
+    rolling windows, else the newest. Lump-sum runs before engine 1.2.0 had monthly windows: skipped."""
     chosen: dict[str, object] = {}
     for record in records:
         if record.kind != "candidate" or record.period != period:
             continue
-        if (record.metrics.get("plan") or {}).get("kind", "ContributionPlan") != "ContributionPlan":
-            continue  # lump-sum runs are illustrations, not trials of the standard cash flow
+        if (record.metrics.get("plan") or {}).get("kind", "ContributionPlan") != plan_kind:
+            continue
+        if plan_kind == "LumpSumPlan" and str(record.metrics.get("engine") or "") < "stocks-1.2.0":
+            continue
         current = chosen.get(record.spec_hash)
         has_windows = bool(_window(record.metrics, "3y").get("count"))
         if current is None or has_windows >= bool(_window(current.metrics, "3y").get("count")):
@@ -90,8 +95,9 @@ def _best_records(records: list, period: str) -> dict[str, object]:
     return chosen
 
 
-def rule_rows(research_dir: str | Path) -> list[dict[str, object]]:
+def rule_rows(research_dir: str | Path, basis: str = "lump_sum") -> list[dict[str, object]]:
     base = Path(research_dir)
+    kind = BASES[basis]
     registry = TrialRegistry(base / "trials.jsonl")
     records = registry.records()
     ledger = PromotionLedger(base / "promotions.jsonl")
@@ -105,9 +111,9 @@ def rule_rows(research_dir: str | Path) -> list[dict[str, object]]:
     forward_since = {item["rule_hash"]: item["since"] for item in StockForwardTracker(base).tracked()}
     etf_current, _older = current_basis(records, "development")
     etf_basis = {record.spec_hash for record in etf_current}
-    development = _best_records(records, "development")
-    validation = _best_records(records, "validation")
-    holdout = _best_records(records, "holdout")
+    development = _best_records(records, "development", kind)
+    validation = _best_records(records, "validation", kind)
+    holdout = _best_records(records, "holdout", kind)
     rows = []
     for spec_hash, dev in development.items():
         stock = dev.data_fingerprint.startswith("stocks:")
@@ -140,6 +146,7 @@ def rule_rows(research_dir: str | Path) -> list[dict[str, object]]:
             "forward_since": forward_since.get(spec_hash),
             "development": {
                 "trial_id": dev.trial_id, "xirr": dev.metrics.get("xirr"), "benchmark_xirr": dev.metrics.get("benchmark_xirr"),
+                "final_value": dev.metrics.get("final_value"), "benchmark_final_value": dev.metrics.get("benchmark_final_value"),
                 "max_drawdown": dev.metrics.get("max_drawdown"),
                 "benchmark_max_drawdown": dev.metrics.get("benchmark_max_drawdown"),
                 "excess": dev.metrics.get("full_period_excess"),
@@ -151,6 +158,7 @@ def rule_rows(research_dir: str | Path) -> list[dict[str, object]]:
             },
             "validation": None if val is None else {
                 "trial_id": val.trial_id, "xirr": val.metrics.get("xirr"), "benchmark_xirr": val.metrics.get("benchmark_xirr"),
+                "final_value": val.metrics.get("final_value"), "benchmark_final_value": val.metrics.get("benchmark_final_value"),
                 "max_drawdown": val.metrics.get("max_drawdown"), "excess": val.metrics.get("full_period_excess"),
                 "win_3y": _window(val.metrics, "3y").get("win_ratio"),
                 "median_3y": _window(val.metrics, "3y").get("median_excess"),
@@ -160,6 +168,8 @@ def rule_rows(research_dir: str | Path) -> list[dict[str, object]]:
             },
             "holdout": None if hold is None else {
                 "trial_id": hold.trial_id, "xirr": hold.metrics.get("xirr"), "excess": hold.metrics.get("full_period_excess"),
+                "benchmark_xirr": hold.metrics.get("benchmark_xirr"), "final_value": hold.metrics.get("final_value"),
+                "benchmark_final_value": hold.metrics.get("benchmark_final_value"),
                 "win_3y": _window(hold.metrics, "3y").get("win_ratio"), "reasons": hold_gate, "report": hold.report_file,
             },
         })
@@ -187,9 +197,10 @@ def ai_rounds(research_dir: str | Path) -> list[dict[str, object]]:
     return list(reversed(rounds))
 
 
-def pool_view(research_dir: str | Path, top: int = 20) -> dict[str, object]:
-    """What the pool page shows: counts, the lists an owner asks about, and every rule."""
-    rows = rule_rows(research_dir)
+def pool_view(research_dir: str | Path, top: int = 20, basis: str = "lump_sum") -> dict[str, object]:
+    """What the pool page shows: counts, the lists an owner asks about, and every rule, on one basis
+    (lump sum, the owner's strategy account since 2026-10-04, or the monthly plan)."""
+    rows = rule_rows(research_dir, basis)
     counts = {status: sum(1 for row in rows if row["status"] == status) for status in STATUS_ORDER}
     families = {family: sum(1 for row in rows if row["family"] == family) for family in ("ETF 規則", "個股規則")}
     ranked = [row for row in rows if row["development"]["win_3y"] is not None]
@@ -210,5 +221,5 @@ def pool_view(research_dir: str | Path, top: int = 20) -> dict[str, object]:
         "stock_pbo": (stock_stats.get("pbo") or {}).get("pbo"),
         "high_win": high_win, "both_periods": both, "ai_rounds": ai_rounds(research_dir),
         "forward_stocks": StockForwardTracker(research_dir).summary(),
-        "status_labels": STATUS_LABELS,
+        "status_labels": STATUS_LABELS, "basis": basis, "basis_label": BASIS_LABELS[basis], "bases": BASIS_LABELS,
     }

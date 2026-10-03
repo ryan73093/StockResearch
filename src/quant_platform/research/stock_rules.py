@@ -53,7 +53,10 @@ STANDARD_PLAN = ContributionPlan(monthly_amount=10_000, day_of_month=5)
 # 1.0.1: two warm-up years before the period for factors and listing age.
 # 1.1.0 (R3): minimum holding period, top-up band and minimum order; trading activity in the
 # report. A rule without the new settings trades exactly as in 1.0.1.
-ENGINE_VERSION = "stocks-1.1.0"
+# 1.2.0 (2026-10-04): a lump-sum run's rolling windows are lump-sum windows too (each window starts
+# with the whole amount and is compared with the same amount in 0050); before, they were monthly.
+ENGINE_VERSION = "stocks-1.2.0"
+LUMP_SUM = 300_000.0     # the owner's strategy account: NT$300,000 once, everything reinvested (2026-10-04)
 WARMUP_YEARS = 2
 # Settings left out of the canonical form (and so the hash) while at their default, so a rule
 # written before a setting existed keeps its hash.
@@ -329,7 +332,7 @@ def evaluate_rule(data: LegacyData, panel: Panel, rule: StockRule, costs: CostMo
         "monthly_active_returns": _monthly_active(run, benchmark),
         "strategy": run.summary(), "benchmark": benchmark.summary(),
         "full_period_excess": round(_excess(run, benchmark), 6),
-        "windows": {f"{months // 12}y": windows(data, variant, costs, first, end, months, ranks, cache)
+        "windows": {f"{months // 12}y": windows(data, variant, costs, first, end, months, ranks, cache, plan=plan)
                     for months in window_months},
         "picks_per_day": round(statistics.fmean(len(picks) for picks in ranks.values()), 1),
         "activity": activity(run), "benchmark_activity": activity(benchmark),
@@ -419,6 +422,7 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
             "trades": strategy["trades"], "costs": strategy["fees"] + strategy["taxes"],
             "full_period_excess": report["full_period_excess"], "windows": report["windows"],
             "cost_scale": 1.0, "execution_lag": 0, "plan": cash_flow,
+            "final_value": strategy["final_value"], "benchmark_final_value": benchmark["final_value"],
             "contributed": report["activity"]["contributed"], "cost_share": report["activity"]["cost_share"],
             "turnover": report["activity"]["turnover"], "orders_per_month": report["activity"]["orders_per_month"],
         },
@@ -516,5 +520,14 @@ def cost_batch() -> list[StockRule]:
     return rules
 
 
+def all_rules() -> list[StockRule]:
+    """Every stock rule of every batch once (by hash): the lump-sum re-evaluation (2026-10-04)."""
+    seen: dict[str, StockRule] = {}
+    for batch in (first_batch, second_batch, sweep_batch, cost_batch):
+        for rule in batch():
+            seen.setdefault(rule.rule_hash, rule)
+    return list(seen.values())
+
+
 BATCHES = {"first": first_batch, "second": second_batch, "high52": high52_family, "sweep": sweep_batch,
-           "cost": cost_batch}
+           "cost": cost_batch, "all": all_rules}

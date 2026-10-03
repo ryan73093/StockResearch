@@ -248,7 +248,7 @@ def main() -> int:
         if args.name == "qualified":
             from quant_platform.research.stock_forward import qualifying_rules
 
-            rules = [rule for rule, _reason in qualifying_rules(RESEARCH)]
+            rules = [rule for rule, _reason in qualifying_rules(RESEARCH, type(stock_plan).__name__)]
             print(f"兩段期間都贏的規則：{len(rules)} 個", flush=True)
         elif args.name not in STOCK_BATCHES:
             raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(STOCK_BATCHES)}、qualified")
@@ -258,15 +258,20 @@ def main() -> int:
             from quant_platform.research.pool import _best_records, _gate
 
             stock_records = [record for record in registry.records() if record.data_fingerprint.startswith("stocks:")]
-            passed = {spec_hash for spec_hash, record in _best_records(stock_records, "development").items()
+            passed = {spec_hash for spec_hash, record in _best_records(stock_records, "development",
+                                                                       type(stock_plan).__name__).items()
                       if (record.metrics.get("windows") or {}).get("3y", {}).get("count") and not _gate(record.metrics)}
             rules = [rule for rule in rules if rule.rule_hash in passed]
             print(f"開發期已通過門檻的規則：{len(rules)} 個", flush=True)
         if args.top:
             # Second stage: the rules whose screening run (no windows) did best, by full-period excess.
             best: dict[str, float] = {}
+            kind = type(stock_plan).__name__
             for record in registry.records():
-                if record.period == "development" and record.data_fingerprint.startswith("stocks:"):
+                same_plan = (record.metrics.get("plan") or {}).get("kind", "ContributionPlan") == kind
+                if kind == "LumpSumPlan" and str(record.metrics.get("engine") or "") < "stocks-1.2.0":
+                    same_plan = False   # earlier lump-sum runs had monthly windows
+                if same_plan and record.period == "development" and record.data_fingerprint.startswith("stocks:"):
                     best[record.spec_hash] = max(best.get(record.spec_hash, float("-inf")),
                                                  record.metrics.get("full_period_excess") or float("-inf"))
             rules = sorted((rule for rule in rules if rule.rule_hash in best), key=lambda r: -best[r.rule_hash])[:args.top]

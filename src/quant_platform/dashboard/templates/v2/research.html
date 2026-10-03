@@ -262,7 +262,7 @@
 <section class="card" id="stock-forward">
   <div class="card__head">
     <h2>個股規則前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>
-    <span class="muted small">兩段期間都贏的規則自動加入、從加入那天起算；每月 5 日投入 10,000 元、國泰手續費；每個交易日 15:30 記錄，只追加不改寫</span>
+    <span class="muted small">兩段期間都贏的規則自動加入、從加入那天起算；一次投入 30 萬、獲利再投入，對同樣 30 萬放 0050；國泰手續費；每個交易日 15:30 記錄，只追加不改寫</span>
   </div>
   {% if stock_forward %}
   <div class="table-wrap table-wrap--stack">
@@ -303,7 +303,7 @@
     {% endif %}
   </details>
   {% endfor %}
-  <p class="note">相對 0050 ＝（規則資產 − 0050 定期定額資產）÷ 投入。股利以再投入的股數計（和研究回測相同），所以股數會有小數。對帳：每天的股數與現金都要能從前一天加當天的交易算出來，重算過去的日子也要和當天寫下的一致。前向結果只觀察，不拿來挑規則；機器可讀版在<a href="/research/pool.json">選手池 JSON</a> 的 forward_stocks。</p>
+  <p class="note">相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入。股利以再投入的股數計（和研究回測相同），所以股數會有小數。對帳：每天的股數與現金都要能從前一天加當天的交易算出來，重算過去的日子也要和當天寫下的一致。前向結果只觀察，不拿來挑規則；機器可讀版在<a href="/research/pool.json">選手池 JSON</a> 的 forward_stocks。</p>
   {% else %}
   <p class="muted" style="margin:0">尚無追蹤中的個股規則。兩段期間都贏的規則會在下一個交易日 15:30 自動加入。</p>
   {% endif %}
@@ -353,8 +353,8 @@
 {% if stock_rules %}
 <section class="card">
   <div class="card__head">
-    <h2>個股規則 <span class="badge">開發期 2004–2016</span></h2>
-    <span class="muted small">無倖存者偏差的上市股票池（含後來下市的）；每月依單一因子換股，等權；與 0050 定期定額同現金流與成本</span>
+    <h2>個股規則 <span class="badge">開發期 2004–2016・一次投入 30 萬</span></h2>
+    <span class="muted small">無倖存者偏差的上市股票池（含後來下市的）；每月依因子換股，等權；30 萬一次投入、獲利再投入，對同樣 30 萬放 0050；完整清單在<a href="/research/pool">研究選手池</a></span>
   </div>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
