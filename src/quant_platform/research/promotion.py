@@ -337,7 +337,11 @@ class PromotionPipeline:
         return evidence
 
     def _drawdown(self, track: str, metrics: dict) -> list[str]:
-        return tolerance_gate(metrics, self._tolerance) if track == "aggressive" else drawdown_gate(metrics)
+        if track != "aggressive":
+            return drawdown_gate(metrics)
+        if self._tolerance is None:  # cannot happen after the development gate; never let it pass silently
+            return ["尚未建立投資計畫，進攻型賽道未啟用"]
+        return tolerance_gate(metrics, self._tolerance)
 
     def advance(self, market: MarketData) -> list[PromotionEvent]:
         """Move every candidate as far as its gates allow; returns the new events."""
