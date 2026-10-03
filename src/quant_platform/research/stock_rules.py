@@ -306,7 +306,8 @@ def _monthly_active(run, benchmark) -> dict[str, float]:
 
 def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: TrialRegistry, reports_dir: Path,
                     costs: CostModel | None = None, data: LegacyData | None = None, panel: Panel | None = None,
-                    generated_at: str | None = None, plan=STANDARD_PLAN) -> tuple[object, dict]:
+                    generated_at: str | None = None, plan=STANDARD_PLAN,
+                    window_months: tuple[int, ...] = (36, 60)) -> tuple[object, dict]:
     """Evaluate one rule on one research period and register it (reused when already run)."""
     if period not in ("development", "validation", "holdout"):
         raise ResearchGateError("個股規則只能用開發、驗證或保留期評估")
@@ -316,7 +317,7 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
     cash_flow = {"monthly_amount": plan.monthly_amount, "day_of_month": plan.day_of_month,
                  "kind": type(plan).__name__}
     payload = {"rule": rule.canonical(), "period": period, "costs": costs.as_dict(), "data": fingerprint,
-               "engine": ENGINE_VERSION, "plan": cash_flow}
+               "engine": ENGINE_VERSION, "plan": cash_flow, "windows": list(window_months)}
     input_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
     existing = registry.find("candidate", period, input_hash)
     if existing is not None:
@@ -330,7 +331,7 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
     # Two years before the period warm the factors and the listing age up; trades start at ``start``.
     data = data or load_stock_data(base, start.year - WARMUP_YEARS, end.year)
     panel = panel or Panel(data)
-    report = evaluate_rule(data, panel, rule, costs, start, end, plan=plan)
+    report = evaluate_rule(data, panel, rule, costs, start, end, plan=plan, window_months=window_months)
     report["data_fingerprint"] = fingerprint
     report["plan"] = cash_flow
     stamp = generated_at or datetime.now(UTC).strftime("%Y%m%d-%H%M%S")

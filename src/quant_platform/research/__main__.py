@@ -177,6 +177,8 @@ def main() -> int:
     )
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--lump-sum", type=float, default=0, help="stocks：一次投入的金額（0＝每月投入）")
+    parser.add_argument("--screen", action="store_true", help="stocks：只算全期間、不算滾動視窗（大掃描第一階段）")
+    parser.add_argument("--top", type=int, default=0, help="stocks：只跑登錄檔中全期超額最高的前 N 個規則（第二階段）")
     parser.add_argument("--dry-run", action="store_true", help="agent：只印出提示內容，不呼叫模型")
     parser.add_argument("--check", action="store_true", help="agent：極小的連線檢查呼叫（金鑰、模型、JSON 格式）")
     parser.add_argument("--name", default="first", help="batch：批次名稱")
@@ -238,10 +240,21 @@ def main() -> int:
         print("現金流：" + (f"一次投入 {args.lump_sum:,.0f} 元" if args.lump_sum else "每月 5 日投入 10,000 元"), flush=True)
         if args.name not in STOCK_BATCHES:
             raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(STOCK_BATCHES)}")
-        for rule in STOCK_BATCHES[args.name]():
+        rules = STOCK_BATCHES[args.name]()
+        if args.top:
+            # Second stage: the rules whose screening run (no windows) did best, by full-period excess.
+            best: dict[str, float] = {}
+            for record in registry.records():
+                if record.period == args.period and record.data_fingerprint.startswith("stocks:"):
+                    best[record.spec_hash] = max(best.get(record.spec_hash, float("-inf")),
+                                                 record.metrics.get("full_period_excess") or float("-inf"))
+            rules = sorted((rule for rule in rules if rule.rule_hash in best), key=lambda r: -best[r.rule_hash])[:args.top]
+        windows = () if args.screen else (36, 60)
+        for rule in rules:
             try:
                 record, report = run_stock_trial(rule, args.period, base, registry, RESEARCH / "reports", costs,
-                                                 data=data, panel=panel, generated_at=stamp, plan=stock_plan)
+                                                 data=data, panel=panel, generated_at=stamp, plan=stock_plan,
+                                                 window_months=windows)
             except ResearchGateError as exc:
                 print(f"{rule.name}：研究規則不允許 — {exc}", file=sys.stderr)
                 continue
