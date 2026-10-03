@@ -596,3 +596,26 @@ td.wrap { white-space: normal; min-width: 180px; }
 .doc :not(pre) > code { background: var(--surface-3); padding: 1px 5px; border-radius: 5px; color: var(--text); }
 .doc pre.mermaid { background: var(--surface-2); text-align: center; }
 .doc__meta { color: var(--muted); font-size: 12.5px; margin-bottom: 14px; }
+
+/* Research sub-navigation, job progress, filters, rule chart (2026-10-04) */
+.subtabs { display: flex; gap: 6px; overflow-x: auto; margin: 0 0 16px; padding-bottom: 4px; scrollbar-width: thin; }
+.subtabs a { flex: 0 0 auto; padding: 7px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-2);
+  text-decoration: none; font-size: 14px; background: var(--surface); white-space: nowrap; }
+.subtabs a:hover { border-color: var(--border-strong); color: var(--text); }
+.subtabs a[aria-current="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.progress { height: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; margin-bottom: 4px; min-width: 120px; }
+.progress span { display: block; height: 100%; background: var(--accent); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+.filters input, .filters select { padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 14px; max-width: 100%; }
+.filters input { flex: 1 1 220px; }
+.basis-switch { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.basis-switch a { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); text-decoration: none; color: var(--text); background: var(--surface-2); }
+.basis-switch a[aria-current="true"] { border-color: var(--accent); background: var(--accent-bg); }
+.rule-chart { width: 100%; height: auto; display: block; background: var(--surface-2); border-radius: var(--radius-sm); }
+.rule-chart .line-rule { fill: none; stroke: var(--accent); stroke-width: 2; }
+.rule-chart .line-bench { fill: none; stroke: var(--warn); stroke-width: 2; }
+.rule-chart .line-put { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--text-2); margin: 6px 0 0; }
+.legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; }

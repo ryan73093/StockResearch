@@ -10,10 +10,16 @@
 </header>
 {% endblock %}
 {% block content %}
+{% include "v2/_research_tabs.html" %}
 {% set c = pool.counts %}
 <section class="card">
   <div class="card__head"><h2>現況</h2></div>
-  <p style="margin:0 0 8px"><strong>比較方式：{{ pool.basis_label }}</strong>。{% for key, label in pool.bases.items() if key != pool.basis %}<a href="/research/pool?basis={{ key }}">改看「{{ label }}」</a>{% endfor %}</p>
+  <div class="basis-switch">
+    {% for key, label in pool.bases.items() %}
+    <a href="/research/pool?basis={{ key }}"{% if key == pool.basis %} aria-current="true"{% endif %}><strong>{{ label.split('；')[0] }}</strong><span class="muted small">{{ counts[key] }} 個規則有結果{% if key == 'seed' %}・你的帳戶{% endif %}</span></a>
+    {% endfor %}
+  </div>
+  <p class="muted small" style="margin:8px 0 12px">目前比較方式：{{ pool.basis_label }}。點規則名稱看它每一次的模擬回測紀錄。{% if not counts.seed %}「啟動資金 30 萬＋每月 1 萬」的回測正在跑或還沒跑，見<a href="/research?tab=jobs">執行中的程式</a>。{% endif %}</p>
   <p style="margin:0 0 12px">
     累計 {{ pool.total }} 個不同規則（ETF 規則 {{ pool.families['ETF 規則'] }}、個股規則 {{ pool.families['個股規則'] }}），
     多重檢定以 {{ pool.attempts or pool.total }} 個不同設定計。已核准 {{ c.approved }}、前向模擬中 {{ c.forward }}、最終驗證期通過 {{ c.holdout_passed }}、
@@ -36,8 +42,8 @@
     <tbody>
     {% for row in rows %}
       {% set d = row.development %}{% set v = row.validation %}
-      <tr>
-        <td data-primary><strong>{{ row.name }}</strong><span class="muted small"> {{ row.family }}・{{ row.source }}</span></td>
+      <tr data-name="{{ row.name }}" data-status="{{ row.status }}" data-family="{{ row.family }}">
+        <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong><span class="muted small"> {{ row.family }}・{{ row.source }}</span></td>
         <td data-label="狀態"><span class="badge {{ 'badge--ok' if row.status in ('approved', 'forward', 'holdout_passed', 'validation_passed') else ('badge--bad' if row.status in ('validation_failed', 'holdout_failed') else '') }}">{{ row.status_label }}</span>{% if row.track and row.track != '一般' %} <span class="badge badge--warn">{{ row.track }}</span>{% endif %}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
         <td class="num" data-label="開發期期末（0050）">{% if d.final_value %}{{ '{:,.0f}'.format(d.final_value / 10000) }} 萬（{{ '{:,.0f}'.format(d.benchmark_final_value / 10000) }} 萬）{% else %}—{% endif %}</td>
         <td class="num {{ 'up' if (d.excess or 0) > 0 else ('down' if (d.excess or 0) < 0 else '') }}" data-label="開發期比 0050">{{ '{:+.0%}'.format(d.excess) if d.excess is not none else '—' }}</td>
@@ -87,8 +93,38 @@
 </details>
 {% endif %}
 
-<details class="card" id="all">
-  <summary><h2>全部規則 <span class="badge">{{ pool.total }}</span></h2></summary>
+<section class="card" id="all">
+  <div class="card__head"><h2>全部規則 <span class="badge">{{ pool.total }}</span></h2></div>
+  <div class="filters">
+    <input type="search" id="rule-search" placeholder="搜尋規則名稱，例如 52 週、動能、殖利率" aria-label="搜尋規則名稱">
+    <select id="rule-status" aria-label="狀態">
+      <option value="">全部狀態</option>
+      {% for key, label in pool.status_labels.items() %}<option value="{{ key }}">{{ label }}（{{ c[key] }}）</option>{% endfor %}
+    </select>
+    <select id="rule-family" aria-label="類別">
+      <option value="">全部類別</option>
+      {% for family, count in pool.families.items() %}<option value="{{ family }}">{{ family }}（{{ count }}）</option>{% endfor %}
+    </select>
+    <span class="muted small" id="rule-count"></span>
+  </div>
   {{ rule_table(pool.rules) }}
-</details>
+</section>
+<script>
+(function () {
+  var search = document.getElementById('rule-search'), status = document.getElementById('rule-status'),
+      family = document.getElementById('rule-family'), count = document.getElementById('rule-count');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('#all tbody tr'));
+  function apply() {
+    var text = search.value.trim(), shown = 0;
+    rows.forEach(function (row) {
+      var ok = (!text || row.dataset.name.indexOf(text) >= 0) && (!status.value || row.dataset.status === status.value)
+        && (!family.value || row.dataset.family === family.value);
+      row.hidden = !ok; if (ok) { shown += 1; }
+    });
+    count.textContent = '顯示 ' + shown + '／' + rows.length + ' 個';
+  }
+  [search, status, family].forEach(function (el) { el.addEventListener('input', apply); });
+  apply();
+})();
+</script>
 {% endblock %}

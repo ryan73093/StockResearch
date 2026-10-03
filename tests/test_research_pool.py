@@ -89,7 +89,7 @@ def test_pool_and_research_page_show_costs_and_forward_tracking(tmp_path):
     assert rows["stock-old"]["development"]["cost_share"] == 0.1
     assert rows["stock-both"]["forward_since"] == "2026-10-05" and rows["etf-win"]["forward_since"] is None
     client = create_app(container).test_client()
-    page = client.get("/research").get_data(as_text=True)
+    page = client.get("/research?tab=forward").get_data(as_text=True)
     assert "個股規則前向模擬" in page and "台積電" in page and "正常" in page
     pool = client.get("/research/pool?basis=dca").get_data(as_text=True)
     assert "前向觀察中的個股規則" in pool and "費稅佔投入" in pool and "前向觀察 10-05 起" in pool
@@ -118,19 +118,54 @@ def test_final_validation_result_shows_on_pool_and_forward_rows(tmp_path):
     final = StockForwardTracker(research).summary()[0]["final"]
     assert final["passed"] is False and final["excess"] == -0.71
     client = create_app(container).test_client()
-    assert "最終驗證未通過 -71%" in client.get("/research").get_data(as_text=True)
+    assert "最終驗證未通過 -71%" in client.get("/research?tab=forward").get_data(as_text=True)
     assert "最終驗證比 0050 -71%" in client.get("/research/pool?basis=dca").get_data(as_text=True)
 
 
-def test_pool_defaults_to_the_lump_sum_account(tmp_path):
+def test_pool_lump_sum_basis_uses_only_engine_1_2_runs(tmp_path):
     registry = seed(tmp_path)
     lump = {**GOOD, "plan": {"kind": "LumpSumPlan", "monthly_amount": 300_000}, "engine": "stocks-1.2.0",
             "final_value": 1_210_000.0, "benchmark_final_value": 679_000.0}
     registry.register(kind="candidate", report_file="r.json", period="development", spec_hash="stock-both",
                       spec_name="個股 52 週高點", input_hash="10", data_fingerprint="stocks:a", metrics=lump)
-    rows = {row["spec_hash"]: row for row in rule_rows(tmp_path)}
+    rows = {row["spec_hash"]: row for row in rule_rows(tmp_path, "lump_sum")}
     # only lump-sum runs of engine 1.2.0 count: the older lump-sum run (monthly windows) is left out
     assert set(rows) == {"stock-both"} and rows["stock-both"]["development"]["final_value"] == 1_210_000.0
     assert rows["stock-both"]["status"] == "window_ok"
-    view = pool_view(tmp_path)
+    view = pool_view(tmp_path, basis="lump_sum")
     assert view["basis"] == "lump_sum" and "30 萬" in view["basis_label"]
+
+
+def test_rule_page_jobs_and_factor_tabs(tmp_path):
+    from quant_platform.research.jobs import JobLog
+    from quant_platform.research.stock_rules import StockRule
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
+    research = tmp_path / "research"
+    seed(research)
+    rule = StockRule(name="個股 52 週高點", factor="high_52w", top=30, buffer=3)
+    (research / "reports").mkdir(parents=True)
+    (research / "reports" / "r.json").write_text(json.dumps({
+        "spec": rule.canonical(), "monthly_active_returns": {"2015-01": 0.01, "2015-02": -0.004},
+        "curve": {"2015-01": [100.0, 100.0, 100.0], "2015-02": [120.0, 110.0, 110.0]},
+        "strategy": {"final_value": 120.0}, "benchmark": {"final_value": 110.0}}, ensure_ascii=False), encoding="utf-8")
+    job = JobLog(research).start("測試程式", "x", total=4)
+    job.update(done=1, force=True)
+    (research / "factors").mkdir()
+    (research / "factors" / "strength-20261004-000000.json").write_text(json.dumps({
+        "generated_at": "2026-10-04T02:00:00+08:00", "months": 260, "universe": "上市",
+        "factors": {"high_52w": {"label": "接近 52 週高點", "verdict": "強", "spread_by_year": {"2015": 0.02},
+                                 "periods": {"development": {"ic": 0.05, "t": 3.2, "spread_year": 0.08}}}}},
+        ensure_ascii=False), encoding="utf-8")
+    client = create_app(container).test_client()
+    page = client.get("/research/rules/stock-both").get_data(as_text=True)
+    assert "依「接近 52 週高點」把合格的上市股票排名" in page and "每一次的模擬回測" in page and "<polyline" in page
+    assert client.get("/research/rules/nope").status_code == 404
+    assert client.get("/research/rules/stock-both.json").get_json()["runs"][0]["yearly"] == {"2015": 0.006}
+    jobs = client.get("/research?tab=jobs").get_data(as_text=True)
+    assert "測試程式" in jobs and "25%" in jobs and "執行中" in jobs
+    factors = client.get("/research?tab=factors").get_data(as_text=True)
+    assert "接近 52 週高點" in factors and "+0.050" in factors
+    pool = client.get("/research/pool?basis=dca").get_data(as_text=True)
+    assert 'href="/research/rules/stock-both"' in pool and 'id="rule-search"' in pool and "選手池・全部規則" in pool
+    job.finish("done", "完成了")

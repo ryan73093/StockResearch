@@ -9,7 +9,7 @@ from quant_platform.research.history.stocks import write_year
 from quant_platform.research.legacy_challenger import LegacyData
 from quant_platform.research.registry import TrialRegistry
 from quant_platform.research.stock_rules import (
-    FACTORS, Panel, StockRule, evaluate_rule, first_batch, rankings, unit_factors_all,
+    BASE_FACTORS, FACTORS, Panel, StockRule, evaluate_rule, first_batch, rankings, unit_factors_all,
 )
 
 
@@ -98,7 +98,7 @@ def test_rule_trial_registers_once_and_counts_as_a_candidate(tmp_path):
 def test_first_batch_is_distinct_and_names_no_stock():
     rules = first_batch()
     assert len(rules) == 14 and len({rule.rule_hash for rule in rules}) == 14
-    assert {rule.factor for rule in rules} == set(FACTORS)
+    assert {rule.factor for rule in rules} == set(BASE_FACTORS)          # the batch stays as it was run
     assert all(not any(char.isdigit() and len(rule.name) < 0 for char in rule.name) for rule in rules)
     assert StockRule(name="a", factor="momentum_6").rule_hash == StockRule(name="b", factor="momentum_6").rule_hash
 
@@ -263,3 +263,13 @@ def test_lump_sum_windows_put_the_whole_amount_in_at_each_window_start():
     assert lump["count"] == 12 and lump["win_ratio"] == 1.0 and 0.27 < lump["median_excess"] < 0.30
     monthly = windows(data, variant, costs, days[0], days[-1], 12, ranks, plan=ContributionPlan(monthly_amount=10_000, day_of_month=5))
     assert 0.10 < monthly["median_excess"] < 0.16                 # money put in monthly is invested for half a year on average
+
+
+def test_seed_plan_puts_the_starting_capital_in_first_then_every_month():
+    from quant_platform.research.stock_rules import SeedPlan
+
+    days = weekdays(date(2024, 1, 1), 70)                       # 2024-01-01 .. 2024-04-05
+    schedule = SeedPlan(300_000, 10_000).schedule(days, days[0], days[-1])
+    assert schedule[0] == (date(2024, 1, 1), 300_000.0) and schedule[1] == (date(2024, 1, 5), 10_000.0)
+    assert [day for day, _ in schedule[1:]] == [date(2024, 1, 5), date(2024, 2, 5), date(2024, 3, 5), date(2024, 4, 5)]
+    assert sum(amount for _, amount in schedule) == 340_000

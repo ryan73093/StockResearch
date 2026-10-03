@@ -71,7 +71,7 @@ def trial_ranking(registry_path: str | Path, period: str, limit: int = 10) -> di
     }
 
 
-def stock_rule_rows(registry_path: str | Path, period: str, plan_kind: str = "LumpSumPlan") -> list[dict[str, object]]:
+def stock_rule_rows(registry_path: str | Path, period: str, plan_kind: str = "SeedPlan") -> list[dict[str, object]]:
     """Stock-rule trials of one period and cash flow (research/stock_rules.py), best 3-year median
     first. The owner's strategy account is a lump sum (2026-10-04); runs before engine 1.2.0 had monthly
     windows and are left out of the lump-sum list."""

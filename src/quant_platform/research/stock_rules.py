@@ -48,7 +48,17 @@ FACTORS = {
     "low_volatility_60": "60 日低波動",
     "high_52w": "接近 52 週高點",
     "dividend_yield": "近 12 個月現金殖利率",
+    # 2026-10-04: more price and trading factors for the factor-strength analysis (research/factors.py)
+    "momentum_3": "3 個月動能",
+    "reversal_5d": "1 週反轉",
+    "low_volatility_250": "1 年低波動",
+    "low_max_return": "近 1 個月最大單日漲幅低（不追飆股）",
+    "liquidity": "成交值大（流動性）",
+    "volume_surge": "成交值放大（近 20 日比近 120 日）",
+    "trend_200": "站上 200 日均線的幅度",
 }
+# The factors the 2026-10-03 batches were built from: the batches stay as they were run.
+BASE_FACTORS = ("momentum_12_1", "momentum_6", "reversal_1", "low_volatility_60", "high_52w", "dividend_yield")
 STANDARD_PLAN = ContributionPlan(monthly_amount=10_000, day_of_month=5)
 # 1.0.1: two warm-up years before the period for factors and listing age.
 # 1.1.0 (R3): minimum holding period, top-up band and minimum order; trading activity in the
@@ -56,7 +66,11 @@ STANDARD_PLAN = ContributionPlan(monthly_amount=10_000, day_of_month=5)
 # 1.2.0 (2026-10-04): a lump-sum run's rolling windows are lump-sum windows too (each window starts
 # with the whole amount and is compared with the same amount in 0050); before, they were monthly.
 ENGINE_VERSION = "stocks-1.2.0"
-LUMP_SUM = 300_000.0     # the owner's strategy account: NT$300,000 once, everything reinvested (2026-10-04)
+LUMP_SUM = 300_000.0     # a one-time amount, for illustrations
+# The owner's account (2026-10-04): a starting capital first, then the monthly contribution; the whole
+# account (money put in plus gains or losses) is traded and compared with the same cash flow in 0050.
+SEED_CAPITAL = 300_000.0   # the owner: start with NT$300,000 for now (2026-10-04)
+SEED_MONTHLY = 10_000.0
 WARMUP_YEARS = 2
 # Settings left out of the canonical form (and so the hash) while at their default, so a rule
 # written before a setting existed keeps its hash.
@@ -67,7 +81,9 @@ class StockRule(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: str = Field(min_length=1, max_length=80)
-    factor: Literal["momentum_12_1", "momentum_6", "reversal_1", "low_volatility_60", "high_52w", "dividend_yield"]
+    factor: Literal["momentum_12_1", "momentum_6", "reversal_1", "low_volatility_60", "high_52w", "dividend_yield",
+                    "momentum_3", "reversal_5d", "low_volatility_250", "low_max_return", "liquidity", "volume_surge",
+                    "trend_200"]
     top: int = Field(default=20, ge=5, le=50)
     rebalance: Literal["monthly", "quarterly"] = "monthly"
     buffer: int = Field(default=1, ge=1, le=5)   # keep a holding while it still ranks within buffer × top
@@ -255,6 +271,22 @@ class Panel:
         if factor == "dividend_yield":
             paid = self.cash[:, max(0, position - 252):position + 1].sum(axis=1)
             return paid / self.close[:, position]
+        if factor == "momentum_3":
+            return now / back(63) - 1
+        if factor == "reversal_5d":
+            return -(now / back(5) - 1)
+        if factor in ("low_volatility_250", "low_max_return"):
+            window = prices[:, max(0, position - (250 if factor == "low_volatility_250" else 21)):position + 1]
+            returns = window[:, 1:] / window[:, :-1] - 1
+            return -(np.nanstd(returns, axis=1) if factor == "low_volatility_250" else np.nanmax(returns, axis=1))
+        if factor in ("liquidity", "volume_surge"):
+            recent = np.nanmean(self.turnover[:, max(0, position - 19):position + 1], axis=1)
+            if factor == "liquidity":
+                return np.log(np.maximum(recent, 1.0))
+            longer = np.nanmean(self.turnover[:, max(0, position - 119):position + 1], axis=1)
+            return recent / np.maximum(longer, 1.0)
+        if factor == "trend_200":
+            return now / np.nanmean(prices[:, max(0, position - 199):position + 1], axis=1) - 1
         raise ValueError(factor)
 
 
@@ -280,6 +312,25 @@ class LumpSumPlan:
     def schedule(self, sessions: list[date], start: date, end: date) -> list[tuple[date, float]]:
         first = next((day for day in sessions if start <= day <= end), None)
         return [(first, float(self.monthly_amount))] if first else []
+
+
+class SeedPlan:
+    """A starting capital at the first session, then ``monthly_amount`` on the first session on or
+    after the ``day_of_month`` of every month (the first month too): the owner's account."""
+
+    def __init__(self, initial: float = SEED_CAPITAL, monthly_amount: float = SEED_MONTHLY, day_of_month: int = 5) -> None:
+        self.initial = float(initial)
+        self.monthly_amount = float(monthly_amount)
+        self.day_of_month = day_of_month
+
+    def schedule(self, sessions: list[date], start: date, end: date) -> list[tuple[date, float]]:
+        first = next((day for day in sessions if start <= day <= end), None)
+        if first is None:
+            return []
+        monthly = ContributionPlan(monthly_amount=self.monthly_amount, day_of_month=self.day_of_month)
+        merged = dict(monthly.schedule(sessions, start, end))
+        merged[first] = merged.get(first, 0.0) + self.initial
+        return sorted(merged.items())
 
 
 def _forward_fill(values: np.ndarray) -> np.ndarray:
@@ -336,8 +387,21 @@ def evaluate_rule(data: LegacyData, panel: Panel, rule: StockRule, costs: CostMo
                     for months in window_months},
         "picks_per_day": round(statistics.fmean(len(picks) for picks in ranks.values()), 1),
         "activity": activity(run), "benchmark_activity": activity(benchmark),
+        "curve": curve(run, benchmark),
     }
     return report
+
+
+def curve(run, benchmark) -> dict[str, list[float]]:
+    """Month-end values for the website's chart: [rule, 0050 with the same cash flow, money put in]."""
+    put_in, contributions, index = 0.0, sorted(run.contributions), 0
+    output: dict[str, list[float]] = {}
+    for day, value, other in zip(run.days, run.values, benchmark.values):
+        while index < len(contributions) and contributions[index][0] <= day:
+            put_in += contributions[index][1]
+            index += 1
+        output[f"{day:%Y-%m}"] = [round(value), round(other), round(put_in)]
+    return output
 
 
 def rule_variant(rule: StockRule) -> Variant:
@@ -389,6 +453,8 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
     fingerprint = stock_fingerprint(base, start.year - WARMUP_YEARS, end.year, until=end)
     cash_flow = {"monthly_amount": plan.monthly_amount, "day_of_month": plan.day_of_month,
                  "kind": type(plan).__name__}
+    if getattr(plan, "initial", None) is not None:
+        cash_flow["initial"] = plan.initial
     payload = {"rule": rule.canonical(), "period": period, "costs": costs.as_dict(), "data": fingerprint,
                "engine": ENGINE_VERSION, "plan": cash_flow, "windows": list(window_months)}
     input_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
@@ -433,7 +499,8 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
 def second_batch() -> list[StockRule]:
     """Turnover kept down: hold while still in the top 3 × N, top 30, monthly and quarterly."""
     rules = []
-    for factor, label in FACTORS.items():
+    for factor in BASE_FACTORS:
+        label = FACTORS[factor]
         for rebalance, word in (("monthly", "每月"), ("quarterly", "每季")):
             rules.append(StockRule(name=f"個股 {label}：前 30 名、{word}換股、留到跌出前 90", factor=factor, top=30,
                                    rebalance=rebalance, buffer=3))
@@ -444,7 +511,8 @@ def second_batch() -> list[StockRule]:
 def first_batch() -> list[StockRule]:
     """Six factors × top 10 and top 30, monthly; the two momentum factors also quarterly."""
     rules = []
-    for factor, label in FACTORS.items():
+    for factor in BASE_FACTORS:
+        label = FACTORS[factor]
         for top in (10, 30):
             rules.append(StockRule(name=f"個股 {label}：前 {top} 名、每月換股", factor=factor, top=top))
     for factor, label in (("momentum_12_1", FACTORS["momentum_12_1"]), ("momentum_6", FACTORS["momentum_6"])):
@@ -477,7 +545,7 @@ def sweep_batch() -> list[StockRule]:
     rules. Each one is an attempt in the multiple-testing count."""
     from itertools import combinations
 
-    names = list(FACTORS)
+    names = list(BASE_FACTORS)
     combos = [(name,) for name in names] + list(combinations(names, 2)) + list(combinations(names, 3))
     rules = []
     for combo in combos:

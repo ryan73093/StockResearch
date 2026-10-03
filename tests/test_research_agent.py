@@ -254,7 +254,7 @@ def test_research_page_shows_the_agent(tmp_path):
     research = tmp_path / "research"
     agent(research, completed(round_payload(GOOD))).run_round(MARKET, 1, trials_left=12)
 
-    body = create_app(build_container(settings)).test_client().get("/research").get_data(as_text=True)
+    body = create_app(build_container(settings)).test_client().get("/research?tab=agent").get_data(as_text=True)
 
     assert "AI 研究員" in body and "gpt-6-luna" in body and "回撤時多買" in body
     assert GOOD["name"] in body and "累計 1 輪、1 個 AI 試驗" in body

@@ -1,0 +1,73 @@
+{% extends "v2/base.html" %}
+{% block title %}{{ rule.name }} · 研究{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>{{ rule.name }}</h1>
+    <p class="page-head__sub">{{ rule.family }}・{{ rule.source }}・每一次的模擬回測紀錄</p>
+  </div>
+  <div class="page-head__meta"><a href="/research/pool">回選手池</a>・<a href="/research/rules/{{ rule.spec_hash }}.json">JSON</a></div>
+</header>
+{% endblock %}
+{% block content %}
+{% include "v2/_research_tabs.html" %}
+
+<section class="card">
+  <div class="card__head"><h2>規則內容</h2>
+    {% if rule.final %}<span class="badge {{ 'badge--ok' if rule.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if rule.final.passed else '未通過' }} {{ '{:+.0%}'.format(rule.final.excess) if rule.final.excess is not none else '' }}</span>{% endif %}
+  </div>
+  <ul class="reasons">{% for line in rule.description %}<li>{{ line }}</li>{% endfor %}</ul>
+  {% if rule.forward %}
+  <p class="small" style="margin:10px 0 0">前向觀察：{{ rule.forward.since }} 起、已記錄 {{ rule.forward.sessions }} 個交易日{% if rule.forward.sessions %}，資產 {{ '{:,.0f}'.format(rule.forward.value) }} 元、同樣的錢買 0050 {{ '{:,.0f}'.format(rule.forward.benchmark_value) }} 元{% endif %}（<a href="/research?tab=forward">看持股與交易</a>）。</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card__head"><h2>每一次的模擬回測 <span class="badge">{{ rule.runs|length }} 次</span></h2></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>期間・投入方式</th><th class="num">期末（同樣的錢買 0050）</th><th class="num">比 0050</th><th class="num">年化（0050）</th><th class="num">最大回撤（0050）</th><th class="num">3 年勝率／中位</th><th class="num">費稅佔投入・每月下單</th><th>結果</th></tr></thead>
+      <tbody>
+      {% for run in rule.runs %}
+        <tr>
+          <td data-primary><strong>{{ run.period_label }}</strong> <span class="small">{{ run.plan }}</span><span class="muted small"> {{ (run.start or '')[:7] }}～{{ (run.end or '')[:7] }}・試驗 #{{ run.trial_id }}・{{ run.created_at }}</span></td>
+          <td class="num" data-label="期末">{% if run.final_value %}{{ '{:,.0f}'.format(run.final_value) }}{% if run.benchmark_final_value %}<span class="muted small">（{{ '{:,.0f}'.format(run.benchmark_final_value) }}）</span>{% endif %}{% else %}—{% endif %}</td>
+          <td class="num {{ 'up' if (run.excess or 0) > 0 else ('down' if (run.excess or 0) < 0 else '') }}" data-label="比 0050">{{ '{:+.0%}'.format(run.excess) if run.excess is not none else '—' }}</td>
+          <td class="num" data-label="年化">{{ '{:.1%}'.format(run.xirr) if run.xirr is not none else '—' }}<span class="muted small">（{{ '{:.1%}'.format(run.benchmark_xirr) if run.benchmark_xirr is not none else '—' }}）</span></td>
+          <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(run.max_drawdown) if run.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(run.benchmark_max_drawdown) if run.benchmark_max_drawdown is not none else '—' }}）</span></td>
+          <td class="num" data-label="3 年勝率／中位">{% if run.three.count %}{{ '{:.0%}'.format(run.three.win_ratio) }}／{{ '{:+.1%}'.format(run.three.median_excess) }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="費稅・下單">{{ '{:.0%}'.format(run.cost_share) if run.cost_share is not none else '—' }}{% if run.orders_per_month %}<span class="muted small">・{{ '%.0f' % run.orders_per_month }} 筆</span>{% endif %}</td>
+          <td class="small" data-label="結果" data-wide>{% if run.screen %}快篩：只算全期間{% elif run.reasons %}{{ run.reasons|join('；') }}{% else %}<span class="badge badge--ok">過門檻</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">比 0050 ＝（規則期末 − 同樣現金流全部買 0050 的期末）÷ 投入的錢。成本用國泰手續費（研究另有註記者除外）、個股賣出證交稅 0.3%、收盤價附近成交。同一期間有多筆時，較早的是舊版引擎或舊成本的紀錄，留著備查。</p>
+</section>
+
+{% for run in rule.runs if run.chart or run.yearly %}
+<details class="card"{% if loop.first %} open{% endif %}>
+  <summary><h2>{{ run.period_label }}・{{ run.plan }} <span class="badge">試驗 #{{ run.trial_id }}</span></h2></summary>
+  {% if run.chart %}
+  <svg class="rule-chart" viewBox="0 0 {{ run.chart.width }} {{ run.chart.height }}" preserveAspectRatio="none" role="img" aria-label="資產走勢">
+    <polyline class="line-put" points="{{ run.chart.put_in }}"/>
+    <polyline class="line-bench" points="{{ run.chart.benchmark }}"/>
+    <polyline class="line-rule" points="{{ run.chart.rule }}"/>
+  </svg>
+  <div class="legend"><span><i style="background:var(--accent)"></i>這個規則</span><span><i style="background:var(--warn)"></i>同樣的錢買 0050</span><span><i style="background:var(--muted)"></i>累計投入</span><span>{{ run.chart.first }}～{{ run.chart.last }}，最高 {{ '{:,.0f}'.format(run.chart.peak) }} 元</span></div>
+  {% else %}
+  <p class="muted small">這次回測在 2026-10-04 之前跑的，沒有存逐月資產；只有逐年差距。</p>
+  {% endif %}
+  {% if run.yearly %}
+  <div class="table-wrap" style="margin-top:10px">
+    <table>
+      <thead><tr><th>年</th>{% for year in run.yearly %}<th class="num">{{ year }}</th>{% endfor %}</tr></thead>
+      <tbody><tr><td>比 0050（百分點）</td>{% for year, value in run.yearly.items() %}<td class="num {{ 'up' if value > 0 else ('down' if value < 0 else '') }}">{{ '%+.0f' % (value * 100) }}</td>{% endfor %}</tr></tbody>
+    </table>
+  </div>
+  <p class="note">每年各月「規則淨值報酬 − 0050 淨值報酬」相加，約略表示那一年多或少幾個百分點。</p>
+  {% endif %}
+</details>
+{% endfor %}
+{% endblock %}

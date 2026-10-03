@@ -170,17 +170,109 @@ def _legacy(args) -> int:
     return 0
 
 
+def _stocks(args, registry: TrialRegistry) -> int:
+    """Stock rules on one period; the run shows on the website (研究 › 執行中的程式)."""
+    from quant_platform.research.jobs import JobLog
+
+    label = {"development": "開發期", "validation": "驗證期", "holdout": "最終驗證"}.get(args.period, args.period)
+    flow = "啟動資金＋每月" if args.initial else ("一次投入" if args.lump_sum else "每月投入")
+    name = f"個股規則 {label}・{args.name}・{flow}" + ("・快篩" if args.screen else "") + (f"・前 {args.top} 名" if args.top else "")
+    with JobLog(RESEARCH).start(name, "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+        return _stocks_body(args, registry, job)
+
+
+def _stocks_body(args, registry: TrialRegistry, job) -> int:
+    from quant_platform.research.stock_rules import BATCHES as STOCK_BATCHES
+    from quant_platform.research.stock_rules import (
+        STANDARD_PLAN, WARMUP_YEARS, LumpSumPlan, Panel, SeedPlan, describe, load_stock_data, run_stock_trial,
+    )
+
+    if args.period not in ("development", "validation", "holdout"):
+        raise SystemExit("stocks：--period 只能是 development、validation 或 holdout")
+    if args.period == "holdout" and args.name != "qualified":
+        # The final validation runs once per rule: never a whole batch by accident.
+        raise SystemExit("最終驗證只跑兩段期間都贏的規則：用 --name qualified")
+    start, end = PERIODS[args.period]
+    base = Path(args.base)
+    costs = broker_costs(args.broker)
+    job.update(current="載入資料", force=True)
+    data = load_stock_data(base, start.year - WARMUP_YEARS, end.year)
+    print(f"個股規則（{args.period}）：{data.notes['symbols']} 檔上市股票、{len(data.sessions)} 個交易日；"
+          f"成本：{BROKERS[args.broker].name}", flush=True)
+    panel = Panel(data)
+    stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
+    if args.initial:
+        stock_plan = SeedPlan(args.initial, args.monthly)
+        print(f"現金流：啟動資金 {args.initial:,.0f} 元，之後每月 5 日投入 {args.monthly:,.0f} 元", flush=True)
+    elif args.lump_sum:
+        stock_plan = LumpSumPlan(args.lump_sum)
+        print(f"現金流：一次投入 {args.lump_sum:,.0f} 元", flush=True)
+    else:
+        stock_plan = STANDARD_PLAN
+        print("現金流：每月 5 日投入 10,000 元", flush=True)
+    if args.name == "qualified":
+        from quant_platform.research.stock_forward import qualifying_rules
+
+        rules = [rule for rule, _reason in qualifying_rules(RESEARCH, type(stock_plan).__name__)]
+        print(f"兩段期間都贏的規則：{len(rules)} 個", flush=True)
+    elif args.name not in STOCK_BATCHES:
+        raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(STOCK_BATCHES)}、qualified")
+    else:
+        rules = STOCK_BATCHES[args.name]()
+    if args.passed:
+        from quant_platform.research.pool import _best_records, _gate
+
+        stock_records = [record for record in registry.records() if record.data_fingerprint.startswith("stocks:")]
+        passed = {spec_hash for spec_hash, record in _best_records(stock_records, "development",
+                                                                   type(stock_plan).__name__).items()
+                  if (record.metrics.get("windows") or {}).get("3y", {}).get("count") and not _gate(record.metrics)}
+        rules = [rule for rule in rules if rule.rule_hash in passed]
+        print(f"開發期已通過門檻的規則：{len(rules)} 個", flush=True)
+    if args.top:
+        # Second stage: the rules whose screening run (no windows) did best, by full-period excess.
+        best: dict[str, float] = {}
+        kind = type(stock_plan).__name__
+        for record in registry.records():
+            same_plan = (record.metrics.get("plan") or {}).get("kind", "ContributionPlan") == kind
+            if kind == "LumpSumPlan" and str(record.metrics.get("engine") or "") < "stocks-1.2.0":
+                same_plan = False   # earlier lump-sum runs had monthly windows
+            if same_plan and record.period == "development" and record.data_fingerprint.startswith("stocks:"):
+                best[record.spec_hash] = max(best.get(record.spec_hash, float("-inf")),
+                                             record.metrics.get("full_period_excess") or float("-inf"))
+        rules = sorted((rule for rule in rules if rule.rule_hash in best), key=lambda r: -best[r.rule_hash])[:args.top]
+    windows = () if args.screen else (36, 60)
+    job.update(total=len(rules), done=0, current="", force=True)
+    written = 0
+    for index, rule in enumerate(rules):
+        job.update(done=index, current=rule.name)
+        try:
+            record, report = run_stock_trial(rule, args.period, base, registry, RESEARCH / "reports", costs,
+                                             data=data, panel=panel, generated_at=stamp, plan=stock_plan,
+                                             window_months=windows)
+        except ResearchGateError as exc:
+            print(f"{rule.name}：研究規則不允許 — {exc}", file=sys.stderr)
+            continue
+        written += 1
+        print(describe(report), flush=True)
+        print(f"  試驗 #{record.trial_id}；報告：{RESEARCH / 'reports' / record.report_file}")
+    job.update(done=len(rules), force=True)
+    job.payload["summary"] = f"{len(rules)} 個規則、{written} 筆結果"
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward"),
+                            "forward", "factors"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
     parser.add_argument("--family", default="etf", choices=("etf", "stocks"), help="stats：ETF 規則或個股規則")
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--lump-sum", type=float, default=0, help="stocks：一次投入的金額（0＝每月投入）")
+    parser.add_argument("--initial", type=float, default=0,
+                        help="stocks：啟動資金，之後每月照 --monthly 投入（使用者的帳戶；0＝沒有啟動資金）")
     parser.add_argument("--screen", action="store_true", help="stocks：只算全期間、不算滾動視窗（大掃描第一階段）")
     parser.add_argument("--top", type=int, default=0, help="stocks：只跑登錄檔中全期超額最高的前 N 個規則（第二階段）")
     parser.add_argument("--dry-run", action="store_true", help="agent：只印出提示內容，不呼叫模型")
@@ -225,68 +317,7 @@ def main() -> int:
     if args.command == "legacy":
         return _legacy(args)
     if args.command == "stocks":
-        from quant_platform.research.stock_rules import BATCHES as STOCK_BATCHES
-        from quant_platform.research.stock_rules import (
-            STANDARD_PLAN, WARMUP_YEARS, LumpSumPlan, Panel, describe, load_stock_data, run_stock_trial,
-        )
-
-        if args.period not in ("development", "validation", "holdout"):
-            raise SystemExit("stocks：--period 只能是 development、validation 或 holdout")
-        start, end = PERIODS[args.period]
-        base = Path(args.base)
-        costs = broker_costs(args.broker)
-        data = load_stock_data(base, start.year - WARMUP_YEARS, end.year)
-        print(f"個股規則（{args.period}）：{data.notes['symbols']} 檔上市股票、{len(data.sessions)} 個交易日；"
-              f"成本：{BROKERS[args.broker].name}", flush=True)
-        panel = Panel(data)
-        stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
-        stock_plan = LumpSumPlan(args.lump_sum) if args.lump_sum else STANDARD_PLAN
-        print("現金流：" + (f"一次投入 {args.lump_sum:,.0f} 元" if args.lump_sum else "每月 5 日投入 10,000 元"), flush=True)
-        if args.period == "holdout" and args.name != "qualified":
-            # The final validation runs once per rule: never a whole batch by accident.
-            raise SystemExit("最終驗證只跑兩段期間都贏的規則：用 --name qualified")
-        if args.name == "qualified":
-            from quant_platform.research.stock_forward import qualifying_rules
-
-            rules = [rule for rule, _reason in qualifying_rules(RESEARCH, type(stock_plan).__name__)]
-            print(f"兩段期間都贏的規則：{len(rules)} 個", flush=True)
-        elif args.name not in STOCK_BATCHES:
-            raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(STOCK_BATCHES)}、qualified")
-        else:
-            rules = STOCK_BATCHES[args.name]()
-        if args.passed:
-            from quant_platform.research.pool import _best_records, _gate
-
-            stock_records = [record for record in registry.records() if record.data_fingerprint.startswith("stocks:")]
-            passed = {spec_hash for spec_hash, record in _best_records(stock_records, "development",
-                                                                       type(stock_plan).__name__).items()
-                      if (record.metrics.get("windows") or {}).get("3y", {}).get("count") and not _gate(record.metrics)}
-            rules = [rule for rule in rules if rule.rule_hash in passed]
-            print(f"開發期已通過門檻的規則：{len(rules)} 個", flush=True)
-        if args.top:
-            # Second stage: the rules whose screening run (no windows) did best, by full-period excess.
-            best: dict[str, float] = {}
-            kind = type(stock_plan).__name__
-            for record in registry.records():
-                same_plan = (record.metrics.get("plan") or {}).get("kind", "ContributionPlan") == kind
-                if kind == "LumpSumPlan" and str(record.metrics.get("engine") or "") < "stocks-1.2.0":
-                    same_plan = False   # earlier lump-sum runs had monthly windows
-                if same_plan and record.period == "development" and record.data_fingerprint.startswith("stocks:"):
-                    best[record.spec_hash] = max(best.get(record.spec_hash, float("-inf")),
-                                                 record.metrics.get("full_period_excess") or float("-inf"))
-            rules = sorted((rule for rule in rules if rule.rule_hash in best), key=lambda r: -best[r.rule_hash])[:args.top]
-        windows = () if args.screen else (36, 60)
-        for rule in rules:
-            try:
-                record, report = run_stock_trial(rule, args.period, base, registry, RESEARCH / "reports", costs,
-                                                 data=data, panel=panel, generated_at=stamp, plan=stock_plan,
-                                                 window_months=windows)
-            except ResearchGateError as exc:
-                print(f"{rule.name}：研究規則不允許 — {exc}", file=sys.stderr)
-                continue
-            print(describe(report), flush=True)
-            print(f"  試驗 #{record.trial_id}；報告：{RESEARCH / 'reports' / record.report_file}")
-        return 0
+        return _stocks(args, registry)
 
     if args.command == "promote":
         from quant_platform.research.forward import STANDARD_PLAN
@@ -305,6 +336,21 @@ def main() -> int:
         overview = pipeline.overview()
         print(f"開發期 {overview['candidates']} 個設定，{overview['window_ok']} 個過視窗門檻，"
               f"{overview['eligible']} 個全部關卡通過；新事件 {len(events)} 筆")
+        return 0
+
+    if args.command == "factors":
+        from quant_platform.research import factors as factor_strength
+        from quant_platform.research.jobs import JobLog
+
+        with JobLog(RESEARCH).start("因子強弱分析（全市場、2005 起每月）",
+                                    "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+            path = factor_strength.run(Path(args.base), RESEARCH / "factors", job=job)
+        report = json.loads(path.read_text(encoding="utf-8"))
+        for key, item in report["factors"].items():
+            dev = item["periods"].get("development", {})
+            print(f"{item['label']}：{item['verdict']}；開發期 IC {dev.get('ic')}（t={dev.get('t')}），"
+                  f"前五分之一減後五分之一每年 {dev.get('spread_year')}", flush=True)
+        print(f"已寫入 {path}")
         return 0
 
     if args.command == "forward":

@@ -468,7 +468,7 @@ def windows(data: LegacyData, variant: Variant, costs: CostModel, start: date, e
     Each window uses ``plan``: monthly contributions, or one lump sum at the window's first session
     (stock rules' lump-sum basis, 2026-10-04). ``benchmarks`` caches the 0050 runs per window and plan."""
     benchmarks = benchmarks if benchmarks is not None else {}
-    plan_key = (type(plan).__name__, plan.monthly_amount, plan.day_of_month)
+    plan_key = (type(plan).__name__, plan.monthly_amount, plan.day_of_month, getattr(plan, "initial", 0.0))
     excesses = []
     for first in _month_starts(data.sessions, start, end, months):
         total = first.year * 12 + first.month - 1 + months

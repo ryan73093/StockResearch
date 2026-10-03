@@ -21,7 +21,8 @@ def client(tmp_path):
         ("/", "今日行動"),
         ("/holdings", "模擬帳戶"),
         ("/plan", "建立你的投資計畫"),
-        ("/research", "暫停中的模組"),
+        ("/research", "研究現況"),
+        ("/research?tab=tools", "暫停中的模組"),
         ("/system", "專案資訊"),
     ],
 )

@@ -249,6 +249,10 @@ flowchart LR
 | `research/` | 研究地基（S3，已建立）：`history/`（官方長歷史抓取、快取、Parquet 資料集、除權息依表頭解析與參考價檢查、總報酬、Yahoo 交叉核對、盤後零股成交分布與各限價成交率、目錄宣告的分割、00631L 上市前的合成回填 `synthesize_backfill`；CLI `python -m quant_platform.research.history`）、`costs.py`（手續費、證交稅、盤後零股成交價、今日委託限價 `order_limit`、券商設定檔）、`cashflow.py`（投入計畫）、`spec.py`（策略設定檔 v1 與四個基準）、`market.py`（資料載入與期間資料指紋）、`engine.py`（現金流回測）、`compare.py`（對定期定額的滾動視窗比較）、`registry.py`（試驗登錄與資料版本）、`periods.py`（期間與最終驗證期關卡）、`statistics.py`、`significance.py`（DSR、PBO、bootstrap）、`batches.py`、`summary.py`、`forward.py`（前向模擬）、`metrics.py`、`reports.py`；CLI `python -m quant_platform.research baselines|trial|batch|trials|stats|schema|legacy`（`--broker`、`--cost-scale`、`--execution-lag`）。後續：AI 研究員（S4-W04） |
 | `application/notifications.py` | LINE Messaging API push、去重與傳送紀錄、訊息內容（S5-W07；設定 `docs/line-notifications.md`） |
 | `research/history/stocks.py` | 證交所每日全市場行情（含後來下市的公司）一天一檔快取，每年一個 Parquet（`history/stocks/twse/`）；CLI `python -m quant_platform.research.history stocks`；worker 15:15 研究資料更新後 `append_current_year` 補當年缺的日子（R2）；櫃買待做 |
+| `research/jobs.py` | 長時間研究程式的登錄（`instance/research/jobs/*.json`）：名稱、進度、預計完成、狀態；研究頁「執行中的程式」與 `/research/jobs.json`；背景執行用 `scripts/research-pipeline.ps1` |
+| `research/factors.py` | 因子強弱分析：每月排序相關與前後五分之一報酬，分期間報告與判定；`python -m quant_platform.research factors` |
+| `research/history/finmind.py` | FinMind 免費等級的籌碼與基本面（外資持股、月營收、本益比、融資融券、三大法人），每檔一次、可續傳、避開平日 13:30–15:30；`python -m quant_platform.research.history finmind` |
+| `dashboard/templates/v2/_research_tabs.html` | 研究頁分頁導覽；`/research?tab=…`、`/research/pool`、`/research/rules/<雜湊>` 共用 |
 | `research/stock_forward.py` | 個股規則前向模擬（R2）：`forward/stocks/tracked.json`（兩段期間都贏的規則自動加入、起始日）、worker 15:30 寫 `forward/stocks/log.jsonl`（持股、交易、除權息調整、0050 對照、重算檢查）、`reconcile` 對帳；CLI `python -m quant_platform.research forward [--date]` |
 | `research/stock_rules.py` | 個股因子規則（單一或混合因子、資格門檻、前 N 名等權、每月／每季、緩衝、一次投入）、兩階段大掃描、登錄為候選試驗（資料指紋 `stocks:…`）；CLI `python -m quant_platform.research stocks --period … --name first|second|sweep|high52 [--screen|--top N] [--lump-sum 300000]` |
 | `research/pool.py` | 研究選手池：從試驗登錄、晉級帳本、AI 日誌與統計檔組出每個規則的狀態與原因；`/research/pool` 與 `/research/pool.json` |

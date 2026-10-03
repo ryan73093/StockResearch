@@ -11,12 +11,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from quant_platform.research.promotion import PromotionLedger, STAGE_LABELS, TRACK_LABELS, drawdown_gate, window_gate
+from quant_platform.research.promotion import (
+    STAGE_LABELS,
+    TRACK_LABELS,
+    PromotionLedger,
+    drawdown_gate,
+    window_gate,
+)
 from quant_platform.research.registry import TrialRegistry, current_basis, distinct_rules
 from quant_platform.research.reports import latest_stats
 
-BASES = {"lump_sum": "LumpSumPlan", "dca": "ContributionPlan"}
-BASIS_LABELS = {"lump_sum": "一次投入 30 萬、獲利再投入，對同樣 30 萬放 0050", "dca": "每月 5 日投入 1 萬，對 0050 定期定額"}
+BASES = {"seed": "SeedPlan", "lump_sum": "LumpSumPlan", "dca": "ContributionPlan"}
+BASIS_LABELS = {
+    "seed": "啟動資金 30 萬＋每月 5 日投入 1 萬，整個帳戶都能買賣、獲利再投入；對同樣的錢全部買 0050",
+    "lump_sum": "一次投入 30 萬、之後不再投入；對同樣 30 萬放 0050",
+    "dca": "每月 5 日投入 1 萬（沒有啟動資金）；對 0050 定期定額",
+}
 STATUS_ORDER = (
     "approved", "forward", "holdout_passed", "validation_passed", "holdout_failed", "validation_failed",
     "window_ok", "eliminated",
@@ -95,7 +105,7 @@ def _best_records(records: list, period: str, plan_kind: str = "ContributionPlan
     return chosen
 
 
-def rule_rows(research_dir: str | Path, basis: str = "lump_sum") -> list[dict[str, object]]:
+def rule_rows(research_dir: str | Path, basis: str = "seed") -> list[dict[str, object]]:
     base = Path(research_dir)
     kind = BASES[basis]
     registry = TrialRegistry(base / "trials.jsonl")
@@ -177,6 +187,117 @@ def rule_rows(research_dir: str | Path, basis: str = "lump_sum") -> list[dict[st
     return rows
 
 
+PERIOD_LABELS = {"development": "開發期", "validation": "驗證期", "holdout": "最終驗證期", "full": "全期間"}
+PERIOD_ORDER = ("development", "validation", "holdout", "full")
+
+
+def plan_label(plan: dict) -> str:
+    kind = plan.get("kind", "ContributionPlan")
+    if kind == "SeedPlan":
+        return f"啟動資金 {plan.get('initial', 0) / 10_000:,.0f} 萬＋每月 {plan.get('monthly_amount', 0):,.0f} 元"
+    if kind == "LumpSumPlan":
+        return f"一次投入 {plan.get('monthly_amount', 0) / 10_000:,.0f} 萬"
+    return f"每月 {plan.get('monthly_amount', 10_000) or 10_000:,.0f} 元"
+
+
+def basis_counts(research_dir: str | Path) -> dict[str, int]:
+    """Rules with a development run per basis (the pool shows a basis only when it has results)."""
+    records = TrialRegistry(Path(research_dir) / "trials.jsonl").records()
+    output = {}
+    for basis, kind in BASES.items():
+        output[basis] = len(_best_records(records, "development", kind))
+    return output
+
+
+def describe_rule(spec: dict) -> list[str]:
+    """A stock rule in plain words (ETF specs: their name and assets)."""
+    from quant_platform.research.stock_rules import FACTORS
+
+    if "factor" not in spec:
+        return [str(spec.get("description") or spec.get("name") or "")]
+    factors = [FACTORS.get(spec["factor"], spec["factor"])] + [
+        f"{FACTORS.get(name, name)}（權重 {weight:g}）" for name, weight in (spec.get("extra") or {}).items()]
+    lines = [
+        "依「" + "＋".join(factors) + "」把合格的上市股票排名" + ("（多個因子時用百分位相加）" if spec.get("extra") else ""),
+        f"持有前 {spec.get('top', 20)} 名，每檔金額相同；每{'月' if spec.get('rebalance', 'monthly') == 'monthly' else '季'} 5 日檢查換股",
+    ]
+    if (spec.get("buffer") or 1) > 1:
+        lines.append(f"已持有的股票跌出前 {spec['top'] * spec['buffer']} 名才賣")
+    if spec.get("min_hold"):
+        lines.append(f"新買的股票至少放 {spec['min_hold']} 個月（不再合格仍會賣）")
+    if spec.get("band"):
+        lines.append(f"某檔比目標金額少 {spec['band']:.0%} 以上才加碼")
+    if spec.get("min_trade"):
+        lines.append(f"每筆至少 {spec['min_trade']:,.0f} 元")
+    lines.append(f"合格：收盤 ≥ {spec.get('min_price', 10):g} 元、近 20 日日均成交值 ≥ {spec.get('min_turnover', 2e7) / 1e4:,.0f} 萬、"
+                 f"上市滿 {spec.get('min_history', 252)} 個交易日")
+    return lines
+
+
+def _svg(curve: dict[str, list[float]], width: int = 640, height: int = 220) -> dict[str, object] | None:
+    if not curve or len(curve) < 2:
+        return None
+    months = list(curve)
+    peak = max(max(values) for values in curve.values()) or 1.0
+
+    def points(column: int) -> str:
+        return " ".join(f"{index * width / (len(months) - 1):.1f},{height - curve[month][column] / peak * (height - 10):.1f}"
+                        for index, month in enumerate(months))
+
+    return {"rule": points(0), "benchmark": points(1), "put_in": points(2), "width": width, "height": height,
+            "first": months[0], "last": months[-1], "peak": peak}
+
+
+def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] | None:
+    """Every backtest run of one rule (all periods and cash flows), with its report: what the website's
+    rule page shows (使用者 2026-10-04：模擬回測的記錄要看得到)."""
+    from quant_platform.research.stock_forward import StockForwardTracker, final_validation
+
+    base = Path(research_dir)
+    records = [record for record in TrialRegistry(base / "trials.jsonl").records()
+               if record.spec_hash == spec_hash and record.kind == "candidate"]
+    if not records:
+        return None
+    spec: dict = {}
+    runs = []
+    for record in records:
+        report: dict = {}
+        if record.report_file:
+            try:
+                report = json.loads((base / "reports" / record.report_file).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                report = {}
+        spec = spec or report.get("spec") or {}
+        metrics = record.metrics
+        strategy, benchmark = report.get("strategy") or {}, report.get("benchmark") or {}
+        yearly: dict[str, float] = {}
+        for month, value in (report.get("monthly_active_returns") or {}).items():
+            yearly[month[:4]] = yearly.get(month[:4], 0.0) + value
+        has_windows = bool(_window(metrics, "3y").get("count"))
+        runs.append({
+            "trial_id": record.trial_id, "created_at": str(record.created_at)[:16].replace("T", " "),
+            "period": record.period, "period_label": PERIOD_LABELS.get(record.period, record.period),
+            "plan": plan_label(metrics.get("plan") or {}), "engine": metrics.get("engine"),
+            "start": metrics.get("start") or report.get("start"), "end": metrics.get("end") or report.get("end"),
+            "final_value": metrics.get("final_value") or strategy.get("final_value"),
+            "benchmark_final_value": metrics.get("benchmark_final_value") or benchmark.get("final_value"),
+            "contributed": metrics.get("contributed") or strategy.get("contributed"),
+            "xirr": metrics.get("xirr"), "benchmark_xirr": metrics.get("benchmark_xirr"),
+            "max_drawdown": metrics.get("max_drawdown"), "benchmark_max_drawdown": metrics.get("benchmark_max_drawdown"),
+            "excess": metrics.get("full_period_excess"), "three": _window(metrics, "3y"), "five": _window(metrics, "5y"),
+            "trades": metrics.get("trades"), "costs": metrics.get("costs"), **_activity(metrics),
+            "reasons": _gate(metrics) if has_windows else None, "screen": not has_windows,
+            "yearly": {year: round(value, 4) for year, value in sorted(yearly.items())},
+            "chart": _svg(report.get("curve") or {}), "report_file": record.report_file,
+        })
+    runs.sort(key=lambda run: (PERIOD_ORDER.index(run["period"]) if run["period"] in PERIOD_ORDER else 9, run["created_at"]))
+    forward = next((row for row in StockForwardTracker(base).summary() if row["rule_hash"] == spec_hash), None)
+    return {"spec_hash": spec_hash, "name": records[-1].spec_name, "spec": spec, "description": describe_rule(spec),
+            "family": "個股規則" if records[-1].data_fingerprint.startswith("stocks:") else "ETF 規則",
+            "source": _sources(base).get(spec_hash, "其他"), "runs": runs, "forward": forward,
+            "final": final_validation(base).get(spec_hash)}
+
+
 def ai_rounds(research_dir: str | Path) -> list[dict[str, object]]:
     journal = Path(research_dir) / "journal.jsonl"
     if not journal.is_file():
@@ -197,7 +318,7 @@ def ai_rounds(research_dir: str | Path) -> list[dict[str, object]]:
     return list(reversed(rounds))
 
 
-def pool_view(research_dir: str | Path, top: int = 20, basis: str = "lump_sum") -> dict[str, object]:
+def pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> dict[str, object]:
     """What the pool page shows: counts, the lists an owner asks about, and every rule, on one basis
     (lump sum, the owner's strategy account since 2026-10-04, or the monthly plan)."""
     rows = rule_rows(research_dir, basis)

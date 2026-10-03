@@ -185,9 +185,9 @@ def test_the_research_page_view_of_a_report(tmp_path):
     client = create_app(build_container(
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False)
     )).test_client()
-    assert "舊版挑戰者評估" not in client.get("/research").get_data(as_text=True)
+    assert "舊版挑戰者評估" not in client.get("/research?tab=legacy").get_data(as_text=True)
     save_report(report, tmp_path / "research" / "legacy")
-    body = client.get("/research").get_data(as_text=True)
+    body = client.get("/research?tab=legacy").get_data(as_text=True)
     assert "舊版挑戰者評估" in body and report["headline"] in body and "前 20 名" in body
 
 

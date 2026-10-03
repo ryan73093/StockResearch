@@ -5,12 +5,99 @@
 <header class="page-head">
   <div>
     <h1>研究</h1>
-    <p class="page-head__sub">AI 研究員與既有研究工具</p>
+    <p class="page-head__sub">研究規則、模擬回測紀錄、因子強弱與前向觀察</p>
   </div>
-  <div class="page-head__meta"><a href="/research/pool">研究選手池</a>・<a href="/system#project">研究方法</a></div>
+  
 </header>
 {% endblock %}
 {% block content %}
+{% include "v2/_research_tabs.html" %}
+{% set running_count = (jobs or [])|selectattr('status', 'equalto', 'running')|list|length %}
+
+{% if research_tab == 'overview' %}
+<section class="card">
+  <div class="card__head"><h2>研究現況</h2>{% if overview %}<span class="muted small">比較方式：{{ overview.basis_label }}</span>{% endif %}</div>
+  {% if overview %}{% set c = overview.counts %}
+  <div class="kpis kpis--four">
+    <div class="kpi"><div class="kpi__label">試過的不同規則</div><div class="kpi__value">{{ overview.attempts }}</div></div>
+    <div class="kpi"><div class="kpi__label">開發期與驗證期都贏</div><div class="kpi__value">{{ overview.both_periods|length }}</div></div>
+    <div class="kpi"><div class="kpi__label">最終驗證通過</div><div class="kpi__value">{{ c.holdout_passed }}</div></div>
+    <div class="kpi"><div class="kpi__label">執行中的程式</div><div class="kpi__value">{{ running_count }}</div></div>
+  </div>
+  {% endif %}
+  <ul class="reasons" style="margin-top:12px">
+    <li>每一個試過的規則、走到哪一關、為什麼被淘汰：<a href="/research/pool">選手池・全部規則</a>；點規則名稱看它每一次的模擬回測紀錄與資產走勢。</li>
+    <li>哪些因子強、哪些弱：<a href="/research?tab=factors">因子強弱</a>。</li>
+    <li>從 10/05 起用真實行情記錄的規則：<a href="/research?tab=forward">前向觀察</a>。</li>
+    <li>現在在跑哪些程式、什麼時候跑完：<a href="/research?tab=jobs">執行中的程式</a>。</li>
+    <li>研究怎麼做、目前結論、淘汰的方向與後續路線圖：<a href="/system#project">研究方法</a>。</li>
+  </ul>
+</section>
+{% endif %}
+
+{% if research_tab == 'factors' %}
+<section class="card" id="factors">
+  <div class="card__head">
+    <h2>因子強弱{% if factor_report %} <span class="badge">{{ factor_report.months }} 個月・{{ factor_report.generated_at[:16].replace('T', ' ') }}</span>{% endif %}</h2>
+    <span class="muted small">{{ factor_report.universe if factor_report else '' }}</span>
+  </div>
+  {% if factor_rows %}
+  <p class="muted small" style="margin:0 0 10px">每月 5 日把合格的上市股票依因子排名，看分數高的股票下個月是不是漲得比較多。「排序相關」大於 0 表示有預測力，t ≥ 2 才算明顯；「前減後」是分數最高五分之一減最低五分之一，一年大約差幾個百分點（未扣手續費與稅）。</p>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>因子</th><th>判定</th><th class="num">開發期 2005–2016<br>排序相關（t）</th><th class="num">驗證期 2017–2021</th><th class="num">最終驗證期 2022–2026</th><th class="num">前減後每年<br>2020 前</th><th class="num">2020 後</th><th class="num">2024 後</th></tr></thead>
+      <tbody>
+      {% for row in factor_rows %}
+        <tr>
+          <td data-primary><strong>{{ row.label }}</strong></td>
+          <td data-label="判定"><span class="badge {{ 'badge--ok' if row.verdict == '強' else ('badge--bad' if row.verdict == '反向' else ('badge--warn' if row.verdict == '不穩' else '')) }}">{{ row.verdict }}</span></td>
+          <td class="num" data-label="開發期">{{ '%+.3f' % row.dev.ic if row.dev else '—' }}{% if row.dev and row.dev.t is not none %}<span class="muted small">（{{ '%.1f' % row.dev.t }}）</span>{% endif %}</td>
+          <td class="num" data-label="驗證期">{{ '%+.3f' % row.val.ic if row.val else '—' }}</td>
+          <td class="num" data-label="最終驗證期">{{ '%+.3f' % row.final.ic if row.final else '—' }}</td>
+          {% for item in (row.before, row.after, row.recent) %}
+          <td class="num {{ 'up' if item and item.spread_year > 0 else ('down' if item and item.spread_year < 0 else '') }}" data-label="{{ ('2020 前', '2020 後', '2024 後')[loop.index0] }}">{{ '{:+.1%}'.format(item.spread_year) if item else '—' }}</td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">判定：強＝開發期明顯有預測力，驗證期與最終驗證期也同方向；不穩＝開發期明顯但後來反過來；反向＝明顯負向；弱＝看不出來。這是描述，不是規則試驗；三段歷史都已看過，用它組出的規則只能靠前向觀察證明。籌碼與基本面因子（外資持股、融資、三大法人、本益比、月營收）的資料正在下載，下載完會加進這張表。</p>
+  {% else %}
+  <p class="muted" style="margin:0">還沒有分析結果。程式在跑時會出現在「執行中的程式」。</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if research_tab == 'jobs' %}
+<section class="card" id="jobs">
+  <div class="card__head"><h2>執行中的程式</h2><span class="muted small">{{ '有程式在跑，頁面每分鐘自動更新' if running_count else '目前沒有程式在跑' }}</span></div>
+  {% if jobs %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>程式</th><th>狀態</th><th>進度</th><th>開始</th><th>預計完成</th><th>說明</th></tr></thead>
+      <tbody>
+      {% for job in jobs %}
+        <tr>
+          <td data-primary><strong>{{ job.name }}</strong></td>
+          <td data-label="狀態"><span class="badge {{ 'badge--warn' if job.status == 'running' else ('badge--ok' if job.status == 'done' else 'badge--bad') }}">{{ job.status_label }}</span></td>
+          <td data-label="進度">{% if job.total %}<div class="progress"><span style="width:{{ job.percent or 0 }}%"></span></div><span class="small">{{ job.done }}／{{ job.total }}（{{ job.percent }}%）</span>{% else %}<span class="small">{{ job.current or '—' }}</span>{% endif %}</td>
+          <td class="small" data-label="開始">{{ job.started_at[5:16].replace('T', ' ') }}</td>
+          <td class="small" data-label="預計完成">{{ job.eta or (job.finished_at[5:16].replace('T', ' ') if job.finished_at else '—') }}</td>
+          <td class="small" data-label="說明" data-wide>{% if job.status == 'running' %}{{ job.current }}{% else %}{{ job.summary }}{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin:0">還沒有紀錄。</p>
+  {% endif %}
+  <p class="note">長時間的研究程式（下載資料、批次回測、因子分析）都會出現在這裡。助理啟動程式後就結束對話、不在旁邊等；看到全部「完成」後再告訴助理繼續。機器可讀版：<a href="/research/jobs.json">/research/jobs.json</a>。</p>
+</section>
+{% if running_count %}<script>setTimeout(function () { location.reload(); }, 60000);</script>{% endif %}
+{% endif %}
+{% if research_tab == 'agent' %}
 <section class="card">
   <div class="card__head">
     <h2>AI 研究員 <span class="badge {{ 'badge--ok' if agent.enabled and agent.configured else 'badge--warn' }}">{{ ('每晚 %d:00' % agent.hour) if agent.enabled and agent.configured else ('未設定金鑰' if agent.enabled else '已關閉') }}</span></h2>
@@ -39,7 +126,9 @@
   <p class="muted" style="margin:0">尚未執行。{{ '第一輪會在今晚 %d:00 開始。' % agent.hour if agent.enabled and agent.configured else '' }}</p>
   {% endif %}
 </section>
+{% endif %}
 
+{% if research_tab == 'overview' %}
 <section class="card" id="weekly">
   <div class="card__head">
     <h2>本週研究報告 <span class="badge">{{ weekly.start[5:].replace('-', '/') }}～{{ weekly.end[5:].replace('-', '/') }}</span></h2>
@@ -126,7 +215,9 @@
   <p class="note">開發期門檻：3 年滾動視窗勝率 ≥ {{ '{:.0%}'.format(round_view.gates.win_ratio) }} 且中位超額 > 0；檢定門檻：DSR ≥ {{ round_view.gates.dsr }}、PBO ≤ {{ '{:.0%}'.format(round_view.gates.pbo) }}。超額以投入金額計。</p>
 </section>
 {% endif %}
+{% endif %}
 
+{% if research_tab == 'legacy' %}
 {% if legacy %}
 <section class="card" id="legacy">
   <div class="card__head">
@@ -186,7 +277,9 @@
   <p class="note">比 0050＝（期末 − 0050 定期定額期末）÷ 投入金額；「只用當時大型股」＝{{ legacy.sensitivity_name }}。{{ legacy.controls }}。排序相關 {{ legacy.quality.mean_rank_ic }}（t={{ legacy.quality.rank_ic_t }}，未扣成本）。{{ legacy.generated }} 產生（評估版本 {{ legacy.version }}）；重跑：<code>python -m quant_platform.research legacy</code>。研究參考，不是交易建議。</p>
 </section>
 {% endif %}
+{% endif %}
 
+{% if research_tab == 'promotion' %}
 <section class="card" id="promotion">
   <div class="card__head">
     <h2>晉級流程 <span class="badge">開發 → 驗證 → 最終驗證 → 前向 → 你核准</span></h2>
@@ -229,7 +322,9 @@
   {% endif %}
   <p class="note">門檻：滾動 3／5 年勝率 ≥ {{ '{:.0%}'.format(promotion.gates.win) }} 且中位超額 > 0、回撤不比定期定額深超過 {{ '%.0f' % (promotion.gates.drawdown * 100) }} 個百分點（一般賽道；更深的走進攻型賽道，回撤上限是你計畫的可承受回撤{% if promotion.gates.aggressive_drawdown is not none %} {{ '{:.0%}'.format(promotion.gates.aggressive_drawdown) }}{% else %}——<a href="/plan">尚未建立投資計畫，進攻型賽道未啟用</a>{% endif %}，其餘門檻相同）、DSR ≥ {{ promotion.gates.dsr }}、PBO ≤ {{ '{:.0%}'.format(promotion.gates.pbo) }}；驗證期另需成本加倍與晚一天執行仍有 ≥ {{ '{:.0%}'.format(promotion.gates.robust) }} 勝率；最終驗證期只評估一次；前向模擬至少 {{ promotion.gates.forward }} 個交易日。核准後才會出現在計畫頁。</p>
 </section>
+{% endif %}
 
+{% if research_tab == 'forward' %}
 <section class="card">
   <div class="card__head">
     <h2>前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>
@@ -262,7 +357,7 @@
 <section class="card" id="stock-forward">
   <div class="card__head">
     <h2>個股規則前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>
-    <span class="muted small">兩段期間都贏的規則自動加入、從加入那天起算；一次投入 30 萬、獲利再投入，對同樣 30 萬放 0050；國泰手續費；每個交易日 15:30 記錄，只追加不改寫</span>
+    <span class="muted small">兩段期間都贏的規則自動加入、從加入那天起算；啟動資金 30 萬＋每月 5 日投入 1 萬、整個帳戶都能買賣，對同樣的錢全部買 0050；國泰手續費；每個交易日 15:30 記錄，只追加不改寫</span>
   </div>
   {% if stock_forward %}
   <div class="table-wrap table-wrap--stack">
@@ -308,7 +403,9 @@
   <p class="muted" style="margin:0">尚無追蹤中的個股規則。兩段期間都贏的規則會在下一個交易日 15:30 自動加入。</p>
   {% endif %}
 </section>
+{% endif %}
 
+{% if research_tab == 'rules' %}
 {% if ranking.total %}
 <section class="card">
   <div class="card__head">
@@ -353,8 +450,8 @@
 {% if stock_rules %}
 <section class="card">
   <div class="card__head">
-    <h2>個股規則 <span class="badge">開發期 2004–2016・一次投入 30 萬</span></h2>
-    <span class="muted small">無倖存者偏差的上市股票池（含後來下市的）；每月依因子換股，等權；30 萬一次投入、獲利再投入，對同樣 30 萬放 0050；完整清單在<a href="/research/pool">研究選手池</a></span>
+    <h2>個股規則 <span class="badge">開發期 2004–2016・啟動資金 30 萬＋每月 1 萬</span></h2>
+    <span class="muted small">無倖存者偏差的上市股票池（含後來下市的）；每月依因子換股，等權；啟動資金 30 萬＋每月 1 萬，整個帳戶都能買賣、獲利再投入，對同樣的錢全部買 0050；完整清單在<a href="/research/pool">研究選手池</a></span>
   </div>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
@@ -379,7 +476,10 @@
   <p class="note">只列開發期 3 年中位超額最高的 25 個；全部規則、驗證期結果與淘汰原因在<a href="/research/pool">研究選手池</a>。資格：收盤 ≥ 10 元、近 20 日日均成交值 ≥ 2,000 萬元、上市滿 252 個交易日；個股賣出證交稅 0.3%；下市的股票以最後成交價計。每個規則都計入多重檢定；通過視窗門檻的才會進驗證期。</p>
 </section>
 {% endif %}
+{% endif %}
 
+{% if research_tab == 'tools' %}
+<p class="note" style="margin:0 0 12px">舊版系統的頁面：已停止開發（需求 §13），S8 決定刪除或保留；日常使用不需要。</p>
 <div class="grid grid--half">
   {% for group in tool_groups if not group.paused %}
   <section class="card">
@@ -404,4 +504,5 @@
   </div>
 </details>
 {% endfor %}
+{% endif %}
 {% endblock %}

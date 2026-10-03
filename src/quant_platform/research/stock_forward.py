@@ -31,10 +31,13 @@ from quant_platform.research.registry import TrialRegistry
 from quant_platform.research.stock_rules import (
     ENGINE_VERSION,
     LUMP_SUM,
+    SEED_CAPITAL,
+    SEED_MONTHLY,
     STANDARD_PLAN,
     WARMUP_YEARS,
     LumpSumPlan,
     Panel,
+    SeedPlan,
     StockRule,
     load_stock_data,
     rankings,
@@ -51,12 +54,14 @@ UNITS_TOLERANCE = 1e-3
 def plan_of(item: dict[str, object]):
     """A tracked rule's cash flow: one lump sum (the owner's NT$300,000 account, the default since
     2026-10-04) or the monthly plan (items written before that carry no ``plan``)."""
+    if item.get("plan") == "seed":
+        return SeedPlan(float(item.get("initial") or SEED_CAPITAL), float(item.get("monthly") or SEED_MONTHLY))
     if item.get("plan") == "lump_sum":
         return LumpSumPlan(float(item.get("amount") or LUMP_SUM))
     return STANDARD_PLAN
 
 
-def qualifying_rules(research_dir: str | Path, plan_kind: str = "LumpSumPlan") -> list[tuple[StockRule, str]]:
+def qualifying_rules(research_dir: str | Path, plan_kind: str = "SeedPlan") -> list[tuple[StockRule, str]]:
     """Stock rules whose development and validation runs on that cash flow both pass the window and
     drawdown gates."""
     from quant_platform.research.pool import _best_records, _gate
@@ -111,7 +116,7 @@ class StockForwardTracker:
             if rule.rule_hash in known:
                 continue
             added.append({"rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.model_dump(mode="json"),
-                          "plan": "lump_sum", "amount": LUMP_SUM,
+                          "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
                           "since": max(FORWARD_START, today).isoformat(), "reason": "兩段期間都贏：" + reason,
                           "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
             known.add(rule.rule_hash)
@@ -249,7 +254,8 @@ def final_validation(research_dir: str | Path) -> dict[str, dict[str, object]]:
         return {}
     records = [record for record in TrialRegistry(path).records() if record.data_fingerprint.startswith("stocks:")]
     output = {}
-    holdouts = {**_best_records(records, "holdout", "ContributionPlan"), **_best_records(records, "holdout", "LumpSumPlan")}
+    holdouts = {**_best_records(records, "holdout", "ContributionPlan"), **_best_records(records, "holdout", "LumpSumPlan"),
+                **_best_records(records, "holdout", "SeedPlan")}
     for spec_hash, record in holdouts.items():
         reasons = _gate(record.metrics)
         output[spec_hash] = {"passed": not reasons, "excess": record.metrics.get("full_period_excess"),

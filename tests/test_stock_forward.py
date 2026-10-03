@@ -113,9 +113,9 @@ def test_rules_that_win_both_periods_are_tracked_from_the_day_they_qualify(tmp_p
         registry.register(kind="candidate", period=period, spec_hash=rule.rule_hash, spec_name=rule.name,
                           input_hash=f"i{number}", data_fingerprint="stocks:x", report_file=report, metrics={
                               "windows": windows, "max_drawdown": -0.2, "benchmark_max_drawdown": -0.25,
-                              "full_period_excess": 0.2, "plan": {"kind": "LumpSumPlan"}, "engine": "stocks-1.2.0"})
+                              "full_period_excess": 0.2, "plan": {"kind": "SeedPlan"}, "engine": "stocks-1.2.0"})
     tracker = StockForwardTracker(tmp_path)
     added = tracker.sync(date(2026, 10, 7))
     assert [item["rule_hash"] for item in added] == [RULE.rule_hash] and added[0]["since"] == "2026-10-07"
-    assert "兩段期間都贏" in added[0]["reason"] and added[0]["plan"] == "lump_sum" and added[0]["amount"] == 300_000
+    assert "兩段期間都贏" in added[0]["reason"] and added[0]["plan"] == "seed" and added[0]["initial"] == 300_000
     assert tracker.sync(date(2026, 10, 8)) == [] and len(tracker.tracked()) == 1

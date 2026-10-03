@@ -1,0 +1,19 @@
+{# Research sub-navigation (使用者 2026-10-04：研究的子項目用分頁分類). #}
+{% set running_jobs = (jobs or [])|selectattr('status', 'equalto', 'running')|list|length %}
+<nav class="subtabs" aria-label="研究分頁">
+  {% for key, label, href in [
+    ('overview', '總覽', '/research'),
+    ('pool', '選手池・全部規則', '/research/pool'),
+    ('rules', '規則排行', '/research?tab=rules'),
+    ('factors', '因子強弱', '/research?tab=factors'),
+    ('forward', '前向觀察', '/research?tab=forward'),
+    ('promotion', '晉級流程', '/research?tab=promotion'),
+    ('agent', 'AI 研究員', '/research?tab=agent'),
+    ('legacy', '舊版模型比較', '/research?tab=legacy'),
+    ('jobs', '執行中的程式', '/research?tab=jobs'),
+    ('method', '研究方法', '/system#project'),
+    ('tools', '舊版工具', '/research?tab=tools'),
+  ] %}
+  <a href="{{ href }}"{% if research_tab == key %} aria-current="true"{% endif %}>{{ label }}{% if key == 'jobs' and running_jobs %} <span class="badge badge--warn">{{ running_jobs }}</span>{% endif %}</a>
+  {% endfor %}
+</nav>

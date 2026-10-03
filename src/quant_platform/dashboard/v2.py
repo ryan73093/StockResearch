@@ -34,7 +34,10 @@ from quant_platform.research.legacy_challenger import challenger_view
 from quant_platform.research.legacy_challenger import latest_report as latest_challenger
 from quant_platform.research.forward import STANDARD_PLAN as FORWARD_PLAN
 from quant_platform.research.periods import ResearchGateError
-from quant_platform.research.pool import pool_view
+from quant_platform.research.factors import latest as latest_factor_strength
+from quant_platform.research.factors import table as factor_table
+from quant_platform.research.jobs import JobLog
+from quant_platform.research.pool import basis_counts, pool_view, rule_detail
 from quant_platform.research.stock_forward import StockForwardTracker
 from quant_platform.research.promotion import PromotionPipeline, promotion_limits
 from quant_platform.research.weekly import weekly_report
@@ -169,6 +172,15 @@ def _aware(value: datetime) -> datetime:
 
 def _taipei_text(value: datetime | None, pattern: str = "%m/%d %H:%M") -> str:
     return _aware(value).astimezone(TAIPEI).strftime(pattern) if value else "尚無"
+
+
+RESEARCH_TABS = ("overview", "rules", "factors", "forward", "promotion", "agent", "legacy", "jobs", "tools")
+
+
+def _default_basis(research_dir: Path) -> str:
+    """The owner's account (starting capital plus monthly) once it has results, else the monthly view."""
+    counts = basis_counts(research_dir)
+    return "seed" if counts.get("seed") else "dca"
 
 
 def _project_root() -> Path:
@@ -672,6 +684,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     @blueprint.get("/research")
     def research():
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        tab = request.args.get("tab", "overview")
+        tab = tab if tab in RESEARCH_TABS else "overview"
         reports_dir = research_dir / "reports"
         ranking = trial_ranking(research_dir / "trials.jsonl", "development")
         stats = latest_stats(research_dir / "stats", "development")
@@ -695,6 +709,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
             stock_forward=StockForwardTracker(research_dir).summary(),
+            research_tab=tab, jobs=JobLog(research_dir).jobs(), factor_report=latest_factor_strength(research_dir / "factors"),
+            factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
+            overview=pool_view(research_dir, basis=_default_basis(research_dir)) if tab == "overview" else None,
             round_view=round_view,
             legacy=challenger_view(latest_challenger(research_dir / "legacy")),
             ranking=ranking,
@@ -709,18 +726,40 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     def research_pool():
         """Every rule ever tried and where it stands (研究選手池); /research/pool.json is the same data."""
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        basis = request.args.get("basis", "lump_sum")
-        basis = basis if basis in ("lump_sum", "dca") else "lump_sum"
+        basis = request.args.get("basis") or _default_basis(research_dir)
+        basis = basis if basis in ("seed", "lump_sum", "dca") else "seed"
         return render_template("v2/research_pool.html", active_nav="research", pool=pool_view(research_dir, basis=basis),
+                               research_tab="pool", jobs=JobLog(research_dir).jobs(), counts=basis_counts(research_dir),
                                generated=datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M"))
 
     @blueprint.get("/research/pool.json")
     def research_pool_json():
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        basis = request.args.get("basis", "lump_sum")
-        view = pool_view(research_dir, basis=basis if basis in ("lump_sum", "dca") else "lump_sum")
+        basis = request.args.get("basis") or _default_basis(research_dir)
+        view = pool_view(research_dir, basis=basis if basis in ("seed", "lump_sum", "dca") else "seed")
         view["generated_at"] = datetime.now(TAIPEI).isoformat(timespec="seconds")
         return jsonify(view)
+
+    @blueprint.get("/research/rules/<spec_hash>")
+    def research_rule(spec_hash: str):
+        """One rule's every backtest run (periods, cash flows, yearly gaps, value chart) and forward record."""
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        detail = rule_detail(research_dir, spec_hash)
+        if detail is None:
+            abort(404)
+        return render_template("v2/research_rule.html", active_nav="research", rule=detail, research_tab="pool",
+                               jobs=JobLog(research_dir).jobs())
+
+    @blueprint.get("/research/rules/<spec_hash>.json")
+    def research_rule_json(spec_hash: str):
+        detail = rule_detail(_instance_dir(dependencies.settings.database_url) / "research", spec_hash)
+        if detail is None:
+            abort(404)
+        return jsonify(detail)
+
+    @blueprint.get("/research/jobs.json")
+    def research_jobs_json():
+        return jsonify(JobLog(_instance_dir(dependencies.settings.database_url) / "research").jobs())
 
     @blueprint.post("/research/promotions/<spec_hash>/<action>")
     def research_promotion(spec_hash: str, action: str):

@@ -1,0 +1,139 @@
+"""Long research programs the website lists (使用者 2026-10-04).
+
+The owner does not want the assistant to sit waiting on long programs (every check spends tokens);
+instead every long research program (data downloads, rule batches, factor analysis) registers itself
+here and the website's 研究 › 執行中的程式 tab shows what runs, how far it is and when it should end.
+One JSON file per run under ``instance/research/jobs/``: written atomically, updated at most every
+few seconds, finished with a status and a one-line summary. A run whose process is gone without
+finishing shows as 中斷.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import json
+import os
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Self
+from zoneinfo import ZoneInfo
+
+TAIPEI = ZoneInfo("Asia/Taipei")
+STATUS_LABELS = {"running": "執行中", "done": "完成", "failed": "失敗", "stopped": "中斷"}
+WRITE_EVERY = 3.0   # seconds between progress writes
+
+
+def _alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel.CloseHandle(handle)
+        return bool(ok) and code.value == 259            # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _now() -> datetime:
+    return datetime.now(TAIPEI)
+
+
+class Job:
+    def __init__(self, path: Path, payload: dict[str, object]) -> None:
+        self._path = path
+        self.payload = payload
+        self._written = 0.0
+        self._write(force=True)
+
+    def _write(self, force: bool = False) -> None:
+        moment = time.monotonic()
+        if not force and moment - self._written < WRITE_EVERY:
+            return
+        self.payload["updated_at"] = _now().isoformat(timespec="seconds")
+        partial = self._path.with_suffix(".partial")
+        partial.write_text(json.dumps(self.payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        partial.replace(self._path)
+        self._written = moment
+
+    def update(self, done: int | None = None, current: str | None = None, total: int | None = None,
+               force: bool = False) -> None:
+        if total is not None:
+            self.payload["total"] = total
+        if done is not None:
+            self.payload["done"] = done
+        if current is not None:
+            self.payload["current"] = current
+        self._write(force=force)
+
+    def finish(self, status: str = "done", summary: str = "") -> None:
+        self.payload.update({"status": status, "summary": summary, "finished_at": _now().isoformat(timespec="seconds")})
+        self._write(force=True)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, kind, error, _trace) -> bool:
+        if self.payload.get("status") == "running":
+            if error is None:
+                self.finish("done", str(self.payload.get("summary") or ""))
+            else:
+                self.finish("stopped" if kind is KeyboardInterrupt else "failed", f"{kind.__name__}: {error}"[:300])
+        return False
+
+
+class JobLog:
+    def __init__(self, research_dir: str | Path) -> None:
+        self.folder = Path(research_dir) / "jobs"
+
+    def start(self, name: str, command: str, total: int | None = None, current: str = "") -> Job:
+        self.folder.mkdir(parents=True, exist_ok=True)
+        started = _now()
+        job_id = f"{started:%Y%m%d-%H%M%S}-{os.getpid()}"
+        return Job(self.folder / f"{job_id}.json", {
+            "id": job_id, "name": name, "command": command, "pid": os.getpid(), "status": "running",
+            "started_at": started.isoformat(timespec="seconds"), "done": 0, "total": total, "current": current,
+            "summary": "", "finished_at": None,
+        })
+
+    def jobs(self, limit: int = 30) -> list[dict[str, object]]:
+        """Newest first, with the status (a running job whose process is gone is 中斷), progress and
+        an estimated end time."""
+        if not self.folder.is_dir():
+            return []
+        rows = []
+        for path in sorted(self.folder.glob("*.json"), reverse=True)[:limit]:
+            try:
+                item = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if item.get("status") == "running" and not _alive(int(item.get("pid") or 0)):
+                item["status"] = "stopped"
+                item["summary"] = item.get("summary") or "程式已不在執行（可能被停止或電腦重開）"
+            item["status_label"] = STATUS_LABELS.get(item["status"], item["status"])
+            done, total = item.get("done") or 0, item.get("total")
+            item["percent"] = round(100 * done / total) if total else None
+            item["eta"] = None
+            if item["status"] == "running" and total and done:
+                started = datetime.fromisoformat(item["started_at"])
+                elapsed = (_now() - started).total_seconds()
+                remaining = elapsed / done * (total - done)
+                item["eta"] = datetime.fromtimestamp(_now().timestamp() + remaining, TAIPEI).strftime("%m/%d %H:%M")
+            rows.append(item)
+        rows.sort(key=lambda row: (row["status"] != "running", row.get("started_at") or ""), reverse=False)
+        running = [row for row in rows if row["status"] == "running"]
+        others = sorted((row for row in rows if row["status"] != "running"), key=lambda row: row.get("started_at") or "",
+                        reverse=True)
+        return running + others
+
+    def running(self) -> int:
+        return sum(1 for row in self.jobs() if row["status"] == "running")
