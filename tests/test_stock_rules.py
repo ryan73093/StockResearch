@@ -100,3 +100,20 @@ def test_first_batch_is_distinct_and_names_no_stock():
     assert {rule.factor for rule in rules} == set(FACTORS)
     assert all(not any(char.isdigit() and len(rule.name) < 0 for char in rule.name) for rule in rules)
     assert StockRule(name="a", factor="momentum_6").rule_hash == StockRule(name="b", factor="momentum_6").rule_hash
+
+
+def test_buffer_keeps_a_holding_until_it_drops_far_enough():
+    from quant_platform.research.stock_rules import second_batch
+
+    days = weekdays(date(2023, 1, 2), 80)
+    closes = {f"S{i}.TW": [20.0 * (1 + 0.0001 * (9 - i)) ** step for step in range(80)] for i in range(10)}
+    closes["0050.TW"] = [100.0] * 80
+    data = panel_data(days, closes)
+    panel = Panel(data)
+    # Without a buffer the top 5 by momentum are S0..S4; S5 is sixth.
+    plain = StockRule(name="p", factor="momentum_6", top=5, min_history=20)
+    assert panel.ranked(plain, days[-1])[:6] == [f"S{i}.TW" for i in range(6)]
+    buffered = StockRule(name="b", factor="momentum_6", top=5, buffer=2, min_history=20)
+    picks = rankings(panel, buffered, days[0], days[-1])
+    assert all(len(choice) == 5 for choice in picks.values() if choice)
+    assert len(second_batch()) == 12 and all(rule.buffer == 3 and rule.top == 30 for rule in second_batch())

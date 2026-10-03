@@ -218,9 +218,8 @@ def main() -> int:
     if args.command == "legacy":
         return _legacy(args)
     if args.command == "stocks":
-        from quant_platform.research.stock_rules import (
-            Panel, describe, first_batch, load_stock_data, run_stock_trial,
-        )
+        from quant_platform.research.stock_rules import BATCHES as STOCK_BATCHES
+        from quant_platform.research.stock_rules import Panel, describe, load_stock_data, run_stock_trial
 
         if args.period not in ("development", "validation", "holdout"):
             raise SystemExit("stocks：--period 只能是 development、validation 或 holdout")
@@ -232,7 +231,9 @@ def main() -> int:
               f"成本：{BROKERS[args.broker].name}", flush=True)
         panel = Panel(data)
         stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
-        for rule in first_batch():
+        if args.name not in STOCK_BATCHES:
+            raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(STOCK_BATCHES)}")
+        for rule in STOCK_BATCHES[args.name]():
             try:
                 record, report = run_stock_trial(rule, args.period, base, registry, RESEARCH / "reports", costs,
                                                  data=data, panel=panel, generated_at=stamp)

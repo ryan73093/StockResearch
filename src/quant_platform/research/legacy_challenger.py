@@ -397,8 +397,8 @@ def simulate(data: LegacyData, variant: Variant | None, costs: CostModel, start:
                         sell_all(symbol)
                     total = cash + sum(units[symbol] * (data.last_close(symbol, day) or 0.0) for symbol in units)
                     for symbol in picks:
-                        held_value = units[symbol] * data.closes[symbol][day]
-                        buy(symbol, total / len(picks) - held_value)
+                        held_value = units[symbol] * (data.last_close(symbol, day) or 0.0)
+                        buy(symbol, total / len(picks) - held_value)  # no close today: buy() skips it
                 else:
                     budget = cash / len(picks)
                     for symbol in picks:

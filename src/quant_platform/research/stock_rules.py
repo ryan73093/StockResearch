@@ -53,6 +53,7 @@ class StockRule(BaseModel):
     factor: Literal["momentum_12_1", "momentum_6", "reversal_1", "low_volatility_60", "high_52w", "dividend_yield"]
     top: int = Field(default=20, ge=5, le=50)
     rebalance: Literal["monthly", "quarterly"] = "monthly"
+    buffer: int = Field(default=1, ge=1, le=5)   # keep a holding while it still ranks within buffer × top
     min_turnover: float = Field(default=20_000_000, ge=0)   # 20-session average NT$ traded
     min_price: float = Field(default=10.0, ge=0)
     min_history: int = Field(default=252, ge=20, le=504)   # sessions listed before a stock is ranked
@@ -214,7 +215,11 @@ def rankings(panel: Panel, rule: StockRule, start: date, end: date,
     current: list[str] = []
     for count, (day, _amount) in enumerate(plan.schedule(sessions, start, end)):
         if rule.rebalance == "monthly" or count % 3 == 0 or not current:
-            current = panel.ranked(rule, day)[: rule.top]
+            ranked = panel.ranked(rule, day)
+            keep_zone = set(ranked[: rule.top * rule.buffer])
+            kept = [symbol for symbol in current if symbol in keep_zone]       # still good enough: hold
+            fresh = [symbol for symbol in ranked if symbol not in kept]
+            current = kept + fresh[: max(0, rule.top - len(kept))]
         output[day] = list(current)
     return output
 
@@ -304,6 +309,17 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
     return record, report
 
 
+def second_batch() -> list[StockRule]:
+    """Turnover kept down: hold while still in the top 3 × N, top 30, monthly and quarterly."""
+    rules = []
+    for factor, label in FACTORS.items():
+        for rebalance, word in (("monthly", "每月"), ("quarterly", "每季")):
+            rules.append(StockRule(name=f"個股 {label}：前 30 名、{word}換股、留到跌出前 90", factor=factor, top=30,
+                                   rebalance=rebalance, buffer=3))
+    return rules
+
+
+
 def first_batch() -> list[StockRule]:
     """Six factors × top 10 and top 30, monthly; the two momentum factors also quarterly."""
     rules = []
@@ -326,3 +342,6 @@ def describe(report: dict) -> str:
             parts.append(f"{key} 視窗 {item['count']} 個、勝率 {item['win_ratio']:.0%}、中位 {item['median_excess']:+.2%}、"
                          f"最差 {item['worst_excess']:+.2%}")
     return "；".join(parts)
+
+
+BATCHES = {"first": first_batch, "second": second_batch}
