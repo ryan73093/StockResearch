@@ -219,14 +219,14 @@ def main() -> int:
         return _legacy(args)
     if args.command == "stocks":
         from quant_platform.research.stock_rules import BATCHES as STOCK_BATCHES
-        from quant_platform.research.stock_rules import Panel, describe, load_stock_data, run_stock_trial
+        from quant_platform.research.stock_rules import WARMUP_YEARS, Panel, describe, load_stock_data, run_stock_trial
 
         if args.period not in ("development", "validation", "holdout"):
             raise SystemExit("stocks：--period 只能是 development、validation 或 holdout")
         start, end = PERIODS[args.period]
         base = Path(args.base)
         costs = broker_costs(args.broker)
-        data = load_stock_data(base, start.year, end.year)
+        data = load_stock_data(base, start.year - WARMUP_YEARS, end.year)
         print(f"個股規則（{args.period}）：{data.notes['symbols']} 檔上市股票、{len(data.sessions)} 個交易日；"
               f"成本：{BROKERS[args.broker].name}", flush=True)
         panel = Panel(data)

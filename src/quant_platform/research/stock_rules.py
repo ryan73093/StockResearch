@@ -43,7 +43,8 @@ FACTORS = {
     "dividend_yield": "近 12 個月現金殖利率",
 }
 STANDARD_PLAN = ContributionPlan(monthly_amount=10_000, day_of_month=5)
-ENGINE_VERSION = "stocks-1.0.0"
+ENGINE_VERSION = "stocks-1.0.1"   # 1.0.1: two warm-up years before the period for factors and listing age
+WARMUP_YEARS = 2
 
 
 class StockRule(BaseModel):
@@ -272,7 +273,7 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
         raise ResearchGateError("個股規則只能用開發、驗證或保留期評估")
     start, end = PERIODS[period]
     costs = costs or CostModel()
-    fingerprint = stock_fingerprint(base, start.year, end.year)
+    fingerprint = stock_fingerprint(base, start.year - WARMUP_YEARS, end.year)
     payload = {"rule": rule.canonical(), "period": period, "costs": costs.as_dict(), "data": fingerprint,
                "engine": ENGINE_VERSION}
     input_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
@@ -285,7 +286,8 @@ def run_stock_trial(rule: StockRule, period: str, base: str | Path, registry: Tr
             raise ResearchGateError("保留期前必須先有驗證期試驗")
         if any(record.period == "holdout" for record in mine):
             raise ResearchGateError("此規則已評估過保留期，每個候選只能評估一次")
-    data = data or load_stock_data(base, start.year, end.year)
+    # Two years before the period warm the factors and the listing age up; trades start at ``start``.
+    data = data or load_stock_data(base, start.year - WARMUP_YEARS, end.year)
     panel = panel or Panel(data)
     report = evaluate_rule(data, panel, rule, costs, start, end)
     report["data_fingerprint"] = fingerprint
@@ -344,4 +346,10 @@ def describe(report: dict) -> str:
     return "；".join(parts)
 
 
-BATCHES = {"first": first_batch, "second": second_batch}
+def high52_family() -> list[StockRule]:
+    """The rules that beat DCA in the development period (2026-10-03): the same hashes as in the
+    first two batches, so running them on the validation period adds no new attempt."""
+    return [rule for rule in first_batch() + second_batch() if rule.factor == "high_52w"]
+
+
+BATCHES = {"first": first_batch, "second": second_batch, "high52": high52_family}
