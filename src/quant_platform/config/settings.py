@@ -16,6 +16,10 @@ PAUSABLE_MODULES = {
     "shadow_trading": "影子交易",
     "promotions": "晉級複驗",
     "rag_index": "報告 RAG 索引",
+    # Roadmap S9-W05 (owner 2026-10-04): the 13:50 workflow keeps market data, the listing check and the
+    # raw data-quality snapshot; features, GPU models, factor research, walk-forward backtests,
+    # ensembles, portfolios, legacy decisions, the legacy after-hours AI and its report stop.
+    "legacy_research": "舊版研究流程（特徵、模型、因子、回測、整合、組合、舊盤後 AI、舊報告）",
 }
 DEFAULT_PAUSED_MODULES = frozenset(PAUSABLE_MODULES)
 

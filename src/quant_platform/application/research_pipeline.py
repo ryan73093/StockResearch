@@ -86,7 +86,10 @@ class DailyResearchPipeline:
         refresh_macro: bool = True,
         progress_callback: Callable[[str, int], None] | None = None,
         early_decision_callback: Callable[[DecisionPipelineResult], None] | None = None,
+        legacy_research: bool = True,
     ) -> DailyResearchPipelineResult:
+        """``legacy_research=False`` (S9-W05): market data, the listing check and the raw data-quality
+        snapshot only; the legacy research steps after them are skipped."""
         progress = progress_callback or (lambda _stage, _percent: None)
         progress("抓取日線行情", 5)
         market_result = self._market_data_pipeline.run(
@@ -110,6 +113,16 @@ class DailyResearchPipeline:
                 logger.exception("Taiwan listing reconciliation failed; continuing")
         feature_result: FeatureLabelPipelineResult | None = None
         model_result: ModelPipelineResult | None = None
+        if not legacy_research:
+            progress("檢查原始資料品質", 60)
+            raw_quality = self._data_quality.evaluate(market, as_of=now, stage="raw")
+            progress("完成（舊版研究流程已暫停）", 100)
+            return DailyResearchPipelineResult(
+                market=market.upper(), market_data=market_result, taiwan_data=None, macro_data=None,
+                raw_data_quality=raw_quality, feature_store=None, data_quality=raw_quality, factor_research=None,
+                backtest_research=None, strategy_ensemble=None, portfolio_risk=None, model_research=None,
+                daily_decision=None,
+            )
         if early_decision_callback is not None:
             # The after-hours order window is time-limited. Today's price
             # features and preliminary decision must not wait for slower

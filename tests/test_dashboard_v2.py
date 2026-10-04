@@ -157,3 +157,8 @@ def test_today_reminds_when_the_account_falls_past_the_plans_tolerance(tmp_path)
     body = create_app(container).test_client().get("/").get_data(as_text=True)
 
     assert "需要留意" in body and "帳戶從高點回落 32.0%，已超過計畫的可承受回撤 30%" in body
+
+
+def test_today_without_a_plan_asks_for_one_instead_of_legacy_picks(client):
+    body = client.get("/").get_data(as_text=True)
+    assert "先建立投資計畫" in body and "研究模型觀察" not in body and "模擬權益" not in body

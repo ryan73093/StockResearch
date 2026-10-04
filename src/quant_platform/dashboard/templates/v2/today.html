@@ -92,6 +92,7 @@
     </section>
     {% endif %}
 
+    {% if plan %}
     <details class="card card--quiet order-4">
       <summary><h2>研究模型觀察 <span class="badge badge--warn">未晉級・僅供參考</span></h2></summary>
       <p style="margin:0 0 6px"><strong>{{ plan.headline }}</strong></p>
@@ -103,6 +104,7 @@
       {% endif %}
       {% for reason in reasons %}<p class="note">{{ reason }}</p>{% endfor %}
     </details>
+    {% endif %}
   </div>
 
   <aside class="stack">
@@ -155,6 +157,27 @@
     </section>
   </aside>
 </div>
+{% elif not plan %}
+{% if onboarding and onboarding.show %}{{ onboarding_card(onboarding) }}{% endif %}
+<section class="hero hero--idle">
+  <div>
+    <div class="hero__eyebrow">{{ icon('spark') }}今日行動</div>
+    <h2 class="hero__headline">先建立投資計畫</h2>
+    <p class="hero__mode">在「計畫」頁填每月投入金額、投入日與採用的策略；之後每個交易日 13:30 收盤後，這裡會告訴你要不要買、買什麼、限價多少。</p>
+    <div class="hero__chips">
+      <a class="btn btn--primary" href="/plan">建立計畫</a>
+      <a class="btn" href="/research/pool">看研究選手池</a>
+    </div>
+  </div>
+</section>
+<section class="card">
+  <div class="card__head"><h2>資料狀態</h2></div>
+  <dl class="facts">
+    <div><dt>最新收盤</dt><dd>{{ status.market_date }}</dd></div>
+    <div><dt>資料品質</dt><dd><span class="badge {{ status.quality_badge }}">{{ status.quality_label }}</span></dd></div>
+    <div><dt>今日排除</dt><dd>{{ status.excluded }} 檔{% if status.excluded %}（可能停牌）{% endif %}</dd></div>
+  </dl>
+</section>
 {% else %}
 {% if onboarding and onboarding.show %}{{ onboarding_card(onboarding) }}{% endif %}
 <section class="hero hero--{{ kind }}">

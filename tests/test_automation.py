@@ -131,8 +131,8 @@ def _mock_tw_workflow(service):
         to_markdown=lambda: "## 盤後 AI 零股決策"
     )
     service._daily_pipeline.run.side_effect = (
-        lambda market, early_decision_callback=None:
-        early_decision_callback(SimpleNamespace(market=market))
+        lambda market, early_decision_callback=None, legacy_research=True:
+        early_decision_callback(SimpleNamespace(market=market)) if early_decision_callback else None
     )
     service._reports = MagicMock()
     service._reports.generate.return_value = SimpleNamespace(
@@ -172,10 +172,12 @@ def test_tw_daily_automation_skips_paused_modules_by_default(tmp_path):
     ):
         paused.assert_not_called()
     service._paper_trading.process_pending.assert_called_once_with()
-    service._universe_expansion.run_batch.assert_called_once_with()
-    assert service._after_hours_ai.generate.call_count == 2
-    assert service._after_hours_ai.submit_to_paper.call_count == 2
-    service._reports.generate.assert_called_once_with("TW", index=False)
+    # S9-W05 (owner 2026-10-04): the legacy research is paused by default: prices, the listing check and
+    # the raw quality snapshot only; no universe expansion, legacy after-hours AI or legacy report
+    assert service._daily_pipeline.run.call_args.kwargs == {"legacy_research": False}
+    service._universe_expansion.run_batch.assert_not_called()
+    service._after_hours_ai.generate.assert_not_called()
+    service._reports.generate.assert_not_called()
 
 
 def test_tw_daily_automation_runs_every_module_when_nothing_is_paused(tmp_path):
@@ -205,14 +207,17 @@ def test_tw_daily_automation_runs_every_module_when_nothing_is_paused(tmp_path):
 
 
 def test_tw_daily_automation_refreshes_existing_prices_before_universe_expansion(tmp_path):
+    from quant_platform.config.settings import DEFAULT_PAUSED_MODULES
+
     container = build_container(Settings(
         database_url=f"sqlite:///{tmp_path / 'tw-refresh-order.db'}",
         email_enabled=False,
+        paused_modules=DEFAULT_PAUSED_MODULES - {"legacy_research"},     # the legacy workflow's order
     ))
     service = container.automation_service
     calls: list[str] = []
     service._daily_pipeline = MagicMock(
-        run=lambda market, early_decision_callback=None: calls.append("daily_pipeline")
+        run=lambda market, early_decision_callback=None, legacy_research=True: calls.append("daily_pipeline")
     )
     service._universe_expansion = MagicMock(
         run_batch=lambda: calls.append("universe_expansion")
@@ -282,3 +287,24 @@ def test_tw_daily_automation_can_run_point_in_time_ingestion(tmp_path):
     )
     service._intraday_features.run.assert_called_once_with(lookback_days=14)
     service._earnings_calls.refresh.assert_called_once_with("ALL")
+
+
+def test_paused_legacy_research_stops_after_prices_listing_check_and_raw_quality():
+    from quant_platform.application.research_pipeline import DailyResearchPipeline
+
+    parts = {name: MagicMock() for name in (
+        "market_data_pipeline", "taiwan_data_pipeline", "macro_data_pipeline", "data_quality_service",
+        "feature_label_pipeline", "factor_research_pipeline", "backtest_research_pipeline", "ensemble_research_pipeline",
+        "portfolio_research_pipeline", "model_research_pipeline", "daily_decision_pipeline", "listing_reconciliation")}
+    parts["market_data_pipeline"].run.return_value = SimpleNamespace(fresh=True)
+    pipeline = DailyResearchPipeline(**parts)
+    result = pipeline.run("TW", legacy_research=False)
+    parts["market_data_pipeline"].run.assert_called_once()
+    parts["listing_reconciliation"].run.assert_called_once()
+    parts["data_quality_service"].evaluate.assert_called_once()
+    parts["data_quality_service"].ensure_research_ready.assert_not_called()
+    for name in ("taiwan_data_pipeline", "macro_data_pipeline", "feature_label_pipeline", "factor_research_pipeline",
+                 "backtest_research_pipeline", "ensemble_research_pipeline", "portfolio_research_pipeline",
+                 "model_research_pipeline", "daily_decision_pipeline"):
+        parts[name].run.assert_not_called()
+    assert result.market == "TW" and result.daily_decision is None

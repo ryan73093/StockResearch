@@ -418,14 +418,19 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         # opening, then to its close, then says it is over (S6-W01).
         deadline = datetime.combine(day, time(14, 30), TAIPEI).isoformat() if is_trading else None
         opening = datetime.combine(day, time(13, 40), TAIPEI).isoformat() if is_trading else None
-        plan = dependencies.after_hours_ai_service.plan_for_page()
-        if plan.orders and plan.submission_allowed:
+        # S9-W05: with the legacy research paused, the legacy after-hours AI plan is no longer made and
+        # the page does not show it (no stale picks).
+        legacy = not dependencies.settings.is_paused("legacy_research")
+        plan = dependencies.after_hours_ai_service.plan_for_page() if legacy else None
+        if plan is None:
+            kind, reasons = "idle", []
+        elif plan.orders and plan.submission_allowed:
             kind = "trade"
         elif not plan.orders and plan.headline.startswith(("今日不交易", "今日休市")):
             kind = "idle"
         else:
             kind = "hold"
-        if plan.orders:
+        if plan is not None and plan.orders:
             # Order reasons are "訊號：…；部位：…；風險：…；回看：…"; the page keeps the
             # signal and the risk, the full text stays on the legacy after-hours page.
             reasons = [
@@ -436,7 +441,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                 )
                 for order in plan.orders[:3]
             ]
-        else:
+        elif plan is not None:
             reasons = [
                 f"{blocker}（{count} 檔）"
                 for blocker, count in Counter(
@@ -486,15 +491,15 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             opening_iso=opening,
             reasons=reasons,
             totals={
-                "amount": sum(order.estimated_amount for order in plan.orders),
-                "cost": sum(order.estimated_cost for order in plan.orders),
+                "amount": sum(order.estimated_amount for order in plan.orders) if plan else 0,
+                "cost": sum(order.estimated_cost for order in plan.orders) if plan else 0,
             },
             names=names_for(
-                [order.symbol for order in plan.orders] + [item.symbol for item in plan.watchlist]
+                ([order.symbol for order in plan.orders] + [item.symbol for item in plan.watchlist] if plan else [])
                 + [f"{order.symbol}.{suffix}" for order in decision.orders for suffix in ("TW", "TWO")]
             ),
             status={
-                "decision_time": _taipei_text(plan.decision_time),
+                "decision_time": _taipei_text(plan.decision_time) if plan else (f"{market_date:%m/%d} 收盤" if market_date else "尚無"),
                 "market_date": f"{market_date:%m/%d}" if market_date else "尚無",
                 "quality_label": quality["label"],
                 "quality_badge": quality["badge"],

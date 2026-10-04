@@ -235,14 +235,20 @@ class AutomationService:
                         early_plan = self._after_hours_ai.generate()
                         self._after_hours_ai.submit_to_paper(plan=early_plan)
 
-                    self._daily_pipeline.run(
-                        schedule.market,
-                        early_decision_callback=(
-                            save_early_tw_plan
-                            if schedule.market == "TW" and self._after_hours_ai is not None
-                            else None
-                        ),
-                    )
+                    paused = self._settings.is_paused
+                    legacy = not paused("legacy_research")
+                    if legacy:
+                        self._daily_pipeline.run(
+                            schedule.market,
+                            early_decision_callback=(
+                                save_early_tw_plan
+                                if schedule.market == "TW" and self._after_hours_ai is not None
+                                else None
+                            ),
+                        )
+                    else:
+                        # S9-W05: prices, the listing check and the raw quality snapshot only.
+                        self._daily_pipeline.run(schedule.market, legacy_research=False)
                     # Updating the already registered universe is the critical
                     # path for the 13:30-14:30 odd-lot decision.  Expanding the
                     # universe can involve slower external metadata providers,
@@ -250,6 +256,7 @@ class AutomationService:
                     if (
                         schedule.market == "TW"
                         and self._universe_expansion is not None
+                        and legacy
                     ):
                         try:
                             self._universe_expansion.run_batch()
@@ -260,7 +267,6 @@ class AutomationService:
                             )
                     # Modules paused by REQUIREMENTS §13 (settings.paused_modules)
                     # keep their code and data but no longer run every day.
-                    paused = self._settings.is_paused
                     if (
                         schedule.market == "TW"
                         and self._settings.pit_auto_ingestion_enabled
@@ -299,6 +305,9 @@ class AutomationService:
                         and not paused("promotions")
                     ):
                         self._promotions.revalidate_all()
+                    if not legacy:
+                        return AutomationExecutionResult(job_key, schedule.market, "succeeded", attempt,
+                                                         "行情與資料品質（舊版研究流程已暫停）", "skipped", None)
                     plan = (
                         self._after_hours_ai.generate()
                         if schedule.market == "TW" and self._after_hours_ai is not None

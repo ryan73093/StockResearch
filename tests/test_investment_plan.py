@@ -93,12 +93,12 @@ def test_next_contribution_day_skips_closures_and_rolls_to_next_month():
 
 def test_today_page_shows_the_plan_card(container):
     client = create_app(container).test_client()
-    assert "還沒有投資計畫" in client.get("/").get_data(as_text=True)
+    assert "先建立投資計畫" in client.get("/").get_data(as_text=True)
 
     container.investment_plan_service.save(FORM)
     body = client.get("/").get_data(as_text=True)
     assert "我的計畫" in body and "15,000 元" in body and "定期不定額（200 日均線）" in body
-    assert "依你的計畫・第 1 版" in body and "未晉級・僅供參考" in body
+    assert "依你的計畫・第 1 版" in body and "未晉級・僅供參考" not in body   # legacy picks gone (S9-W05)
 
 
 def test_plan_keeps_the_broker_and_rejects_unknown_ones(container):
