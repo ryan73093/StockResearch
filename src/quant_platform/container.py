@@ -185,6 +185,7 @@ class Container:
     plan_decision_service: PlanDecisionService
     notification_service: NotificationService
     dividend_calendar: DividendCalendar
+    prices: object = None   # S9-W03: research price store first, legacy bars as the fallback
 
 
 def _sqlite_path(database_url: str) -> Path | None:
@@ -493,16 +494,20 @@ def build_container(settings: Settings | None = None) -> Container:
         plan = investment_plan_service.current()
         return plan.broker if plan else "conservative"
 
+    from quant_platform.research.prices import FallbackPrices, ResearchPrices
+
+    # S9-W03 (owner 2026-10-04: one copy of prices): the research history first; the legacy bars only
+    # where it has nothing as recent (TPEx stocks, a missed close) until the legacy price step stops.
+    prices = FallbackPrices(ResearchPrices(_instance_dir(resolved.database_url) / "research" / "history"),
+                            market_bar_repository)
+
     def bar_history(symbol: str) -> list:
         """Daily closes as (Taipei session date, close), oldest first."""
-        return [
-            (bar.event_time.astimezone(TAIPEI_ZONE).date(), float(bar.close))
-            for bar in market_bar_repository.list_bars(symbol)
-        ]
+        return prices.history(symbol)
 
     actual_account_service = ActualAccountService(
         SqlAlchemyActualAccountRepository(database.session_factory),
-        price_lookup=market_bar_repository.latest_closes,
+        price_lookup=prices.latest_closes,
         research_dir=_instance_dir(resolved.database_url) / "research",
         default_broker=plan_broker,
         bar_history=bar_history,
@@ -600,8 +605,9 @@ def build_container(settings: Settings | None = None) -> Container:
         investment_plan_service=investment_plan_service,
         actual_account_service=actual_account_service,
         plan_decision_service=PlanDecisionService(
-            investment_plan_service, actual_account_service, market_bar_repository, market_calendar,
+            investment_plan_service, actual_account_service, prices, market_calendar,
         ),
+        prices=prices,
         notification_service=NotificationService(resolved, automation_repository),
         dividend_calendar=DividendCalendar(_instance_dir(resolved.database_url) / "events" / "ex_dividends.json"),
     )

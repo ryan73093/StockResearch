@@ -342,6 +342,29 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
     return len(written)
 
 
+def fetch_official_close(container: "Container", now: datetime | None = None) -> object | None:
+    """S9-W03: from 13:49 on trading days, fetch TWSE's all-market quotes for today (first seen 19–21
+    minutes after the close) so Today's orders read today's close from the research price store."""
+    from datetime import time as clock
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.prices import fetch_today_close
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if not clock(13, 49) <= local_now.time() <= clock(14, 25):
+        return None
+    if _exchange_closure(container, "TW", local_now) is not None:
+        return None
+    base = _instance_dir(container.settings.database_url) / "research" / "history"
+    if not (base / "manifest.json").is_file():
+        return None
+    count = fetch_today_close(base, local_now.date())
+    if count:
+        logger.info("Official close for %s: %s codes", local_now.date(), count)
+    return count
+
+
 def run_research_agent(container: "Container") -> object | None:
     """S4-W04: one night of the AI researcher (development period only)."""
     from quant_platform.container import _instance_dir
@@ -432,6 +455,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        fetch_official_close,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour="13-14", minute="*", timezone=timezone),
+        id="official_close_fetch",
+        name="官方收盤（證交所全市場，交易日 13:49～14:25 每分鐘，到手即停）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=50,
     )
     scheduler.add_job(
         record_forward_simulation,

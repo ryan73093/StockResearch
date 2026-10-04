@@ -448,7 +448,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                     item.blocker for item in plan.watchlist if item.blocker
                 ).most_common(3)
             ]
-        market_date = dependencies.daily_market_data_pipeline.latest_market_date("TW")
+        market_date = (dependencies.prices.latest_market_date() if dependencies.prices is not None
+                       else dependencies.daily_market_data_pipeline.latest_market_date("TW"))
         quality = quality_status("TW")
         investment_plan = dependencies.investment_plan_service.current()
         plan_card = None
