@@ -199,6 +199,7 @@ PERIOD_ORDER = ("recent", "development", "validation", "holdout", "full")
 def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
     """The new design (S9-W02): every daily-decision rule's latest run on 2015-06..2026-09 with the
     owner's account, passed rules first."""
+    from quant_platform.research.daily import TIER_LABELS, TIERS, tier
     from quant_platform.research.daily import gate as daily_gate
     from quant_platform.research.stock_forward import StockForwardTracker
 
@@ -208,13 +209,17 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
         if record.kind == "candidate" and record.period == "recent":
             latest[record.spec_hash] = record
     origin = _sources(base) if latest else {}
-    since = {item["rule_hash"]: item["since"] for item in StockForwardTracker(base).tracked()}
+    tracker = StockForwardTracker(base)
+    since = {item["rule_hash"]: item["since"] for item in tracker.tracked()}
+    forward = {row["rule_hash"]: row for row in tracker.summary()} if latest else {}
     rows = []
     for spec_hash, record in latest.items():
         metrics = record.metrics
         reasons = daily_gate(metrics)
         one, three = _window(metrics, "1y"), _window(metrics, "3y")
+        grade, why = tier(metrics, forward.get(spec_hash))
         rows.append({
+            "tier": grade, "tier_label": TIER_LABELS[grade], "tier_reason": why,
             "spec_hash": spec_hash, "name": record.spec_name, "source": origin.get(spec_hash, "其他"),
             "trial_id": record.trial_id, "passed": not reasons, "reasons": reasons,
             "final_value": metrics.get("final_value"), "benchmark_final_value": metrics.get("benchmark_final_value"),
@@ -227,7 +232,7 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
             "cost_share": metrics.get("cost_share"), "orders_per_month": metrics.get("orders_per_month"),
             "forward_since": since.get(spec_hash),
         })
-    rows.sort(key=lambda row: (not row["passed"], -(row["excess"] if row["excess"] is not None else -9)))
+    rows.sort(key=lambda row: (TIERS.index(row["tier"]), -(row["excess"] if row["excess"] is not None else -9)))
     return rows
 
 
@@ -391,5 +396,7 @@ def pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> d
         "high_win": high_win, "both_periods": both, "ai_rounds": ai_rounds(research_dir),
         "forward_stocks": StockForwardTracker(research_dir).summary(),
         "daily": daily_rules, "daily_passed": sum(1 for row in daily_rules if row["passed"]),
+        "daily_tiers": {grade: sum(1 for row in daily_rules if row["tier"] == grade)
+                        for grade in ("T0", "T0 候選", "T1", "T2", "T3")},
         "status_labels": STATUS_LABELS, "basis": basis, "basis_label": BASIS_LABELS[basis], "bases": BASIS_LABELS,
     }

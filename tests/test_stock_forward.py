@@ -137,7 +137,7 @@ def test_daily_rules_that_pass_the_new_design_are_tracked_and_recorded_every_day
     tracker = StockForwardTracker(tmp_path, min_quotes=1)
     written = tracker.record(date(2026, 10, 2), now=at(date(2026, 10, 2)))
     item = tracker.tracked()[0]
-    assert item["kind"] == "daily" and item["plan"] == "seed" and "新設計過門檻" in item["reason"]
+    assert item["kind"] == "daily" and item["plan"] == "seed" and "新設計 T0 候選" in item["reason"]
     # the account starts on 10-02 with NT$300,000 and buys the three strongest trends the same day
     assert len(written) == 1 and written[0]["contributed"] == 300_000 and len(written[0]["holdings"]) == 3
     tracker.record(date(2026, 10, 5), now=at(date(2026, 10, 5)))

@@ -130,3 +130,39 @@ def test_factor_batch_is_one_rule_per_factor():
     assert all(len(rule.name) <= 80 for rule in rules)
     with pytest.raises(ValueError):
         DailyRule(name="x", factors={"no_such_factor": 1.0})
+
+
+class IndustryPanel(ScriptedPanel):
+    def __init__(self, sessions, script, industries):
+        super().__init__(sessions, script)
+        self.industries = industries
+
+    def industry(self, symbol):
+        return self.industries[symbol]
+
+
+def test_industry_cap_skips_a_full_industry_for_the_next_best():
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 2))
+    ranked = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"]
+    industries = {name: ("電子零組件業" if name in "ABCDE" else f"其他{name}") for name in ranked}
+    panel = IndustryPanel(days, {days[0]: ranked}, industries)
+    base = {"name": "x", "factors": {"momentum_3": 1.0}, "top": 10}
+    assert daily_rankings(panel, DailyRule(**base), days[0], days[0])[days[0]] == ranked[:10]
+    capped = DailyRule(**base, industry_cap=0.3)                     # at most 3 of 10 from one industry
+    assert capped.industry_limit == 3
+    assert daily_rankings(panel, capped, days[0], days[0])[days[0]] == ["A", "B", "C", "F", "G", "H", "I", "J", "K", "L"]
+    assert "industry_cap" not in DailyRule(**base).canonical() and DailyRule(**base).rule_hash != capped.rule_hash
+
+
+def test_tiers():
+    from quant_platform.research.daily import tier
+
+    windows = {"1y": {"count": 100, "win_ratio": 0.6}, "3y": {"count": 80, "win_ratio": 0.8, "median_excess": 0.2}}
+    good = {"full_period_excess": 2.0, "since_2020_excess": 0.4, "max_drawdown": -0.36, "benchmark_max_drawdown": -0.34,
+            "windows": windows}
+    assert tier(good)[0] == "T0 候選" and tier(good, {"sessions": 30, "excess": 0.02})[1] == "前向觀察 30／60 個交易日"
+    assert tier(good, {"sessions": 60, "excess": 0.01, "problems": []})[0] == "T0"
+    assert tier(good, {"sessions": 60, "excess": -0.01, "problems": []})[0] == "T0 候選"
+    assert tier({**good, "max_drawdown": -0.52})[0] == "T1"                      # wins, more volatile
+    assert tier({**good, "since_2020_excess": -0.1})[0] == "T2"                  # only part of the time
+    assert tier({**good, "full_period_excess": -0.5})[0] == "T3"

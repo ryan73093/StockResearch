@@ -63,8 +63,7 @@ def plan_of(item: dict[str, object]):
 
 def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:
     """Daily-decision rules (S9-W02) that pass the new design's gate on 2015-06..2026-09."""
-    from quant_platform.research.daily import DailyRule
-    from quant_platform.research.daily import gate as daily_gate
+    from quant_platform.research.daily import DailyRule, tier
 
     base = Path(research_dir)
     latest: dict[str, object] = {}
@@ -73,13 +72,14 @@ def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:
             latest[record.spec_hash] = record
     output = []
     for record in latest.values():
-        if daily_gate(record.metrics):
+        grade, _why = tier(record.metrics)
+        if grade not in ("T0 候選", "T1"):            # T1 too: beats 0050, more volatile (owner 2026-10-04)
             continue
         try:
             spec = json.loads((base / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
         except (OSError, ValueError, KeyError):
             continue
-        reason = (f"新設計過門檻：2015-06 起比 0050 {record.metrics.get('full_period_excess'):+.1%}、"
+        reason = (f"新設計 {grade}：2015-06 起比 0050 {record.metrics.get('full_period_excess'):+.1%}、"
                   f"2020-10 起 {record.metrics.get('since_2020_excess'):+.1%}（試驗 #{record.trial_id}）")
         output.append((DailyRule.model_validate(spec), reason))
     return output
@@ -205,10 +205,17 @@ class StockForwardTracker:
             snapshots: dict = {}
             plan = plan_of(item)
             if item.get("kind") == "daily":
-                from quant_platform.research.daily import DailyRule, FactorPanel, daily_rankings, simulate_daily
+                from quant_platform.research.daily import (
+                    DailyRule,
+                    FactorPanel,
+                    Industries,
+                    daily_rankings,
+                    load_industries,
+                    simulate_daily,
+                )
 
                 rule = DailyRule.model_validate(item["rule"])
-                factor_panel = factor_panel or FactorPanel(panel)
+                factor_panel = factor_panel or FactorPanel(panel, Industries(load_industries(self._history)))
                 run = simulate_daily(data, rule, self._costs, start, last, daily_rankings(factor_panel, rule, start, last),
                                      plan, ledger=ledger, snapshots=snapshots)
                 benchmark = simulate_daily(data, None, self._costs, start, last, plan=plan)

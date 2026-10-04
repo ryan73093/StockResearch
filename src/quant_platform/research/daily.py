@@ -85,6 +85,9 @@ class DailyRule(BaseModel):
     min_price: float = Field(default=10.0, ge=0)
     min_turnover: float = Field(default=20_000_000, ge=0)
     min_history: int = Field(default=252, ge=20, le=504)
+    # At most this share of the picks from one industry (2026-10-04: a trend rule bunched into passive
+    # components and fell 41% in a month); 0 = no limit. Left out of the hash at 0.
+    industry_cap: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @field_validator("factors")
     @classmethod
@@ -97,7 +100,14 @@ class DailyRule(BaseModel):
         return value
 
     def canonical(self) -> dict[str, object]:
-        return self.model_dump(mode="json")
+        data = self.model_dump(mode="json")
+        if not data.get("industry_cap"):
+            data.pop("industry_cap", None)
+        return data
+
+    @property
+    def industry_limit(self) -> int | None:
+        return max(1, int(self.industry_cap * self.top)) if self.industry_cap else None
 
     @property
     def rule_hash(self) -> str:
@@ -119,8 +129,9 @@ class FactorPanel:
     """Every factor for every stock and session (symbols × sessions), computed once with rolling
     windows on the dividend- and split-adjusted closes; ranking a day is then a column lookup."""
 
-    def __init__(self, panel: Panel) -> None:
+    def __init__(self, panel: Panel, industries: dict[str, str] | None = None) -> None:
         self.panel = panel
+        self.industries = industries or {}
         self.sessions, self.index, self.symbols = panel.sessions, panel.index, panel.symbols
         self._prices = pd.DataFrame(panel.filled.T)
         self._cache: dict[str, np.ndarray] = {}
@@ -190,6 +201,9 @@ class FactorPanel:
             return (p / p.rolling(55).max()).to_numpy()
         raise ValueError(factor)
 
+    def industry(self, symbol: str) -> str:
+        return self.industries.get(symbol.split(".")[0], "未分類")
+
     def eligible(self, rule: DailyRule, position: int) -> np.ndarray:
         return ((self.panel.close[:, position] >= rule.min_price) & (self.turnover_20[:, position] >= rule.min_turnover)
                 & (self.age[:, position] >= rule.min_history))
@@ -250,8 +264,24 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
         kept = [symbol for symbol in current
                 if symbol in keep_zone or (symbol in eligible and count - bought[symbol] < rule.min_hold)]
         held = set(kept)
-        fresh = [symbol for symbol in ranked if symbol not in held]
-        current = kept + fresh[: max(0, rule.top - len(kept))]
+        limit = rule.industry_limit
+        counts: dict[str, int] = defaultdict(int)
+        if limit:
+            for symbol in kept:
+                counts[fp.industry(symbol)] += 1
+        chosen = []
+        for symbol in ranked:
+            if len(kept) + len(chosen) >= rule.top:
+                break
+            if symbol in held:
+                continue
+            if limit:
+                group = fp.industry(symbol)
+                if counts[group] >= limit:
+                    continue                      # this industry is full: the next best from another
+                counts[group] += 1
+            chosen.append(symbol)
+        current = kept + chosen
         bought = {symbol: bought.get(symbol, count) for symbol in current}
         output[day] = list(current)
     return output
@@ -397,6 +427,37 @@ def gate(metrics: dict) -> list[str]:
     return reasons
 
 
+TIERS = ("T0", "T0 候選", "T1", "T2", "T3")
+TIER_LABELS = {
+    "T0": "T0：可採用（全部門檻＋前向觀察確認）",
+    "T0 候選": "T0 候選：全部門檻都過，等前向觀察",
+    "T1": "T1：贏 0050，但波動較大",
+    "T2": "T2：只有部分期間贏",
+    "T3": "T3：輸 0050",
+}
+FORWARD_SESSIONS = 60   # about three months of forward observation before a rule can be T0
+
+
+def tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
+    """The pool's grade of a daily rule (owner 2026-10-04): T3 lost to 0050 from 2015-06; T2 won from
+    2015-06 but lost from 2020-10 or failed the rolling windows; T1 passed both periods and the windows
+    but fell more than 5 points deeper than 0050 (more volatile); T0 候選 passed every gate; T0 is a
+    T0 候選 that, after at least 60 sessions of forward observation, is not behind 0050 and reconciles."""
+    reasons = gate(metrics)
+    if (metrics.get("full_period_excess") or 0) <= 0:
+        return "T3", reasons[0] if reasons else "2015-06 起輸 0050"
+    partial = [reason for reason in reasons if "2020-10" in reason or "視窗" in reason]
+    if partial:
+        return "T2", "；".join(partial)
+    if reasons:
+        return "T1", "；".join(reasons)
+    sessions = (forward or {}).get("sessions") or 0
+    if (sessions >= FORWARD_SESSIONS and ((forward or {}).get("excess") or 0) >= 0
+            and not (forward or {}).get("problems")):
+        return "T0", f"前向觀察 {sessions} 個交易日、不輸 0050"
+    return "T0 候選", f"前向觀察 {sessions}／{FORWARD_SESSIONS} 個交易日"
+
+
 def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel,
              benchmark_cache: dict | None = None) -> dict[str, object]:
     cache = benchmark_cache if benchmark_cache is not None else {}
@@ -424,9 +485,50 @@ def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostMode
     }
 
 
+INDUSTRY_FILE = Path("raw") / "finmind" / "TaiwanStockInfo.json"
+
+
+def load_industries(history: str | Path) -> dict[str, str]:
+    """Code → industry from FinMind's TaiwanStockInfo (today's classification, applied to history;
+    industries rarely change). Codes it no longer lists (stocks delisted long ago) take the most common
+    industry of listed codes with the same first two digits (TWSE codes group by industry)."""
+    path = Path(history) / INDUSTRY_FILE
+    if not path.is_file():
+        return {}
+    rows = json.loads(path.read_text(encoding="utf-8")).get("data") or []
+    output: dict[str, str] = {}
+    for row in sorted(rows, key=lambda item: str(item.get("date") or "")):     # the latest classification wins,
+        code, group = str(row.get("stock_id") or ""), str(row.get("industry_category") or "")
+        if not code or group in ("ETF", "Index", "大盤", "所有證券", ""):
+            continue
+        if group == "電子工業" and output.get(code) not in (None, "電子工業"):
+            continue                                                            # but a specific one beats 電子工業
+        output[code] = group
+    by_prefix: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for code, group in output.items():
+        by_prefix[code[:2]][group] += 1
+    output["__prefix__"] = json.dumps({prefix: max(counts, key=counts.get) for prefix, counts in by_prefix.items()},
+                                      ensure_ascii=False)
+    return output
+
+
+class Industries(dict):
+    """The code → industry map with the two-digit fallback for codes it does not list."""
+
+    def __init__(self, mapping: dict[str, str]) -> None:
+        prefixes = json.loads(mapping.get("__prefix__", "{}")) if mapping else {}
+        super().__init__({code: group for code, group in mapping.items() if code != "__prefix__"})
+        self._prefixes = prefixes
+
+    def get(self, code, default=None):
+        if code in self:
+            return self[code]
+        return self._prefixes.get(str(code)[:2], default)
+
+
 def load(history: str | Path) -> tuple[LegacyData, FactorPanel]:
     data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year)
-    return data, FactorPanel(Panel(data))
+    return data, FactorPanel(Panel(data), Industries(load_industries(history)))
 
 
 def fingerprint(history: str | Path) -> str:
@@ -488,4 +590,25 @@ def factor_batch() -> list[DailyRule]:
     return rules
 
 
-BATCHES = {"factors": factor_batch}
+def risk_batch() -> list[DailyRule]:
+    """2026-10-04, the owner: add an industry cap to bring the drawdown into the gate. The two strongest
+    trend factors and trend mixed with liquidity (large, actively traded stocks), each with at most 30%
+    of the picks from one industry, alone and with half the account in 0050."""
+    families = [
+        ("站上 200 日均線的幅度", {"trend_200": 1.0}),
+        ("接近 52 週高點", {"high_52w": 1.0}),
+        ("站上 200 日均線＋成交值大", {"trend_200": 1.0, "liquidity": 1.0}),
+    ]
+    rules = []
+    for label, factors in families:
+        for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+            rules.append(DailyRule(name=f"每天 {label}：前 20 名、同產業最多 3 成{word}"[:80], factors=factors,
+                                   core=core, industry_cap=0.3))
+    # the 30% cap with half in 0050 missed the drawdown gate by a fraction of a point: a 20% cap
+    for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+        rules.append(DailyRule(name=f"每天 站上 200 日均線的幅度：前 20 名、同產業最多 2 成{word}", factors={"trend_200": 1.0},
+                               core=core, industry_cap=0.2))
+    return rules
+
+
+BATCHES = {"factors": factor_batch, "risk": risk_batch}

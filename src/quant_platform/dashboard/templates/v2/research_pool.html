@@ -13,17 +13,21 @@
 {% include "v2/_research_tabs.html" %}
 {% set c = pool.counts %}
 <section class="card" id="daily">
-  <div class="card__head"><h2>新設計：2015-06 起、每天決策 <span class="badge">{{ pool.daily|length }} 個規則・{{ pool.daily_passed }} 個過門檻</span></h2></div>
+  <div class="card__head"><h2>新設計：2015-06 起、每天決策 <span class="badge">{{ pool.daily|length }} 個規則</span></h2></div>
+  <div class="kpis kpis--four" style="margin-bottom:12px">
+    {% for grade in ('T0', 'T0 候選', 'T1', 'T2', 'T3') %}<div class="kpi"><div class="kpi__label">{{ grade }}</div><div class="kpi__value">{{ pool.daily_tiers[grade] }}</div></div>{% endfor %}
+  </div>
+  <p class="small" style="margin:0 0 10px">分級：<strong>T0</strong> 全部門檻都過，而且前向觀察滿 60 個交易日仍不輸 0050，可以由你核准採用；<strong>T0 候選</strong> 全部門檻都過，等前向觀察；<strong>T1</strong> 兩段期間都贏、視窗勝率也夠，但回撤比 0050 深超過 5 個百分點（贏但波動大）；<strong>T2</strong> 只有部分期間贏；<strong>T3</strong> 輸 0050。T0 候選與 T1 自動進前向觀察。</p>
   <p class="muted small" style="margin:0 0 10px">帳戶：啟動資金 30 萬、每月 5 日再投入 1 萬，整個帳戶都能買賣；每個交易日收盤後檢查，掉出保留區才賣、新進榜才買；比同樣的錢買 0050。門檻：2015-06 起與 2020-10 起都贏 0050、3 年視窗勝率 ≥ 60% 且中位為正、1 年視窗勝率 ≥ 50%、回撤不比 0050 深超過 5 個百分點。最後以 2026-10-05 起的前向觀察判斷。</p>
   {% if pool.daily %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th>結果</th><th class="num">2015-06 起期末（0050）</th><th class="num">比 0050</th><th class="num">2020-10 起比 0050</th><th class="num">1 年／3 年視窗勝率</th><th class="num">最大回撤（0050）</th><th class="num">費稅佔投入・每月下單</th></tr></thead>
+      <thead><tr><th>規則</th><th>等級</th><th class="num">2015-06 起期末（0050）</th><th class="num">比 0050</th><th class="num">2020-10 起比 0050</th><th class="num">1 年／3 年視窗勝率</th><th class="num">最大回撤（0050）</th><th class="num">費稅佔投入・每月下單</th></tr></thead>
       <tbody>
       {% for row in pool.daily %}
         <tr data-name="{{ row.name }}">
           <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong>{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
-          <td data-label="結果" data-wide>{% if row.passed %}<span class="badge badge--ok">過門檻</span>{% else %}<span class="small">{{ row.reasons|join('；') }}</span>{% endif %}</td>
+          <td data-label="等級" data-wide><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--warn' if row.tier == 'T1' else ('badge--bad' if row.tier == 'T3' else '')) }}">{{ row.tier }}</span> <span class="small">{{ row.tier_reason }}</span></td>
           <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
           <td class="num {{ 'up' if (row.excess or 0) > 0 else 'down' }}" data-label="比 0050">{{ '{:+.0%}'.format(row.excess) if row.excess is not none else '—' }}</td>
           <td class="num {{ 'up' if (row.since_2020_excess or 0) > 0 else 'down' }}" data-label="2020-10 起">{{ '{:+.0%}'.format(row.since_2020_excess) if row.since_2020_excess is not none else '—' }}</td>
