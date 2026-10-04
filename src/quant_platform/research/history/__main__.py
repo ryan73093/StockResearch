@@ -51,7 +51,8 @@ def _summary(manifest: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
-    parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind"))
+    parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
+                                            "chips"))
     parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部")
     parser.add_argument("--exchange", default="twse,tpex", help="stocks：twse、tpex 或兩者")
     parser.add_argument("--from-year", type=int, default=2004, help="stocks：起始年")
@@ -148,6 +149,16 @@ def main() -> int:
                                        "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
             result = fetch_all(base, token, codes, datasets, job=job)
         print(json.dumps(result, ensure_ascii=False)[:2000], flush=True)
+        return 0
+
+    if args.command == "chips":
+        from quant_platform.research.chips import build as build_chips
+        from quant_platform.research.jobs import JobLog
+
+        with JobLog(base.parent).start("整理籌碼與基本面資料（FinMind → Parquet）",
+                                       "python -m quant_platform.research.history chips") as job:
+            written = build_chips(base, job=job)
+        print(json.dumps(written, ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "actions":

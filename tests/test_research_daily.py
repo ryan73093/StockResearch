@@ -125,7 +125,7 @@ def test_a_rule_runs_registers_once_and_reports_both_periods(tmp_path, monkeypat
 
 def test_factor_batch_is_one_rule_per_factor():
     rules = daily.factor_batch()
-    assert len(rules) == 2 * (len(daily.FACTOR_LABELS) + len(daily.OSCILLATORS))
+    assert len(rules) == 2 * (len(daily.FIRST_FACTORS) + len(daily.OSCILLATORS)) == 44   # as run on 2026-10-04
     assert len({rule.rule_hash for rule in rules}) == len(rules)
     assert all(len(rule.name) <= 80 for rule in rules)
     with pytest.raises(ValueError):

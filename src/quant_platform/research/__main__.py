@@ -300,7 +300,7 @@ def main() -> int:
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
-    parser.add_argument("--family", default="etf", choices=("etf", "stocks"), help="stats：ETF 規則或個股規則")
+    parser.add_argument("--family", default="etf", choices=("etf", "stocks", "daily"), help="stats：ETF、個股或每天決策規則")
     parser.add_argument("--recent", action="store_true", help="factors：新設計（2015-06 起、每週排名、看 20 個交易日）")
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--lump-sum", type=float, default=0, help="stocks：一次投入的金額（0＝每月投入）")
@@ -402,6 +402,24 @@ def main() -> int:
                   f"資產 {row['value']:,.0f}、0050 {row['benchmark_value']:,.0f}、持股 {len(row['holdings'])} 檔、"
                   f"費稅 {row['costs']:,}；對帳 {'正常' if not row['problems'] else '；'.join(row['problems'])}")
         return 0 if not reconcile(tracker.records()) else 1
+
+    if args.command == "stats" and args.family == "daily":
+        from quant_platform.research import daily as daily_research
+
+        basis = daily_research.fingerprint(Path(args.base))
+        report = significance(registry, RESEARCH / "reports", daily_research.PERIOD, fingerprint=basis)
+        if not report["candidates"]:
+            print("沒有目前資料版本的每天決策規則試驗")
+            return 1
+        path = save_stats(report, RESEARCH / "stats", "daily-recent", datetime.now(TAIPEI))
+        for item in sorted(report["candidates"], key=lambda item: -(item["dsr"]["deflated_sharpe"] or 0))[:8]:
+            print(f"#{item['trial_id']} {item['name']}：月超額平均 {item['bootstrap']['mean']:+.3%}"
+                  f"（95% 區間 {item['bootstrap']['low']:+.3%}～{item['bootstrap']['high']:+.3%}），"
+                  f"DSR {item['dsr']['deflated_sharpe']:.2f}（試驗數 {item['dsr']['trials']}）")
+        if report.get("pbo"):
+            print(f"PBO {report['pbo']['pbo']:.2f}（{len(report['candidates'])} 個規則）")
+        print(f"已寫入 {path}")
+        return 0
 
     if args.command == "stats" and args.family == "stocks":
         from quant_platform.research.stock_rules import WARMUP_YEARS, stock_fingerprint

@@ -207,6 +207,7 @@ class StockForwardTracker:
             if item.get("kind") == "daily":
                 from quant_platform.research.daily import (
                     DailyRule,
+                    ChipStore,
                     FactorPanel,
                     Industries,
                     daily_rankings,
@@ -215,7 +216,9 @@ class StockForwardTracker:
                 )
 
                 rule = DailyRule.model_validate(item["rule"])
-                factor_panel = factor_panel or FactorPanel(panel, Industries(load_industries(self._history)))
+                factor_panel = factor_panel or FactorPanel(
+                    panel, Industries(load_industries(self._history)),
+                    ChipStore(self._history, panel.sessions, panel.symbols, panel.close))
                 run = simulate_daily(data, rule, self._costs, start, last, daily_rankings(factor_panel, rule, start, last),
                                      plan, ledger=ledger, snapshots=snapshots)
                 benchmark = simulate_daily(data, None, self._costs, start, last, plan=plan)

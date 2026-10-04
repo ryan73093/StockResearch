@@ -67,7 +67,9 @@ TECHNICAL = {
     "bollinger_b": "布林通道位置 %B（20 日）",
     "breakout_55": "接近 55 日高點（突破）",
 }
-FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL}
+from quant_platform.research.chips import CHIP_FACTORS, ChipStore
+
+FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
 
@@ -129,9 +131,10 @@ class FactorPanel:
     """Every factor for every stock and session (symbols × sessions), computed once with rolling
     windows on the dividend- and split-adjusted closes; ranking a day is then a column lookup."""
 
-    def __init__(self, panel: Panel, industries: dict[str, str] | None = None) -> None:
+    def __init__(self, panel: Panel, industries: dict[str, str] | None = None, chips: ChipStore | None = None) -> None:
         self.panel = panel
         self.industries = industries or {}
+        self.chips = chips
         self.sessions, self.index, self.symbols = panel.sessions, panel.index, panel.symbols
         self._prices = pd.DataFrame(panel.filled.T)
         self._cache: dict[str, np.ndarray] = {}
@@ -150,6 +153,10 @@ class FactorPanel:
         return self._cache[factor]
 
     def _compute(self, factor: str):
+        if factor in CHIP_FACTORS:
+            if self.chips is None or not self.chips.available():
+                return np.full((len(self.sessions), len(self.symbols)), np.nan)
+            return self.chips.matrix(factor).T                      # back to sessions × symbols
         p = self._prices
         if factor in ("low_volatility_60", "low_volatility_250", "low_max_return"):
             returns = p.pct_change(fill_method=None)
@@ -528,7 +535,9 @@ class Industries(dict):
 
 def load(history: str | Path) -> tuple[LegacyData, FactorPanel]:
     data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year)
-    return data, FactorPanel(Panel(data), Industries(load_industries(history)))
+    panel = Panel(data)
+    return data, FactorPanel(panel, Industries(load_industries(history)),
+                             ChipStore(history, panel.sessions, panel.symbols, panel.close))
 
 
 def fingerprint(history: str | Path) -> str:
@@ -576,12 +585,14 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
 
 # --- batches -----------------------------------------------------------------------------------
 OSCILLATORS = ("rsi_14", "kd_k", "bollinger_b")
+FIRST_FACTORS = tuple(PRICE_FACTORS) + tuple(TECHNICAL)
 
 
 def factor_batch() -> list[DailyRule]:
     """One rule per factor (and the oscillators reversed: buy the oversold), alone and with half the
     account kept in 0050: different factors, not parameter variants (the owner, 2026-10-04)."""
-    singles: list[tuple[str, dict[str, float]]] = [(FACTOR_LABELS[name], {name: 1.0}) for name in FACTOR_LABELS]
+    # the 19 price, trading and technical factors this batch was run with (the chip factors have their own)
+    singles: list[tuple[str, dict[str, float]]] = [(FACTOR_LABELS[name], {name: 1.0}) for name in FIRST_FACTORS]
     singles += [(f"反向：{FACTOR_LABELS[name]}（買超賣）", {name: -1.0}) for name in OSCILLATORS]
     rules = []
     for label, factors in singles:
@@ -611,4 +622,33 @@ def risk_batch() -> list[DailyRule]:
     return rules
 
 
-BATCHES = {"factors": factor_batch, "risk": risk_batch}
+def chip_batch() -> list[DailyRule]:
+    """R13 (2026-10-04): one rule per chip and fundamental factor, and the two whose opposite is the
+    better-known story reversed (margin falling = retail leaving; small caps), alone and half in 0050."""
+    singles: list[tuple[str, dict[str, float]]] = [(CHIP_FACTORS[name], {name: 1.0}) for name in CHIP_FACTORS]
+    singles += [("反向：融資餘額減少（20 日）", {"margin_growth_20": -1.0}), ("反向：市值小（小型股）", {"market_cap": -1.0})]
+    rules = []
+    for label, factors in singles:
+        for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+            rules.append(DailyRule(name=f"每天 {label}：前 20 名{word}"[:80], factors=factors, core=core))
+    return rules
+
+
+def combo_batch() -> list[DailyRule]:
+    """2026-10-04: alone the chip and fundamental factors lose to 0050 (their daily changes churn the
+    top 20), so they confirm the strongest trend factor instead: trend plus revenue growth, plus
+    investment-trust buying, plus foreign buying; industry cap 30%, alone and half in 0050."""
+    families = [
+        ("站上 200 日均線＋月營收年增", {"trend_200": 1.0, "revenue_yoy": 1.0}),
+        ("站上 200 日均線＋投信買超", {"trend_200": 1.0, "trust_buy_20": 1.0}),
+        ("站上 200 日均線＋外資買超", {"trend_200": 1.0, "foreign_buy_20": 1.0}),
+    ]
+    rules = []
+    for label, factors in families:
+        for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+            rules.append(DailyRule(name=f"每天 {label}：前 20 名、同產業最多 3 成{word}"[:80], factors=factors,
+                                   core=core, industry_cap=0.3))
+    return rules
+
+
+BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch}
