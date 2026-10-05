@@ -190,16 +190,23 @@ class StockForwardTracker:
                                     and (day.isoformat(), item["rule_hash"]) not in done] for item in items}
         if not any(todo.values()):
             return []
-        panel = Panel(data)
-        factor_panel = None
+        twse_data = data
+        loaded: dict[str, list] = {}             # universe -> [data, panel, fingerprint, factor panel]
         names = _names(self._history, today.year)
-        fingerprint = stock_fingerprint(self._history, first_year, today.year)
         moment = (now or datetime.now(TAIPEI)).astimezone(TAIPEI)
         written = []
         for item in items:
             days = todo[item["rule_hash"]]
             if not days:
                 continue
+            # R6: a daily rule on listed plus TPEx stocks reads both; every other rule the TWSE data
+            universe = (item.get("rule") or {}).get("universe", "twse") if item.get("kind") == "daily" else "twse"
+            if universe not in loaded:
+                universe_data = twse_data if universe == "twse" else load_stock_data(self._history, first_year, today.year,
+                                                                                       universe=universe)
+                loaded[universe] = [universe_data, Panel(universe_data),
+                                    stock_fingerprint(self._history, first_year, today.year, universe=universe), None]
+            data, panel, fingerprint, factor_panel = loaded[universe]
             start, last = date.fromisoformat(item["since"]), days[-1]
             ledger: list[dict[str, object]] = []
             snapshots: dict = {}
@@ -212,13 +219,16 @@ class StockForwardTracker:
                     Industries,
                     daily_rankings,
                     load_industries,
+                    market_closes,
                     simulate_daily,
                 )
 
                 rule = DailyRule.model_validate(item["rule"])
                 factor_panel = factor_panel or FactorPanel(
                     panel, Industries(load_industries(self._history)),
-                    ChipStore(self._history, panel.sessions, panel.symbols, panel.close))
+                    ChipStore(self._history, panel.sessions, panel.symbols, panel.close),
+                    market_closes(self._history, panel.sessions))
+                loaded[universe][3] = factor_panel
                 run = simulate_daily(data, rule, self._costs, start, last, daily_rankings(factor_panel, rule, start, last),
                                      plan, ledger=ledger, snapshots=snapshots)
                 benchmark = simulate_daily(data, None, self._costs, start, last, plan=plan)
@@ -325,11 +335,13 @@ def _trade(entry: dict[str, object], names: dict[str, str]) -> dict[str, object]
 def _names(history: Path, year: int) -> dict[str, str]:
     import pyarrow.parquet as pq
 
-    path = history / "stocks" / "twse" / f"{year}.parquet"
-    if not path.is_file():
-        return {}
-    table = pq.read_table(path, columns=["code", "name"])
-    return dict(zip(table["code"].to_pylist(), table["name"].to_pylist()))
+    names: dict[str, str] = {}
+    for exchange in ("tpex", "twse"):              # a stock that moved to TWSE keeps its TWSE name
+        path = history / "stocks" / exchange / f"{year}.parquet"
+        if path.is_file():
+            table = pq.read_table(path, columns=["code", "name"])
+            names.update(zip(table["code"].to_pylist(), table["name"].to_pylist()))
+    return names
 
 
 def _replay_check(earlier: list[dict[str, object]], rule_hash: str, replayed: dict[date, float]) -> dict[str, object]:

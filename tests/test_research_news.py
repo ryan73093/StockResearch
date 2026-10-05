@@ -68,5 +68,5 @@ def test_tpex_codes_and_list_downloads(tmp_path):
     assert counts["TaiwanStockDelisting:all"] == 4 and counts["TaiwanFuturesInstitutionalInvestors:TX"] == 1
     assert len(queries) == 6 and read_rows(tmp_path, "TaiwanStockDelisting", "all")[0]["stock_id"] == "5346"
     # today's TPEx stock plus a delisted code TWSE never quoted; ETFs, TDRs and listed codes are out
-    assert tpex_codes(tmp_path) == ["5346", "6488"]
+    assert tpex_codes(tmp_path) == ["5346", "6488"]          # 9105 (TDR) is out; 99xx would be in
     assert json.loads(gzip.decompress(path_for(tmp_path, "TaiwanStockInfo", "all").read_bytes()))["data"]

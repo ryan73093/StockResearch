@@ -311,6 +311,10 @@ def refresh_research_history(container: "Container", now: datetime | None = None
             appended = append_current_year(base, OfficialHistoryClient(base / "raw"), local_now.date())
             logger.info("Stock quotes appended: last day %s, %s rows today", appended.get("last_day"),
                         appended.get("today_rows"))
+            if (base / "stocks" / "tpex").is_dir():   # R6: TPEx stocks too (official daily quotes)
+                appended = append_current_year(base, OfficialHistoryClient(base / "raw"), local_now.date(), exchange="tpex")
+                logger.info("TPEx quotes appended: last day %s, %s rows today", appended.get("last_day"),
+                            appended.get("today_rows"))
         except Exception:  # the ETF refresh above stays done; the forward record waits for the quotes
             logger.exception("Stock quotes append failed")
     return manifest.get("requests")

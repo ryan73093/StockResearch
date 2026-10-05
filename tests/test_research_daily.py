@@ -166,3 +166,66 @@ def test_tiers():
     assert tier({**good, "max_drawdown": -0.52})[0] == "T1"                      # wins, more volatile
     assert tier({**good, "since_2020_excess": -0.1})[0] == "T2"                  # only part of the time
     assert tier({**good, "full_period_excess": -0.5})[0] == "T3"
+
+
+class PricedPanel(ScriptedPanel):
+    """A scripted ranking with adjusted closes and a market switch (R7)."""
+
+    def __init__(self, sessions, script, prices, on=None):
+        super().__init__(sessions, script)
+        self.prices, self.on = prices, on
+
+    def price(self, symbol, position):
+        return self.prices[symbol][position]
+
+    def risk_on(self, position):
+        return self.on[position]
+
+
+def test_trailing_stop_sells_15_percent_below_the_high_and_waits_20_sessions():
+    days = weekdays(date(2024, 1, 1), date(2024, 2, 16))
+    script = {day: ["A", "B", "C", "D", "E"] for day in days}
+    a = [100.0, 100.0, 100.0, 120.0, 110.0, 101.0] + [101.0] * (len(days) - 6)   # 101 < 120 × 0.85 = 102
+    panel = PricedPanel(days, script, {name: a if name == "A" else [100.0] * len(days) for name in "ABCDE"})
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=3, keep=1, stop_loss=0.15)
+    out = daily_rankings(panel, rule, days[0], days[-1])
+    assert out[days[4]] == ["A", "B", "C"]                  # 110 is only 8% below the high
+    assert out[days[5]] == ["B", "C", "D"]                  # stopped out, the next best bought
+    assert out[days[24]] == ["B", "C", "D"]                 # not bought back for 20 sessions
+    assert out[days[25]] == ["B", "C", "A"]                 # D's 20 sessions are up and A ranks first again
+    plain = daily_rankings(panel, DailyRule(name="x", factors={"trend_200": 1.0}, top=3, keep=1), days[0], days[-1])
+    assert plain[days[5]] == ["A", "B", "C"]
+
+
+def test_market_filter_holds_cash_and_keeps_the_0050_core():
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 12))
+    on = [True, True, False, False, True, True, True, True, True, True]
+    panel = PricedPanel(days, {day: ["A", "B", "C"] for day in days}, {}, on)
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=3, core=0.5, market_filter="taiex_200")
+    ranks = daily_rankings(panel, rule, days[0], days[-1])
+    assert ranks[days[1]] == ["A", "B", "C"] and ranks[days[2]] == [] == ranks[days[3]] and ranks[days[4]] == ["A", "B", "C"]
+    data = market(days, {f"{name}.TW": {day: 10.0 for day in days} for name in "ABC"})
+    ranks = {day: [f"{symbol}.TW" for symbol in names] for day, names in ranks.items()}
+    snapshots = {}
+    simulate_daily(data, rule, FREE, days[0], days[-1], ranks, SeedPlan(100_000, 0), snapshots=snapshots)
+    cash, units = snapshots[days[2]]
+    assert set(units) == {"0050.TW"} and cash == pytest.approx(50_000 * 0.997, abs=5)   # sold (0.3% tax); core stays
+    assert set(snapshots[days[4]][1]) == {"0050.TW", "A.TW", "B.TW", "C.TW"}
+
+
+def test_market_filter_compares_taiex_with_its_200_session_average():
+    days = weekdays(date(2023, 1, 2), date(2024, 1, 31))
+    data = market(days, {"1101.TW": {day: 10.0 for day in days}})
+    taiex = np.array([100.0] * 230 + [80.0] * (len(days) - 230))
+    fp = FactorPanel(Panel(data), market=taiex)
+    assert fp.risk_on(10) and fp.risk_on(229) and not fp.risk_on(240)
+    with pytest.raises(ValueError):
+        FactorPanel(Panel(data)).risk_on(240)
+
+
+def test_risk_controls_are_part_of_the_rule_only_when_on():
+    base = DailyRule(name="x", factors={"trend_200": 1.0})
+    assert "stop_loss" not in base.canonical() and "market_filter" not in base.canonical()
+    batch = daily.overlay_batch()
+    assert len({rule.rule_hash for rule in batch} | {base.rule_hash}) == 7 and len({rule.name for rule in batch}) == 6
+    assert all(rule.industry_cap == 0.3 and rule.factors == {"trend_200": 1.0} for rule in batch)

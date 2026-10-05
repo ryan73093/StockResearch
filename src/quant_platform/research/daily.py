@@ -32,6 +32,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from quant_platform.research.costs import CostModel, affordable_shares, fill_price
+from quant_platform.research.history.dataset import read_series
 from quant_platform.research.legacy_challenger import (
     BENCHMARK,
     LegacyData,
@@ -44,6 +45,7 @@ from quant_platform.research.registry import TrialRegistry
 from quant_platform.research.stock_rules import FACTORS as PRICE_FACTORS
 from quant_platform.research.stock_rules import (
     STANDARD_PLAN,
+    UNIVERSES,
     WARMUP_YEARS,
     Panel,
     SeedPlan,
@@ -57,7 +59,10 @@ from quant_platform.research.stock_rules import (
 RECENT_START = date(2015, 6, 1)      # daily price limit ±10%
 REGIME_START = date(2020, 10, 26)    # continuous trading (2020-03-23) and intraday odd lots (2020-10-26)
 RECENT_END = date(2026, 9, 30)       # forward observation starts after this
-ENGINE_VERSION = "daily-1.0.0"
+# 1.1.0 (2026-10-05): trailing stop and market filter (R7); the data version covers the chip data and
+# only what the period covers (0050 and this year's ex-rights file are rewritten nightly).
+ENGINE_VERSION = "daily-1.1.0"
+STOP_COOLDOWN = 20          # sessions a stopped-out stock may not be bought again
 PERIOD = "recent"
 TECHNICAL = {
     "ma_cross_20_60": "20 日均線高於 60 日均線的幅度（黃金交叉）",
@@ -90,6 +95,14 @@ class DailyRule(BaseModel):
     # At most this share of the picks from one industry (2026-10-04: a trend rule bunched into passive
     # components and fell 41% in a month); 0 = no limit. Left out of the hash at 0.
     industry_cap: float = Field(default=0.0, ge=0.0, le=1.0)
+    # R6 (2026-10-05): "all" ranks the TPEx stocks too. Left out of the hash when "twse".
+    universe: Literal["twse", "all"] = "twse"
+    # R7 (2026-10-05), risk controls, left out of the hash when off. stop_loss: sell a holding whose
+    # adjusted close falls this far below its highest since it was bought, and do not buy it back for
+    # STOP_COOLDOWN sessions. market_filter "taiex_200": no stocks while TAIEX closes below its
+    # 200-session average (the 0050 core stays; contributions wait in cash).
+    stop_loss: float = Field(default=0.0, ge=0.0, le=0.5)
+    market_filter: Literal["none", "taiex_200"] = "none"
 
     @field_validator("factors")
     @classmethod
@@ -105,6 +118,12 @@ class DailyRule(BaseModel):
         data = self.model_dump(mode="json")
         if not data.get("industry_cap"):
             data.pop("industry_cap", None)
+        if data.get("universe") == "twse":
+            data.pop("universe", None)
+        if not data.get("stop_loss"):
+            data.pop("stop_loss", None)
+        if data.get("market_filter") == "none":
+            data.pop("market_filter", None)
         return data
 
     @property
@@ -131,11 +150,15 @@ class FactorPanel:
     """Every factor for every stock and session (symbols × sessions), computed once with rolling
     windows on the dividend- and split-adjusted closes; ranking a day is then a column lookup."""
 
-    def __init__(self, panel: Panel, industries: dict[str, str] | None = None, chips: ChipStore | None = None) -> None:
+    def __init__(self, panel: Panel, industries: dict[str, str] | None = None, chips: ChipStore | None = None,
+                 market: np.ndarray | None = None) -> None:
         self.panel = panel
         self.industries = industries or {}
         self.chips = chips
         self.sessions, self.index, self.symbols = panel.sessions, panel.index, panel.symbols
+        self.row = {symbol: row for row, symbol in enumerate(panel.symbols)}
+        self.market = market                                  # TAIEX close per session (R7 market filter)
+        self._market_average = (pd.Series(market).rolling(200).mean().to_numpy() if market is not None else None)
         self._prices = pd.DataFrame(panel.filled.T)
         self._cache: dict[str, np.ndarray] = {}
         turnover = pd.DataFrame(panel.turnover.T)
@@ -211,6 +234,17 @@ class FactorPanel:
     def industry(self, symbol: str) -> str:
         return self.industries.get(symbol.split(".")[0], "未分類")
 
+    def price(self, symbol: str, position: int) -> float:
+        """The adjusted close (dividends reinvested): its ratios between two days are the total return."""
+        return float(self.panel.filled[self.row[symbol], position])
+
+    def risk_on(self, position: int) -> bool:
+        """TAIEX at or above its 200-session average (true until 200 sessions exist)."""
+        if self.market is None:
+            raise ValueError("市場濾網需要加權指數序列（FactorPanel market）")
+        average = self._market_average[position]
+        return bool(not np.isfinite(average) or self.market[position] >= average)
+
     def eligible(self, rule: DailyRule, position: int) -> np.ndarray:
         return ((self.panel.close[:, position] >= rule.min_price) & (self.turnover_20[:, position] >= rule.min_turnover)
                 & (self.age[:, position] >= rule.min_history))
@@ -262,10 +296,28 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
     output: dict[date, list[str]] = {}
     current: list[str] = []
     bought: dict[str, int] = {}
+    peak: dict[str, float] = {}           # R7: highest adjusted close since bought
+    stopped: dict[str, int] = {}          # R7: session count of the last stop-out
     for count, day in enumerate(sessions):
         if day not in checks:
             continue
-        ranked = fp.ranked(rule, fp.index[day])
+        position = fp.index[day]
+        if rule.market_filter != "none" and not fp.risk_on(position):
+            current, bought, peak = [], {}, {}
+            output[day] = []
+            continue
+        ranked = fp.ranked(rule, position)
+        if rule.stop_loss:
+            for symbol in list(current):
+                price = fp.price(symbol, position)
+                if not np.isfinite(price):
+                    continue
+                peak[symbol] = max(peak.get(symbol, price), price)
+                if price < peak[symbol] * (1 - rule.stop_loss):
+                    current.remove(symbol)
+                    stopped[symbol] = count
+            barred = {symbol for symbol, when in stopped.items() if count - when < STOP_COOLDOWN}
+            ranked = [symbol for symbol in ranked if symbol not in barred]
         keep_zone = set(ranked[: rule.top * rule.keep])
         eligible = set(ranked)
         kept = [symbol for symbol in current
@@ -290,6 +342,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
             chosen.append(symbol)
         current = kept + chosen
         bought = {symbol: bought.get(symbol, count) for symbol in current}
+        if rule.stop_loss:
+            peak = {symbol: peak[symbol] if symbol in peak else fp.price(symbol, position) for symbol in current}
         output[day] = list(current)
     return output
 
@@ -533,16 +587,50 @@ class Industries(dict):
         return self._prefixes.get(str(code)[:2], default)
 
 
-def load(history: str | Path) -> tuple[LegacyData, FactorPanel]:
-    data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year)
+def market_closes(history: str | Path, sessions: list[date]) -> np.ndarray:
+    """TAIEX's close on each session (carried over a missing day), for the market filter."""
+    closes = {row["date"]: row["close"] for row in read_series(Path(history) / "daily" / "TAIEX.parquet") if row["close"]}
+    return pd.Series([closes.get(day, np.nan) for day in sessions], dtype=float).ffill().to_numpy()
+
+
+def load(history: str | Path, universe: str = "twse") -> tuple[LegacyData, FactorPanel]:
+    data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year, universe=universe)
     panel = Panel(data)
     return data, FactorPanel(panel, Industries(load_industries(history)),
-                             ChipStore(history, panel.sessions, panel.symbols, panel.close))
+                             ChipStore(history, panel.sessions, panel.symbols, panel.close),
+                             market_closes(history, panel.sessions))
 
 
-def fingerprint(history: str | Path) -> str:
-    return "daily:" + stock_fingerprint(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year,
-                                        until=RECENT_END).removeprefix("stocks:")
+def chips_digest(history: str | Path, until: date, universe: str = "twse") -> str:
+    """The chip and fundamental data the period can see (published by ``until``) for the universe's
+    codes: rebuilding the chip files with other codes or later days leaves it alone."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    base = Path(history)
+    codes: set[str] = set()
+    for exchange in UNIVERSES[universe]:
+        for path in sorted((base / "stocks" / exchange).glob("*.parquet")):
+            codes.update(pq.read_table(path, columns=["code"])["code"].unique().to_pylist())
+    digest = hashlib.sha256()
+    folder = base / "chips"
+    for path in sorted(folder.glob("*.parquet")) if folder.is_dir() else []:
+        table = pq.read_table(path)
+        column = "available" if "available" in table.column_names else "date"
+        table = table.filter(pc.and_(pc.less_equal(table[column], pa.scalar(until, pa.date32())),
+                                     pc.is_in(table["code"], value_set=pa.array(sorted(codes)))))
+        frame = table.sort_by([("date", "ascending"), ("code", "ascending")]).to_pandas()
+        digest.update(path.name.encode())
+        digest.update(pd.util.hash_pandas_object(frame, index=False).to_numpy().tobytes())
+    return digest.hexdigest()
+
+
+def fingerprint(history: str | Path, universe: str = "twse") -> str:
+    stocks = stock_fingerprint(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year, until=RECENT_END,
+                               universe=universe).removeprefix("stocks:")
+    chips = chips_digest(history, RECENT_END, universe)
+    return "daily:" + hashlib.sha256(f"{stocks}:{chips}".encode()).hexdigest()
 
 
 def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, reports_dir: Path, costs: CostModel,
@@ -651,4 +739,31 @@ def combo_batch() -> list[DailyRule]:
     return rules
 
 
-BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch}
+def tpex_batch() -> list[DailyRule]:
+    """R6 (2026-10-05): the risk batch's three trend families (30% industry cap, alone and half in 0050)
+    on listed plus TPEx stocks: the same rules on a wider universe, to see whether the TPEx small and
+    mid caps add return or only volatility."""
+    rules = []
+    for rule in risk_batch()[:6]:
+        name = rule.name.replace("每天 ", "每天（上市＋上櫃）", 1)[:80]
+        rules.append(rule.model_copy(update={"name": name, "universe": "all"}))
+    return rules
+
+
+def overlay_batch() -> list[DailyRule]:
+    """R7 (2026-10-05): two risk controls on the strongest rule so far (trend, top 20, 30% industry cap;
+    its drawdown was 45%, and 39% with half in 0050): a 15% trailing stop, the TAIEX 200-day filter, and
+    both; alone and half in 0050. New mechanisms with settings fixed in advance, not a parameter search."""
+    variants = [("跌離買進後高點 15% 停損", {"stop_loss": 0.15}),
+                ("加權指數跌破 200 日均線就空手", {"market_filter": "taiex_200"}),
+                ("停損＋指數濾網", {"stop_loss": 0.15, "market_filter": "taiex_200"})]
+    rules = []
+    for label, extra in variants:
+        for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+            rules.append(DailyRule(name=f"每天 站上 200 日均線：前 20 名、同產業最多 3 成、{label}{word}",
+                                   factors={"trend_200": 1.0}, industry_cap=0.3, core=core, **extra))
+    return rules
+
+
+BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch,
+           "tpex": tpex_batch, "overlays": overlay_batch}

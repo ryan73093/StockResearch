@@ -94,8 +94,8 @@ def tpex_codes(base: Path) -> list[str]:
     delisted = {str(row.get("stock_id")) for row in read_rows(base, "TaiwanStockDelisting", "all")}
     listed = set(stock_codes(base))
 
-    def common(code: str) -> bool:
-        return len(code) == 4 and code.isdigit() and code[0] not in "09"
+    def common(code: str) -> bool:      # four digits, not ETFs (0…) or TDRs (91…); 99xx are common stocks
+        return len(code) == 4 and code.isdigit() and code[0] != "0" and not code.startswith("91")
 
     return sorted(code for code in current | (delisted - listed) if common(code))
 

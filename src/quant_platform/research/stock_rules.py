@@ -140,9 +140,14 @@ def unit_factors_all(closes: dict[date, float], events: dict[date, tuple[str, fl
     return factors
 
 
-def load_stock_data(base: str | Path, first_year: int, last_year: int) -> LegacyData:
-    """Every listed TWSE stock's closes and turnover for the years, 0050 as the benchmark, and the
-    unit factors from the official ex-rights tables."""
+UNIVERSES = {"twse": ("twse",), "all": ("twse", "tpex")}
+
+
+def load_stock_data(base: str | Path, first_year: int, last_year: int, universe: str = "twse") -> LegacyData:
+    """Every listed TWSE stock's closes and turnover for the years (with ``universe="all"`` the TPEx
+    stocks too, R6 2026-10-05), 0050 as the benchmark, and the unit factors from the official
+    ex-rights tables. TWSE stocks are ``code.TW``, TPEx stocks ``code.TWO``; a stock that moved from
+    TPEx to TWSE is one ``code.TW`` series, its TPEx days (and ex-rights) before the move first."""
     base = Path(base)
     closes: dict[str, dict[date, float]] = {}
     traded: dict[str, dict[date, float]] = {}
@@ -151,21 +156,38 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int) -> Legacy
             symbol = f"{row['code']}.TW"
             closes.setdefault(symbol, {})[row["date"]] = float(row["close"])
             traded.setdefault(symbol, {})[row["date"]] = float(row["turnover"] or 0)
+    moved: dict[str, date] = {}
+    if "tpex" in UNIVERSES[universe]:
+        first_listed = {symbol: min(series) for symbol, series in closes.items()}
+        for year in range(first_year, last_year + 1):
+            for row in read_year(base / "stocks" / "tpex" / f"{year}.parquet"):
+                code, day = row["code"], row["date"]
+                listed = first_listed.get(f"{code}.TW")
+                symbol = f"{code}.TW" if listed and day < listed else f"{code}.TWO"
+                if symbol.endswith(".TW"):
+                    moved[code] = listed
+                closes.setdefault(symbol, {})[day] = float(row["close"])
+                traded.setdefault(symbol, {})[day] = float(row["turnover"] or 0)
     benchmark = {row["date"]: float(row["close"]) for row in read_series(base / "daily" / "0050.parquet")
                  if row["close"] and first_year <= row["date"].year <= last_year}
     closes[BENCHMARK] = benchmark
     traded[BENCHMARK] = {day: 1e12 for day in benchmark}
     events = exchange_events(base / "raw", first_year)
+    for code, listed in moved.items():
+        merged = events.setdefault(f"{code}.TW", {})
+        for day, event in events.get(f"{code}.TWO", {}).items():
+            if day < listed:
+                merged.setdefault(day, event)
     factors = {symbol: unit_factors_all(series, events.get(symbol, {})) for symbol, series in closes.items()}
     sessions = sorted(row["date"] for row in read_series(base / "daily" / "TAIEX.parquet")
                       if first_year <= row["date"].year <= last_year)
     return LegacyData(sessions=sessions, closes=closes, traded_value=traded, factors=factors, predictions={},
-                      notes={"symbols": len(closes) - 1, "years": [first_year, last_year]})
+                      notes={"symbols": len(closes) - 1, "years": [first_year, last_year], "universe": universe})
 
 
 def _year_digest(path: Path, until: date | None) -> str:
-    """The file's hash, or - when it holds sessions after ``until`` (the current year grows every
-    day) - the hash of its rows up to ``until``, so a period's fingerprint stays put."""
+    """The file's hash, or with ``until`` the hash of its rows up to ``until`` (the current year grows
+    every day), so a period's fingerprint stays put however the file grows after the period ends."""
     if not path.is_file():
         return "missing"
     if until is None:
@@ -174,22 +196,44 @@ def _year_digest(path: Path, until: date | None) -> str:
     import pyarrow.parquet as pq
 
     table = pq.read_table(path)
-    if table.num_rows == 0 or pc.max(table["date"]).as_py() <= until:
-        return sha256(path)
-    table = table.filter(pc.less_equal(table["date"], until)).sort_by([("date", "ascending"), ("code", "ascending")])
+    keys = [("date", "ascending")] + ([("code", "ascending")] if "code" in table.column_names else [])
+    table = table.filter(pc.less_equal(table["date"], until)).sort_by(keys)
     return "rows:" + hashlib.sha256(json.dumps(table.to_pylist(), default=str).encode("utf-8")).hexdigest()
 
 
-def stock_fingerprint(base: str | Path, first_year: int, last_year: int, until: date | None = None) -> str:
+def _events_digest(raw: Path, first_year: int, last_year: int, until: date, universe: str) -> str:
+    """The ex-rights events of the period (as parsed), not the files: this year's file is fetched again
+    every night and grows with events after the period's end (2026-10-05)."""
+    tpex = "tpex" in UNIVERSES[universe]
+    rows = sorted([symbol, day.isoformat(), *event] for symbol, days in exchange_events(raw, first_year).items()
+                  if tpex or not symbol.endswith(".TWO")
+                  for day, event in days.items() if day <= until and day.year <= last_year)
+    return hashlib.sha256(json.dumps(rows).encode("utf-8")).hexdigest()
+
+
+def stock_fingerprint(base: str | Path, first_year: int, last_year: int, until: date | None = None,
+                      universe: str = "twse") -> str:
     base = Path(base)
     digest = hashlib.sha256()
     for year in range(first_year, last_year + 1):
         path = base / "stocks" / "twse" / f"{year}.parquet"
         digest.update(f"{year}:{_year_digest(path, until if year == last_year else None)}".encode())
-    digest.update(sha256(base / "daily" / "0050.parquet").encode())
-    for path in sorted((base / "raw" / "twse_ex_rights").glob("*.json")):
-        if path.stem.isdigit() and first_year <= int(path.stem) <= last_year:
-            digest.update(f"{path.stem}:{sha256(path)}".encode())
+    if until is None:          # the forward record: the whole files as they are tonight
+        digest.update(sha256(base / "daily" / "0050.parquet").encode())
+        for path in sorted((base / "raw" / "twse_ex_rights").glob("*.json")):
+            if path.stem.isdigit() and first_year <= int(path.stem) <= last_year:
+                digest.update(f"{path.stem}:{sha256(path)}".encode())
+    else:                      # a research period: only what it covers (0050 and the events up to ``until``)
+        digest.update(f"0050:{_year_digest(base / 'daily' / '0050.parquet', until)}".encode())
+        digest.update(f"events:{_events_digest(base / 'raw', first_year, last_year, until, universe)}".encode())
+    if "tpex" in UNIVERSES[universe]:                 # the TWSE-only fingerprint leaves TPEx out
+        for year in range(first_year, last_year + 1):
+            path = base / "stocks" / "tpex" / f"{year}.parquet"
+            digest.update(f"tpex{year}:{_year_digest(path, until if year == last_year else None)}".encode())
+        if until is None:
+            for path in sorted((base / "raw" / "tpex_ex_rights").glob("*.json")):
+                if path.stem.isdigit() and first_year <= int(path.stem) <= last_year:
+                    digest.update(f"tpex{path.stem}:{sha256(path)}".encode())
     return "stocks:" + digest.hexdigest()
 
 

@@ -30,7 +30,13 @@ switch ($Name) {
     }
     "daily" {
         # The new design (S9-W02): 2015-06 onward, decisions every trading day, the owner's account.
-        Invoke-Step "factors" @("-m", "quant_platform.research", "daily", "--name", "factors", "--broker", "cathay")
+        # Every batch (a rule already run on this data version is not run again), then the statistics
+        # for the listed and the listed-plus-TPEx data versions (2026-10-05: R6 tpex, R7 overlays).
+        foreach ($batch in @("factors", "risk", "chips", "combos", "tpex", "overlays")) {
+            Invoke-Step "daily-$batch" @("-m", "quant_platform.research", "daily", "--name", $batch, "--broker", "cathay")
+        }
+        Invoke-Step "stats-twse" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "stats-all" @("-m", "quant_platform.research", "stats", "--family", "daily", "--universe", "all")
     }
     "factors-recent" { Invoke-Step "factors-recent" @("-m", "quant_platform.research", "factors", "--recent") }
     "archive" { Invoke-Step "archive" @("scripts/archive_legacy_tables.py") }

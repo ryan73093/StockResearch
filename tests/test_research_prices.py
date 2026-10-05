@@ -46,7 +46,7 @@ def test_research_prices_add_today_only_after_the_close_is_public(tmp_path):
     assert prices.latest_closes(["2330.TW", "0050.TW"], after) == {"2330.TW": 1510.0, "0050.TW": 113.5}
     bars = prices.list_bars("2330.TW", as_of=after)
     assert bars[-1].event_time == datetime(2026, 10, 5, 13, 30, tzinfo=TAIPEI) and bars[-1].close == 1510.0
-    assert prices.history("6488.TWO", after) == []                     # TPEx stocks: not in the research store
+    assert prices.history("6488.TWO", after) == []                     # no TPEx file in this store
     assert prices.latest_market_date(after) == date(2026, 10, 5)
 
 

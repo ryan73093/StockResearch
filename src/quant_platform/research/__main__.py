@@ -272,13 +272,16 @@ def _daily(args, registry: TrialRegistry) -> int:
     command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
     with JobLog(RESEARCH).start(f"每天決策規則・{args.name}（2015-06 起、啟動資金 30 萬＋每月 1 萬）", command,
                                 total=len(rules)) as job:
-        job.update(current="載入 2013 年起全市場行情", force=True)
-        data, fp = daily_research.load(Path(args.base))
-        fingerprint = daily_research.fingerprint(Path(args.base))
-        cache: dict = {}
+        loaded: dict[str, tuple] = {}
         stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
         passed = 0
         for index, rule in enumerate(rules):
+            if rule.universe not in loaded:          # each universe once (R6: TPEx stocks too)
+                job.update(current=f"載入 2013 年起全市場行情（{'上市＋上櫃' if rule.universe == 'all' else '上市'}）",
+                           force=True)
+                loaded[rule.universe] = (*daily_research.load(Path(args.base), rule.universe),
+                                         daily_research.fingerprint(Path(args.base), rule.universe), {})
+            data, fp, fingerprint, cache = loaded[rule.universe]
             job.update(done=index, current=rule.name)
             record, report = daily_research.run_trial(rule, args.base, registry, RESEARCH / "reports", costs, data, fp,
                                                       fingerprint, cache, stamp)
@@ -301,6 +304,8 @@ def main() -> int:
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
     parser.add_argument("--family", default="etf", choices=("etf", "stocks", "daily"), help="stats：ETF、個股或每天決策規則")
+    parser.add_argument("--universe", default="twse", choices=("twse", "all"),
+                        help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
     parser.add_argument("--recent", action="store_true", help="factors：新設計（2015-06 起、每週排名、看 20 個交易日）")
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--lump-sum", type=float, default=0, help="stocks：一次投入的金額（0＝每月投入）")
@@ -406,7 +411,7 @@ def main() -> int:
     if args.command == "stats" and args.family == "daily":
         from quant_platform.research import daily as daily_research
 
-        basis = daily_research.fingerprint(Path(args.base))
+        basis = daily_research.fingerprint(Path(args.base), args.universe)
         report = significance(registry, RESEARCH / "reports", daily_research.PERIOD, fingerprint=basis)
         if not report["candidates"]:
             print("沒有目前資料版本的每天決策規則試驗")

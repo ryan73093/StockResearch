@@ -1,7 +1,7 @@
 """One price store for the app (roadmap S9-W03, owner 2026-10-04: 股價不要存兩份).
 
 The research history is the source of daily closes: the ETF series under history/daily (official, built
-nightly) and every listed stock under history/stocks/twse (official all-market quotes, appended nightly).
+nightly) and every listed stock under history/stocks/twse and tpex (official all-market quotes, appended nightly).
 Today's close comes from TWSE's all-market quote table (MI_INDEX), which the close job fetches from
 13:49 (first seen 19–21 minutes after the close, S1-W05) into the same raw cache the nightly append reads.
 
@@ -78,10 +78,10 @@ class ResearchPrices:
                                 if close}
         return self._cache[key]
 
-    def _stock(self, code: str) -> dict[date, float]:
-        folder = self._history / "stocks" / "twse"
+    def _stock(self, code: str, exchange: str = "twse") -> dict[date, float]:
+        folder = self._history / "stocks" / exchange
         files = sorted(folder.glob("*.parquet")) if folder.is_dir() else []
-        key = ("stock", code, tuple(path.stat().st_mtime for path in files))
+        key = ("stock", exchange, code, tuple(path.stat().st_mtime for path in files))
         if key not in self._cache:
             series: dict[date, float] = {}
             for path in files:
@@ -108,7 +108,7 @@ class ResearchPrices:
     # --- the repository interface -------------------------------------------------------------
     def history(self, symbol: str, as_of: datetime | None = None) -> list[tuple[date, float]]:
         code, _, suffix = symbol.upper().partition(".")
-        series = dict(self._etf(code) or ({} if suffix == "TWO" else self._stock(code)))
+        series = dict(self._etf(code) or self._stock(code, "tpex" if suffix == "TWO" else "twse"))
         moment = (as_of or datetime.now(TAIPEI)).astimezone(TAIPEI)
         today = moment.date()
         if today not in series and suffix != "TWO" and moment.time() >= PUBLISHED:

@@ -48,7 +48,7 @@ def twse_all_day(client: OfficialHistoryClient, day: date) -> object:
 def tpex_all_day(client: OfficialHistoryClient, day: date) -> object:
     from urllib.parse import urlencode
 
-    query = urlencode({"date": f"{day:%Y/%m/%d}", "response": "json"})
+    query = urlencode({"date": f"{day:%Y/%m/%d}", "type": "EW", "response": "json"})  # EW: all but warrants
     return client._cached(
         f"tpex_stock_all/{day:%Y}/{day:%Y%m%d}", f"{TPEX_BULLETIN.rsplit('/', 1)[0]}/afterTrading/otc?{query}",
         final=day < client._today(), period_end=day,
@@ -180,6 +180,55 @@ def append_current_year(base: Path, client: OfficialHistoryClient, today: date,
     result["last_day"] = max((row["date"] for row in rows), default=None)
     result["today_rows"] = sum(1 for row in rows if row["date"] == today)
     return result
+
+
+def _positive(value: object) -> float | None:
+    return float(value) if value and float(value) > 0 else None
+
+
+def build_tpex_from_finmind(base: Path) -> dict[str, object]:
+    """R6 (2026-10-05): TPEx common stocks' daily quotes from FinMind's TaiwanStockPrice downloads
+    (today's TPEx stocks and the delisted ones TWSE never quoted), one Parquet per year under
+    stocks/tpex/ like the TWSE files. Days without a trade are left out; names from TaiwanStockInfo.
+    FinMind answers a code's whole history whatever the market, so for a stock that moved to TWSE the
+    days TWSE already has are left out (the TPEx file keeps its years before the move)."""
+    from quant_platform.research.history.finmind import read_rows, tpex_codes
+
+    on_twse: dict[str, tuple[date, date]] = {}
+    for path in sorted((base / "stocks" / "twse").glob("*.parquet")):
+        frame = pq.read_table(path, columns=["date", "code"]).to_pandas()
+        for code, (first, last) in frame.groupby("code")["date"].agg(["min", "max"]).iterrows():
+            known = on_twse.get(code)
+            on_twse[code] = (min(known[0], first), max(known[1], last)) if known else (first, last)
+
+    info_path = base / "raw" / "finmind" / "TaiwanStockInfo.json"
+    names = {}
+    if info_path.is_file():
+        for row in json.loads(info_path.read_text(encoding="utf-8")).get("data") or []:
+            names.setdefault(str(row.get("stock_id")), str(row.get("stock_name") or ""))
+    by_year: dict[int, list[dict[str, object]]] = {}
+    codes = 0
+    for code in tpex_codes(base):
+        rows = read_rows(base, "TaiwanStockPrice", code)
+        if rows:
+            codes += 1
+        listed = on_twse.get(code)
+        for row in rows:
+            close, volume = row.get("close"), row.get("Trading_Volume")
+            if not close or close <= 0 or not volume:
+                continue
+            day = date.fromisoformat(row["date"])
+            if listed and listed[0] <= day <= listed[1]:
+                continue
+            by_year.setdefault(day.year, []).append({
+                "date": day, "code": code, "name": names.get(code, ""), "open": _positive(row.get("open")),
+                "high": _positive(row.get("max")), "low": _positive(row.get("min")), "close": float(close), "volume": int(volume),
+                "turnover": int(row.get("Trading_money") or 0), "trades": int(row.get("Trading_turnover") or 0),
+            })
+    for year, rows in by_year.items():
+        rows.sort(key=lambda item: (item["date"], item["code"]))
+        write_year(rows, base / "stocks" / "tpex" / f"{year}.parquet")
+    return {"codes": codes, "years": sorted(by_year), "rows": sum(len(rows) for rows in by_year.values())}
 
 
 def universe_summary(base: Path) -> dict[str, object]:
