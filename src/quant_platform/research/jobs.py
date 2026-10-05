@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 TAIPEI = ZoneInfo("Asia/Taipei")
 STATUS_LABELS = {"running": "執行中", "done": "完成", "failed": "失敗", "stopped": "中斷"}
 WRITE_EVERY = 3.0   # seconds between progress writes
+RETRIES, RETRIES_FORCED, RETRY_PAUSE = 3, 20, 0.25
 
 
 def _alive(pid: int) -> bool:
@@ -61,9 +62,19 @@ class Job:
             return
         self.payload["updated_at"] = _now().isoformat(timespec="seconds")
         partial = self._path.with_suffix(".partial")
-        partial.write_text(json.dumps(self.payload, ensure_ascii=False, indent=1), encoding="utf-8")
-        partial.replace(self._path)
-        self._written = moment
+        text = json.dumps(self.payload, ensure_ascii=False, indent=1)
+        # Windows refuses to replace a file another process (the website listing the jobs) has open at
+        # that instant: on 2026-10-05 that stopped a download. Retry briefly; a progress note never stops
+        # the program (the next update writes it again).
+        for _attempt in range(RETRIES_FORCED if force else RETRIES):
+            try:
+                partial.write_text(text, encoding="utf-8")
+                partial.replace(self._path)
+            except OSError:
+                time.sleep(RETRY_PAUSE)
+                continue
+            self._written = moment
+            return
 
     def update(self, done: int | None = None, current: str | None = None, total: int | None = None,
                force: bool = False) -> None:
