@@ -217,7 +217,9 @@ class StockForwardTracker:
                     ChipStore,
                     FactorPanel,
                     Industries,
+                    account_parking,
                     daily_rankings,
+                    daily_weights,
                     load_industries,
                     market_closes,
                     simulate_daily,
@@ -229,8 +231,10 @@ class StockForwardTracker:
                     ChipStore(self._history, panel.sessions, panel.symbols, panel.close),
                     market_closes(self._history, panel.sessions))
                 loaded[universe][3] = factor_panel
-                run = simulate_daily(data, rule, self._costs, start, last, daily_rankings(factor_panel, rule, start, last),
-                                     plan, ledger=ledger, snapshots=snapshots)
+                ranks = daily_rankings(factor_panel, rule, start, last)
+                run = simulate_daily(data, rule, self._costs, start, last, ranks, plan, ledger=ledger, snapshots=snapshots,
+                                     weights=daily_weights(factor_panel, rule, ranks),
+                                     parked=account_parking(data, factor_panel, rule, self._costs))
                 benchmark = simulate_daily(data, None, self._costs, start, last, plan=plan)
             else:
                 rule = StockRule.model_validate(item["rule"])

@@ -229,3 +229,64 @@ def test_risk_controls_are_part_of_the_rule_only_when_on():
     batch = daily.overlay_batch()
     assert len({rule.rule_hash for rule in batch} | {base.rule_hash}) == 7 and len({rule.name for rule in batch}) == 6
     assert all(rule.industry_cap == 0.3 and rule.factors == {"trend_200": 1.0} for rule in batch)
+
+
+def test_inverse_volatility_weights_give_the_calmer_stock_more():
+    days = weekdays(date(2023, 1, 2), date(2024, 3, 29))
+    swing = {"1101.TW": 0.01, "1102.TW": 0.02, "1103.TW": 0.04}            # daily up/down swings
+    closes = {symbol: {day: 100 * (1 + size) ** (n % 2) for n, day in enumerate(days)} for symbol, size in swing.items()}
+    fp = FactorPanel(Panel(market(days, closes)))
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=3, weighting="inverse_vol")
+    weights = daily.daily_weights(fp, rule, {days[-1]: list(swing)})[days[-1]]
+    assert sum(weights.values()) == pytest.approx(1.0)
+    sigma = {symbol: -fp.matrix("low_volatility_60")[fp.row[symbol], len(days) - 1] for symbol in swing}
+    products = [weights[symbol] * sigma[symbol] for symbol in swing]
+    assert products == pytest.approx([products[0]] * 3, rel=1e-5)          # share × volatility is the same
+    assert weights["1101.TW"] > weights["1102.TW"] > weights["1103.TW"]
+    assert daily.daily_weights(fp, DailyRule(name="x", factors={"trend_200": 1.0}), {days[-1]: list(swing)}) is None
+
+
+def test_weights_and_parking_in_0050_by_hand():
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 12))
+    data = market(days, {"A.TW": {day: 10.0 for day in days}, "B.TW": {day: 10.0 for day in days},
+                         "0050.TW": {day: 100.0 for day in days}})
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=3, core=0.5)
+    ranks = {day: ["A.TW", "B.TW"] for day in days}
+    weights = {day: {"A.TW": 0.75, "B.TW": 0.25} for day in days}
+    snapshots = {}
+    simulate_daily(data, rule, FREE, days[0], days[-1], ranks, SeedPlan(100_000, 0), snapshots=snapshots,
+                   weights=weights, parked={days[2], days[3]})
+    assert snapshots[days[0]][1] == {"0050.TW": 500, "A.TW": 3750, "B.TW": 1250}
+    # parked: the stocks sold (0.3% tax: 49,850) buy 498 more units of 0050
+    cash, held = snapshots[days[2]]
+    assert held == {"0050.TW": 998} and cash == pytest.approx(50, abs=1)
+    assert snapshots[days[3]][1] == {"0050.TW": 998}
+    # back: the 0050 above the core (49,875) is sold as 498 units (0.1% tax: 49,750.2, cash 49,800.2); of the
+    # stock half (99,800.2 / 2) A's 75% is 37,425 → 3,742 shares, B gets the 12,380.2 left → 1,238 shares
+    cash, held = snapshots[days[4]]
+    assert held == {"0050.TW": 500, "A.TW": 3742, "B.TW": 1238} and cash == pytest.approx(2.0)   # taxes round down to whole NT$
+
+
+def test_account_filter_parks_only_after_the_rule_itself_turns_down():
+    days = weekdays(date(2022, 1, 3), date(2024, 12, 31))
+    peak = 560
+    closes = {}
+    for number, symbol in enumerate(("1101.TW", "1102.TW", "1103.TW")):
+        series, price = {}, 20.0 + number
+        for n, day in enumerate(days):
+            price *= 1.001 if n < peak else 0.996
+            series[day] = price
+        closes[symbol] = series
+    data = market(days, closes)
+    fp = FactorPanel(Panel(data))
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=3, account_filter="own_200")
+    parked = daily.account_parking(data, fp, rule, FREE)
+    assert parked and min(parked) > days[peak] and days[-1] in parked
+    assert daily.account_parking(data, fp, DailyRule(name="x", factors={"trend_200": 1.0}, top=3), FREE) is None
+
+
+def test_holding_controls_are_part_of_the_rule_only_when_on():
+    base = DailyRule(name="x", factors={"trend_200": 1.0})
+    assert "weighting" not in base.canonical() and "account_filter" not in base.canonical()
+    batch = daily.holdings_batch()
+    assert len({rule.rule_hash for rule in batch} | {base.rule_hash}) == 7 and len({rule.name for rule in batch}) == 6

@@ -19,6 +19,7 @@ account in 0050. The benchmark is the same cash flow into 0050.
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 import statistics
 import warnings
@@ -33,6 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from quant_platform.research.costs import CostModel, affordable_shares, fill_price
 from quant_platform.research.history.dataset import read_series
+from quant_platform.research.metrics import unit_values
 from quant_platform.research.legacy_challenger import (
     BENCHMARK,
     LegacyData,
@@ -61,7 +63,9 @@ REGIME_START = date(2020, 10, 26)    # continuous trading (2020-03-23) and intra
 RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 # 1.1.0 (2026-10-05): trailing stop and market filter (R7); the data version covers the chip data and
 # only what the period covers (0050 and this year's ex-rights file are rewritten nightly).
-ENGINE_VERSION = "daily-1.1.0"
+# 1.2.0 (2026-10-06): inverse-volatility weights and the account's own trend filter (R7b).
+ENGINE_VERSION = "daily-1.2.0"
+SHADOW_WARMUP = 252         # sessions before the shadow account starts (the factors need a year)
 STOP_COOLDOWN = 20          # sessions a stopped-out stock may not be bought again
 PERIOD = "recent"
 TECHNICAL = {
@@ -103,6 +107,13 @@ class DailyRule(BaseModel):
     # 200-session average (the 0050 core stays; contributions wait in cash).
     stop_loss: float = Field(default=0.0, ge=0.0, le=0.5)
     market_filter: Literal["none", "taiex_200"] = "none"
+    # R7b (2026-10-06), risk controls that look at the holdings themselves, left out of the hash when
+    # off. weighting "inverse_vol": each pick's target in proportion to 1 / its 60-session volatility
+    # (the calmer, the more money) instead of equal amounts. account_filter "own_200": while this rule's
+    # own stock account (the same rule with no core and no filter, the "shadow") is below its
+    # 200-session average value, the stock part is held in 0050 instead; back above, the stocks return.
+    weighting: Literal["equal", "inverse_vol"] = "equal"
+    account_filter: Literal["none", "own_200"] = "none"
 
     @field_validator("factors")
     @classmethod
@@ -124,6 +135,10 @@ class DailyRule(BaseModel):
             data.pop("stop_loss", None)
         if data.get("market_filter") == "none":
             data.pop("market_filter", None)
+        if data.get("weighting") == "equal":
+            data.pop("weighting", None)
+        if data.get("account_filter") == "none":
+            data.pop("account_filter", None)
         return data
 
     @property
@@ -352,8 +367,12 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
 def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, start: date, end: date,
                    ranks: dict[date, list[str]] | None = None, plan=None,
                    ledger: list[dict[str, object]] | None = None,
-                   snapshots: dict | None = None) -> RunResult:
-    """``rule=None`` is the benchmark: the same cash flow into 0050 on the day it arrives."""
+                   snapshots: dict | None = None, weights: dict[date, dict[str, float]] | None = None,
+                   parked: set[date] | None = None) -> RunResult:
+    """``rule=None`` is the benchmark: the same cash flow into 0050 on the day it arrives. ``weights``:
+    each pick's share of the stock part on its check day (equal when absent). ``parked``: days the stock
+    part is held in 0050 (the stocks are sold and 0050 bought the same close; on the first day after,
+    the 0050 above the core is sold and the picks bought)."""
     plan = plan or SeedPlan()
     sessions = [day for day in data.sessions if start <= day <= end]
     contributions = plan.schedule(sessions, start, end)
@@ -361,6 +380,8 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
     result = RunResult(rule.rule_hash[:12] if rule else "dca_0050", sessions, [], [], contributions)
     cash, units = 0.0, defaultdict(float)
     picks: list[str] = []
+    shares_of: dict[str, float] = {}
+    was_parked = False
     minimum = max(rule.min_trade, 1.0) if rule else 1.0
 
     def price(symbol: str, day: date) -> float:
@@ -385,16 +406,23 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                 ledger.append({"day": day, "symbol": symbol, "side": "BUY", "shares": shares, "price": fill,
                                "fee": fee, "tax": 0})
 
-    def sell_all(symbol: str, day: date) -> None:
+    def sell_all(symbol: str, day: date, amount: float | None = None) -> None:
+        """Sell the whole holding, or whole shares worth about ``amount``."""
         nonlocal cash
         close = data.closes.get(symbol, {}).get(day)
         if close is None or units[symbol] <= 0:
             return
         shares, fill = units[symbol], fill_price(close, "SELL", costs.slippage_bps, _tick(symbol))
+        if amount is not None:
+            shares = min(shares, float(math.floor(amount / fill)))
+            if shares <= 0:
+                return
         amount = shares * fill
         fee, tax = costs.fee(amount), costs.tax(amount, _tax_kind(symbol), "SELL")
         cash += amount - fee - tax
-        units[symbol] = 0.0
+        units[symbol] -= shares
+        if units[symbol] < 1e-9:
+            units[symbol] = 0.0
         result.trades += 1
         result.fees += fee
         result.taxes += tax
@@ -416,28 +444,39 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
             if cash > 0:
                 buy(BENCHMARK, cash, day)
         else:
-            today = ranks.get(day) if ranks else None
+            park = parked is not None and day in parked
+            today = [] if park else (ranks.get(day) if ranks else None)
             if today is not None:
                 for symbol in [held for held, count in units.items() if count > 0 and held != BENCHMARK and held not in today]:
                     sell_all(symbol, day)
                 picks = today
-            if today is not None or contribution:
+                if not park:
+                    shares_of = (weights or {}).get(day) or {}
+            if was_parked and not park:            # back from 0050: keep only the core in it
+                total = cash + sum(count * price(symbol, day) for symbol, count in units.items() if count > 0)
+                excess = units[BENCHMARK] * price(BENCHMARK, day) - total * rule.core
+                if excess >= minimum:
+                    sell_all(BENCHMARK, day, excess)
+            if today is not None or contribution or park != was_parked:
                 total = cash + sum(count * price(symbol, day) for symbol, count in units.items() if count > 0)
                 targets: dict[str, float] = {}
-                if rule.core > 0:
-                    targets[BENCHMARK] = total * rule.core
+                if rule.core > 0 or park:
+                    targets[BENCHMARK] = total * (1.0 if park else rule.core)
                 for symbol in picks:
-                    targets[symbol] = targets.get(symbol, 0.0) + total * (1 - rule.core) / len(picks)
+                    share = shares_of.get(symbol, 1 / len(picks)) if shares_of else 1 / len(picks)
+                    targets[symbol] = targets.get(symbol, 0.0) + total * (1 - rule.core) * share
                 orders = []
                 for symbol, target in targets.items():
                     held_value = units[symbol] * price(symbol, day)
                     gap = target - held_value
-                    if gap > 0 and (held_value <= 0 or contribution):
+                    if gap > 0 and (held_value <= 0 or contribution or (park and symbol == BENCHMARK)):
                         orders.append((gap, symbol))
                 for gap, symbol in sorted(orders, reverse=True):
                     amount = min(gap, cash)
                     if amount >= minimum:
                         buy(symbol, amount, day)
+        if rule is not None:
+            was_parked = parked is not None and day in parked
         value = cash + sum(count * price(symbol, day) for symbol, count in units.items() if count > 0)
         result.values.append(value)
         result.flows.append(contribution)
@@ -446,17 +485,52 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
     return result
 
 
+def daily_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]) -> dict[date, dict[str, float]] | None:
+    """R7b: each pick's share of the stock part, in proportion to 1 / its 60-session volatility (a pick
+    without one takes the median of the others); None for equal amounts."""
+    if rule.weighting == "equal":
+        return None
+    volatility = -fp.matrix("low_volatility_60")             # stored negated: the daily standard deviation
+    output: dict[date, dict[str, float]] = {}
+    for day, names in ranks.items():
+        if not names:
+            continue
+        position = fp.index[day]
+        sigmas = np.array([volatility[fp.row[symbol], position] for symbol in names], dtype=float)
+        valid = np.isfinite(sigmas) & (sigmas > 0)
+        sigmas = np.where(valid, sigmas, np.median(sigmas[valid]) if valid.any() else 1.0)
+        inverse = 1 / sigmas
+        output[day] = {symbol: float(share) for symbol, share in zip(names, inverse / inverse.sum(), strict=True)}
+    return output
+
+
+def account_parking(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel) -> set[date] | None:
+    """R7b: the sessions on which the rule's own stock account (no core, no filter, from SHADOW_WARMUP
+    sessions into the data) closes below its 200-session average unit value; None when the filter is off."""
+    if rule.account_filter == "none":
+        return None
+    shadow = rule.model_copy(update={"account_filter": "none", "core": 0.0})
+    sessions = fp.sessions
+    start, end = sessions[min(SHADOW_WARMUP, len(sessions) - 1)], sessions[-1]
+    ranks = daily_rankings(fp, shadow, start, end)
+    run = simulate_daily(data, shadow, costs, start, end, ranks, weights=daily_weights(fp, shadow, ranks))
+    units = unit_values(run.values, run.flows)
+    average = pd.Series(units).rolling(200).mean().to_numpy()
+    return {day for day, unit, mean in zip(run.days, units, average, strict=True) if np.isfinite(mean) and unit < mean}
+
+
 def _excess(run: RunResult, benchmark: RunResult) -> float:
     return (run.final_value - benchmark.final_value) / run.contributed if run.contributed else 0.0
 
 
 def window_stats(data: LegacyData, rule: DailyRule, costs: CostModel, ranks: dict[date, list[str]], months: int,
-                 start: date, end: date, cache: dict) -> dict[str, object]:
+                 start: date, end: date, cache: dict, weights: dict | None = None,
+                 parked: set[date] | None = None) -> dict[str, object]:
     excesses = []
     for first in _month_starts(data.sessions, start, end, months):
         total = first.year * 12 + first.month - 1 + months
         last = date(total // 12, total % 12 + 1, 1) - timedelta(days=1)
-        run = simulate_daily(data, rule, costs, first, last, ranks)
+        run = simulate_daily(data, rule, costs, first, last, ranks, weights=weights, parked=parked)
         if (first, last) not in cache:
             cache[(first, last)] = simulate_daily(data, None, costs, first, last)
         if run.contributed:
@@ -523,10 +597,11 @@ def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostMode
              benchmark_cache: dict | None = None) -> dict[str, object]:
     cache = benchmark_cache if benchmark_cache is not None else {}
     ranks = daily_rankings(fp, rule, RECENT_START, RECENT_END)
+    weights, parked = daily_weights(fp, rule, ranks), account_parking(data, fp, rule, costs)
     first = next((day for day in sorted(ranks) if ranks[day]), RECENT_START)
-    run = simulate_daily(data, rule, costs, first, RECENT_END, ranks)
+    run = simulate_daily(data, rule, costs, first, RECENT_END, ranks, weights=weights, parked=parked)
     benchmark = simulate_daily(data, None, costs, first, RECENT_END)
-    regime_run = simulate_daily(data, rule, costs, REGIME_START, RECENT_END, ranks)
+    regime_run = simulate_daily(data, rule, costs, REGIME_START, RECENT_END, ranks, weights=weights, parked=parked)
     regime_benchmark = simulate_daily(data, None, costs, REGIME_START, RECENT_END)
     yearly: dict[str, float] = {}
     active = _monthly_active(run, benchmark)
@@ -539,8 +614,10 @@ def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostMode
         "full_period_excess": round(_excess(run, benchmark), 6),
         "since_2020": {"start": REGIME_START.isoformat(), "strategy": regime_run.summary(),
                        "benchmark": regime_benchmark.summary(), "excess": round(_excess(regime_run, regime_benchmark), 6)},
-        "windows": {key: window_stats(data, rule, costs, ranks, months, first, RECENT_END, cache.setdefault(key, {}))
+        "windows": {key: window_stats(data, rule, costs, ranks, months, first, RECENT_END, cache.setdefault(key, {}),
+                                      weights, parked)
                     for key, months in WINDOWS.items()},
+        "parked_sessions": len([day for day in parked or () if first <= day <= RECENT_END]),
         "monthly_active_returns": active, "yearly": {year: round(value, 4) for year, value in sorted(yearly.items())},
         "activity": activity(run), "curve": curve(run, benchmark),
     }
@@ -765,5 +842,21 @@ def overlay_batch() -> list[DailyRule]:
     return rules
 
 
+def holdings_batch() -> list[DailyRule]:
+    """R7b (2026-10-06, the owner: 繼續研究): the deepest drawdowns of the trend rule were its own
+    holdings crashing while TAIEX did not, so two controls that look at the holdings: weights by inverse
+    volatility, and the account's own trend (stock part to 0050 while the rule's own account is below
+    its 200-day average), and both; alone and half in 0050. Settings fixed in advance."""
+    variants = [("依波動度配置", {"weighting": "inverse_vol"}),
+                ("帳戶跌破自己的 200 日均線就換 0050", {"account_filter": "own_200"}),
+                ("依波動度配置＋帳戶濾網", {"weighting": "inverse_vol", "account_filter": "own_200"})]
+    rules = []
+    for label, extra in variants:
+        for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+            rules.append(DailyRule(name=f"每天 站上 200 日均線：前 20 名、同產業最多 3 成、{label}{word}",
+                                   factors={"trend_200": 1.0}, industry_cap=0.3, core=core, **extra))
+    return rules
+
+
 BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch,
-           "tpex": tpex_batch, "overlays": overlay_batch}
+           "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch}
