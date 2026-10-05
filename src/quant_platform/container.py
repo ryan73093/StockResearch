@@ -435,8 +435,14 @@ def build_container(settings: Settings | None = None) -> Container:
     authentication_service = AuthenticationService(
         resolved, authentication_repository, GoogleOidcClient(resolved)
     )
-    paper_trading_service = PaperTradingService(
-        paper_trading_repository, universe_repository, market_bar_repository
+    from quant_platform.research.prices import FallbackPrices, ResearchPrices
+
+    # S9-W03 (owner 2026-10-04: one copy of prices): the research history first; the legacy bars only
+    # where it has nothing as recent (TPEx stocks, a missed close) until the legacy price step stops.
+    prices = FallbackPrices(ResearchPrices(_instance_dir(resolved.database_url) / "research" / "history"),
+                            market_bar_repository)
+    paper_trading_service = PaperTradingService(      # S9-W05: fills and marks from the one price store
+        paper_trading_repository, universe_repository, prices
     )
     after_hours_ai_service = AfterHoursAiService(
         decision_repository,
@@ -494,12 +500,6 @@ def build_container(settings: Settings | None = None) -> Container:
         plan = investment_plan_service.current()
         return plan.broker if plan else "conservative"
 
-    from quant_platform.research.prices import FallbackPrices, ResearchPrices
-
-    # S9-W03 (owner 2026-10-04: one copy of prices): the research history first; the legacy bars only
-    # where it has nothing as recent (TPEx stocks, a missed close) until the legacy price step stops.
-    prices = FallbackPrices(ResearchPrices(_instance_dir(resolved.database_url) / "research" / "history"),
-                            market_bar_repository)
 
     def bar_history(symbol: str) -> list:
         """Daily closes as (Taipei session date, close), oldest first."""

@@ -7,7 +7,17 @@ import pytest
 from quant_platform.research.history.dataset import write_parquet
 from quant_platform.research.history.official import DailyRow
 from quant_platform.research.history.stocks import write_year
-from quant_platform.research.snapshot import GROUPS, build, candles, display, load, search, stock_bars, view
+from quant_platform.research.snapshot import (
+    GROUPS,
+    build,
+    candles,
+    display,
+    load,
+    market_view,
+    search,
+    stock_bars,
+    view,
+)
 
 
 def weekdays(start, end):
@@ -99,3 +109,24 @@ def test_stock_page_and_search(tmp_path):
     assert missing.status_code == 404 and "找不到 9999" in missing.get_data(as_text=True)
     assert client.get("/stock/<script>").status_code == 404
     assert "查個股" in client.get("/stock").get_data(as_text=True)
+
+
+def test_market_breadth_and_overview_page(tmp_path):
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+
+    base = history(tmp_path / "research" / "history")
+    build(base, tmp_path / "research", date(2026, 10, 9))
+    snapshot = load(tmp_path / "research")
+    market = snapshot["market"]
+    assert len(market["days"]) == 250 and market["days"][-1] == "2026-10-09"
+    # 1101 is flat (no advance, at its high and low at once); the three others rise every day
+    assert market["advance"][-1] == 3 and market["decline"][-1] == 0 and market["new_high"][-1] == 4
+    assert market["above_200"][-1] == 0.75 and market["traded"][-1] == 4
+    page = market_view(snapshot)
+    assert page["taiex_vs_200"] == 0.0 and page["gainers"][0]["code"] == "6488" and page["industries"] == []
+    client = create_app(build_container(Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}",
+                                                 scheduler_in_web=False))).test_client()
+    body = client.get("/market").get_data(as_text=True)
+    assert "站上自己 200 日均線的股票" in body and "/stock/6488" in body and "75%" in body

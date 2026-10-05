@@ -89,8 +89,11 @@ MAINTENANCE_JOBS = (
     (time(3, 0), "資料庫備份", "每日；保留最近 7 份"),
     (time(13, 30), "收盤資料時效實測", "交易日每分鐘到 14:45；記錄各來源公布時間"),
     (time(13, 45), "LINE 投入日建議", "投入日每 5 分鐘到 14:25，收盤到了就發一則；14:15 仍缺資料時提醒"),
-    (time(15, 15), "研究資料補抓", "交易日；長歷史資料只補當月、除權息只補今年"),
+    (time(13, 49), "官方收盤表", "交易日每分鐘到 14:25，抓到證交所全市場收盤就停（今日、持倉、計畫用）"),
+    (time(14, 40), "新聞收集", "交易日；前一個交易日、成交值前 150 檔與前向觀察持股"),
+    (time(15, 15), "研究資料補抓", "交易日；ETF 與指數、上市與上櫃個股當年行情、除權息"),
     (time(15, 30), "前向模擬紀錄", "交易日；追蹤中的策略當日狀態只追加不改寫"),
+    (time(15, 45), "個股因子快照", "交易日；個股頁與市場總覽用"),
     (time(23, 30), "每週研究報告", "每週日；把本週研究報告存檔"),
 )
 BACKGROUND_JOBS = (
@@ -121,7 +124,7 @@ TOOL_GROUPS = (
     {
         "title": "市場與個股", "badge": "", "badge_class": "", "paused": False,
         "tools": (
-            ("/market", "市場總覽（舊版）", "指標、K 線與跨資產熱圖"),
+            ("/market", "市場總覽（新版）", "大盤與 200 日均線、市場寬度、產業、漲跌與成交值排行；舊版在 /market/legacy"),
             ("/stock", "個股（新版）", "K 線、30 個因子的全市場排名、前向觀察持有；舊版單股研究在 /stocks"),
             ("/universe", "股票池", "新增、停用與排程標的"),
         ),
@@ -141,7 +144,7 @@ TOOL_GROUPS = (
     {
         "title": "資料", "badge": "", "badge_class": "", "paused": False,
         "tools": (
-            ("/data-quality", "資料品質", "閘門、缺漏與排除標的"),
+            ("/data-quality", "資料品質（舊版）", "舊資料庫行情的閘門與缺漏；新版在系統頁「資料品質」"),
             ("/data-pipeline", "資料建置進度", "補資料與特徵進度"),
             ("/taiwan-data", "台股研究資料", "法人、融資券、估值、財報"),
             ("/macro-data", "總經資料", "利率、通膨與殖利率"),
@@ -175,7 +178,7 @@ def _taipei_text(value: datetime | None, pattern: str = "%m/%d %H:%M") -> str:
     return _aware(value).astimezone(TAIPEI).strftime(pattern) if value else "尚無"
 
 
-RESEARCH_TABS = ("overview", "rules", "factors", "forward", "promotion", "agent", "legacy", "jobs", "tools")
+RESEARCH_TABS = ("overview", "rules", "factors", "forward", "promotion", "agent", "legacy", "jobs")
 
 
 def _default_basis(research_dir: Path) -> str:
@@ -388,6 +391,36 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "badge": "badge--ok",
             "detail": f"{len(series)} 個序列・資料到 {last or '—'}",
         }
+
+    quality_cache: dict[str, object] = {}
+
+    def research_quality(now: datetime) -> dict[str, object] | None:
+        """S9-W05 (2026-10-06): the research store's quality (research/quality.py), kept two minutes."""
+        from quant_platform.research.quality import check, ex_rights_events
+
+        local = now.astimezone(TAIPEI)
+        calendar = dependencies.market_calendar.calendar("TW")
+        day = local.date()
+        try:
+            if calendar.is_trading_day(day) and local.time() >= time(15, 20):
+                expected = day
+            else:
+                expected = calendar.previous_trading_day(day, inclusive=not calendar.is_trading_day(day))
+            sessions = [day - timedelta(days=offset) for offset in range(20)
+                        if calendar.is_trading_day(day - timedelta(days=offset))]
+        except ValueError:
+            return None
+        cached = quality_cache.get("value")
+        if cached and quality_cache.get("expected") == expected and \
+                (datetime.now(UTC) - quality_cache["at"]).total_seconds() < 120:
+            return cached
+        research = _instance_dir(dependencies.settings.database_url) / "research"
+        if not (research / "history" / "stocks" / "twse").is_dir():
+            return None
+        value = check(research / "history", research, expected, sessions,
+                      ex_rights_events(research / "history", expected.year))
+        quality_cache.update({"value": value, "expected": expected, "at": datetime.now(UTC)})
+        return value
 
     def quality_status(market: str) -> dict[str, object]:
         view = dependencies.data_quality_service.latest_view(market)
@@ -692,6 +725,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     def research():
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         tab = request.args.get("tab", "overview")
+        if tab == "tools":                 # S9-W05: the legacy pages moved to the system page
+            return redirect(url_for("v2.system") + "#legacy-tools")
         tab = tab if tab in RESEARCH_TABS else "overview"
         reports_dir = research_dir / "reports"
         ranking = trial_ranking(research_dir / "trials.jsonl", "development")
@@ -774,6 +809,16 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             verdicts = {row["factor"]: row["verdict"] for row in factor_table(report)}
         return load_snapshot(research_dir), verdicts
 
+    @blueprint.get("/market")
+    def market_overview():
+        """S9-W05 (2026-10-06): TAIEX against its 200-day average, the market's breadth, industries and the
+        day's movers, from the nightly snapshot."""
+        from quant_platform.research.snapshot import load as load_snapshot
+        from quant_platform.research.snapshot import market_view
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        return render_template("v2/market.html", active_nav="today", market=market_view(load_snapshot(research_dir)))
+
     @blueprint.get("/stock")
     def stock_search():
         """S9-W05: find a stock by code or name (listed and TPEx)."""
@@ -850,22 +895,32 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "badge": "badge--ok" if health.status == "healthy" else "badge--bad",
             "detail": f"資料庫 {health.database}",
         }]
-        for market, title in (("TW", "台股行情"), ("US", "美股行情")):
-            latest = dependencies.daily_market_data_pipeline.latest_market_date(market, now)
-            fresh = dependencies.daily_market_data_pipeline.is_fresh(market, now)
-            items.append({
-                "label": title,
-                "state": "最新" if fresh else "落後",
-                "badge": "badge--ok" if fresh else "badge--warn",
-                "detail": f"最新收盤 {latest:%Y-%m-%d}" if latest else "尚無資料",
-            })
-        quality = quality_status("TW")
-        items.append({
-            "label": "台股資料品質",
-            "state": quality["label"],
-            "badge": quality["badge"],
-            "detail": f"檢查 {quality['computed']}；排除 {quality['excluded']} 檔",
+        quality = research_quality(now)
+        rows = {row["name"]: row for row in quality["rows"]} if quality else {}
+        listed = rows.get("上市個股日行情") or {}
+        items.append({                     # S9-W05: the research store is the price source (S9-W03)
+            "label": "台股行情",
+            "state": {"ok": "最新", "warn": "落後", "bad": "落後"}.get(listed.get("status"), "尚無資料"),
+            "badge": "badge--ok" if listed.get("status") == "ok" else "badge--warn",
+            "detail": f"研究資料最新收盤 {listed.get('last') or '—'}（應有 {quality['expected']}）" if quality else "尚無資料",
         })
+        latest = dependencies.daily_market_data_pipeline.latest_market_date("US", now)
+        fresh = dependencies.daily_market_data_pipeline.is_fresh("US", now)
+        items.append({
+            "label": "美股行情",
+            "state": "最新" if fresh else "落後",
+            "badge": "badge--ok" if fresh else "badge--warn",
+            "detail": f"最新收盤 {latest:%Y-%m-%d}" if latest else "尚無資料",
+        })
+        if quality:
+            unexplained = [move for move in quality["moves"] if not move["explained"]]
+            items.append({
+                "label": "台股資料品質",
+                "state": {"ok": "正常", "warn": "有提醒", "bad": "有問題"}[quality["status"]],
+                "badge": {"ok": "badge--ok", "warn": "badge--warn", "bad": "badge--bad"}[quality["status"]],
+                "detail": f"{sum(row['status'] == 'ok' for row in quality['rows'])}／{len(quality['rows'])} 項最新；"
+                          f"超過漲跌幅 {len(unexplained)} 檔",
+            })
         calendar_status = dependencies.market_calendar.status(now.astimezone(TAIPEI).date())
         years = calendar_status["covered_years"]
         manual = len(calendar_status["manual_closures"])
@@ -932,6 +987,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             ],
             close_sources=CLOSE_SOURCES,
             close_rows=recent_table(dependencies.close_availability),
+            quality=quality,
+            tool_groups=TOOL_GROUPS,
             checked_at=_taipei_text(now),
             doc_tabs=[(key, label) for key, (label, _) in DOCS.items()],
             line_enabled=dependencies.notification_service.enabled,

@@ -1,0 +1,106 @@
+{% extends "v2/base.html" %}
+{% block title %}市場總覽{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>市場總覽</h1>
+    <p class="page-head__sub">{% if market %}{{ market.date }} 收盤・上市＋上櫃普通股 {{ '{:,}'.format(market.traded) }} 檔有成交{% else %}台股整體狀況{% endif %}</p>
+  </div>
+  <div class="page-head__meta"><a href="/stock">查個股</a>・<a href="/">回今日</a></div>
+</header>
+{% endblock %}
+{% block content %}
+{% if not market %}
+<section class="card"><p class="muted">還沒有市場快照（每個交易日 15:45 建立）。</p></section>
+{% else %}
+<div class="kpis kpis--page kpis--four">
+  <div class="kpi"><div class="kpi__label">加權指數</div>
+    <div class="kpi__value">{{ '{:,.0f}'.format(market.taiex) if market.taiex else '—' }}{% if market.taiex_change is not none %}<small class="{{ 'up' if market.taiex_change > 0 else ('down' if market.taiex_change < 0 else '') }}">{{ '{:+.2%}'.format(market.taiex_change) }}</small>{% endif %}</div></div>
+  <div class="kpi"><div class="kpi__label">比 200 日均線</div><div class="kpi__value {{ 'up' if (market.taiex_vs_200 or 0) > 0 else 'down' }}">{{ '{:+.1%}'.format(market.taiex_vs_200) if market.taiex_vs_200 is not none else '—' }}</div></div>
+  <div class="kpi"><div class="kpi__label">站上自己 200 日均線的股票</div><div class="kpi__value">{{ '{:.0%}'.format(market.above_200) if market.above_200 is not none else '—' }}</div></div>
+  <div class="kpi"><div class="kpi__label">上漲／下跌家數</div><div class="kpi__value"><span class="up">{{ market.advance }}</span><small>／</small><span class="down">{{ market.decline }}</span></div></div>
+</div>
+
+<div class="grid grid--half">
+  <section class="card">
+    <div class="card__head"><h2>加權指數與 200 日均線（近一年）</h2></div>
+    {% if market.chart %}
+    <svg class="rule-chart" viewBox="0 0 {{ market.chart.width }} {{ market.chart.height }}" preserveAspectRatio="none" role="img" aria-label="加權指數走勢">
+      <polyline class="line-bench" points="{{ market.chart.taiex_200 }}"/>
+      <polyline class="line-rule" points="{{ market.chart.taiex }}"/>
+    </svg>
+    <div class="legend"><span><i style="background:var(--accent)"></i>加權指數</span><span><i style="background:var(--warn)"></i>200 日均線</span><span>{{ market.chart.first }}～{{ market.chart.last }}，{{ '{:,.0f}'.format(market.chart.low) }}～{{ '{:,.0f}'.format(market.chart.high) }}</span></div>
+    {% endif %}
+  </section>
+  <section class="card">
+    <div class="card__head"><h2>站上自己 200 日均線的股票比例（近一年）</h2></div>
+    {% if market.breadth %}
+    <svg class="rule-chart" viewBox="0 0 {{ market.breadth.width }} {{ market.breadth.height }}" preserveAspectRatio="none" role="img" aria-label="市場寬度走勢">
+      <line class="line-put" x1="0" x2="{{ market.breadth.width }}" y1="{{ market.breadth.middle }}" y2="{{ market.breadth.middle }}"/>
+      <polyline class="line-rule" points="{{ market.breadth.above_200 }}"/>
+    </svg>
+    <div class="legend"><span><i style="background:var(--accent)"></i>比例（0%～100%，虛線 50%）</span><span>今天創 52 週新高 {{ market.new_high }} 檔、新低 {{ market.new_low }} 檔</span></div>
+    {% endif %}
+    <p class="note">指數創高但只有少數股票在漲時，這個比例會比指數弱；追趨勢的規則持有的就是站上均線的股票。</p>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card__head"><h2>產業（依近 3 個月漲幅排序）</h2></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>產業</th><th class="num">檔數</th><th class="num">今天（中位數）</th><th class="num">近 3 個月（中位數）</th><th class="num">站上 200 日均線</th><th class="num">20 日日均成交值</th></tr></thead>
+      <tbody>
+      {% for group in market.industries %}
+        <tr>
+          <td data-primary><strong>{{ group.name }}</strong></td>
+          <td class="num" data-label="檔數">{{ group.count }}</td>
+          <td class="num {{ 'up' if group.change > 0 else ('down' if group.change < 0 else '') }}" data-label="今天">{{ '{:+.1%}'.format(group.change) }}</td>
+          <td class="num {{ 'up' if (group.momentum_3 or 0) > 0 else ('down' if (group.momentum_3 or 0) < 0 else '') }}" data-label="近 3 個月">{{ '{:+.1%}'.format(group.momentum_3) if group.momentum_3 is not none else '—' }}</td>
+          <td class="num" data-label="站上 200 日均線">{{ '{:.0%}'.format(group.above_200) if group.above_200 is not none else '—' }}</td>
+          <td class="num" data-label="日均成交值">{{ ('{:,.0f}' if group.turnover >= 1e9 else '{:,.1f}').format(group.turnover / 1e8) }} 億</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">產業別是 FinMind 的現行分類；只列 5 檔以上的產業。近 3 個月用還原權息後的價格；今天的漲跌是實際收盤價，除權息日會顯示成下跌。</p>
+</section>
+
+<div class="grid grid--half">
+  {% for title, rows in (('今天漲最多', market.gainers), ('今天跌最多', market.losers)) %}
+  <section class="card">
+    <div class="card__head"><h2>{{ title }}</h2><span class="muted small">只列符合規則基本資格的股票</span></div>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+        {% for row in rows %}
+          <tr><td><a class="symbol" href="/stock/{{ row.code }}"><strong>{{ row.code }}</strong><span>{{ row.name }}</span></a></td>
+              <td class="muted small">{{ row.industry }}</td>
+              <td class="num {{ 'up' if row.change > 0 else 'down' }}">{{ '{:+.1%}'.format(row.change) }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endfor %}
+</div>
+
+<section class="card">
+  <div class="card__head"><h2>成交值最大（近 20 日日均）</h2></div>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+      {% for row in market.active %}
+        <tr><td><a class="symbol" href="/stock/{{ row.code }}"><strong>{{ row.code }}</strong><span>{{ row.name }}</span></a>
+                <div class="muted small">{{ row.exchange }}・{{ row.industry }}</div></td>
+            <td class="num">{{ '{:,.0f}'.format(row.turnover / 1e8) }} 億</td>
+            <td class="num {{ 'up' if row.change > 0 else ('down' if row.change < 0 else '') }}">{{ '{:+.1%}'.format(row.change) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<p class="note">資料是每個交易日 15:45 的全市場快照（研究用的官方行情，含上櫃）。這頁只描述市場，不是買賣建議。</p>
+{% endif %}
+{% endblock %}

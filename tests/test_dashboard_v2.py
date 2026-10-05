@@ -22,7 +22,7 @@ def client(tmp_path):
         ("/holdings", "模擬帳戶"),
         ("/plan", "建立你的投資計畫"),
         ("/research", "研究現況"),
-        ("/research?tab=tools", "暫停中的模組"),
+        ("/system", "暫停中的模組"),
         ("/system", "專案資訊"),
     ],
 )
@@ -83,10 +83,12 @@ def test_project_docs_are_served_from_the_repository(client):
     assert client.get("/system/docs/unknown").status_code == 404
 
 
-def test_legacy_market_overview_moved_to_market(client):
+def test_market_overview_is_new_and_the_legacy_one_moved(client):
     response = client.get("/market")
-    assert response.status_code == 200
-    assert 'href="/"' in response.get_data(as_text=True)
+    assert response.status_code == 200 and "市場總覽" in response.get_data(as_text=True)
+    assert "還沒有市場快照" in response.get_data(as_text=True)          # no snapshot in a fresh instance
+    legacy = client.get("/market/legacy")
+    assert legacy.status_code == 200 and 'href="/"' in legacy.get_data(as_text=True)
 
 
 @pytest.mark.parametrize(
@@ -162,3 +164,12 @@ def test_today_reminds_when_the_account_falls_past_the_plans_tolerance(tmp_path)
 def test_today_without_a_plan_asks_for_one_instead_of_legacy_picks(client):
     body = client.get("/").get_data(as_text=True)
     assert "先建立投資計畫" in body and "研究模型觀察" not in body and "模擬權益" not in body
+
+
+def test_legacy_tools_left_the_research_page_for_the_system_page(client):
+    """S9-W05 (2026-10-06): the research tabs no longer list the legacy tools; the system page keeps them."""
+    assert "舊版工具" not in client.get("/research").get_data(as_text=True)
+    moved = client.get("/research?tab=tools")
+    assert moved.status_code == 302 and moved.headers["Location"].endswith("/system#legacy-tools")
+    system = client.get("/system").get_data(as_text=True)
+    assert 'id="legacy-tools"' in system and "/market/legacy" in system and "/paper-trading" in system

@@ -63,6 +63,37 @@
   </section>
 </div>
 
+{% if quality %}
+<section class="card" id="quality">
+  <div class="card__head"><h2>資料品質</h2><span class="muted small">研究資料（今日、持倉、計畫、研究共用的行情）；應有 {{ quality.expected }} 收盤</span></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>資料</th><th>最新一天</th><th>狀態</th><th>說明</th></tr></thead>
+      <tbody>
+      {% for row in quality.rows %}
+        <tr>
+          <td data-primary><strong>{{ row.name }}</strong></td>
+          <td data-label="最新一天">{{ row.last or '—' }}</td>
+          <td data-label="狀態"><span class="badge {{ {'ok': 'badge--ok', 'warn': 'badge--warn', 'bad': 'badge--bad'}[row.status] }}">{{ {'ok': '最新', 'warn': '提醒', 'bad': '落後'}[row.status] }}</span></td>
+          <td class="small" data-label="說明" data-wide>{{ row.detail }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% set unexplained = quality.moves|rejectattr('explained')|list %}
+  {% if quality.moves %}
+    <p class="small" style="margin:10px 0 4px">最新一天漲跌超過 10.5% 的股票（漲跌幅限制 10%）：</p>
+    <ul class="reasons">
+      {% for move in quality.moves[:20] %}<li><a href="/stock/{{ move.code }}">{{ move.code }} {{ move.name }}</a> {{ '{:+.1%}'.format(move.change) }}{% if move.explained %}（{{ move.explained }}）{% else %}（沒有除權息紀錄：可能是新上市前幾天、減資或資料錯誤，請到個股頁看 K 線）{% endif %}</li>{% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted small" style="margin:10px 0 0">最新一天沒有超過漲跌幅限制的股票。</p>
+  {% endif %}
+  {% if quality.gone %}<p class="muted small" style="margin:6px 0 0">前一天有行情、最新一天沒有的股票 {{ quality.gone }} 檔（暫停交易或下市；大量出現代表當天行情沒抓完整）。</p>{% endif %}
+</section>
+{% endif %}
+
 <section class="card">
   <div class="card__head"><h2>收盤資料時效</h2><span class="muted small">首次看到當日資料的時間（13:30 後幾分）</span></div>
   {% if close_rows %}
@@ -83,6 +114,35 @@
     <p class="muted" style="margin:0">尚無紀錄；交易日 13:30 起每分鐘記錄證交所、櫃買、Yahoo 與盤後零股的公布時間，連續 5 個交易日後決定決策快照最早可開始的時間。</p>
   {% endif %}
 </section>
+
+<details class="card card--quiet" id="legacy-tools">
+  <summary><h2>舊版頁面 <span class="badge">備查</span></h2></summary>
+  <p class="muted small">舊版系統的頁面：已停止開發（需求 §13），S8 決定刪除或保留；日常使用不需要。個股、市場總覽、資料品質、模擬交易已有新版（查個股、今日 › 市場總覽、本頁資料品質、持倉 › 模擬帳戶）。</p>
+<div class="grid grid--half">
+  {% for group in tool_groups if not group.paused %}
+  <section class="card">
+    <div class="card__head"><h2>{{ group.title }}</h2></div>
+    <div class="tool-grid">
+      {% for href, name, note in group.tools %}
+        <a class="tool" href="{{ href }}"><span class="tool__text"><strong>{{ name }}</strong><span>{{ note }}</span></span>{{ icon('arrow') }}</a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+
+{% for group in tool_groups if group.paused %}
+<details class="card card--quiet">
+  <summary><h2>{{ group.title }} <span class="badge {{ group.badge_class }}">{{ group.badge }}</span></h2></summary>
+  <p class="muted small">這些模組暫停新功能開發（需求 §13），在 S8 決定保留、合併或移除；目前仍可開啟查看。</p>
+  <div class="tool-grid">
+    {% for href, name, note in group.tools %}
+      <a class="tool" href="{{ href }}"><span class="tool__text"><strong>{{ name }}</strong><span>{{ note }}</span></span>{{ icon('arrow') }}</a>
+    {% endfor %}
+  </div>
+</details>
+{% endfor %}
+</details>
 
 <section class="card" id="project">
   <div class="card__head"><h2>專案資訊</h2></div>

@@ -88,3 +88,28 @@ def test_close_job_fetches_once(tmp_path):
     assert fetch_today_close(tmp_path, date(2026, 10, 6), client=Client()) == 600
     assert fetch_today_close(tmp_path, date(2026, 10, 6), client=Client()) == 600 and len(asked) == 1
     assert quotes_from_payload({"stat": "很抱歉"}) == {}
+
+
+def test_research_bars_carry_open_and_volume_and_fill_the_paper_account(tmp_path):
+    """S9-W05: the paper account fills at the next session's open from the research store."""
+    from datetime import UTC
+    from decimal import Decimal
+
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+
+    history = tmp_path / "research" / "history"
+    days = [date(2025, 1, 2), date(2025, 1, 3), date(2025, 1, 6)]
+    write_year([{"date": day, "code": "2330", "name": "台積電", "open": open_, "high": close + 2, "low": open_ - 2,
+                 "close": close, "volume": 1_000_000, "turnover": 1, "trades": 1}
+                for day, open_, close in zip(days, (98.0, 110.0, 120.0), (100.0, 112.0, 121.0), strict=True)],
+               history / "stocks" / "twse" / "2025.parquet")
+    bars = ResearchPrices(history).list_bars("2330.TW", as_of=datetime(2025, 1, 7, 9, tzinfo=TAIPEI))
+    assert [(bar.open, bar.close, bar.volume) for bar in bars] == [
+        (98.0, 100.0, 1_000_000), (110.0, 112.0, 1_000_000), (120.0, 121.0, 1_000_000)]
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'paper.db'}"))
+    container.research_universe_service.add_asset("2330.TW", "TW", "EQUITY", "半導體", "0050.TW", date(2020, 1, 1))
+    service = container.paper_trading_service
+    service.submit_order("2330", "BUY", 100, now=datetime(2025, 1, 2, 7, tzinfo=UTC))
+    assert service.process_pending(datetime(2025, 1, 3, 7, tzinfo=UTC)).filled == 1
+    assert service.overview(datetime(2025, 1, 3, 7, tzinfo=UTC)).fills[0].price == Decimal("110.110000")

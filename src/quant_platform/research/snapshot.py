@@ -144,19 +144,123 @@ def build(history: str | Path, research_dir: str | Path, today: date | None = No
             "values": {factor: _number(values[factor][row]) for factor in FACTOR_LABELS},
             "ranks": {factor: _number(ranks[factor][row]) for factor in FACTOR_LABELS},
         }
+    market = _market(panel, fp, history, position)
     chips_as_of = None
     shareholding = history / "chips" / "TaiwanStockShareholding.parquet"
     if shareholding.is_file():
         chips_as_of = pc.max(pq.read_table(shareholding, columns=["date"])["date"]).as_py()
     snapshot = {"date": day.isoformat(), "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
                 "chips_as_of": chips_as_of.isoformat() if chips_as_of else None,
-                "labels": dict(FACTOR_LABELS), "stocks": stocks}
+                "labels": dict(FACTOR_LABELS), "stocks": stocks, "market": market}
     path = research_dir / SNAPSHOT_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(".partial")
     partial.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
     partial.replace(path)
     return {"date": snapshot["date"], "stocks": len(stocks), "chips_as_of": snapshot["chips_as_of"]}
+
+
+MARKET_SESSIONS = 250
+
+
+def _market(panel, fp, history: Path, position: int) -> dict[str, list]:
+    """The last MARKET_SESSIONS sessions up to ``position``: TAIEX and its 200-session average, and the
+    market's breadth among the stocks that traded each day — the share above their own 200-day average
+    (adjusted), advancers and decliners against the previous session (adjusted, so an ex-dividend drop
+    is not a decline), and closes at a 52-week (252-session) high or low."""
+    import pandas as pd
+
+    from quant_platform.research.history.dataset import read_series
+
+    first = max(0, position - MARKET_SESSIONS + 1)
+    prices = pd.DataFrame(panel.filled[:, : position + 1].T)
+    traded = np.isfinite(panel.close[:, : position + 1].T)
+    change = prices.pct_change(fill_method=None).to_numpy()
+    high = prices.rolling(252, min_periods=252).max().to_numpy()
+    low = prices.rolling(252, min_periods=252).min().to_numpy()
+    trend = fp.matrix("trend_200")[:, : position + 1].T
+    closes = {row["date"]: row["close"] for row in read_series(history / "daily" / "TAIEX.parquet") if row["close"]}
+    taiex = pd.Series([closes.get(day, np.nan) for day in panel.sessions[: position + 1]], dtype=float).ffill()
+    average = taiex.rolling(200).mean()
+    output: dict[str, list] = {key: [] for key in ("days", "taiex", "taiex_200", "above_200", "advance", "decline",
+                                                    "new_high", "new_low", "traded")}
+    values = prices.to_numpy()
+    for row in range(first, position + 1):
+        live = traded[row]
+        with np.errstate(invalid="ignore"):
+            ranked = live & np.isfinite(trend[row])
+            output["days"].append(panel.sessions[row].isoformat())
+            output["taiex"].append(_number(taiex.iloc[row]))
+            output["taiex_200"].append(_number(average.iloc[row]))
+            output["above_200"].append(_number((trend[row][ranked] > 0).mean()) if ranked.any() else None)
+            output["advance"].append(int((live & (change[row] > 0)).sum()))
+            output["decline"].append(int((live & (change[row] < 0)).sum()))
+            output["new_high"].append(int((live & (values[row] >= high[row])).sum()))
+            output["new_low"].append(int((live & (values[row] <= low[row])).sum()))
+            output["traded"].append(int(live.sum()))
+    return output
+
+
+def market_view(snapshot: dict | None, top: int = 10) -> dict | None:
+    """What the market overview page shows, from the snapshot."""
+    if not snapshot or not snapshot.get("market"):
+        return None
+    market, stocks = snapshot["market"], snapshot["stocks"]
+    last = len(market["days"]) - 1
+    taiex, average = market["taiex"][last], market["taiex_200"][last]
+    previous = market["taiex"][last - 1] if last else None
+    rows = []
+    for code, item in stocks.items():
+        if item["close"] and item["previous"]:
+            rows.append({"code": code, "name": item["name"], "exchange": item["exchange"], "industry": item["industry"],
+                         "change": item["close"] / item["previous"] - 1, "close": item["close"],
+                         "turnover": item["turnover_20"] or 0.0, "eligible": item["eligible"],
+                         "trend": item["values"].get("trend_200"), "momentum_3": item["values"].get("momentum_3")})
+    liquid = [row for row in rows if row["eligible"]]
+    industries: dict[str, list[dict]] = {}
+    for row in rows:
+        industries.setdefault(row["industry"], []).append(row)
+    groups = []
+    for name, members in industries.items():
+        if len(members) < 5:
+            continue
+        trends = [row["trend"] for row in members if row["trend"] is not None]
+        momenta = [row["momentum_3"] for row in members if row["momentum_3"] is not None]
+        groups.append({"name": name, "count": len(members),
+                       "change": float(np.median([row["change"] for row in members])),
+                       "momentum_3": float(np.median(momenta)) if momenta else None,
+                       "above_200": sum(value > 0 for value in trends) / len(trends) if trends else None,
+                       "turnover": sum(row["turnover"] for row in members)})
+    groups.sort(key=lambda group: -(group["momentum_3"] if group["momentum_3"] is not None else -9))
+    return {
+        "date": snapshot["date"], "taiex": taiex, "taiex_change": (taiex / previous - 1) if taiex and previous else None,
+        "taiex_vs_200": (taiex / average - 1) if taiex and average else None,
+        "above_200": market["above_200"][last], "advance": market["advance"][last], "decline": market["decline"][last],
+        "new_high": market["new_high"][last], "new_low": market["new_low"][last], "traded": market["traded"][last],
+        "chart": _lines(market["days"], {"taiex": market["taiex"], "taiex_200": market["taiex_200"]}),
+        "breadth": _lines(market["days"], {"above_200": market["above_200"]}, floor=0.0, ceiling=1.0),
+        "industries": groups,
+        "gainers": sorted(liquid, key=lambda row: -row["change"])[:top],
+        "losers": sorted(liquid, key=lambda row: row["change"])[:top],
+        "active": sorted(rows, key=lambda row: -row["turnover"])[:top],
+    }
+
+
+def _lines(days: list[str], series: dict[str, list], width: int = 720, height: int = 200,
+           floor: float | None = None, ceiling: float | None = None) -> dict | None:
+    values = [value for line in series.values() for value in line if value is not None]
+    if len(days) < 2 or not values:
+        return None
+    low = min(values) if floor is None else floor
+    high = max(values) if ceiling is None else ceiling
+    span = (high - low) or 1.0
+    step = width / (len(days) - 1)
+    output = {name: " ".join(f"{round(index * step, 1)},{round(6 + (high - value) / span * (height - 12), 1)}"
+                             for index, value in enumerate(line) if value is not None)
+              for name, line in series.items()}
+    output.update({"width": width, "height": height, "first": days[0], "last": days[-1], "low": low, "high": high,
+                   "middle": round(6 + (high - (low + high) / 2) / span * (height - 12), 1)})
+    return output
 
 
 _CACHE: dict[str, tuple[float, dict]] = {}

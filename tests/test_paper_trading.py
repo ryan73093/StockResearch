@@ -88,3 +88,16 @@ def test_paper_trading_page_labels_money_shares_percent_and_bps(tmp_path):
     assert "委託股數" in text and "股" in text and "張" in text
     assert "總曝險" in text and "%" in text
     assert "模擬滑價" in text and "bps" in text
+
+
+def test_holdings_page_sends_paper_orders_and_comes_back(tmp_path):
+    """S9-W05: the paper account lives on the holdings page; the legacy routes return there."""
+    container = _container(tmp_path)
+    client = create_app(container).test_client()
+    response = client.post("/paper-trading/orders", data={"symbol": "2330", "side": "BUY", "quantity": "5",
+                                                           "next": "/holdings?paper=1#paper"})
+    assert response.status_code == 302 and response.headers["Location"].endswith("/holdings?paper=1#paper")
+    body = client.get("/holdings?paper=1").get_data(as_text=True)
+    assert "最近的委託" in body and "待成交" in body and "送出模擬委託" in body
+    outside = client.post("/paper-trading/process", data={"next": "//evil.example"})
+    assert outside.headers["Location"].endswith("/paper-trading")

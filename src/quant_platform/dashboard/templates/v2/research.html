@@ -479,31 +479,4 @@
 {% endif %}
 {% endif %}
 
-{% if research_tab == 'tools' %}
-<p class="note" style="margin:0 0 12px">舊版系統的頁面：已停止開發（需求 §13），S8 決定刪除或保留；日常使用不需要。</p>
-<div class="grid grid--half">
-  {% for group in tool_groups if not group.paused %}
-  <section class="card">
-    <div class="card__head"><h2>{{ group.title }}</h2></div>
-    <div class="tool-grid">
-      {% for href, name, note in group.tools %}
-        <a class="tool" href="{{ href }}"><span class="tool__text"><strong>{{ name }}</strong><span>{{ note }}</span></span>{{ icon('arrow') }}</a>
-      {% endfor %}
-    </div>
-  </section>
-  {% endfor %}
-</div>
-
-{% for group in tool_groups if group.paused %}
-<details class="card card--quiet">
-  <summary><h2>{{ group.title }} <span class="badge {{ group.badge_class }}">{{ group.badge }}</span></h2></summary>
-  <p class="muted small">這些模組暫停新功能開發（需求 §13），在 S8 決定保留、合併或移除；目前仍可開啟查看。</p>
-  <div class="tool-grid">
-    {% for href, name, note in group.tools %}
-      <a class="tool" href="{{ href }}"><span class="tool__text"><strong>{{ name }}</strong><span>{{ note }}</span></span>{{ icon('arrow') }}</a>
-    {% endfor %}
-  </div>
-</details>
-{% endfor %}
-{% endif %}
 {% endblock %}

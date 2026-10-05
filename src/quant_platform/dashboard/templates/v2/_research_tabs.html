@@ -12,7 +12,6 @@
     ('legacy', '舊版模型比較', '/research?tab=legacy'),
     ('jobs', '執行中的程式', '/research?tab=jobs'),
     ('method', '研究方法', '/system#project'),
-    ('tools', '舊版工具', '/research?tab=tools'),
   ] %}
   <a href="{{ href }}"{% if research_tab == key %} aria-current="true"{% endif %}>{{ label }}{% if key == 'jobs' and running_jobs %} <span class="badge badge--warn">{{ running_jobs }}</span>{% endif %}</a>
   {% endfor %}

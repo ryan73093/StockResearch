@@ -10,7 +10,7 @@ def test_dashboard_and_health(tmp_path):
     settings = Settings(database_url=f"sqlite:///{tmp_path / 'test.db'}")
     app = create_app(build_container(settings))
     client = app.test_client()
-    dashboard = client.get("/market")
+    dashboard = client.get("/market/legacy")
     assert dashboard.status_code == 200
     assert "Research Command Center" in dashboard.get_data(as_text=True)
     health = client.get("/health")
@@ -25,7 +25,7 @@ def test_dashboard_and_health(tmp_path):
     assert portfolios.status_code == 200
     assert "Portfolio & Risk Lab" in portfolios.get_data(as_text=True)
 
-    for path in ("/market", "/guide", "/progress", "/account", "/decisions", "/stocks", "/data", "/data-pipeline", "/data-quality", "/macro-data", "/odd-lot", "/paper-trading", "/rl-lab", "/shadow-trading", "/promotions", "/model-governance", "/news", "/reports", "/automation", "/universe", "/features", "/factors", "/strategies", "/backtests", "/ensembles", "/portfolios", "/models"):
+    for path in ("/market/legacy", "/guide", "/progress", "/account", "/decisions", "/stocks", "/data", "/data-pipeline", "/data-quality", "/macro-data", "/odd-lot", "/paper-trading", "/rl-lab", "/shadow-trading", "/promotions", "/model-governance", "/news", "/reports", "/automation", "/universe", "/features", "/factors", "/strategies", "/backtests", "/ensembles", "/portfolios", "/models"):
         response = client.get(path)
         body = response.get_data(as_text=True)
         assert response.status_code == 200
@@ -88,7 +88,7 @@ def test_dashboard_keeps_expanded_stock_pool_out_of_homepage_analytics(tmp_path)
     analytics = Mock(wraps=container.quant_analytics_service)
     container.quant_analytics_service = analytics
 
-    response = create_app(container).test_client().get("/market")
+    response = create_app(container).test_client().get("/market/legacy")
 
     assert response.status_code == 200
     requested_symbols = analytics.command_center.call_args.args[0]

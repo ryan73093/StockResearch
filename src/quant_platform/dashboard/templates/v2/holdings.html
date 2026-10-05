@@ -250,8 +250,8 @@
 </details>
 {% endif %}
 
-<details class="card card--quiet">
-  <summary><h2>模擬帳戶 <span class="badge">研究用</span></h2></summary>
+<details class="card card--quiet" id="paper"{% if request.args.get('paper') %} open{% endif %}>
+  <summary><h2>模擬帳戶 <span class="badge">研究用</span>{% set pending = overview.orders|selectattr('status.value', 'equalto', 'pending')|list %}{% if pending %} <span class="badge badge--warn">待成交 {{ pending|length }} 筆</span>{% endif %}</h2></summary>
   <div class="kpis kpis--four">
     <div class="kpi"><div class="kpi__label">權益</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.equity) }}<small>元</small></div></div>
     <div class="kpi"><div class="kpi__label">現金</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.account.cash) }}<small>元</small></div></div>
@@ -278,6 +278,61 @@
     </table>
   </div>
   {% endif %}
-  <p class="note">模擬帳戶由舊版盤後 AI 自動下單，只作研究對照，不代表你的實際持股。</p>
+  <form method="post" action="/paper-trading/orders" class="form" style="margin-top:14px">
+    <input type="hidden" name="next" value="/holdings?paper=1#paper">
+    <div class="form__row">
+      <label>代號<input name="symbol" placeholder="2330 或 0050" required></label>
+      <label>買賣<select name="side"><option value="BUY">買進</option><option value="SELL">賣出</option></select></label>
+      <label>股數<input name="quantity" type="number" min="1" max="1000000" value="1" required></label>
+    </div>
+    <div class="form__row">
+      <button class="btn" type="submit">送出模擬委託（下一個交易日開盤成交）</button>
+    </div>
+  </form>
+  <form method="post" action="/paper-trading/process" style="margin-top:8px">
+    <input type="hidden" name="next" value="/holdings?paper=1#paper">
+    <button class="btn btn--small" type="submit">檢查待成交委託</button>
+  </form>
+  {% if overview.orders %}
+  <h3 class="small" style="margin:14px 0 6px">最近的委託</h3>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>送單</th><th>代號</th><th>買賣</th><th class="num">股數</th><th class="num">參考價（元）</th><th>狀態</th></tr></thead>
+      <tbody>
+      {% for item in overview.orders[:10] %}
+        <tr>
+          <td data-primary><strong>{{ taipei_time(item.submitted_at).strftime('%m/%d %H:%M') }}</strong> {{ item.symbol.split('.')[0] }}</td>
+          <td class="table-only">{{ item.symbol.split('.')[0] }}</td>
+          <td data-label="買賣">{{ '買進' if item.side == 'BUY' else '賣出' }}</td>
+          <td class="num" data-label="股數">{{ '{:,}'.format(item.quantity) }}</td>
+          <td class="num" data-label="參考價">{{ '{:,.2f}'.format(item.estimated_price) }}</td>
+          <td data-label="狀態" data-wide>{{ {'pending': '待成交', 'filled': '已成交', 'cancelled': '已取消', 'rejected': '風控拒絕'}.get(item.status.value, item.status.value) }}{% if item.rejection_reason %}：{{ item.rejection_reason }}{% endif %}
+            {% if item.status.value == 'pending' %}<form method="post" action="/paper-trading/orders/{{ item.id }}/cancel" style="display:inline"><input type="hidden" name="next" value="/holdings?paper=1#paper"><button class="btn btn--small" type="submit">取消</button></form>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if overview.fills %}
+  <h3 class="small" style="margin:14px 0 6px">最近的成交</h3>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>成交</th><th>買賣</th><th class="num">股數</th><th class="num">成交價（元）</th><th class="num">手續費＋稅（元）</th></tr></thead>
+      <tbody>
+      {% for item in overview.fills[:10] %}
+        <tr>
+          <td data-primary><strong>{{ taipei_time(item.executed_at).strftime('%m/%d') }}</strong> {{ item.symbol.split('.')[0] }}</td>
+          <td data-label="買賣">{{ '買進' if item.side == 'BUY' else '賣出' }}</td>
+          <td class="num" data-label="股數">{{ '{:,}'.format(item.quantity) }}</td>
+          <td class="num" data-label="成交價">{{ '{:,.2f}'.format(item.price) }}</td>
+          <td class="num" data-label="費稅">{{ '{:,.0f}'.format(item.commission + item.transaction_tax) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <p class="note">模擬帳戶只作研究對照，不代表你的實際持股，也不會連接券商。舊版盤後 AI 已暫停（2026-10-04），不再自動下單；這裡可以手動送模擬單，下一個交易日用研究行情的開盤價加滑價、手續費與證交稅成交（每個交易日 13:50 的台股流程會處理，也可以按「檢查待成交委託」）。</p>
 </details>
 {% endblock %}

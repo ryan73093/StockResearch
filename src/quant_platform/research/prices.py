@@ -37,6 +37,30 @@ class Bar:
     available_time: datetime      # when the official close is public
     close: float
     source: str = "twse_official"
+    open: float | None = None     # S9-W05: the paper account fills at the next session's open
+    volume: float = 0.0           # shares traded
+
+    def __post_init__(self) -> None:
+        if self.open is None:
+            object.__setattr__(self, "open", self.close)
+
+
+def rows_from_payload(payload: object) -> dict[str, tuple[float | None, float, float]]:
+    """Every code's (open, close, shares traded) in a TWSE MI_INDEX all-market payload."""
+    if not isinstance(payload, dict) or payload.get("stat") != "OK":
+        return {}
+    output: dict[str, tuple[float | None, float, float]] = {}
+    for table in payload.get("tables") or []:
+        fields = (table or {}).get("fields") or []
+        if fields[:2] != ["證券代號", "證券名稱"]:
+            continue
+        for item in table.get("data") or []:
+            if len(item) < 9:
+                continue
+            close = number(item[8])
+            if close is not None and close > 0:
+                output[str(item[0]).strip()] = (number(item[5]), close, number(item[2]) or 0.0)
+    return output
 
 
 def quotes_from_payload(payload: object) -> dict[str, float]:
@@ -94,15 +118,34 @@ class ResearchPrices:
 
     def today_quotes(self, day: date) -> dict[str, float]:
         """The close job's cached MI_INDEX payload for ``day`` (empty before it is published)."""
+        return {code: row[1] for code, row in self.today_rows(day).items()}
+
+    def today_rows(self, day: date) -> dict[str, tuple[float | None, float, float]]:
         path = self._history / "raw" / "twse_stock_all" / f"{day:%Y}" / f"{day:%Y%m%d}.json"
         if not path.is_file():
             return {}
         key = ("raw", day, path.stat().st_mtime)
         if key not in self._cache:
             try:
-                self._cache[key] = quotes_from_payload(json.loads(path.read_text(encoding="utf-8")))
+                self._cache[key] = rows_from_payload(json.loads(path.read_text(encoding="utf-8")))
             except ValueError:
                 self._cache[key] = {}
+        return self._cache[key]
+
+    def _ohlcv(self, code: str, exchange: str) -> dict[date, tuple[float | None, float]]:
+        """(open, shares traded) by session: the ETF series, else the stock year files."""
+        path = self._history / "daily" / f"{code}.parquet"
+        files = [path] if path.is_file() else sorted((self._history / "stocks" / exchange).glob("*.parquet"))[-2:]
+        key = ("ohlcv", exchange, code, tuple(item.stat().st_mtime for item in files))
+        if key not in self._cache:
+            rows: dict[date, tuple[float | None, float]] = {}
+            for item in files:
+                filters = None if item == path else [("code", "=", code)]
+                table = pq.read_table(item, columns=["date", "open", "volume"], filters=filters)
+                for day, open_, volume in zip(table["date"].to_pylist(), table["open"].to_pylist(),
+                                              table["volume"].to_pylist(), strict=True):
+                    rows[day] = (float(open_) if open_ else None, float(volume or 0))
+            self._cache[key] = rows
         return self._cache[key]
 
     # --- the repository interface -------------------------------------------------------------
@@ -120,7 +163,16 @@ class ResearchPrices:
 
     def list_bars(self, symbol: str, interval: str = "1d", source: str | None = None,
                   as_of: datetime | None = None) -> list[Bar]:
-        return [Bar(symbol.upper(), _at(day, CLOSE), _at(day, PUBLISHED), close) for day, close in self.history(symbol, as_of)]
+        code, _, suffix = symbol.upper().partition(".")
+        closes = self.history(symbol, as_of)
+        if not closes:
+            return []
+        rows = self._ohlcv(code, "tpex" if suffix == "TWO" else "twse")
+        bars = []
+        for day, close in closes:
+            open_, volume = rows.get(day) or (self.today_rows(day).get(code) or (None, close, 0.0))[::2]
+            bars.append(Bar(symbol.upper(), _at(day, CLOSE), _at(day, PUBLISHED), close, open=open_, volume=volume))
+        return bars
 
     def latest_closes(self, symbols: list[str], as_of: datetime | None = None) -> dict[str, float]:
         output = {}

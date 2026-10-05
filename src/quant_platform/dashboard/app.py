@@ -629,7 +629,7 @@ def create_app(container: Container | None = None) -> Flask:
 
     app.jinja_env.globals["quality_value_display"] = quality_value_display
 
-    @app.get("/market")
+    @app.get("/market/legacy")       # S9-W05: /market is the new market overview (v2)
     def index() -> str:
         overview = dependencies.research_overview_service.get_overview()
         active_symbols = set(dependencies.research_universe_service.active_symbols())
@@ -1249,6 +1249,13 @@ def create_app(container: Container | None = None) -> Flask:
             flash(f"沙盒送單被拒絕：{exc}", "error")
         return redirect(url_for("promotion_overview"))
 
+    def back_to(default_endpoint: str):
+        """S9-W05: the holdings page posts here too and asks to come back (a local path only)."""
+        target = request.form.get("next", "")
+        if target.startswith("/") and not target.startswith("//") and "\\" not in target:
+            return redirect(target)
+        return redirect(url_for(default_endpoint))
+
     @app.post("/paper-trading/orders")
     def submit_paper_order():
         try:
@@ -1266,7 +1273,7 @@ def create_app(container: Container | None = None) -> Flask:
         except Exception as exc:
             app.logger.exception("Paper order submission failed")
             flash(f"模擬委託失敗：{exc}", "error")
-        return redirect(url_for("paper_trading_overview"))
+        return back_to("paper_trading_overview")
 
     @app.post("/paper-trading/process")
     def process_paper_orders():
@@ -1275,13 +1282,13 @@ def create_app(container: Container | None = None) -> Flask:
             f"待成交檢查完成：成交 {result.filled} 筆、拒絕 {result.rejected} 筆、仍等待 {result.pending} 筆。",
             "success",
         )
-        return redirect(url_for("paper_trading_overview"))
+        return back_to("paper_trading_overview")
 
     @app.post("/paper-trading/orders/<int:order_id>/cancel")
     def cancel_paper_order(order_id: int):
         cancelled = dependencies.paper_trading_service.cancel(order_id)
         flash("模擬委託已取消。" if cancelled else "只有待成交委託可以取消。", "success" if cancelled else "error")
-        return redirect(url_for("paper_trading_overview"))
+        return back_to("paper_trading_overview")
 
     @app.get("/news")
     def news_overview() -> str:
