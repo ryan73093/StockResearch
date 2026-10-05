@@ -1,0 +1,205 @@
+"""R15 stage B (2026-10-06): the supervised baseline — every factor combined by a gradient-boosted model.
+
+One model per year, walk-forward: the model that scores the sessions of year Y is trained only on weekly
+samples whose 20-session label ended before Y's first session (no label overlaps the year it scores).
+Features: each of the 30 factors as the stock's percentile among the eligible stocks that day (the same
+eligibility as the rules); missing chip data stays missing (the trees route it). Label: the percentile
+of the stock's next-20-session return (dividends reinvested) among the same stocks — a ranking target,
+so market-wide moves do not dominate. The settings are fixed in advance; tuning them would be more trials.
+
+The scores become a factor (``ml_gbm`` in research/daily.py MODEL_FACTORS): a rule holds the top N by
+score with the usual keep zone, minimum holding, industry cap and account, and is judged by the same
+gate. ``python -m quant_platform.research model`` trains, saves the yearly models and the out-of-sample
+diagnostics under ``research/models/<version>/``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import pickle
+from datetime import UTC, datetime
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+MODEL_VERSION = "gbm-1.0.0"
+HORIZON = 20                # sessions the label looks ahead
+STEP = 5                    # weekly training samples
+WARMUP = 252                # sessions before the factors are complete
+FIRST_YEAR = 2015
+PARAMS = {"max_iter": 300, "learning_rate": 0.05, "max_leaf_nodes": 31, "min_samples_leaf": 200,
+          "l2_regularization": 1.0, "random_state": 0}
+
+
+def features() -> tuple[str, ...]:
+    from quant_platform.research.daily import FACTOR_LABELS
+
+    return tuple(FACTOR_LABELS)
+
+
+def model_dir(history: str | Path) -> Path:
+    return Path(history).parent / "models" / MODEL_VERSION
+
+
+def eligibility(fp) -> np.ndarray:
+    """symbols × sessions: the rules' default eligibility (price, 20-session turnover, listing age)."""
+    from quant_platform.research.daily import DailyRule
+
+    rule = DailyRule(name="資格", factors={"trend_200": 1.0})
+    with np.errstate(invalid="ignore"):
+        return ((fp.panel.close >= rule.min_price) & (fp.turnover_20 >= rule.min_turnover)
+                & (fp.age >= rule.min_history))
+
+
+def _rank(values: np.ndarray) -> np.ndarray:
+    """Percentile within each row (NaN stays NaN), rows = sessions."""
+    return pd.DataFrame(values).rank(axis=1, pct=True).to_numpy(dtype=np.float32)
+
+
+def feature_block(fp, columns: list[int], eligible: np.ndarray) -> np.ndarray:
+    """len(columns) × symbols × features."""
+    names = features()
+    block = np.empty((len(columns), len(fp.symbols), len(names)), dtype=np.float32)
+    mask = eligible[:, columns].T
+    for index, name in enumerate(names):
+        values = np.where(mask, fp.matrix(name)[:, columns].T, np.nan)
+        block[:, :, index] = _rank(values)
+    return block
+
+
+def label_block(fp, columns: list[int], eligible: np.ndarray) -> np.ndarray:
+    """len(columns) × symbols: the percentile of the next HORIZON sessions' return (NaN past the data)."""
+    prices = fp.panel.filled
+    later = [column + HORIZON for column in columns]
+    valid = [column < prices.shape[1] for column in later]
+    output = np.full((len(columns), len(fp.symbols)), np.nan, dtype=np.float32)
+    rows = [index for index, ok in enumerate(valid) if ok]
+    if rows:
+        start = prices[:, [columns[index] for index in rows]].T
+        end = prices[:, [later[index] for index in rows]].T
+        with np.errstate(invalid="ignore", divide="ignore"):
+            returns = np.where(eligible[:, [columns[index] for index in rows]].T, end / start - 1, np.nan)
+        output[rows] = _rank(returns)
+    return output
+
+
+def sample_columns(sessions: int) -> list[int]:
+    return list(range(WARMUP, sessions, STEP))
+
+
+def training_columns(fp, samples: list[int], year: int) -> list[int]:
+    """The samples whose label window ends before the year's first session."""
+    first = next((index for index, day in enumerate(fp.sessions) if day.year >= year), len(fp.sessions))
+    return [column for column in samples if column + HORIZON < first]
+
+
+def _fit(features_: np.ndarray, labels: np.ndarray):
+    from sklearn.ensemble import HistGradientBoostingRegressor
+
+    rows = np.isfinite(labels)
+    x = features_[rows].copy()
+    # a factor with no value at all in the training years (chip data starts later) is held at the middle:
+    # the trees cannot bin an empty column, and a constant one is simply never used
+    x[:, ~np.isfinite(x).any(axis=0)] = 0.5
+    model = HistGradientBoostingRegressor(**PARAMS)
+    model.fit(x, labels[rows])
+    return model, int(rows.sum())
+
+
+def _spearman(left: np.ndarray, right: np.ndarray) -> float | None:
+    mask = np.isfinite(left) & np.isfinite(right)
+    if mask.sum() < 20:
+        return None
+    return float(pd.Series(left[mask]).rank().corr(pd.Series(right[mask]).rank()))
+
+
+def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] | None = None,
+          job=None) -> dict[str, object]:
+    """Fit and save one model per year; returns the out-of-sample diagnostics."""
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    eligible = eligibility(fp)
+    samples = sample_columns(len(fp.sessions))
+    x = feature_block(fp, samples, eligible)
+    y = label_block(fp, samples, eligible)
+    last_year = fp.sessions[-1].year
+    years = years or list(range(FIRST_YEAR, last_year + 1))
+    diagnostics = {}
+    for number, year in enumerate(years):
+        if job:
+            job.update(done=number, current=f"{year} 年的模型", force=True)
+        train_cols = training_columns(fp, samples, year)
+        if not train_cols:
+            continue
+        positions = [samples.index(column) for column in train_cols]
+        model, rows = _fit(x[positions].reshape(-1, x.shape[2]), y[positions].reshape(-1))
+        (out / f"{year}.pkl").write_bytes(pickle.dumps(model, protocol=5))
+        # out of sample: the year's own weekly samples (labels known by now)
+        tests = [index for index, column in enumerate(samples) if fp.sessions[column].year == year]
+        ics, tops = [], []
+        for index in tests:
+            if not np.isfinite(y[index]).any():
+                continue
+            live = np.isfinite(x[index]).any(axis=1)
+            if live.sum() < 20:
+                continue
+            predicted = np.full(len(fp.symbols), np.nan)
+            predicted[live] = model.predict(x[index][live])
+            ic = _spearman(predicted, y[index])
+            if ic is not None:
+                ics.append(ic)
+            ranked = np.isfinite(predicted) & np.isfinite(y[index])
+            if ranked.sum() >= 50:
+                cut = np.quantile(predicted[ranked], 0.8)
+                tops.append(float(np.nanmean(y[index][ranked & (predicted >= cut)]) - np.nanmean(y[index][ranked])))
+        diagnostics[str(year)] = {
+            "train_rows": rows, "train_until": fp.sessions[train_cols[-1] + HORIZON].isoformat(),
+            "weeks": len(ics), "ic": round(float(np.mean(ics)), 4) if ics else None,
+            "ic_positive": round(float(np.mean([value > 0 for value in ics])), 3) if ics else None,
+            "top_fifth_rank_gap": round(float(np.mean(tops)), 4) if tops else None,
+        }
+    meta = {"version": MODEL_VERSION, "params": PARAMS, "features": list(features()), "horizon": HORIZON,
+            "step": STEP, "data": data_fingerprint, "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "years": diagnostics}
+    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    return meta
+
+
+def digest(out_dir: str | Path) -> str:
+    """The saved models' hash (part of a model rule's trial input)."""
+    folder = Path(out_dir)
+    output = hashlib.sha256()
+    for path in sorted(folder.glob("*.pkl")) if folder.is_dir() else []:
+        output.update(path.name.encode())
+        output.update(hashlib.sha256(path.read_bytes()).digest())
+    return output.hexdigest()
+
+
+def scores(fp, out_dir: str | Path) -> np.ndarray:
+    """sessions × symbols: each session scored by the model of its year (the latest model after the last
+    trained year); NaN where the stock is not eligible or no model exists yet."""
+    folder = Path(out_dir)
+    output = np.full((len(fp.sessions), len(fp.symbols)), np.nan, dtype=np.float32)
+    models = {int(path.stem): path for path in folder.glob("*.pkl")} if folder.is_dir() else {}
+    if not models:
+        return output
+    eligible = eligibility(fp)
+    by_year: dict[int, list[int]] = {}
+    for column, day in enumerate(fp.sessions):
+        usable = [year for year in models if year <= day.year]
+        if usable:
+            by_year.setdefault(max(usable), []).append(column)
+    for year, columns in by_year.items():
+        model = pickle.loads(models[year].read_bytes())
+        for start in range(0, len(columns), 60):
+            part = columns[start: start + 60]
+            block = feature_block(fp, part, eligible)
+            live = np.isfinite(block).any(axis=2) & eligible[:, part].T
+            flat = block[live]
+            if len(flat):
+                predicted = np.full(live.shape, np.nan, dtype=np.float32)
+                predicted[live] = model.predict(flat)
+                output[part] = predicted
+    return output

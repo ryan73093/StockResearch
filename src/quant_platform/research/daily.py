@@ -79,6 +79,9 @@ TECHNICAL = {
 from quant_platform.research.chips import CHIP_FACTORS, ChipStore
 
 FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS}
+# R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
+MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、梯度提升、逐年滾動訓練）"}
+RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
 
@@ -119,7 +122,7 @@ class DailyRule(BaseModel):
     @classmethod
     def _known(cls, value: dict[str, float]) -> dict[str, float]:
         for name, weight in value.items():
-            if name not in FACTOR_LABELS:
+            if name not in RULE_FACTORS:
                 raise ValueError(f"未知因子：{name}")
             if not weight or abs(weight) > 3:
                 raise ValueError("因子權重要在 -3～3 之間且不為 0")
@@ -155,7 +158,7 @@ class DailyRule(BaseModel):
     def label(self) -> str:
         parts = []
         for name, weight in self.factors.items():
-            text = FACTOR_LABELS[name]
+            text = RULE_FACTORS[name]
             parts.append(("反向：" if weight < 0 else "") + text + (f"×{abs(weight):g}" if abs(weight) != 1 else ""))
         return "＋".join(parts)
 
@@ -166,8 +169,9 @@ class FactorPanel:
     windows on the dividend- and split-adjusted closes; ranking a day is then a column lookup."""
 
     def __init__(self, panel: Panel, industries: dict[str, str] | None = None, chips: ChipStore | None = None,
-                 market: np.ndarray | None = None) -> None:
+                 market: np.ndarray | None = None, models: Path | None = None) -> None:
         self.panel = panel
+        self.models = models                                  # R15-B: the yearly model files (ml_gbm)
         self.industries = industries or {}
         self.chips = chips
         self.sessions, self.index, self.symbols = panel.sessions, panel.index, panel.symbols
@@ -191,6 +195,12 @@ class FactorPanel:
         return self._cache[factor]
 
     def _compute(self, factor: str):
+        if factor in MODEL_FACTORS:
+            if self.models is None:
+                return np.full((len(self.sessions), len(self.symbols)), np.nan)
+            from quant_platform.research.model import scores
+
+            return scores(self, self.models)                      # sessions × symbols
         if factor in CHIP_FACTORS:
             if self.chips is None or not self.chips.available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
@@ -673,9 +683,11 @@ def market_closes(history: str | Path, sessions: list[date]) -> np.ndarray:
 def load(history: str | Path, universe: str = "twse") -> tuple[LegacyData, FactorPanel]:
     data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year, universe=universe)
     panel = Panel(data)
+    from quant_platform.research.model import model_dir
+
     return data, FactorPanel(panel, Industries(load_industries(history)),
                              ChipStore(history, panel.sessions, panel.symbols, panel.close),
-                             market_closes(history, panel.sessions))
+                             market_closes(history, panel.sessions), model_dir(history))
 
 
 def chips_digest(history: str | Path, until: date, universe: str = "twse") -> str:
@@ -717,6 +729,10 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
             "day_of_month": 5}
     payload = {"rule": rule.canonical(), "period": PERIOD, "costs": costs.as_dict(), "data": data_fingerprint,
                "engine": ENGINE_VERSION, "plan": plan}
+    if any(name in MODEL_FACTORS for name in rule.factors):     # R15-B: the trained models are part of the input
+        from quant_platform.research.model import MODEL_VERSION, digest, model_dir
+
+        payload["model"] = {"version": MODEL_VERSION, "digest": digest(model_dir(history))}
     input_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
     existing = registry.find("candidate", PERIOD, input_hash)
     if existing is not None:
@@ -724,6 +740,8 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
     report = evaluate(data, fp, rule, costs, benchmark_cache)
     report["data_fingerprint"] = data_fingerprint
     report["plan"] = plan
+    if "model" in payload:
+        report["model"] = payload["model"]
     stamp = stamp or datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     reports_dir.mkdir(parents=True, exist_ok=True)
     report_file = f"{PERIOD}-daily-{rule.rule_hash[:8]}-{stamp}.json"
@@ -858,5 +876,16 @@ def holdings_batch() -> list[DailyRule]:
     return rules
 
 
+def model_batch() -> list[DailyRule]:
+    """R15 stage B (2026-10-06): hold the top 20 by the walk-forward model's score, with the 30% industry
+    cap, alone and half in 0050, equal and inverse-volatility amounts (the one sizing that helped)."""
+    rules = []
+    for weighting, words in (("equal", ""), ("inverse_vol", "、依波動度配置")):
+        for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+            rules.append(DailyRule(name=f"每天 機器學習綜合分數：前 20 名、同產業最多 3 成{words}{word}",
+                                   factors={"ml_gbm": 1.0}, industry_cap=0.3, core=core, weighting=weighting))
+    return rules
+
+
 BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch,
-           "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch}
+           "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch}

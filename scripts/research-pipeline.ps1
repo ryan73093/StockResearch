@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with
 #   Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scripts\research-pipeline.ps1','-Name','seed'
@@ -37,6 +37,12 @@ switch ($Name) {
         }
         Invoke-Step "stats-twse" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "stats-all" @("-m", "quant_platform.research", "stats", "--family", "daily", "--universe", "all")
+    }
+    "model" {
+        # R15 stage B (2026-10-06): train the walk-forward models, run the model rules, the statistics.
+        Invoke-Step "1-train" @("-m", "quant_platform.research", "model")
+        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "model", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "factors-recent" { Invoke-Step "factors-recent" @("-m", "quant_platform.research", "factors", "--recent") }
     "archive" { Invoke-Step "archive" @("scripts/archive_legacy_tables.py") }

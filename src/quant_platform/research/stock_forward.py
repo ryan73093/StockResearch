@@ -226,10 +226,12 @@ class StockForwardTracker:
                 )
 
                 rule = DailyRule.model_validate(item["rule"])
+                from quant_platform.research.model import model_dir
+
                 factor_panel = factor_panel or FactorPanel(
                     panel, Industries(load_industries(self._history)),
                     ChipStore(self._history, panel.sessions, panel.symbols, panel.close),
-                    market_closes(self._history, panel.sessions))
+                    market_closes(self._history, panel.sessions), model_dir(self._history))
                 loaded[universe][3] = factor_panel
                 ranks = daily_rankings(factor_panel, rule, start, last)
                 run = simulate_daily(data, rule, self._costs, start, last, ranks, plan, ledger=ledger, snapshots=snapshots,
