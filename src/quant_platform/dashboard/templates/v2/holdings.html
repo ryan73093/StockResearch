@@ -33,7 +33,7 @@
         {% for item in actual.holdings %}
           {% set pnl_class = 'up' if (item.unrealized or 0) > 0 else ('down' if (item.unrealized or 0) < 0 else '') %}
           <tr>
-            <td data-primary><span class="symbol"><strong>{{ item.symbol }}</strong><span>{{ code_names.get(item.symbol, '') }}</span></span>{% if item.unrealized is not none %}<span class="stack-only num {{ pnl_class }}">{{ '{:+,.0f}'.format(item.unrealized) }} 元</span>{% endif %}</td>
+            <td data-primary><a class="symbol" href="/stock/{{ item.symbol.split('.')[0] }}"><strong>{{ item.symbol }}</strong><span>{{ code_names.get(item.symbol, '') }}</span></a>{% if item.unrealized is not none %}<span class="stack-only num {{ pnl_class }}">{{ '{:+,.0f}'.format(item.unrealized) }} 元</span>{% endif %}</td>
             <td class="num" data-label="股數">{{ '{:,}'.format(item.shares) }}</td>
             <td class="num" data-label="平均成本">{{ '{:,.2f}'.format(item.average_cost) }}</td>
             <td class="num" data-label="現價">{{ '{:,.2f}'.format(item.price) if item.price is not none else '—' }}</td>

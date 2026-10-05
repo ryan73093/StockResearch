@@ -1,0 +1,111 @@
+{% extends "v2/base.html" %}
+{% block title %}{% if page %}{{ page.item.name if page.item else '' }} {{ page.code }} · 個股{% else %}查個股{% endif %}{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    {% if page %}
+      <h1>{{ page.item.name if page.item else '' }} {{ page.code }}</h1>
+      <p class="page-head__sub">{% if page.item %}{{ page.item.exchange }}・{{ page.item.industry }}・{% endif %}行情到 {{ page.last_day or '—' }}</p>
+    {% else %}
+      <h1>查個股</h1>
+      <p class="page-head__sub">上市與上櫃普通股：K 線、30 個因子的全市場排名、前向觀察的規則有沒有持有</p>
+    {% endif %}
+  </div>
+  <form class="stock-search" action="/stock" method="get" role="search">
+    <label class="visually-hidden" for="stock-q">代號或名稱</label>
+    <input id="stock-q" name="q" type="search" value="{{ query }}" placeholder="代號或名稱，例如 2330、環球晶" autocomplete="off">
+    <button class="btn" type="submit">查詢</button>
+  </form>
+</header>
+{% endblock %}
+{% block content %}
+
+{% if not page %}
+<section class="card">
+  {% if missing %}
+    <p>找不到 {{ query }}：研究資料裡沒有這個代號的上市或上櫃普通股（ETF 請看今日與持倉頁）。</p>
+  {% elif query and not results %}
+    <p>沒有符合「{{ query }}」的股票。</p>
+  {% elif results %}
+    <div class="card__head"><h2>符合「{{ query }}」的股票 <span class="badge">{% if more %}只列前 20 檔，請打得更完整{% else %}{{ results|length }} 檔{% endif %}</span></h2></div>
+    <div class="tool-grid">
+      {% for item in results %}
+        <a class="tool" href="/stock/{{ item.code }}"><span class="tool__text"><strong>{{ item.code }} {{ item.name }}</strong><span>{{ item.exchange }}・{{ item.industry }}・收盤 {{ '{:,.2f}'.format(item.close) if item.close else '—' }}</span></span>{{ icon('arrow') }}</a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">輸入代號或名稱。資料是每個交易日 15:45 整理的全市場快照{% if snapshot_date %}（目前到 {{ snapshot_date }}）{% endif %}。</p>
+  {% endif %}
+</section>
+{% else %}
+
+{% set item = page.item %}
+<div class="kpis kpis--page kpis--four">
+  <div class="kpi"><div class="kpi__label">收盤（{{ page.last_day }}）</div>
+    <div class="kpi__value">{{ '{:,.2f}'.format(page.close) if page.close else '—' }}
+      {% if page.close and page.previous %}{% set change = page.close / page.previous - 1 %}<small class="{{ 'up' if change > 0 else ('down' if change < 0 else '') }}">{{ '{:+.2%}'.format(change) }}</small>{% endif %}</div></div>
+  <div class="kpi"><div class="kpi__label">近 20 日日均成交值</div><div class="kpi__value">{% if item and item.turnover_20 %}{{ '{:,.1f}'.format(item.turnover_20 / 1e8) }}<small>億</small>{% else %}—{% endif %}</div></div>
+  <div class="kpi"><div class="kpi__label">規則的基本資格</div><div class="kpi__value">{% if item %}{{ '符合' if item.eligible else '不符合' }}{% else %}—{% endif %}</div></div>
+  <div class="kpi"><div class="kpi__label">前向觀察的規則持有</div><div class="kpi__value">{{ page.holders|length }}<small>個規則</small></div></div>
+</div>
+
+<section class="card">
+  <div class="card__head"><h2>日 K 線（近 120 個交易日）</h2></div>
+  {% if page.chart %}
+  <svg class="candles" viewBox="0 0 {{ page.chart.width }} {{ page.chart.height }}" preserveAspectRatio="none" role="img" aria-label="{{ page.code }} 日 K 線">
+    {% for bar in page.chart.bodies %}
+      <g class="{{ 'up' if bar.up else 'down' }}">
+        <line class="wick" x1="{{ bar.x }}" x2="{{ bar.x }}" y1="{{ bar.high }}" y2="{{ bar.low }}"/>
+        <rect x="{{ bar.left }}" y="{{ bar.top }}" width="{{ bar.width }}" height="{{ bar.height }}"/>
+      </g>
+    {% endfor %}
+    {% if page.chart.ma20 %}<polyline class="ma20" points="{{ page.chart.ma20 }}"/>{% endif %}
+    {% if page.chart.ma60 %}<polyline class="ma60" points="{{ page.chart.ma60 }}"/>{% endif %}
+  </svg>
+  <div class="legend"><span><i style="background:var(--accent)"></i>20 日均線</span><span><i style="background:var(--warn)"></i>60 日均線</span><span>{{ page.chart.first }}～{{ page.chart.last }}，最高 {{ '{:,.2f}'.format(page.chart.high) }}、最低 {{ '{:,.2f}'.format(page.chart.low) }}</span></div>
+  <p class="note">紅漲綠跌；價格是當天實際成交價，沒有還原除權息（除權息日會出現缺口）。因子用的是還原後的價格。</p>
+  {% else %}
+  <p class="muted">行情不足兩天，畫不出 K 線。</p>
+  {% endif %}
+</section>
+
+{% if page.holders %}
+<section class="card">
+  <div class="card__head"><h2>前向觀察中持有它的規則</h2></div>
+  <ul class="reasons">
+    {% for holder in page.holders %}
+      <li><a href="/research/rules/{{ holder.rule_hash }}">{{ holder.name }}</a>：佔帳戶 {{ '{:.1%}'.format(holder.share) }}（{{ holder.date }}，{{ holder.since }} 起觀察）</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if item %}
+<p class="note" style="margin:0">排名：{{ page.snapshot_date }} 收盤後，和當天有成交、有這個因子數值的全部上市＋上櫃股票比；「前 5%」表示這個因子上比 95% 的股票強（低波動、不追飆股是越平穩排越前）。籌碼與基本面用 {{ page.snapshot_date }} 收盤前已公布的資料{% if page.chips_as_of %}，目前下載到 {{ page.chips_as_of }}{% endif %}；上櫃股的籌碼還在下載。「因子強弱」是研究頁因子分析的結論（2015-06 起每週排名、看之後 20 個交易日），不是對這檔股票的預測。</p>
+<div class="grid factor-grid">
+  {% for group in page.groups %}
+  <section class="card">
+    <div class="card__head"><h2>{{ group.title }}</h2></div>
+    <div class="table-wrap">
+      <table class="factor-table">
+        <thead><tr><th>因子（研究判定的強弱）</th><th class="num">數值</th><th class="num">排名</th></tr></thead>
+        <tbody>
+        {% for row in group.rows %}
+          <tr>
+            <td>{{ row.label }}{% if row.verdict %} <span class="badge {{ 'badge--ok' if row.verdict == '強' else ('badge--bad' if row.verdict == '反向' else '') }}">{{ row.verdict }}</span>{% endif %}</td>
+            <td class="num">{{ row.value }}</td>
+            <td class="num">{% if row.top %}前 {{ row.top }}%<span class="rankbar" aria-hidden="true"><i style="width:{{ (row.rank * 100)|round(0) }}%"></i></span>{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<section class="card"><p class="muted">今天的因子快照沒有這檔（可能當天沒有成交，或快照還沒建立）。</p></section>
+{% endif %}
+
+{% endif %}
+{% endblock %}

@@ -389,7 +389,7 @@
         <thead><tr><th>股票</th><th class="num">股數</th><th class="num">收盤</th><th class="num">市值（元）</th></tr></thead>
         <tbody>
         {% for item in row.holdings %}
-          <tr><td data-primary><strong>{{ item.code }}</strong> {{ item.name }}</td><td class="num" data-label="股數">{{ '{:,.2f}'.format(item.units) }}</td><td class="num" data-label="收盤">{{ item.close }}</td><td class="num" data-label="市值">{{ '{:,.0f}'.format(item.value) }}</td></tr>
+          <tr><td data-primary><a href="/stock/{{ item.code }}"><strong>{{ item.code }}</strong> {{ item.name }}</a></td><td class="num" data-label="股數">{{ '{:,.2f}'.format(item.units) }}</td><td class="num" data-label="收盤">{{ item.close }}</td><td class="num" data-label="市值">{{ '{:,.0f}'.format(item.value) }}</td></tr>
         {% endfor %}
         </tbody>
       </table>

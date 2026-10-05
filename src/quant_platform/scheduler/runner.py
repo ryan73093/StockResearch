@@ -346,6 +346,24 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
     return len(written)
 
 
+def build_stock_snapshot(container: "Container", now: datetime | None = None) -> object | None:
+    """S9-W05: at 15:45 on trading days, every stock's factors on the latest session for the stock page
+    (after the 15:16 quotes and the 15:30 forward record)."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.snapshot import build
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if _exchange_closure(container, "TW", local_now) is not None:
+        return None
+    research = _instance_dir(container.settings.database_url) / "research"
+    if not (research / "history" / "stocks" / "twse").is_dir():
+        return None
+    result = build(research / "history", research, local_now.date())
+    logger.info("Stock snapshot built: %s", result)
+    return result
+
+
 def fetch_official_close(container: "Container", now: datetime | None = None) -> object | None:
     """S9-W03: from 13:49 on trading days, fetch TWSE's all-market quotes for today (first seen 19–21
     minutes after the close) so Today's orders read today's close from the research price store."""
@@ -516,6 +534,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=30, timezone=timezone),
         id="forward_simulation",
         name="前向模擬紀錄（交易日 15:30）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3 * 3600,
+    )
+    scheduler.add_job(
+        build_stock_snapshot,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=45, timezone=timezone),
+        id="stock_snapshot",
+        name="個股因子快照（交易日 15:45，個股頁用）",
         replace_existing=True,
         coalesce=True,
         max_instances=1,

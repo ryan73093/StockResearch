@@ -619,3 +619,54 @@ td.wrap { white-space: normal; min-width: 180px; }
 .rule-chart .line-put { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--text-2); margin: 6px 0 0; }
 .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; }
+
+/* ---------- stock search and stock page (S9-W05, 2026-10-05) ---------- */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.sidesearch, .sidesearch-link { display: none; }
+@media (min-width: 768px) {
+  .sidesearch-link {
+    display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px;
+    font-size: 12px; color: var(--text-2); border-radius: 10px;
+  }
+  .sidesearch-link:hover { text-decoration: none; background: var(--surface-2); color: var(--text); }
+  .sidesearch-link .icon { width: 20px; height: 20px; }
+}
+@media (min-width: 1200px) {
+  .sidesearch-link { display: none; }
+  .sidesearch {
+    display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--muted);
+  }
+  .sidesearch:focus-within { border-color: var(--accent); }
+  .sidesearch .icon { width: 17px; height: 17px; flex: none; }
+  .sidesearch input { border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13.5px; width: 100%; outline: none; }
+}
+.stock-search { display: flex; gap: 8px; flex-wrap: wrap; }
+.stock-search input {
+  flex: 1 1 220px; min-width: 0; padding: 9px 12px; font: inherit; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+}
+.candles { width: 100%; height: auto; display: block; background: var(--surface-2); border-radius: var(--radius-sm); }
+.candles .wick { stroke-width: 1; }
+.candles .up { fill: var(--up); stroke: var(--up); }
+.candles .down { fill: var(--down); stroke: var(--down); }
+.candles .ma20 { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.candles .ma60 { fill: none; stroke: var(--warn); stroke-width: 1.5; }
+.rankbar { display: block; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 4px; min-width: 60px; }
+.rankbar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.factor-table td.num { white-space: nowrap; }
+.factor-table td:first-child { white-space: normal; min-width: 0; }
+.factor-table { width: 100%; }
+@media (max-width: 480px) {
+  .factor-table th, .factor-table td { padding-left: 6px; padding-right: 6px; font-size: 13px; }
+  .factor-table th:first-child, .factor-table td:first-child { padding-left: 18px; }
+  .factor-table th:last-child, .factor-table td:last-child { padding-right: 18px; }
+  .rankbar { min-width: 44px; }
+  .factor-table td.num:nth-child(2) { white-space: normal; }
+}
+@media (min-width: 1400px) { .factor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.page-head .stock-search { width: 100%; }
+.stock-search input { flex-basis: 160px; }
+@media (min-width: 768px) { .page-head .stock-search { width: auto; min-width: 340px; } }
+.kpi__value small.up { color: var(--up); }
+.kpi__value small.down { color: var(--down); }

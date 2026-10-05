@@ -299,7 +299,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors", "daily"),
+                            "forward", "factors", "daily", "snapshot"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -390,6 +390,12 @@ def main() -> int:
             print(f"{item['label']}：{item['verdict']}；{first.get('label')} 排序相關 {first.get('ic')}（t={first.get('t')}），"
                   f"前段比平均每年 {first.get('top_excess_year')}、比 0050 {first.get('top_vs_0050_year')}", flush=True)
         print(f"已寫入 {path}")
+        return 0
+
+    if args.command == "snapshot":          # S9-W05: the stock page's factor snapshot (worker 15:45)
+        from quant_platform.research.snapshot import build as build_snapshot
+
+        print(json.dumps(build_snapshot(Path(args.base), RESEARCH), ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "daily":

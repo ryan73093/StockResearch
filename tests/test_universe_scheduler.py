@@ -366,6 +366,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "forward_simulation",
             "official_close_fetch",
             "news_collection",
+            "stock_snapshot",
             "line_plan_advice",
             "research_agent",
             "weekly_research_report",

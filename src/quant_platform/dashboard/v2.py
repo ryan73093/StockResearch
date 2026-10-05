@@ -48,7 +48,7 @@ from quant_platform.research.reports import latest_reports, latest_stats, report
 logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.4.4"
+ASSET_VERSION = "2.5.3"
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {
@@ -122,7 +122,7 @@ TOOL_GROUPS = (
         "title": "市場與個股", "badge": "", "badge_class": "", "paused": False,
         "tools": (
             ("/market", "市場總覽（舊版）", "指標、K 線與跨資產熱圖"),
-            ("/stocks", "單股研究", "K 線、特徵、預測與回測"),
+            ("/stock", "個股（新版）", "K 線、30 個因子的全市場排名、前向觀察持有；舊版單股研究在 /stocks"),
             ("/universe", "股票池", "新增、停用與排程標的"),
         ),
     },
@@ -764,6 +764,54 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         if detail is None:
             abort(404)
         return jsonify(detail)
+
+    def _stock_context(research_dir: Path) -> tuple[dict | None, dict[str, str]]:
+        from quant_platform.research.snapshot import load as load_snapshot
+
+        report = latest_factor_strength(research_dir / "factors")
+        verdicts = {}
+        if report and report.get("design") == "recent":
+            verdicts = {row["factor"]: row["verdict"] for row in factor_table(report)}
+        return load_snapshot(research_dir), verdicts
+
+    @blueprint.get("/stock")
+    def stock_search():
+        """S9-W05: find a stock by code or name (listed and TPEx)."""
+        from quant_platform.research.snapshot import search
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        query = (request.args.get("q") or "").strip()
+        snapshot, _verdicts = _stock_context(research_dir)
+        results = search(snapshot, query, limit=21) if query else []
+        if results and (len(results) == 1 or results[0]["code"] == query.upper()):
+            return redirect(url_for("v2.stock_page", code=results[0]["code"]))
+        return render_template("v2/stock.html", active_nav="research", page=None, query=query, results=results[:20],
+                               more=len(results) > 20, snapshot_date=(snapshot or {}).get("date"))
+
+    @blueprint.get("/stock/<code>")
+    def stock_page(code: str):
+        """S9-W05 (2026-10-05): one stock's daily candles, every factor's value and market rank on the
+        latest session (the nightly snapshot), and which forward-observed rules hold it."""
+        from quant_platform.research.snapshot import view as stock_view
+
+        code = code.upper().removesuffix(".TWO").removesuffix(".TW")
+        if not re.fullmatch(r"[0-9A-Z]{4,6}", code):
+            abort(404)
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        snapshot, verdicts = _stock_context(research_dir)
+        holders = []
+        for row in StockForwardTracker(research_dir).summary():
+            for item in row["holdings"]:
+                if item.get("code") == code and row["value"]:
+                    value = float(item.get("units") or 0) * float(item.get("close") or 0)
+                    holders.append({"name": row["name"], "rule_hash": row["rule_hash"], "since": row["since"],
+                                    "share": value / row["value"], "date": row["date"]})
+        page = stock_view(research_dir / "history", research_dir, code, snapshot, holders, verdicts)
+        if page is None:
+            return render_template("v2/stock.html", active_nav="research", page=None, query=code, results=[],
+                                   snapshot_date=(snapshot or {}).get("date"), missing=True), 404
+        return render_template("v2/stock.html", active_nav="research", page=page, query="", results=[],
+                               snapshot_date=(snapshot or {}).get("date"))
 
     @blueprint.get("/research/jobs.json")
     def research_jobs_json():

@@ -254,6 +254,7 @@ flowchart LR
 | `scripts/archive_legacy_tables.py` | 舊研究資料表只讀封存到 `instance/archive/legacy/*.parquet`，`manifest.json` 記錄筆數與雜湊（S9-W06） |
 | `research/news.py` | 新聞收集（R15/R16）：worker `news_collection` 交易日 14:40 收前一個交易日、成交值前 150 檔與前向觀察持股的新聞（FinMind，一檔一天一次），存 `history/raw/finmind/TaiwanStockNews/<日期>/<代號>.json.gz`；只收集、還不用來決策 |
 | `research/prices.py` | 單一行情來源（S9-W03）：`ResearchPrices`（ETF 日線、全市場上市股與上櫃股（`.TWO`）、當天 MI_INDEX 收盤）提供 `list_bars`／`latest_closes`／`latest_market_date`；`FallbackPrices` 研究資料優先、舊 SQLite 日線備援；`fetch_today_close` 由 worker `official_close_fetch`（交易日 13:49～14:25 每分鐘，到手即停）呼叫 |
+| `research/snapshot.py` | 個股頁（S9-W05）：`build` 載入近 3 年上市＋上櫃行情與籌碼，算最新完整交易日（有行情的檔數達近 20 天最多的八成）每檔 30 個因子的數值與全市場百分位，存 `research/snapshots/stocks-latest.json`（約 3 MB、20 秒）；worker `stock_snapshot` 交易日 15:45、CLI `python -m quant_platform.research snapshot`；`load`（依檔案時間快取）、`search`、`stock_bars`（兩個市場的日線）、`view`、`candles`（K 線 SVG 幾何）。網頁 `/stock`、`/stock/<代號>`（`v2/stock.html`） |
 | `research/jobs.py` | 長時間研究程式的登錄（`instance/research/jobs/*.json`）：名稱、進度、預計完成、狀態；研究頁「執行中的程式」與 `/research/jobs.json`；背景執行用 `scripts/research-pipeline.ps1` |
 | `research/factors.py` | 因子強弱分析：每月排序相關與前後五分之一報酬，分期間報告與判定；`python -m quant_platform.research factors` |
 | `research/history/finmind.py` | FinMind 免費等級的籌碼與基本面（外資持股、月營收、本益比、融資融券、三大法人），每檔一次、可續傳、避開平日 13:30–15:30；`python -m quant_platform.research.history finmind` |
