@@ -252,6 +252,7 @@ flowchart LR
 | `research/daily.py` | 新設計（S9-W02）：每天決策的規則（`DailyRule`）、因子矩陣（19 個價格、成交與技術指標因子）、排名與保留、帳戶模擬（啟動資金＋每月、核心 0050、每筆最低金額）、2015-06 起與 2020-10 起、滾動 1／3 年視窗、門檻、登錄（期間 `recent`）；`python -m quant_platform.research daily --name factors` |
 | `scripts/slim-legacy-tables.ps1`、`scripts/slim_legacy_tables.py` | 資料庫瘦身（S9-W06）：停服務、複製備份到 `instance/backups/pre-slim-<時間>/`、筆數與封存一致才清空 12 張舊研究結果表、VACUUM、一定重新啟動服務；紀錄在 `instance/research/logs/slim-<時間>.log`。回復：停服務後把備份資料夾的檔案複製回 `instance/` |
 | `scripts/archive_legacy_tables.py` | 舊研究資料表只讀封存到 `instance/archive/legacy/*.parquet`，`manifest.json` 記錄筆數與雜湊（S9-W06） |
+| `research/news.py` | 新聞收集（R15/R16）：worker `news_collection` 交易日 14:40 收前一個交易日、成交值前 150 檔與前向觀察持股的新聞（FinMind，一檔一天一次），存 `history/raw/finmind/TaiwanStockNews/<日期>/<代號>.json.gz`；只收集、還不用來決策 |
 | `research/prices.py` | 單一行情來源（S9-W03）：`ResearchPrices`（ETF 日線、全市場上市股、當天 MI_INDEX 收盤）提供 `list_bars`／`latest_closes`／`latest_market_date`；`FallbackPrices` 研究資料優先、舊 SQLite 日線備援；`fetch_today_close` 由 worker `official_close_fetch`（交易日 13:49～14:25 每分鐘，到手即停）呼叫 |
 | `research/jobs.py` | 長時間研究程式的登錄（`instance/research/jobs/*.json`）：名稱、進度、預計完成、狀態；研究頁「執行中的程式」與 `/research/jobs.json`；背景執行用 `scripts/research-pipeline.ps1` |
 | `research/factors.py` | 因子強弱分析：每月排序相關與前後五分之一報酬，分期間報告與判定；`python -m quant_platform.research factors` |

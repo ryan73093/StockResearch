@@ -359,10 +359,38 @@ def fetch_official_close(container: "Container", now: datetime | None = None) ->
     base = _instance_dir(container.settings.database_url) / "research" / "history"
     if not (base / "manifest.json").is_file():
         return None
+    from quant_platform.research.prices import ResearchPrices
+
+    if len(ResearchPrices(base).today_quotes(local_now.date())) > 500:
+        return None                                   # already have today's table: nothing to log
     count = fetch_today_close(base, local_now.date())
     if count:
         logger.info("Official close for %s: %s codes", local_now.date(), count)
     return count
+
+
+def collect_news(container: "Container", now: datetime | None = None) -> object | None:
+    """R15/R16 (2026-10-05): at 14:40 on trading days, the previous trading day's news of the most traded
+    listed stocks and the forward holdings (FinMind, one request per stock); kept for the LLM analyst."""
+    from datetime import timedelta
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.jobs import JobLog
+    from quant_platform.research.news import candidates, collect
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if _exchange_closure(container, "TW", local_now) is not None or not container.settings.finmind_token:
+        return None
+    research = _instance_dir(container.settings.database_url) / "research"
+    base = research / "history"
+    if not (base / "stocks" / "twse").is_dir():
+        return None
+    calendar = container.market_calendar.calendar("TW")
+    day = calendar.previous_trading_day(local_now.date() - timedelta(days=1))
+    codes = candidates(base, research, day)
+    with JobLog(research).start(f"收集新聞（{day}，{len(codes)} 檔）", "scheduler collect_news") as job:
+        return collect(base, day, codes, container.settings.finmind_token, job=job)
 
 
 def run_research_agent(container: "Container") -> object | None:
@@ -466,6 +494,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=50,
+    )
+    scheduler.add_job(
+        collect_news,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=14, minute=40, timezone=timezone),
+        id="news_collection",
+        name="收集新聞（交易日 14:40，前一個交易日、成交值前 150 檔與前向觀察持股）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3 * 3600,
     )
     scheduler.add_job(
         record_forward_simulation,

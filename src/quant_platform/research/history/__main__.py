@@ -53,7 +53,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
                                             "chips"))
-    parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部")
+    parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報")
+    parser.add_argument("--codes", default="twse", choices=("twse", "tpex", "all", "lists"),
+                        help="finmind：上市、上櫃、全部，或 lists（下市清單、股票基本資料、期貨法人部位）")
     parser.add_argument("--exchange", default="twse,tpex", help="stocks：twse、tpex 或兩者")
     parser.add_argument("--from-year", type=int, default=2004, help="stocks：起始年")
     parser.add_argument("--every", type=int, default=5, help="oddlot：每幾個交易日抽樣一次")
@@ -136,16 +138,29 @@ def main() -> int:
 
     if args.command == "finmind":
         from quant_platform.config import Settings
-        from quant_platform.research.history.finmind import DATASETS, fetch_all, stock_codes
+        from quant_platform.research.history.finmind import (
+            DATASETS, STATEMENTS, fetch_all, fetch_lists, stock_codes, tpex_codes,
+        )
         from quant_platform.research.jobs import JobLog
 
         token = Settings.from_env().finmind_token
         if not token:
             print("沒有 FINMIND_TOKEN（.env）", file=sys.stderr)
             return 2
-        datasets = [item.strip() for item in (args.datasets or ",".join(DATASETS)).split(",") if item.strip()]
-        codes = stock_codes(base)
-        with JobLog(base.parent).start(f"下載籌碼與基本面（FinMind，{len(datasets)} 種 × {len(codes)} 檔）",
+        if args.codes == "lists":
+            with JobLog(base.parent).start("下載清單資料（FinMind：下市、股票基本資料、期貨法人部位）",
+                                           "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
+                counts = fetch_lists(base, token)
+                job.payload["summary"] = "、".join(f"{key} {value:,} 列" for key, value in counts.items())
+            print(json.dumps(counts, ensure_ascii=False), flush=True)
+            return 0
+        text = args.datasets or ",".join(DATASETS)
+        text = text.replace("statements", ",".join(STATEMENTS))
+        datasets = [item.strip() for item in text.split(",") if item.strip()]
+        codes = {"twse": stock_codes(base), "tpex": tpex_codes(base),
+                 "all": sorted(set(stock_codes(base)) | set(tpex_codes(base)))}[args.codes]
+        market = {"twse": "上市", "tpex": "上櫃", "all": "上市＋上櫃"}[args.codes]
+        with JobLog(base.parent).start(f"下載 FinMind（{market}，{len(datasets)} 種 × {len(codes)} 檔：{'、'.join(datasets)}）"[:120],
                                        "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
             result = fetch_all(base, token, codes, datasets, job=job)
         print(json.dumps(result, ensure_ascii=False)[:2000], flush=True)

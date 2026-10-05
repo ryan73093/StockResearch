@@ -1,4 +1,4 @@
-param([ValidateSet("daily", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with
 #   Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scripts\research-pipeline.ps1','-Name','seed'
@@ -21,6 +21,13 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
 }
 
 switch ($Name) {
+    "data-a" {
+        # R15 stage A (2026-10-05): lists, TPEx prices, quarterly statements (listed and TPEx), TPEx chips.
+        Invoke-Step "1-lists" @("-m", "quant_platform.research.history", "finmind", "--codes", "lists")
+        Invoke-Step "2-tpex-prices" @("-m", "quant_platform.research.history", "finmind", "--codes", "tpex", "--datasets", "TaiwanStockPrice")
+        Invoke-Step "3-statements" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "statements")
+        Invoke-Step "4-tpex-chips" @("-m", "quant_platform.research.history", "finmind", "--codes", "tpex")
+    }
     "daily" {
         # The new design (S9-W02): 2015-06 onward, decisions every trading day, the owner's account.
         Invoke-Step "factors" @("-m", "quant_platform.research", "daily", "--name", "factors", "--broker", "cathay")

@@ -42,6 +42,13 @@ DATASETS = {
     "TaiwanStockMarginPurchaseShortSale": "融資融券",
     "TaiwanStockInstitutionalInvestorsBuySell": "三大法人買賣超",
 }
+STATEMENTS = ("TaiwanStockFinancialStatements", "TaiwanStockBalanceSheet", "TaiwanStockCashFlowsStatement")
+PRICES = "TaiwanStockPrice"          # raw (unadjusted) daily prices; used for TPEx stocks (R6)
+LISTS = {                            # one request each: dataset -> data ids ("" = the whole list)
+    "TaiwanStockDelisting": ("",),
+    "TaiwanStockInfo": ("",),
+    "TaiwanFuturesInstitutionalInvestors": ("TX", "MTX", "TE", "TF"),
+}
 PER_HOUR = 560                     # under the free tier's 600 an hour, with room for other users of the token
 QUIET = (clock_time(13, 30), clock_time(15, 30))
 
@@ -76,6 +83,50 @@ def http_get(dataset: str, code: str, token: str, end: date) -> dict[str, object
     if payload.get("status") in (402, 429):
         raise QuotaReached(str(payload.get("msg")))
     return payload
+
+
+def tpex_codes(base: Path) -> list[str]:
+    """TPEx common stocks: today's (TaiwanStockInfo type tpex) and delisted codes TWSE never quoted
+    since 2004 (the delisting list does not say which market; FinMind answers empty for a code it lacks)."""
+    info_path = base / "raw" / "finmind" / "TaiwanStockInfo.json"
+    rows = (json.loads(info_path.read_text(encoding="utf-8")).get("data") or []) if info_path.is_file() else []
+    current = {str(row["stock_id"]) for row in rows if row.get("type") == "tpex"}
+    delisted = {str(row.get("stock_id")) for row in read_rows(base, "TaiwanStockDelisting", "all")}
+    listed = set(stock_codes(base))
+
+    def common(code: str) -> bool:
+        return len(code) == 4 and code.isdigit() and code[0] not in "09"
+
+    return sorted(code for code in current | (delisted - listed) if common(code))
+
+
+def fetch_lists(base: Path, token: str, get: Callable[[str], dict] | None = None,
+                sleep: Callable[[float], None] = time.sleep) -> dict[str, int]:
+    """The list datasets (delisting, stock info, futures positioning by contract): one request each."""
+    def default(query: str) -> dict:
+        request = urllib.request.Request(f"{URL}?{query}", headers={"Authorization": f"Bearer {token}",
+                                                                     "User-Agent": "StockResearch/1.0"})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    get = get or default
+    counts = {}
+    for dataset, ids in LISTS.items():
+        for data_id in ids:
+            query = urllib.parse.urlencode({"dataset": dataset, **({"data_id": data_id, "start_date": "2000-01-01"}
+                                                                   if data_id else {})})
+            payload = get(query)
+            rows = payload.get("data") or []
+            path = path_for(base, dataset, data_id or "all")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(gzip.compress(json.dumps({"dataset": dataset, "code": data_id, "data": rows},
+                                                      ensure_ascii=False).encode("utf-8")))
+            if dataset == "TaiwanStockInfo":       # the industry map reads the plain JSON
+                (base / "raw" / "finmind" / "TaiwanStockInfo.json").write_text(
+                    json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            counts[f"{dataset}:{data_id or 'all'}"] = len(rows)
+            sleep(3)
+    return counts
 
 
 def stock_codes(base: Path) -> list[str]:
