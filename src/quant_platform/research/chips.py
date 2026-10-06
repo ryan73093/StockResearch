@@ -58,13 +58,17 @@ OFFICIAL = {"TaiwanStockShareholding": "holding", "TaiwanStockPER": "per",
 
 def _add_official(base: Path, dataset: str, columns: dict[str, list]) -> int:
     """S9-W04 (2026-10-06): the exchanges' daily reports for the (day, code) pairs FinMind's files lack."""
-    from quant_platform.research.history.chips_daily import cached_rows
+    from quant_platform.research.history.chips_daily import cached_revenue_rows, cached_rows
 
-    if dataset not in OFFICIAL:
+    if dataset == "TaiwanStockMonthRevenue":
+        rows = cached_revenue_rows(base)          # the month's first table that lists the company
+    elif dataset in OFFICIAL:
+        rows = cached_rows(base, OFFICIAL[dataset])
+    else:
         return 0
     seen = set(zip(columns["date"], columns["code"], strict=True))
     added = 0
-    for row in cached_rows(base, OFFICIAL[dataset]):
+    for row in rows:
         if (row["date"], row["code"]) in seen:
             continue
         seen.add((row["date"], row["code"]))

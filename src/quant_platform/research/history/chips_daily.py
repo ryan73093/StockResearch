@@ -15,8 +15,13 @@ day by day from these reports, four requests per exchange and session:
 | TaiwanStockInstitutionalInvestorsBuySell | fund/T86 | insti/dailyTrade |
 
 The raw replies are cached under ``raw/official_chips/`` (a session's copy is requested again once after
-it closed); ``research/chips.py`` adds their rows for the days the FinMind files do not have. Monthly
-revenue is not here (it comes once a month).
+it closed); ``research/chips.py`` adds their rows for the days the FinMind files do not have.
+
+Monthly revenue (2026-10-06): the exchanges' open data publish the latest month's table for every listed
+(TWSE t187ap05_L) and TPEx (mopsfin_t187ap05_O) company, in thousands of NT$, with the date the table was
+compiled (出表日期). It is fetched with the chips every night and each distinct table (month and
+compilation date) kept under ``raw/official_revenue/``; a company's month is usable from the first table
+that lists it — later than the company's own announcement that FinMind dates, so never early.
 """
 
 from __future__ import annotations
@@ -141,6 +146,75 @@ def fetch(base: Path, client: OfficialHistoryClient, sessions: Iterable[date], t
                     parse(exchange, dataset, payload, day))
     return {"sessions": len(days), "first": days[0].isoformat() if days else None,
             "last": days[-1].isoformat() if days else None, "rows": counts, "requests": client.requests}
+
+
+REVENUE = {"twse": "https://openapi.twse.com.tw/v1/opendata/t187ap05_L",
+           "tpex": "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"}
+
+
+def _roc_date(text: object) -> date | None:
+    digits = str(text or "").strip()
+    if len(digits) != 7 or not digits.isdigit():
+        return None
+    try:
+        return date(int(digits[:3]) + 1911, int(digits[3:5]), int(digits[5:7]))
+    except ValueError:
+        return None
+
+
+def parse_revenue(payload: object) -> list[dict[str, object]]:
+    """Rows in the chips revenue columns: the month (its first day), code, available (the table's
+    compilation date, not before the month's 28th), revenue in NT$, year, month."""
+    rows = []
+    for item in payload if isinstance(payload, list) else []:
+        code = str(item.get("公司代號") or "").strip()
+        month_text = str(item.get("資料年月") or "").strip()
+        compiled = _roc_date(item.get("出表日期"))
+        revenue = _value(item.get("營業收入-當月營收"))
+        if not STOCK.match(code) or len(month_text) != 5 or not month_text.isdigit() or compiled is None or revenue is None:
+            continue
+        year, month = int(month_text[:3]) + 1911, int(month_text[3:])
+        if not 1 <= month <= 12:
+            continue
+        rows.append({"date": date(year, month, 1), "code": code, "available": max(compiled, date(year, month, 28)),
+                     "revenue": revenue * 1000.0, "year": year, "month": month})
+    return rows
+
+
+def fetch_revenue(base: Path, client: OfficialHistoryClient) -> dict[str, object]:
+    """Keep each distinct revenue table (month × compilation date) the exchanges publish."""
+    import json
+
+    saved = {}
+    for exchange, address in REVENUE.items():
+        payload = client._request(address)
+        rows = parse_revenue(payload)
+        if not rows:
+            saved[exchange] = 0
+            continue
+        month = max(row["date"] for row in rows)
+        compiled = max(row["available"] for row in rows)
+        path = Path(base) / "raw" / "official_revenue" / exchange / f"{month:%Y%m}-{compiled:%Y%m%d}.json"
+        if not path.is_file():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            partial = path.with_suffix(".json.partial")
+            partial.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            partial.replace(path)
+        saved[exchange] = len(rows)
+    return saved
+
+
+def cached_revenue_rows(base: Path) -> Iterator[dict[str, object]]:
+    """Every kept revenue table's rows, earliest compilation first (so the first sighting wins)."""
+    import json
+
+    folder = Path(base) / "raw" / "official_revenue"
+    paths = sorted(folder.rglob("*.json"), key=lambda path: path.stem.split("-")[-1]) if folder.is_dir() else []
+    for path in paths:
+        try:
+            yield from parse_revenue(json.loads(path.read_text(encoding="utf-8")))
+        except ValueError:
+            continue
 
 
 def cached_rows(base: Path, dataset: str) -> Iterator[dict[str, object]]:

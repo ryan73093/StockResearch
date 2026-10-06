@@ -114,3 +114,12 @@ def test_the_excess_return_model_finds_the_planted_signal(tmp_path):
     fp_model = FactorPanel(Panel(data), models=tmp_path)
     held = daily_rankings(fp_model, rule, fp.sessions[-5], fp.sessions[-1])[fp.sessions[-1]]
     assert np.mean([drifts[int(symbol[:4]) - 1101] for symbol in held]) > 0.001
+
+
+def test_a_year_added_later_keeps_the_other_years(tmp_path):
+    data, _drifts = planted(stocks=30)
+    fp = FactorPanel(Panel(data))
+    model.train(fp, tmp_path, "data:x", [2015])
+    first = (tmp_path / "2015.pkl").read_bytes()
+    meta = model.train(fp, tmp_path, "data:y", [2016])
+    assert set(meta["years"]) == {"2015", "2016"} and (tmp_path / "2015.pkl").read_bytes() == first

@@ -192,11 +192,42 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
             "top_fifth_gain": round(float(np.mean(fifth_gains)), 4) if fifth_gains else None,
             "top20_gain": round(float(np.mean(top20_gains)), 4) if top20_gains else None,
         }
+    meta_path = out / "meta.json"
+    earlier = {}
+    if meta_path.is_file():                  # a year added later keeps the other years' diagnostics
+        try:
+            earlier = json.loads(meta_path.read_text(encoding="utf-8")).get("years") or {}
+        except ValueError:
+            earlier = {}
     meta = {"version": version, "label": label, "params": PARAMS, "features": list(features()), "horizon": HORIZON,
             "step": STEP, "data": data_fingerprint, "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "years": diagnostics}
+            "years": dict(sorted({**earlier, **diagnostics}.items()))}
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     return meta
+
+
+def train_year(history: str | Path, version: str, year: int, job=None) -> dict[str, object]:
+    """The model that scores ``year``, trained on everything up to that year's first session (the yearly
+    retrain, 2026-10-06); the version's other years stay as they are."""
+    from quant_platform.research.daily import (
+        RECENT_START,
+        ChipStore,
+        FactorPanel,
+        Industries,
+        load_industries,
+        market_closes,
+    )
+    from quant_platform.research.stock_rules import WARMUP_YEARS, Panel, load_stock_data, stock_fingerprint
+
+    history = Path(history)
+    first = RECENT_START.year - WARMUP_YEARS
+    data = load_stock_data(history, first, year)
+    panel = Panel(data)
+    fp = FactorPanel(panel, Industries(load_industries(history)), ChipStore(history, panel.sessions, panel.symbols, panel.close),
+                     market_closes(history, panel.sessions))
+    fingerprint = stock_fingerprint(history, first, year)
+    return train(fp, model_dir(history, version), fingerprint, [year], job=job, label=VERSIONS[version]["label"],
+                 version=version)
 
 
 def digest(out_dir: str | Path) -> str:

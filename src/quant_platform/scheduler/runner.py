@@ -356,7 +356,7 @@ def update_chips(container: "Container", now: datetime | None = None) -> object 
 
     from quant_platform.container import _instance_dir
     from quant_platform.research.chips import build
-    from quant_platform.research.history.chips_daily import fetch
+    from quant_platform.research.history.chips_daily import fetch, fetch_revenue
     from quant_platform.research.history.official import OfficialHistoryClient
     from quant_platform.research.jobs import JobLog
 
@@ -379,13 +379,50 @@ def update_chips(container: "Container", now: datetime | None = None) -> object 
     with JobLog(research).start(f"每晚籌碼（官方日報，{len(sessions)} 個交易日）", "scheduler update_chips",
                                 total=2) as job:
         job.update(done=0, current="證交所與櫃買日報", force=True)
-        fetched = fetch(base, OfficialHistoryClient(base / "raw"), sessions, local_now.date())
+        client = OfficialHistoryClient(base / "raw")
+        fetched = fetch(base, client, sessions, local_now.date())
+        try:
+            fetched["revenue"] = fetch_revenue(base, client)        # the latest month's table (2 requests)
+        except Exception:  # a failed revenue table must not stop the chips
+            logger.exception("Monthly revenue table failed")
         job.update(done=1, current="重建籌碼檔", force=True)
         written = build(base)
         job.update(done=2, force=True)
         job.payload["summary"] = f"{fetched['first']}～{fetched['last']}；請求 {fetched['requests']} 次"
     logger.info("Chips updated: %s; %s", fetched, written)
     return fetched
+
+
+def retrain_models(container: "Container", now: datetime | None = None) -> object | None:
+    """Every trading day at 22:45: a model that a forward-observed rule uses and that has no model for this
+    year yet gets one (trained on everything before the year's first session). Once a year in practice."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.daily import MODEL_FACTORS
+    from quant_platform.research.jobs import JobLog
+    from quant_platform.research.model import MODELS, model_dir, train_year
+    from quant_platform.research.stock_forward import StockForwardTracker
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if _exchange_closure(container, "TW", local_now) is not None:
+        return None
+    research = _instance_dir(container.settings.database_url) / "research"
+    base = research / "history"
+    used = {name for item in StockForwardTracker(research).tracked() if item.get("kind") == "daily"
+            for name in (item.get("rule") or {}).get("factors", {}) if name in MODEL_FACTORS}
+    trained = []
+    for name in sorted(used):
+        version = MODELS[name]["version"]
+        if (model_dir(base, version) / f"{local_now.year}.pkl").is_file():
+            continue
+        with JobLog(research).start(f"重訓機器學習模型（{version}，{local_now.year} 年）", "scheduler retrain_models",
+                                    total=1) as job:
+            meta = train_year(base, version, local_now.year, job=job)
+            job.payload["summary"] = f"{local_now.year} 年模型：訓練 {meta['years'].get(str(local_now.year), {}).get('train_rows')} 筆"
+        trained.append(version)
+    if trained:
+        logger.info("Models retrained for %s: %s", local_now.year, trained)
+    return trained
 
 
 def build_stock_snapshot(container: "Container", now: datetime | None = None) -> object | None:
@@ -580,6 +617,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3 * 3600,
+    )
+    scheduler.add_job(
+        retrain_models,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=22, minute=45, timezone=timezone),
+        id="model_retrain",
+        name="機器學習模型年度重訓（交易日 22:45 檢查，新的一年才訓練）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
         update_chips,

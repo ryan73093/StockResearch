@@ -94,3 +94,36 @@ def test_reports_fill_the_days_finmind_lacks(tmp_path):
                       (date(2026, 10, 2), "6488"): 40.0, (DAY, "6488"): 40.0}
     flows = pq.read_table(base / "chips" / "TaiwanStockInstitutionalInvestorsBuySell.parquet").to_pylist()
     assert {(row["code"], row["foreign_net"]) for row in flows if row["date"] == DAY} == {("2330", -5_913_874), ("6488", -862_867)}
+
+
+def revenue_row(code, month="11508", compiled="1150917", revenue="514805337"):
+    return {"出表日期": compiled, "資料年月": month, "公司代號": code, "公司名稱": "x", "營業收入-當月營收": revenue}
+
+
+def test_monthly_revenue_tables_keep_the_first_day_each_company_appears(tmp_path):
+    from quant_platform.research.history.chips_daily import fetch_revenue, parse_revenue
+
+    assert parse_revenue([revenue_row("2330"), revenue_row("00878"), revenue_row("1101", revenue="-")]) == [
+        {"date": date(2026, 8, 1), "code": "2330", "available": date(2026, 9, 17), "revenue": 514_805_337_000.0,
+         "year": 2026, "month": 8}]
+    base = tmp_path / "history"
+    finmind = base / "raw" / "finmind" / "TaiwanStockMonthRevenue"
+    finmind.mkdir(parents=True)
+    (finmind / "2330.json.gz").write_bytes(gzip.compress(json.dumps({"data": [
+        {"revenue_year": 2026, "revenue_month": 8, "revenue": 514_805_337_000, "create_time": "2026-09-10"}]}).encode()))
+    tables = {"twse": [[revenue_row("2330"), revenue_row("1101", revenue="13515534")],
+                       [revenue_row("2330", compiled="1150920"), revenue_row("1101", compiled="1150920", revenue="13515534"),
+                        revenue_row("1102", compiled="1150920", revenue="100")]],
+              "tpex": [[revenue_row("6488", revenue="4764363")], [revenue_row("6488", revenue="4764363")]]}
+    for night in (0, 1):
+        client = OfficialHistoryClient(base / "raw", min_interval=0,
+                                       fetch_json=lambda url, night=night: tables["twse" if "twse" in url else "tpex"][night])
+        fetch_revenue(base, client)
+    kept = sorted(path.name for path in (base / "raw" / "official_revenue").rglob("*.json"))
+    assert kept == ["202608-20260917.json", "202608-20260917.json", "202608-20260920.json"]
+    build(base)
+    rows = {row["code"]: row for row in pq.read_table(base / "chips" / "TaiwanStockMonthRevenue.parquet").to_pylist()}
+    assert rows["2330"]["available"] == date(2026, 9, 10)                 # FinMind's own announcement date stays
+    assert rows["1101"]["available"] == date(2026, 9, 17) and rows["1101"]["revenue"] == 13_515_534_000
+    assert rows["1102"]["available"] == date(2026, 9, 20)                 # a late reporter: its first table
+    assert rows["6488"]["revenue"] == 4_764_363_000
