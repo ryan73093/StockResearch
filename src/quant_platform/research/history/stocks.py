@@ -35,12 +35,17 @@ SCHEMA = pa.schema([
 ])
 
 
+TWSE_REPORT = "https://www.twse.com.tw/exchangeReport"
+
+
 def twse_all_day(client: OfficialHistoryClient, day: date) -> object:
     from urllib.parse import urlencode
 
     query = urlencode({"date": f"{day:%Y%m%d}", "type": "ALLBUT0999", "response": "json"})
+    # The older exchangeReport path answers the same table (checked 2026-10-06: all 1,371 rows equal) and
+    # had today's close at 13:51:33 while the rwd/zh path still answered empty until 13:56:00.
     return client._cached(
-        f"twse_stock_all/{day:%Y}/{day:%Y%m%d}", f"{TWSE}/afterTrading/MI_INDEX?{query}",
+        f"twse_stock_all/{day:%Y}/{day:%Y%m%d}", f"{TWSE_REPORT}/MI_INDEX?{query}",
         final=day < client._today(), period_end=day,
     )
 
