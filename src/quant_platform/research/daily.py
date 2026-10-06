@@ -77,11 +77,14 @@ TECHNICAL = {
     "breakout_55": "接近 55 日高點（突破）",
 }
 from quant_platform.research.chips import CHIP_FACTORS, ChipStore
+from quant_platform.research.fundamentals import STATEMENT_FACTORS, FundamentalStore
 
-FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS}
+# 2026-10-06: five quarterly statement factors (research/fundamentals.py), dated by the filing deadline
+FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS}
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
 MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
-                 "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）"}
+                 "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
+                 "ml_gbm_statements": "機器學習綜合分數（35 個因子含財報、超額報酬標籤、逐年滾動訓練）"}
 RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
@@ -202,6 +205,14 @@ class FactorPanel:
             from quant_platform.research.model import MODELS, scores
 
             return scores(self, Path(self.models) / MODELS[factor]["version"])      # sessions × symbols
+        if factor in STATEMENT_FACTORS:
+            # the statements sit next to the chip files: the store follows the chip store's history
+            if self.chips is None:
+                return np.full((len(self.sessions), len(self.symbols)), np.nan)
+            store = FundamentalStore(Path(self.chips._folder).parent, self.sessions, self.symbols)
+            if not store.available():
+                return np.full((len(self.sessions), len(self.symbols)), np.nan)
+            return store.matrix(factor).T                           # back to sessions × symbols
         if factor in CHIP_FACTORS:
             if self.chips is None or not self.chips.available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
@@ -730,6 +741,10 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
             "day_of_month": 5}
     payload = {"rule": rule.canonical(), "period": PERIOD, "costs": costs.as_dict(), "data": data_fingerprint,
                "engine": ENGINE_VERSION, "plan": plan}
+    if any(name in STATEMENT_FACTORS for name in rule.factors):  # the statements are part of the input
+        from quant_platform.research.fundamentals import digest as statements_digest
+
+        payload["statements"] = statements_digest(history, RECENT_END)
     if any(name in MODEL_FACTORS for name in rule.factors):     # R15-B: the trained models are part of the input
         from quant_platform.research.model import MODELS, digest, model_dir
 
@@ -902,6 +917,19 @@ def model_excess_batch() -> list[DailyRule]:
             for core, word in ((0.0, ""), (0.5, "、一半放 0050"))]
 
 
+def statement_batch() -> list[DailyRule]:
+    """2026-10-06: one rule per statement factor, alone and half in 0050 (like the chip factors), and the
+    statement-aware model's top 20 (gbm-1.2.0), industry cap 30%, alone and half in 0050."""
+    rules = []
+    for name, label in STATEMENT_FACTORS.items():
+        for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+            rules.append(DailyRule(name=f"每天 {label}：前 20 名{word}"[:80], factors={name: 1.0}, core=core))
+    for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+        rules.append(DailyRule(name=f"每天 機器學習（含財報）：前 20 名、同產業最多 3 成{word}",
+                               factors={"ml_gbm_statements": 1.0}, industry_cap=0.3, core=core))
+    return rules
+
+
 BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch,
            "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch,
-           "model-excess": model_excess_batch}
+           "model-excess": model_excess_batch, "statements": statement_batch}

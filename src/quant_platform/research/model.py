@@ -30,9 +30,11 @@ MODEL_VERSION = "gbm-1.0.0"
 # 0050 as a top-20 rule. 1.1.0 (2026-10-06): the return itself above the day's median, the day's top and
 # bottom 1% clipped, as research_method §9 planned (excess return), so a big winner weighs as much as it gains.
 MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
-          "ml_gbm_excess": {"version": "gbm-1.1.0", "label": "excess"}}
+          "ml_gbm_excess": {"version": "gbm-1.1.0", "label": "excess"},
+          # 2026-10-06: the same as 1.1.0 with the five statement factors (35 features)
+          "ml_gbm_statements": {"version": "gbm-1.2.0", "label": "excess"}}
 VERSIONS = {spec["version"]: spec for spec in MODELS.values()}
-LATEST = "gbm-1.1.0"
+LATEST = "gbm-1.2.0"
 HORIZON = 20                # sessions the label looks ahead
 STEP = 5                    # weekly training samples
 WARMUP = 252                # sessions before the factors are complete
@@ -70,9 +72,20 @@ def _rank(values: np.ndarray) -> np.ndarray:
     return pd.DataFrame(values).rank(axis=1, pct=True).to_numpy(dtype=np.float32)
 
 
-def feature_block(fp, columns: list[int], eligible: np.ndarray) -> np.ndarray:
-    """len(columns) × symbols × features."""
-    names = features()
+def trained_features(folder: str | Path) -> tuple[str, ...]:
+    """The features a saved version was trained with (its meta.json); the current list if none."""
+    path = Path(folder) / "meta.json"
+    if path.is_file():
+        try:
+            return tuple(json.loads(path.read_text(encoding="utf-8"))["features"])
+        except (ValueError, KeyError):
+            pass
+    return features()
+
+
+def feature_block(fp, columns: list[int], eligible: np.ndarray, names: tuple[str, ...] | None = None) -> np.ndarray:
+    """len(columns) × symbols × features (the given names, or every factor now)."""
+    names = names or features()
     block = np.empty((len(columns), len(fp.symbols), len(names)), dtype=np.float32)
     mask = eligible[:, columns].T
     for index, name in enumerate(names):
@@ -140,12 +153,14 @@ def _spearman(left: np.ndarray, right: np.ndarray) -> float | None:
 
 def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] | None = None,
           job=None, label: str = "rank", version: str = MODEL_VERSION) -> dict[str, object]:
-    """Fit and save one model per year; returns the out-of-sample diagnostics."""
+    """Fit and save one model per year; returns the out-of-sample diagnostics. A version keeps the feature
+    list it was first trained with (a later year of the same version uses the same features)."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    names = trained_features(out)
     eligible = eligibility(fp)
     samples = sample_columns(len(fp.sessions))
-    x = feature_block(fp, samples, eligible)
+    x = feature_block(fp, samples, eligible, names)
     y = label_block(fp, samples, eligible, label)
     ranks = y if label == "rank" else label_block(fp, samples, eligible, "rank")
     gains = label_block(fp, samples, eligible, "excess")
@@ -199,7 +214,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
             earlier = json.loads(meta_path.read_text(encoding="utf-8")).get("years") or {}
         except ValueError:
             earlier = {}
-    meta = {"version": version, "label": label, "params": PARAMS, "features": list(features()), "horizon": HORIZON,
+    meta = {"version": version, "label": label, "params": PARAMS, "features": list(names), "horizon": HORIZON,
             "step": STEP, "data": data_fingerprint, "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "years": dict(sorted({**earlier, **diagnostics}.items()))}
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -249,6 +264,7 @@ def scores(fp, out_dir: str | Path) -> np.ndarray:
     if not models:
         return output
     eligible = eligibility(fp)
+    names = trained_features(folder)              # gbm-1.0.0 and 1.1.0 learned 30 factors; more came later
     by_year: dict[int, list[int]] = {}
     for column, day in enumerate(fp.sessions):
         usable = [year for year in models if year <= day.year]
@@ -258,7 +274,7 @@ def scores(fp, out_dir: str | Path) -> np.ndarray:
         model = pickle.loads(models[year].read_bytes())
         for start in range(0, len(columns), 60):
             part = columns[start: start + 60]
-            block = feature_block(fp, part, eligible)
+            block = feature_block(fp, part, eligible, names)
             live = np.isfinite(block).any(axis=2) & eligible[:, part].T
             flat = block[live]
             if len(flat):

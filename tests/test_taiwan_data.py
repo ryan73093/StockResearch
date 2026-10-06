@@ -372,3 +372,17 @@ def test_tdcc_distribution_materializes_large_and_retail_holder_features(tmp_pat
         "large_holder_count_1000_lots": 8.0,
         "shareholder_count": 108.0,
     }
+
+
+def test_the_retired_taiwan_data_pipeline_writes_nothing_while_the_legacy_research_is_paused(tmp_path) -> None:
+    """S9-W04 (2026-10-06): no page or API call writes the SQLite Taiwan data any more."""
+    from unittest.mock import MagicMock
+
+    repository, provider = MagicMock(), MagicMock()
+    pipeline = TaiwanDataPipeline(MagicMock(), repository, MagicMock(), MagicMock(), provider, paused=lambda: True)
+    result = pipeline.run(now=datetime(2025, 1, 3, tzinfo=UTC))
+    assert result.status == "paused" and "legacy_research" in result.failures
+    repository.add_revisions.assert_not_called()
+    provider.assert_not_called()
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'paused.db'}"))
+    assert container.taiwan_data_pipeline.run(now=datetime(2025, 1, 3, tzinfo=UTC)).status == "paused"

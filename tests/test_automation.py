@@ -308,3 +308,20 @@ def test_paused_legacy_research_stops_after_prices_listing_check_and_raw_quality
                  "model_research_pipeline", "daily_decision_pipeline"):
         parts[name].run.assert_not_called()
     assert result.market == "TW" and result.daily_decision is None
+
+
+def test_a_caller_asking_for_the_paused_legacy_research_gets_prices_and_quality_only():
+    """S9-W04 (2026-10-06): the API, the legacy pages and the CLI call run() with the default
+    legacy_research=True; while the module is paused it runs as if False."""
+    from quant_platform.application.research_pipeline import DailyResearchPipeline
+
+    parts = {name: MagicMock() for name in (
+        "market_data_pipeline", "taiwan_data_pipeline", "macro_data_pipeline", "data_quality_service",
+        "feature_label_pipeline", "factor_research_pipeline", "backtest_research_pipeline", "ensemble_research_pipeline",
+        "portfolio_research_pipeline", "model_research_pipeline", "daily_decision_pipeline", "listing_reconciliation")}
+    parts["market_data_pipeline"].run.return_value = SimpleNamespace(fresh=True)
+    pipeline = DailyResearchPipeline(**parts, legacy_paused=lambda: True)
+    pipeline.run("TW")
+    parts["data_quality_service"].evaluate.assert_called_once()
+    for name in ("taiwan_data_pipeline", "feature_label_pipeline", "model_research_pipeline", "daily_decision_pipeline"):
+        parts[name].run.assert_not_called()

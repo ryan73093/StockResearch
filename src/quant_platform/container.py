@@ -279,6 +279,7 @@ def build_container(settings: Settings | None = None) -> Container:
         feature_store_repository,
         job_run_repository,
         TaiwanOfficialFallbackProvider(finmind_provider),
+        paused=lambda: resolved.is_paused("legacy_research"),
     )
     feature_label_pipeline = FeatureLabelPipeline(
         universe_repository,
@@ -365,6 +366,7 @@ def build_container(settings: Settings | None = None) -> Container:
         ensemble_research_pipeline, portfolio_research_pipeline,
         model_research_pipeline, daily_decision_pipeline,
         listing_reconciliation=listing_reconciliation,
+        legacy_paused=lambda: resolved.is_paused("legacy_research"),
     )
 
     def load_missing_stock_research(
@@ -372,6 +374,10 @@ def build_container(settings: Settings | None = None) -> Container:
         progress: Callable[[str, int], None],
     ) -> None:
         normalized = symbol.strip().upper()
+        if resolved.is_paused("legacy_research"):
+            # S9-W04/S9-W05: the legacy single-stock page no longer fetches a missing stock into the legacy
+            # tables; the new stock page reads the research history (listed and TPEx)
+            raise RuntimeError("舊版單股頁已停止自動補資料（舊版研究暫停中）；請改用「查個股」")
         is_taiwan = normalized.endswith((".TW", ".TWO"))
         market = "TW" if is_taiwan else "US"
         progress("加入研究股票池", 2)

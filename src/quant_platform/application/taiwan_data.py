@@ -4,6 +4,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, time, timedelta
+from collections.abc import Callable
 from typing import Any
 
 from quant_platform.application.ports import (
@@ -118,7 +119,11 @@ class TaiwanDataPipeline:
         feature_repository: FeatureLabelStoreRepository,
         run_repository: SchedulerJobRunRepository,
         provider: TaiwanDataProvider,
+        paused: Callable[[], bool] | None = None,
     ) -> None:
+        # S9-W04 (2026-10-06): the SQLite Taiwan data (chips, revenue, news) is retired while the legacy
+        # research is paused; the research keeps its own (history/chips, nightly from the exchanges)
+        self._paused = paused
         self._universe_repository = universe_repository
         self._data_repository = data_repository
         self._feature_repository = feature_repository
@@ -184,6 +189,9 @@ class TaiwanDataPipeline:
     ) -> TaiwanDataPipelineResult:
         if market.upper() != "TW":
             return TaiwanDataPipelineResult(0, "skipped", 0, 0, 0, 0, 0, 0, {})
+        if self._paused is not None and self._paused():
+            return TaiwanDataPipelineResult(0, "paused", 0, 0, 0, 0, 0, 0, {
+                "legacy_research": "舊版台股資料流程已停用（舊版研究暫停中）；籌碼與基本面改由研究資料每晚 21:30 更新"})
         started = now or datetime.now(UTC)
         if started.tzinfo is None:
             raise ValueError("now must be timezone-aware")

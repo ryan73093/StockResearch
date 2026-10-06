@@ -63,8 +63,12 @@ class DailyResearchPipeline:
         model_research_pipeline: ModelResearchPipeline,
         daily_decision_pipeline: DailyDecisionPipeline,
         listing_reconciliation: TaiwanListingReconciliationService | None = None,
+        legacy_paused: Callable[[], bool] | None = None,
     ) -> None:
         self._listing_reconciliation = listing_reconciliation
+        # S9-W04 (2026-10-06): while the legacy research is paused, no caller (API, legacy pages, CLI) may
+        # run its steps — they write the SQLite Taiwan data and features the research no longer uses
+        self._legacy_paused = legacy_paused
         self._market_data_pipeline = market_data_pipeline
         self._taiwan_data_pipeline = taiwan_data_pipeline
         self._macro_data_pipeline = macro_data_pipeline
@@ -90,6 +94,8 @@ class DailyResearchPipeline:
     ) -> DailyResearchPipelineResult:
         """``legacy_research=False`` (S9-W05): market data, the listing check and the raw data-quality
         snapshot only; the legacy research steps after them are skipped."""
+        if legacy_research and self._legacy_paused is not None and self._legacy_paused():
+            legacy_research = False
         progress = progress_callback or (lambda _stage, _percent: None)
         progress("抓取日線行情", 5)
         market_result = self._market_data_pipeline.run(

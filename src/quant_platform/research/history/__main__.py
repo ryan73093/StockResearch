@@ -52,7 +52,7 @@ def _summary(manifest: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
-                                            "chips", "tpex"))
+                                            "chips", "tpex", "fundamentals"))
     parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報")
     parser.add_argument("--codes", default="twse", choices=("twse", "tpex", "all", "lists"),
                         help="finmind：上市、上櫃、全部，或 lists（下市清單、股票基本資料、期貨法人部位）")
@@ -164,6 +164,12 @@ def main() -> int:
                                        "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
             result = fetch_all(base, token, codes, datasets, job=job)
         print(json.dumps(result, ensure_ascii=False)[:2000], flush=True)
+        return 0
+
+    if args.command == "fundamentals":      # 2026-10-06: the quarterly statement table
+        from quant_platform.research.fundamentals import build as build_fundamentals
+
+        print(json.dumps(build_fundamentals(base), ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "tpex":

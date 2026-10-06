@@ -31,7 +31,8 @@ GROUPS = (
     ("波動、成交與股利", ("low_volatility_60", "low_volatility_250", "liquidity", "volume_surge", "dividend_yield")),
     ("籌碼", ("foreign_holding", "foreign_holding_change", "foreign_buy_20", "trust_buy_20", "margin_growth_20",
              "short_margin_ratio")),
-    ("基本面", ("earnings_yield", "book_to_price", "revenue_yoy", "revenue_yoy_3m", "market_cap")),
+    ("基本面", ("earnings_yield", "book_to_price", "revenue_yoy", "revenue_yoy_3m", "market_cap", "roe_ttm",
+             "gross_margin", "operating_margin_change", "eps_growth", "low_debt")),
 )
 
 
@@ -80,6 +81,14 @@ def display(factor: str, value: float | None) -> str:
         return f"淨值比 {1 / value:.2f}" if value > 0 else "—"
     if factor == "market_cap":
         return _money(math.exp(value))
+    if factor in ("roe_ttm", "gross_margin"):
+        return f"{value:.1%}"
+    if factor == "operating_margin_change":
+        return f"{value * 100:+.1f} 個百分點"
+    if factor == "eps_growth":
+        return f"{value:+.0%}"
+    if factor == "low_debt":
+        return f"負債比 {-value:.0%}"
     return f"{value:.3g}"
 
 

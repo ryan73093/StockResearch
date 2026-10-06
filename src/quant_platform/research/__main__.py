@@ -304,7 +304,7 @@ def main() -> int:
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
     parser.add_argument("--family", default="etf", choices=("etf", "stocks", "daily"), help="stats：ETF、個股或每天決策規則")
-    parser.add_argument("--model-version", default="gbm-1.1.0", choices=("gbm-1.0.0", "gbm-1.1.0"),
+    parser.add_argument("--model-version", default="gbm-1.2.0", choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")

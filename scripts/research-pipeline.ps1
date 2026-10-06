@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -43,6 +43,15 @@ switch ($Name) {
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "gbm-1.1.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "model-excess", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "statements" {
+        # 2026-10-06: the statement table, factor strength with the statement factors, the statement-aware
+        # model (gbm-1.2.0), the statement rules, the statistics.
+        Invoke-Step "1-table" @("-m", "quant_platform.research.history", "fundamentals")
+        Invoke-Step "2-strength" @("-m", "quant_platform.research", "factors", "--recent")
+        Invoke-Step "3-train" @("-m", "quant_platform.research", "model", "--model-version", "gbm-1.2.0")
+        Invoke-Step "4-rules" @("-m", "quant_platform.research", "daily", "--name", "statements", "--broker", "cathay")
+        Invoke-Step "5-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "factors-recent" { Invoke-Step "factors-recent" @("-m", "quant_platform.research", "factors", "--recent") }
     "archive" { Invoke-Step "archive" @("scripts/archive_legacy_tables.py") }
