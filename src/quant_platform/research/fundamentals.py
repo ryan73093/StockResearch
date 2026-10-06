@@ -103,7 +103,7 @@ def factor_table(frame: pd.DataFrame) -> pd.DataFrame:
         group = group.set_index("index")
         span = range(group.index.min(), group.index.max() + 1)
         full = group.reindex(span)                                   # missing quarters stay as gaps
-        four = lambda column: full[column].rolling(4, min_periods=4).sum()     # noqa: E731
+        four = lambda column, quarters=full: quarters[column].rolling(4, min_periods=4).sum()     # noqa: E731
         with np.errstate(divide="ignore", invalid="ignore"):
             equity = full["equity"].where(full["equity"] > 0)
             revenue4 = four("revenue").where(four("revenue") > 0)
