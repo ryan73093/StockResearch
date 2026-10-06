@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "rl", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -52,6 +52,10 @@ switch ($Name) {
         Invoke-Step "3-train" @("-m", "quant_platform.research", "model", "--model-version", "gbm-1.2.0")
         Invoke-Step "4-rules" @("-m", "quant_platform.research", "daily", "--name", "statements", "--broker", "cathay")
         Invoke-Step "5-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "rl" {
+        # R15 stage C1 (2026-10-06): the RL exposure overlay on the best trend rule, walk-forward 2017 on.
+        Invoke-Step "rl" @("-m", "quant_platform.research", "rl", "--broker", "cathay")
     }
     "factors-recent" { Invoke-Step "factors-recent" @("-m", "quant_platform.research", "factors", "--recent") }
     "archive" { Invoke-Step "archive" @("scripts/archive_legacy_tables.py") }

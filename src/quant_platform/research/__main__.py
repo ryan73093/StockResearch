@@ -299,7 +299,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors", "daily", "snapshot", "model"),
+                            "forward", "factors", "daily", "snapshot", "model", "rl"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -392,6 +392,30 @@ def main() -> int:
             print(f"{item['label']}：{item['verdict']}；{first.get('label')} 排序相關 {first.get('ic')}（t={first.get('t')}），"
                   f"前段比平均每年 {first.get('top_excess_year')}、比 0050 {first.get('top_vs_0050_year')}", flush=True)
         print(f"已寫入 {path}")
+        return 0
+
+    if args.command == "rl":                # R15 stage C1: the RL exposure overlay, walk-forward
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import rl as research_rl
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        out = RESEARCH / "rl" / research_rl.RL_VERSION
+        with JobLog(RESEARCH).start(f"強化學習部位調整（{research_rl.RL_VERSION}，2017 起逐年、5 個種子）", command,
+                                    total=10) as job:
+            job.update(current="載入行情並重播規則帳戶", force=True)
+            data, fp = daily_research.load(Path(args.base))
+            overlay = research_rl.build_overlay(data, fp, broker_costs(args.broker))
+            report = research_rl.walk_forward(overlay, out, job=job)
+            overall = report["overall"]
+            job.payload["summary"] = (f"樣本外 {report['test_from']}～{report['test_to']}：RL {overall['rl']['growth']:+.0%}"
+                                      f"（回撤 {overall['rl']['max_drawdown']:.0%}）、規則 {overall['rule']['growth']:+.0%}"
+                                      f"（{overall['rule']['max_drawdown']:.0%}）、0050 {overall['0050']['growth']:+.0%}")
+        for year, item in report["years"].items():
+            print(f"{year}：RL {item['rl']['growth']:+.1%}（回撤 {item['rl']['max_drawdown']:.0%}、平均個股 {item['average_share']:.0%}、"
+                  f"換 {item['switches']} 次）；規則 {item['rule']['growth']:+.1%}（{item['rule']['max_drawdown']:.0%}）；"
+                  f"一半 {item['half']['growth']:+.1%}；0050 {item['0050']['growth']:+.1%}", flush=True)
+        print(json.dumps(report["overall"], ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "model":             # R15 stage B: train the walk-forward models
