@@ -25,6 +25,14 @@ import numpy as np
 import pandas as pd
 
 MODEL_VERSION = "gbm-1.0.0"
+# Each model factor and how its model is trained. 1.0.0 (2026-10-06 00:29): the percentile of the next 20
+# sessions' return — its scores ranked well (IC +0.09) but favoured calm, rarely-last stocks and lost to
+# 0050 as a top-20 rule. 1.1.0 (2026-10-06): the return itself above the day's median, the day's top and
+# bottom 1% clipped, as research_method §9 planned (excess return), so a big winner weighs as much as it gains.
+MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
+          "ml_gbm_excess": {"version": "gbm-1.1.0", "label": "excess"}}
+VERSIONS = {spec["version"]: spec for spec in MODELS.values()}
+LATEST = "gbm-1.1.0"
 HORIZON = 20                # sessions the label looks ahead
 STEP = 5                    # weekly training samples
 WARMUP = 252                # sessions before the factors are complete
@@ -39,8 +47,12 @@ def features() -> tuple[str, ...]:
     return tuple(FACTOR_LABELS)
 
 
-def model_dir(history: str | Path) -> Path:
-    return Path(history).parent / "models" / MODEL_VERSION
+def models_root(history: str | Path) -> Path:
+    return Path(history).parent / "models"
+
+
+def model_dir(history: str | Path, version: str = MODEL_VERSION) -> Path:
+    return models_root(history) / version
 
 
 def eligibility(fp) -> np.ndarray:
@@ -69,8 +81,9 @@ def feature_block(fp, columns: list[int], eligible: np.ndarray) -> np.ndarray:
     return block
 
 
-def label_block(fp, columns: list[int], eligible: np.ndarray) -> np.ndarray:
-    """len(columns) × symbols: the percentile of the next HORIZON sessions' return (NaN past the data)."""
+def label_block(fp, columns: list[int], eligible: np.ndarray, kind: str = "rank") -> np.ndarray:
+    """len(columns) × symbols: the next HORIZON sessions' return (NaN past the data) as its percentile among
+    the day's eligible stocks ("rank"), or above the day's median with the day's 1% tails clipped ("excess")."""
     prices = fp.panel.filled
     later = [column + HORIZON for column in columns]
     valid = [column < prices.shape[1] for column in later]
@@ -81,7 +94,17 @@ def label_block(fp, columns: list[int], eligible: np.ndarray) -> np.ndarray:
         end = prices[:, [later[index] for index in rows]].T
         with np.errstate(invalid="ignore", divide="ignore"):
             returns = np.where(eligible[:, [columns[index] for index in rows]].T, end / start - 1, np.nan)
-        output[rows] = _rank(returns)
+        if kind == "rank":
+            output[rows] = _rank(returns)
+        else:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)          # a day with no stock: all NaN
+                low = np.nanpercentile(returns, 1, axis=1, keepdims=True)
+                high = np.nanpercentile(returns, 99, axis=1, keepdims=True)
+                median = np.nanmedian(returns, axis=1, keepdims=True)
+            output[rows] = np.clip(returns, low, high) - median
     return output
 
 
@@ -116,14 +139,16 @@ def _spearman(left: np.ndarray, right: np.ndarray) -> float | None:
 
 
 def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] | None = None,
-          job=None) -> dict[str, object]:
+          job=None, label: str = "rank", version: str = MODEL_VERSION) -> dict[str, object]:
     """Fit and save one model per year; returns the out-of-sample diagnostics."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     eligible = eligibility(fp)
     samples = sample_columns(len(fp.sessions))
     x = feature_block(fp, samples, eligible)
-    y = label_block(fp, samples, eligible)
+    y = label_block(fp, samples, eligible, label)
+    ranks = y if label == "rank" else label_block(fp, samples, eligible, "rank")
+    gains = label_block(fp, samples, eligible, "excess")
     last_year = fp.sessions[-1].year
     years = years or list(range(FIRST_YEAR, last_year + 1))
     diagnostics = {}
@@ -138,29 +163,36 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
         (out / f"{year}.pkl").write_bytes(pickle.dumps(model, protocol=5))
         # out of sample: the year's own weekly samples (labels known by now)
         tests = [index for index, column in enumerate(samples) if fp.sessions[column].year == year]
-        ics, tops = [], []
+        ics, tops, fifth_gains, top20_gains = [], [], [], []
         for index in tests:
-            if not np.isfinite(y[index]).any():
+            if not np.isfinite(ranks[index]).any():
                 continue
             live = np.isfinite(x[index]).any(axis=1)
             if live.sum() < 20:
                 continue
             predicted = np.full(len(fp.symbols), np.nan)
             predicted[live] = model.predict(x[index][live])
-            ic = _spearman(predicted, y[index])
+            ic = _spearman(predicted, ranks[index])
             if ic is not None:
                 ics.append(ic)
-            ranked = np.isfinite(predicted) & np.isfinite(y[index])
+            ranked = np.isfinite(predicted) & np.isfinite(ranks[index])
             if ranked.sum() >= 50:
                 cut = np.quantile(predicted[ranked], 0.8)
-                tops.append(float(np.nanmean(y[index][ranked & (predicted >= cut)]) - np.nanmean(y[index][ranked])))
+                tops.append(float(np.nanmean(ranks[index][ranked & (predicted >= cut)]) - np.nanmean(ranks[index][ranked])))
+                fifth_gains.append(float(np.nanmean(gains[index][ranked & (predicted >= cut)])
+                                         - np.nanmean(gains[index][ranked])))
+                best = np.argsort(-np.where(ranked, predicted, -np.inf))[:20]
+                top20_gains.append(float(np.nanmean(gains[index][best]) - np.nanmean(gains[index][ranked])))
         diagnostics[str(year)] = {
             "train_rows": rows, "train_until": fp.sessions[train_cols[-1] + HORIZON].isoformat(),
             "weeks": len(ics), "ic": round(float(np.mean(ics)), 4) if ics else None,
             "ic_positive": round(float(np.mean([value > 0 for value in ics])), 3) if ics else None,
             "top_fifth_rank_gap": round(float(np.mean(tops)), 4) if tops else None,
+            # 20-session return above the day's median (clipped), the top fifth and the top 20 by score
+            "top_fifth_gain": round(float(np.mean(fifth_gains)), 4) if fifth_gains else None,
+            "top20_gain": round(float(np.mean(top20_gains)), 4) if top20_gains else None,
         }
-    meta = {"version": MODEL_VERSION, "params": PARAMS, "features": list(features()), "horizon": HORIZON,
+    meta = {"version": version, "label": label, "params": PARAMS, "features": list(features()), "horizon": HORIZON,
             "step": STEP, "data": data_fingerprint, "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "years": diagnostics}
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")

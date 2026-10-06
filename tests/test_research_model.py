@@ -56,15 +56,16 @@ def test_walk_forward_models_never_see_the_year_they_score_and_find_the_planted_
 def test_scores_use_each_years_model_and_become_a_rule_factor(tmp_path):
     data, drifts = planted()
     fp = FactorPanel(Panel(data))
-    model.train(fp, tmp_path, "data:x", [2015, 2016])
-    scores = model.scores(fp, tmp_path)
+    folder = tmp_path / model.MODEL_VERSION                   # the factor reads <models>/<its version>
+    model.train(fp, folder, "data:x", [2015, 2016])
+    scores = model.scores(fp, folder)
     first_2015 = next(index for index, day in enumerate(fp.sessions) if day.year == 2015)
     assert np.isnan(scores[:first_2015]).all() and np.isfinite(scores[first_2015:]).mean() > 0.9
     # the 2016 sessions are scored by the 2016 model: the same as predicting directly
     import pickle
 
     column = len(fp.sessions) - 1
-    direct = pickle.loads((tmp_path / "2016.pkl").read_bytes())
+    direct = pickle.loads((folder / "2016.pkl").read_bytes())
     block = model.feature_block(fp, [column], model.eligibility(fp))[0]
     assert scores[column] == pytest.approx(direct.predict(block).astype(np.float32), rel=1e-5)
     # a rule on the scores holds the stocks drifting up most
@@ -84,3 +85,32 @@ def test_the_model_digest_follows_the_files(tmp_path):
     assert before == model.digest(tmp_path) and before != model.digest(tmp_path / "missing")
     (tmp_path / "2016.pkl").write_bytes((tmp_path / "2016.pkl").read_bytes() + b"x")
     assert model.digest(tmp_path) != before
+
+
+def test_excess_label_by_hand_and_the_second_model():
+    from quant_platform.research.daily import MODEL_FACTORS
+
+    data, drifts = planted()
+    fp = FactorPanel(Panel(data))
+    eligible = model.eligibility(fp)
+    column = 300
+    excess = model.label_block(fp, [column], eligible, "excess")[0]
+    returns = fp.panel.filled[:, column + model.HORIZON] / fp.panel.filled[:, column] - 1
+    returns = np.where(eligible[:, column], returns, np.nan)
+    low, high = np.nanpercentile(returns, 1), np.nanpercentile(returns, 99)
+    assert excess == pytest.approx(np.clip(returns, low, high) - np.nanmedian(returns), rel=1e-5, nan_ok=True)
+    assert np.nanmedian(excess) == pytest.approx(0, abs=1e-6)
+    assert set(MODEL_FACTORS) == set(model.MODELS) and model.VERSIONS[model.LATEST]["label"] == "excess"
+
+
+def test_the_excess_return_model_finds_the_planted_signal(tmp_path):
+    data, drifts = planted()
+    fp = FactorPanel(Panel(data))
+    meta = model.train(fp, tmp_path / "gbm-1.1.0", "data:x", [2015, 2016], label="excess", version="gbm-1.1.0")
+    assert meta["label"] == "excess" and meta["version"] == "gbm-1.1.0"
+    for year in ("2015", "2016"):
+        assert meta["years"][year]["ic"] > 0.1 and meta["years"][year]["top20_gain"] > 0.005
+    rule = DailyRule(name="x", factors={"ml_gbm_excess": 1.0}, top=10)
+    fp_model = FactorPanel(Panel(data), models=tmp_path)
+    held = daily_rankings(fp_model, rule, fp.sessions[-5], fp.sessions[-1])[fp.sessions[-1]]
+    assert np.mean([drifts[int(symbol[:4]) - 1101] for symbol in held]) > 0.001

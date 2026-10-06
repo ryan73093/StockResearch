@@ -80,7 +80,8 @@ from quant_platform.research.chips import CHIP_FACTORS, ChipStore
 
 FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS}
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
-MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、梯度提升、逐年滾動訓練）"}
+MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
+                 "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）"}
 RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
@@ -198,9 +199,9 @@ class FactorPanel:
         if factor in MODEL_FACTORS:
             if self.models is None:
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
-            from quant_platform.research.model import scores
+            from quant_platform.research.model import MODELS, scores
 
-            return scores(self, self.models)                      # sessions × symbols
+            return scores(self, Path(self.models) / MODELS[factor]["version"])      # sessions × symbols
         if factor in CHIP_FACTORS:
             if self.chips is None or not self.chips.available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
@@ -683,11 +684,11 @@ def market_closes(history: str | Path, sessions: list[date]) -> np.ndarray:
 def load(history: str | Path, universe: str = "twse") -> tuple[LegacyData, FactorPanel]:
     data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year, universe=universe)
     panel = Panel(data)
-    from quant_platform.research.model import model_dir
+    from quant_platform.research.model import models_root
 
     return data, FactorPanel(panel, Industries(load_industries(history)),
                              ChipStore(history, panel.sessions, panel.symbols, panel.close),
-                             market_closes(history, panel.sessions), model_dir(history))
+                             market_closes(history, panel.sessions), models_root(history))
 
 
 def chips_digest(history: str | Path, until: date, universe: str = "twse") -> str:
@@ -730,9 +731,15 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
     payload = {"rule": rule.canonical(), "period": PERIOD, "costs": costs.as_dict(), "data": data_fingerprint,
                "engine": ENGINE_VERSION, "plan": plan}
     if any(name in MODEL_FACTORS for name in rule.factors):     # R15-B: the trained models are part of the input
-        from quant_platform.research.model import MODEL_VERSION, digest, model_dir
+        from quant_platform.research.model import MODELS, digest, model_dir
 
-        payload["model"] = {"version": MODEL_VERSION, "digest": digest(model_dir(history))}
+        used = [name for name in rule.factors if name in MODEL_FACTORS]
+        if used == ["ml_gbm"]:                   # the form the gbm-1.0.0 trials were registered with
+            payload["model"] = {"version": MODELS["ml_gbm"]["version"],
+                                "digest": digest(model_dir(history, MODELS["ml_gbm"]["version"]))}
+        else:
+            payload["model"] = {name: {"version": MODELS[name]["version"],
+                                       "digest": digest(model_dir(history, MODELS[name]["version"]))} for name in used}
     input_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
     existing = registry.find("candidate", PERIOD, input_hash)
     if existing is not None:
@@ -887,5 +894,14 @@ def model_batch() -> list[DailyRule]:
     return rules
 
 
+def model_excess_batch() -> list[DailyRule]:
+    """R15 stage B, gbm-1.1.0 (2026-10-06): the excess-return model's top 20, industry cap 30%, alone and
+    half in 0050 (equal amounts: inverse volatility changed little for the first model)."""
+    return [DailyRule(name=f"每天 機器學習（超額報酬標籤）：前 20 名、同產業最多 3 成{word}",
+                      factors={"ml_gbm_excess": 1.0}, industry_cap=0.3, core=core)
+            for core, word in ((0.0, ""), (0.5, "、一半放 0050"))]
+
+
 BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch,
-           "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch}
+           "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch,
+           "model-excess": model_excess_batch}

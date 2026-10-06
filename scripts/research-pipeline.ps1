@@ -40,8 +40,9 @@ switch ($Name) {
     }
     "model" {
         # R15 stage B (2026-10-06): train the walk-forward models, run the model rules, the statistics.
-        Invoke-Step "1-train" @("-m", "quant_platform.research", "model")
-        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "model", "--broker", "cathay")
+        # gbm-1.1.0 (excess-return label); gbm-1.0.0 ran on 2026-10-06 00:29 with --model-version gbm-1.0.0
+        Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "gbm-1.1.0")
+        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "model-excess", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "factors-recent" { Invoke-Step "factors-recent" @("-m", "quant_platform.research", "factors", "--recent") }

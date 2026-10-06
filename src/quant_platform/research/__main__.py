@@ -304,6 +304,8 @@ def main() -> int:
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
     parser.add_argument("--family", default="etf", choices=("etf", "stocks", "daily"), help="stats：ETF、個股或每天決策規則")
+    parser.add_argument("--model-version", default="gbm-1.1.0", choices=("gbm-1.0.0", "gbm-1.1.0"),
+                        help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
     parser.add_argument("--recent", action="store_true", help="factors：新設計（2015-06 起、每週排名、看 20 個交易日）")
@@ -401,18 +403,23 @@ def main() -> int:
 
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         years = list(range(research_model.FIRST_YEAR, daily_research.RECENT_END.year + 1))
-        with JobLog(RESEARCH).start(f"訓練機器學習模型（{research_model.MODEL_VERSION}，逐年 {years[0]}～{years[-1]}）",
+        version = args.model_version
+        label = research_model.VERSIONS[version]["label"]
+        with JobLog(RESEARCH).start(f"訓練機器學習模型（{version}，{label} 標籤，逐年 {years[0]}～{years[-1]}）",
                                     command, total=len(years)) as job:
             job.update(current="載入 2013 年起上市行情與籌碼", force=True)
             data, fp = daily_research.load(Path(args.base))
             fingerprint = daily_research.fingerprint(Path(args.base))
-            meta = research_model.train(fp, research_model.model_dir(Path(args.base)), fingerprint, years, job=job)
+            meta = research_model.train(fp, research_model.model_dir(Path(args.base), version), fingerprint, years,
+                                        job=job, label=label, version=version)
             job.update(done=len(years), force=True)
             ics = [item["ic"] for item in meta["years"].values() if item.get("ic") is not None]
             job.payload["summary"] = f"{len(meta['years'])} 個年度模型；樣本外 IC 平均 {np.mean(ics):+.3f}" if ics else "沒有模型"
         for year, item in meta["years"].items():
             print(f"{year}：訓練 {item['train_rows']:,} 筆（標籤到 {item['train_until']}）、樣本外 IC {item['ic']}、"
-                  f"IC 為正的週 {item['ic_positive']}、前五分之一排名多 {item['top_fifth_rank_gap']}", flush=True)
+                  f"IC 為正的週 {item['ic_positive']}、前五分之一排名多 {item['top_fifth_rank_gap']}、"
+                  f"20 日報酬比中位數多：前五分之一 {item.get('top_fifth_gain')}、前 20 名 {item.get('top20_gain')}",
+                  flush=True)
         return 0
 
     if args.command == "snapshot":          # S9-W05: the stock page's factor snapshot (worker 15:45)
