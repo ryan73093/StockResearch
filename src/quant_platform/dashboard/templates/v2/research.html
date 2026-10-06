@@ -70,6 +70,77 @@
 </section>
 {% endif %}
 
+{% if research_tab == 'ml' and ml %}
+<section class="card">
+  <div class="card__head"><h2>機器學習模型（逐年滾動訓練）</h2></div>
+  {% if ml.models %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>版本</th><th>標籤</th><th class="num">特徵</th><th class="num">樣本外 IC（平均）</th><th class="num">前 20 名比中位數多（20 日）</th><th>訓練</th></tr></thead>
+      <tbody>
+      {% for item in ml.models %}
+        <tr>
+          <td data-primary><strong>{{ item.version }}</strong></td>
+          <td data-label="標籤">{{ '報酬排名' if item.label == 'rank' else '超額報酬' }}</td>
+          <td class="num" data-label="特徵">{{ item.features }}</td>
+          <td class="num" data-label="IC">{{ '{:+.3f}'.format(item.ic) if item.ic is not none else '—' }}</td>
+          <td class="num" data-label="前 20 名">{{ '{:+.2%}'.format(item.top20_gain) if item.top20_gain is not none else '—' }}</td>
+          <td class="small" data-label="訓練" data-wide>{{ item.years|length }} 個年度・{{ item.trained_at }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">每年一個模型，只用標籤在那一年之前就結束的資料訓練；IC 是分數和之後 20 個交易日報酬排名的相關（0 代表沒有預測力）。模型分數當成因子給規則用，規則的結果在選手池。</p>
+  {% else %}<p class="muted">還沒有訓練過的模型。</p>{% endif %}
+</section>
+
+{% for report in ml.rl %}
+<section class="card">
+  <div class="card__head"><h2>強化學習：部位調整 <span class="badge">{{ report.version }}</span></h2><span class="muted small">樣本外 {{ report.test_from }}～{{ report.test_to }}</span></div>
+  <p class="small" style="margin:0 0 10px">底層規則「{{ report.base_rule }}」照常選股；RL 每個交易日收盤後決定個股佔帳戶 0%、50% 或 100%（其餘 0050），預測每一年只用那一年以前的資料訓練，{{ report.seeds|length }} 個種子平均。</p>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>做法</th><th class="num">樣本外總報酬</th><th class="num">年化</th><th class="num">最大回撤</th></tr></thead>
+      <tbody>
+      {% for key, label in (('rl', 'RL 調整部位'), ('rule', '規則，一直全部個股'), ('half', '規則，固定一半 0050'), ('0050', '全部 0050')) %}
+        {% set item = report.overall[key] %}
+        <tr><td data-primary><strong>{{ label }}</strong></td>
+            <td class="num {{ 'up' if item.growth > 0 else 'down' }}" data-label="總報酬">{{ '{:+.0%}'.format(item.growth) }}</td>
+            <td class="num" data-label="年化">{{ '{:.1%}'.format(item.annual) }}</td>
+            <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(item.max_drawdown) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <svg class="rule-chart" viewBox="0 0 {{ report.chart.width }} {{ report.chart.height }}" preserveAspectRatio="none" role="img" aria-label="個股部位" style="margin-top:12px">
+    <polyline class="line-rule" points="{{ report.chart.points }}"/>
+  </svg>
+  <div class="legend"><span><i style="background:var(--accent)"></i>個股佔帳戶（下緣 0%、上緣 100%），平均 {{ '{:.0%}'.format(report.overall.average_share) }}</span><span>{{ report.chart.first }}～{{ report.chart.last }}</span></div>
+  <details style="margin-top:10px"><summary class="small">逐年</summary>
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>年</th><th class="num">RL（回撤）</th><th class="num">規則</th><th class="num">一半 0050</th><th class="num">0050</th><th class="num">平均個股・換部位</th></tr></thead>
+        <tbody>
+        {% for year, item in report.years.items() %}
+          <tr><td data-primary><strong>{{ year }}</strong></td>
+              <td class="num" data-label="RL">{{ '{:+.0%}'.format(item.rl.growth) }}<span class="muted small">（{{ '{:.0%}'.format(item.rl.max_drawdown) }}）</span></td>
+              <td class="num" data-label="規則">{{ '{:+.0%}'.format(item.rule.growth) }}<span class="muted small">（{{ '{:.0%}'.format(item.rule.max_drawdown) }}）</span></td>
+              <td class="num" data-label="一半 0050">{{ '{:+.0%}'.format(item.half.growth) }}</td>
+              <td class="num" data-label="0050">{{ '{:+.0%}'.format(item['0050'].growth) }}</td>
+              <td class="num" data-label="平均個股・換部位">{{ '{:.0%}'.format(item.average_share) }}・{{ item.switches }} 次</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  <p class="note">這裡用每日報酬計算（不含每月投入），只比較部位調整本身；過了「樣本外贏規則、回撤不更深」才接進真實帳戶引擎與前向觀察。</p>
+</section>
+{% else %}
+<section class="card"><p class="muted">強化學習還沒有跑出結果（研究 › 執行中的程式）。</p></section>
+{% endfor %}
+{% endif %}
+
 {% if research_tab == 'jobs' %}
 <section class="card" id="jobs">
   <div class="card__head"><h2>執行中的程式</h2><span class="muted small">{{ '有程式在跑，頁面每分鐘自動更新' if running_count else '目前沒有程式在跑' }}</span></div>

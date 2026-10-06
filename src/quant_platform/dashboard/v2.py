@@ -180,7 +180,42 @@ def _taipei_text(value: datetime | None, pattern: str = "%m/%d %H:%M") -> str:
     return _aware(value).astimezone(TAIPEI).strftime(pattern) if value else "尚無"
 
 
-RESEARCH_TABS = ("overview", "rules", "factors", "forward", "promotion", "agent", "legacy", "jobs")
+RESEARCH_TABS = ("overview", "rules", "factors", "ml", "forward", "promotion", "agent", "legacy", "jobs")
+
+
+def ml_view(research_dir: Path) -> dict[str, object]:
+    """2026-10-06: the walk-forward models' out-of-sample diagnostics and the RL overlay's report."""
+    models = []
+    folder = research_dir / "models"
+    for path in sorted(folder.glob("*/meta.json")) if folder.is_dir() else []:
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+        years = meta.get("years") or {}
+
+        def average(key: str) -> float | None:
+            values = [item.get(key) for item in years.values() if item.get(key) is not None]
+            return sum(values) / len(values) if values else None
+
+        models.append({"version": meta.get("version") or path.parent.name, "label": meta.get("label", "rank"),
+                       "features": len(meta.get("features") or []), "years": years, "ic": average("ic"),
+                       "top20_gain": average("top20_gain"), "trained_at": (meta.get("trained_at") or "")[:16]})
+    reports = []
+    for path in sorted((research_dir / "rl").glob("*/report.json")) if (research_dir / "rl").is_dir() else []:
+        try:
+            report = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+        shares = report.get("shares") or {}
+        days = list(shares)
+        width, height = 720, 120
+        points = " ".join(f"{index * width / max(len(days) - 1, 1):.1f},{height - 6 - shares[day] * (height - 12):.1f}"
+                          for index, day in enumerate(days))
+        report["chart"] = {"points": points, "width": width, "height": height,
+                           "first": days[0] if days else "", "last": days[-1] if days else ""}
+        reports.append(report)
+    return {"models": models, "rl": reports}
 
 
 def _default_basis(research_dir: Path) -> str:
@@ -755,6 +790,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             stock_forward=StockForwardTracker(research_dir).summary(),
             research_tab=tab, jobs=JobLog(research_dir).jobs(), factor_report=latest_factor_strength(research_dir / "factors"),
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
+            ml=ml_view(research_dir) if tab == "ml" else None,
             factor_columns=factor_columns(latest_factor_strength(research_dir / "factors")),
             overview=pool_view(research_dir, basis=_default_basis(research_dir)) if tab == "overview" else None,
             round_view=round_view,

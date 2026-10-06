@@ -173,3 +173,30 @@ def test_legacy_tools_left_the_research_page_for_the_system_page(client):
     assert moved.status_code == 302 and moved.headers["Location"].endswith("/system#legacy-tools")
     system = client.get("/system").get_data(as_text=True)
     assert 'id="legacy-tools"' in system and "/market/legacy" in system and "/paper-trading" in system
+
+
+def test_ml_tab_shows_the_models_and_the_rl_report(tmp_path):
+    """2026-10-06: research › 機器學習與 RL."""
+    import json
+
+    research = tmp_path / "research"
+    (research / "models" / "gbm-1.1.0").mkdir(parents=True)
+    (research / "models" / "gbm-1.1.0" / "meta.json").write_text(json.dumps({
+        "version": "gbm-1.1.0", "label": "excess", "features": ["a"] * 30,
+        "years": {"2025": {"ic": 0.04, "top20_gain": 0.02}, "2026": {"ic": 0.06, "top20_gain": 0.04}}}), encoding="utf-8")
+    (research / "rl" / "rl-overlay-1.0.0").mkdir(parents=True)
+    item = {"growth": 0.5, "annual": 0.1, "max_drawdown": -0.2}
+    (research / "rl" / "rl-overlay-1.0.0" / "report.json").write_text(json.dumps({
+        "version": "rl-overlay-1.0.0", "base_rule": "規則", "seeds": [0, 1], "test_from": "2017-01-03", "test_to": "2026-10-05",
+        "overall": {"rl": item, "rule": item, "half": item, "0050": item, "average_share": 0.6},
+        "years": {"2017": {"rl": item, "rule": item, "half": item, "0050": item, "average_share": 0.5, "switches": 3}},
+        "shares": {"2017-01-03": 1.0, "2017-01-04": 0.5}}), encoding="utf-8")
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+
+    client = create_app(build_container(Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}",
+                                                 scheduler_in_web=False))).test_client()
+    body = client.get("/research?tab=ml").get_data(as_text=True)
+    assert "gbm-1.1.0" in body and "+0.050" in body and "+3.00%" in body
+    assert "rl-overlay-1.0.0" in body and "RL 調整部位" in body and "平均 60%" in body and "3 次" in body
