@@ -346,6 +346,48 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
     return len(written)
 
 
+def update_chips(container: "Container", now: datetime | None = None) -> object | None:
+    """S9-W04 (2026-10-06): at 21:30 on trading days, the exchanges' daily chip reports for every session
+    the chip files lack (up to the last 20), then the chip files rebuilt (FinMind history + the reports)."""
+    from datetime import timedelta
+
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.chips import build
+    from quant_platform.research.history.chips_daily import fetch
+    from quant_platform.research.history.official import OfficialHistoryClient
+    from quant_platform.research.jobs import JobLog
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if _exchange_closure(container, "TW", local_now) is not None:
+        return None
+    research = _instance_dir(container.settings.database_url) / "research"
+    base = research / "history"
+    shareholding = base / "chips" / "TaiwanStockShareholding.parquet"
+    if not shareholding.is_file():
+        return None
+    last = pc.max(pq.read_table(shareholding, columns=["date"])["date"]).as_py()
+    calendar = container.market_calendar.calendar("TW")
+    sessions, day = [], local_now.date()
+    while day > last and len(sessions) < 20:
+        if calendar.is_trading_day(day):
+            sessions.append(day)
+        day -= timedelta(days=1)
+    with JobLog(research).start(f"每晚籌碼（官方日報，{len(sessions)} 個交易日）", "scheduler update_chips",
+                                total=2) as job:
+        job.update(done=0, current="證交所與櫃買日報", force=True)
+        fetched = fetch(base, OfficialHistoryClient(base / "raw"), sessions, local_now.date())
+        job.update(done=1, current="重建籌碼檔", force=True)
+        written = build(base)
+        job.update(done=2, force=True)
+        job.payload["summary"] = f"{fetched['first']}～{fetched['last']}；請求 {fetched['requests']} 次"
+    logger.info("Chips updated: %s; %s", fetched, written)
+    return fetched
+
+
 def build_stock_snapshot(container: "Container", now: datetime | None = None) -> object | None:
     """S9-W05: at 15:45 on trading days, every stock's factors on the latest session for the stock page
     (after the 15:16 quotes and the 15:30 forward record)."""
@@ -538,6 +580,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3 * 3600,
+    )
+    scheduler.add_job(
+        update_chips,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=21, minute=30, timezone=timezone),
+        id="chips_update",
+        name="每晚籌碼與基本面（交易日 21:30，證交所與櫃買日報）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
         build_stock_snapshot,

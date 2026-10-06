@@ -94,7 +94,7 @@ def check(history: str | Path, research_dir: str | Path, expected: date, session
     chips_last = pc.max(pq.read_table(chips, columns=["date"])["date"]).as_py() if chips.is_file() else None
     rows.append({"name": "籌碼與基本面（FinMind）", "last": chips_last,
                  "status": _status(chips_last, expected, behind(chips_last), STALE_CHIPS),
-                 "detail": "每晚自動更新尚未接上（S9-W04）；研究用的是下載當時的資料"})
+                 "detail": "交易日 21:30 由證交所與櫃買日報更新（月營收另計）"})
     news = history / "raw" / "finmind" / "TaiwanStockNews"
     folders = sorted(path for path in news.iterdir() if path.is_dir()) if news.is_dir() else []
     news_last = date.fromisoformat(f"{folders[-1].name[:4]}-{folders[-1].name[4:6]}-{folders[-1].name[6:]}") if folders else None

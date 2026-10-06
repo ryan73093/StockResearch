@@ -52,8 +52,31 @@ def _rows(raw: Path, dataset: str):
         yield path.name.split(".")[0], body.get("data") or []
 
 
+OFFICIAL = {"TaiwanStockShareholding": "holding", "TaiwanStockPER": "per",
+            "TaiwanStockMarginPurchaseShortSale": "margin", "TaiwanStockInstitutionalInvestorsBuySell": "insti"}
+
+
+def _add_official(base: Path, dataset: str, columns: dict[str, list]) -> int:
+    """S9-W04 (2026-10-06): the exchanges' daily reports for the (day, code) pairs FinMind's files lack."""
+    from quant_platform.research.history.chips_daily import cached_rows
+
+    if dataset not in OFFICIAL:
+        return 0
+    seen = set(zip(columns["date"], columns["code"], strict=True))
+    added = 0
+    for row in cached_rows(base, OFFICIAL[dataset]):
+        if (row["date"], row["code"]) in seen:
+            continue
+        seen.add((row["date"], row["code"]))
+        for name in columns:
+            columns[name].append(row.get(name))
+        added += 1
+    return added
+
+
 def build(history: str | Path, job=None) -> dict[str, int]:
-    """One Parquet per dataset with the columns the factors use; returns rows written."""
+    """One Parquet per dataset with the columns the factors use; returns rows written. FinMind's download
+    first, then the exchanges' daily reports for the days it does not have (research/history/chips_daily.py)."""
     base = Path(history)
     raw, out = base / "raw" / "finmind", base / "chips"
     out.mkdir(parents=True, exist_ok=True)
@@ -111,6 +134,7 @@ def build(history: str | Path, job=None) -> dict[str, int]:
                     columns["revenue"].append(float(row["revenue"]))
                     columns["year"].append(year)
                     columns["month"].append(month)
+        _add_official(base, dataset, columns)
         table = pa.table(columns)
         pq.write_table(table, out / f"{dataset}.parquet", compression="zstd")
         written[dataset] = table.num_rows

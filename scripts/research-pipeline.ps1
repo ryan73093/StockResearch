@@ -1,7 +1,6 @@
 param([ValidateSet("data-a", "daily", "model", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
-# start with
-#   Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scripts\research-pipeline.ps1','-Name','seed'
+# start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
