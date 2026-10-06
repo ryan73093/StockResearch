@@ -61,3 +61,16 @@ def test_system_page_shows_the_research_quality(tmp_path):
     body = client.get("/system").get_data(as_text=True)
     assert 'id="quality"' in body and "上市個股日行情" in body and "個股因子快照" in body
     assert "官方收盤表" in body and "個股因子快照" in body                      # the schedule lists the new jobs
+
+
+def test_today_reads_the_price_quality_of_the_research_store(tmp_path):
+    """S9-W03 (2026-10-06): Today's quality chip follows the research prices (no TPEx file here: 落後)."""
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+
+    store(tmp_path / "research" / "history")
+    client = create_app(build_container(Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}",
+                                                 scheduler_in_web=False))).test_client()
+    body = client.get("/").get_data(as_text=True)
+    assert "資料品質</dt><dd><span class=\"badge badge--bad\">落後</span>" in body

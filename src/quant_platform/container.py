@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -264,6 +264,18 @@ def build_container(settings: Settings | None = None) -> Container:
     market_calendar = MarketCalendarStore(
         _instance_dir(resolved.database_url), client=TwseHolidayScheduleClient()
     )
+    from quant_platform.research.prices import FallbackPrices, ResearchPrices, fetch_today_close
+
+    # S9-W03 (owner 2026-10-04: one copy of prices): the research history first; the legacy bars only
+    # where it has nothing as recent (TPEx stocks, a missed close) until the legacy price step stops.
+    research_history = _instance_dir(resolved.database_url) / "research" / "history"
+    prices = FallbackPrices(ResearchPrices(research_history), market_bar_repository)
+
+    def research_close(moment: datetime) -> int:
+        if not (research_history / "daily").is_dir():
+            return 0
+        return fetch_today_close(research_history, moment.astimezone(ZoneInfo("Asia/Taipei")).date())
+
     market_data_pipeline = DailyMarketDataPipeline(
         universe_repository,
         market_bar_repository,
@@ -272,6 +284,9 @@ def build_container(settings: Settings | None = None) -> Container:
         TaiwanOfficialDailyBarProvider(calendar_store=market_calendar),
         calendar_store=market_calendar,
         official_wait=timedelta(minutes=resolved.tw_official_close_wait_minutes),
+        research_prices=prices,
+        research_close=research_close,
+        legacy_paused=lambda: resolved.is_paused("legacy_research"),
     )
     taiwan_data_pipeline = TaiwanDataPipeline(
         universe_repository,
@@ -441,12 +456,6 @@ def build_container(settings: Settings | None = None) -> Container:
     authentication_service = AuthenticationService(
         resolved, authentication_repository, GoogleOidcClient(resolved)
     )
-    from quant_platform.research.prices import FallbackPrices, ResearchPrices
-
-    # S9-W03 (owner 2026-10-04: one copy of prices): the research history first; the legacy bars only
-    # where it has nothing as recent (TPEx stocks, a missed close) until the legacy price step stops.
-    prices = FallbackPrices(ResearchPrices(_instance_dir(resolved.database_url) / "research" / "history"),
-                            market_bar_repository)
     paper_trading_service = PaperTradingService(      # S9-W05: fills and marks from the one price store
         paper_trading_repository, universe_repository, prices
     )

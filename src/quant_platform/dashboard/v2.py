@@ -459,6 +459,22 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         quality_cache.update({"value": value, "expected": expected, "at": datetime.now(UTC)})
         return value
 
+    def price_quality(now: datetime) -> dict[str, object]:
+        """S9-W03 (2026-10-06): what Today's orders depend on — the research history's listed, TPEx and ETF
+        prices and unexplained moves beyond the limit (the chips and news lags belong on the system page)."""
+        quality = research_quality(now)
+        if quality is None:
+            return quality_status("TW")
+        rows = [row for row in quality["rows"] if row["name"] in ("上市個股日行情", "上櫃個股日行情", "ETF 與指數日線")]
+        unexplained = [move for move in quality["moves"] if not move["explained"]]
+        if any(row["status"] == "bad" for row in rows):
+            label, badge = "落後", "badge--bad"
+        elif unexplained or any(row["status"] != "ok" for row in rows):
+            label, badge = "有提醒", "badge--warn"
+        else:
+            label, badge = "正常", "badge--ok"
+        return {"label": label, "badge": badge, "excluded": quality["gone"], "computed": quality["expected"]}
+
     def quality_status(market: str) -> dict[str, object]:
         view = dependencies.data_quality_service.latest_view(market)
         if view is None:
@@ -520,7 +536,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             ]
         market_date = (dependencies.prices.latest_market_date() if dependencies.prices is not None
                        else dependencies.daily_market_data_pipeline.latest_market_date("TW"))
-        quality = quality_status("TW")
+        quality = price_quality(datetime.now(UTC))
         investment_plan = dependencies.investment_plan_service.current()
         plan_card = None
         if investment_plan is not None:

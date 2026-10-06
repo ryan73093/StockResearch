@@ -268,7 +268,16 @@ class DailyMarketDataPipeline:
         official_poll_seconds: float = 30.0,
         sleep=None,
         clock=None,
+        research_prices: object | None = None,
+        research_close=None,
+        legacy_paused=None,
     ) -> None:
+        # S9-W03 (2026-10-06): while the legacy research is paused, Taiwan's daily prices live only in the
+        # research history (one copy, owner 2026-10-04): a TW run fetches the official close into it and
+        # checks it, and freshness is read from it; the SQLite bars are no longer written for TW.
+        self._research_prices = research_prices
+        self._research_close = research_close
+        self._legacy_paused = legacy_paused
         self._universe_repository = universe_repository
         self._market_bar_repository = market_bar_repository
         self._ingestion_service = ingestion_service
@@ -313,10 +322,16 @@ class DailyMarketDataPipeline:
         sessions = calendar or default_market_calendar().calendar(market)
         return sessions.previous_trading_day(candidate)
 
+    def _research_mode(self, market: str) -> bool:
+        return (market.upper() == "TW" and self._research_prices is not None and self._legacy_paused is not None
+                and bool(self._legacy_paused()))
+
     def latest_market_date(
         self, market: str, now: datetime | None = None
     ) -> date | None:
         normalized_market = market.upper()
+        if self._research_mode(normalized_market):
+            return self._research_prices.latest_market_date(now)
         benchmark = "0050.TW" if normalized_market == "TW" else "SPY"
         latest = max(
             (
@@ -410,6 +425,8 @@ class DailyMarketDataPipeline:
         started = now or datetime.now(UTC)
         if started.tzinfo is None:
             raise ValueError("now must be timezone-aware")
+        if self._research_mode(normalized_market):
+            return self._run_research(started)
         selected_symbols = {item.strip().upper() for item in symbols} if symbols else None
         assets = [
             asset
@@ -568,6 +585,37 @@ class DailyMarketDataPipeline:
             metrics_json=json.dumps(asdict(result), ensure_ascii=False),
             error="; ".join(f"{symbol}: {error}" for symbol, error in failures.items()) or None,
         )
+        return result
+
+    def _run_research(self, started: datetime) -> DailyPipelineResult:
+        """S9-W03: fetch today's official close into the research history (polling until it is published or
+        the wait ends) and record whether the research history has the expected session."""
+        run_id = self._run_repository.start("daily_market_data", "TW", started)
+        expected = self.expected_session_date("TW", started, self._calendar("TW"))
+        deadline = started + self._official_wait
+        while True:
+            moment = self._clock()
+            if self._research_close is not None:
+                try:
+                    self._research_close(moment)
+                except Exception as exc:  # noqa: BLE001 - a failed fetch is retried until the wait ends
+                    logger.warning("Official close fetch failed: %s", exc)
+            latest = self._research_prices.latest_market_date(moment)
+            fresh = latest is not None and latest >= expected
+            if fresh or moment >= deadline:
+                break
+            self._sleep(self._official_poll_seconds)
+        completed = self._clock()
+        status = JobRunStatus.SUCCEEDED if fresh else JobRunStatus.FAILED
+        failures = {} if fresh else {"research": f"研究資料最新 {latest or '無'}，應有 {expected}"}
+        result = DailyPipelineResult(
+            run_id=run_id, market="TW", status=status.value, asset_count=0, succeeded=int(fresh), failed=int(not fresh),
+            received=0, inserted=0, failures=failures, started_at=started.isoformat(), completed_at=completed.isoformat(),
+            data_date=latest.isoformat() if latest else None, expected_date=expected.isoformat(), fresh=fresh,
+        )
+        self._run_repository.finish(run_id=run_id, status=status.value, completed_at=completed,
+                                    metrics_json=json.dumps(asdict(result), ensure_ascii=False),
+                                    error=failures.get("research"))
         return result
 
     def list_recent_runs(self, limit: int = 20) -> list[SchedulerJobRun]:

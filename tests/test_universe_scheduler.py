@@ -442,3 +442,50 @@ def test_startup_catch_up_sees_todays_success_behind_many_later_runs(tmp_path):
 
     assert "tw_daily_market_data" not in calls
     assert calls == ["us_daily_market_data"]
+
+
+class _Untouched:
+    """The legacy repositories and providers a research-mode TW run must not use."""
+
+    def __getattr__(self, name):
+        raise AssertionError(f"legacy {name} used")
+
+
+def research_tw_pipeline(tmp_path, ready_after):
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'tw.db'}"))
+    runs = SqlAlchemySchedulerJobRunRepository(container.database.session_factory)
+    started = datetime(2025, 1, 3, 5, 50, tzinfo=UTC)  # 13:50 Taipei
+    clock = {"now": started}
+    sleeps, fetched = [], []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += timedelta(seconds=seconds)
+
+    class Research:
+        def latest_market_date(self, as_of=None):
+            return date(2025, 1, 3) if len(fetched) >= ready_after else date(2025, 1, 2)
+
+    pipeline = DailyMarketDataPipeline(
+        _Untouched(), _Untouched(), _Untouched(), runs, _Untouched(), official_wait=timedelta(minutes=10),
+        official_poll_seconds=30, sleep=sleep, clock=lambda: clock["now"], research_prices=Research(),
+        research_close=fetched.append, legacy_paused=lambda: True)
+    return pipeline, runs, started, sleeps, fetched, clock
+
+
+def test_with_the_legacy_research_paused_tw_prices_come_from_the_research_history(tmp_path):
+    """S9-W03 (2026-10-06): the 13:50 run fetches the official close into the research history and records
+    the run the catch-up reads; the SQLite bars are not written for TW."""
+    pipeline, runs, started, sleeps, fetched, clock = research_tw_pipeline(tmp_path, ready_after=3)
+    result = pipeline.run("TW", now=started)
+    assert result.status == "succeeded" and result.fresh and result.data_date == "2025-01-03"
+    assert sleeps == [30, 30] and len(fetched) == 3
+    assert pipeline.is_fresh("TW", clock["now"]) and runs.latest_succeeded("daily_market_data", "TW", started)
+
+
+def test_a_research_close_that_never_comes_fails_after_the_wait(tmp_path):
+    pipeline, runs, started, sleeps, _fetched, _clock = research_tw_pipeline(tmp_path, ready_after=10_000)
+    result = pipeline.run("TW", now=started)
+    assert result.status == "failed" and not result.fresh and sum(sleeps) == 600
+    assert "應有 2025-01-03" in result.failures["research"]
+    assert runs.latest_succeeded("daily_market_data", "TW", started) is None
