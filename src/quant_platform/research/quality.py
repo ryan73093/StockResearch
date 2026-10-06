@@ -92,7 +92,7 @@ def check(history: str | Path, research_dir: str | Path, expected: date, session
                  "detail": f"{len(lasts)} 個序列" + (f"；落後：{'、'.join(lagging)}（最舊 {oldest}）" if lagging else "")})
     chips = history / "chips" / "TaiwanStockShareholding.parquet"
     chips_last = pc.max(pq.read_table(chips, columns=["date"])["date"]).as_py() if chips.is_file() else None
-    rows.append({"name": "籌碼與基本面（FinMind）", "last": chips_last,
+    rows.append({"name": "籌碼與基本面", "last": chips_last,
                  "status": _status(chips_last, expected, behind(chips_last), STALE_CHIPS),
                  "detail": "交易日 21:30 由證交所與櫃買日報更新（月營收另計）"})
     news = history / "raw" / "finmind" / "TaiwanStockNews"
