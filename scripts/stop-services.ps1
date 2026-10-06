@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     # Allow stopping during the 13:30-14:40 after-hours decision window.
-    [switch]$DuringTradingWindow
+    [switch]$DuringTradingWindow,
+    # Allow stopping while the worker runs a registered job or during 15:14-15:50 (2026-10-06).
+    [switch]$DuringWorkerJob
 )
 
 # Stops this project's supervisor, web, API and worker. Every process is
@@ -22,6 +24,25 @@ $minutes = $taipeiNow.Hour * 60 + $taipeiNow.Minute
 $isWeekday = $taipeiNow.DayOfWeek -notin @([DayOfWeek]::Saturday, [DayOfWeek]::Sunday)
 if ($isWeekday -and $minutes -ge (13 * 60 + 30) -and $minutes -lt (14 * 60 + 40) -and -not $DuringTradingWindow) {
     throw 'Refusing to stop services during 13:30-14:40 Taipei; pass -DuringTradingWindow to override.'
+}
+# 2026-10-06: a deploy at 14:41 stopped the 14:40 news collection half-way. The worker's own jobs that
+# register in instance\research\jobs (news 14:40, chips 21:30, model retrain 22:45) and the unregistered
+# 15:15-15:45 ones (research refresh, forward record, stock snapshot) are not interrupted.
+if (-not $DuringWorkerJob) {
+    if ($isWeekday -and $minutes -ge (15 * 60 + 14) -and $minutes -lt (15 * 60 + 50)) {
+        throw 'Refusing to stop services during 15:14-15:50 Taipei (research refresh, forward record, stock snapshot); pass -DuringWorkerJob to override.'
+    }
+    $jobsDir = Join-Path $projectRoot 'instance\research\jobs'
+    if (Test-Path -LiteralPath $jobsDir) {
+        $busy = @(Get-ChildItem -LiteralPath $jobsDir -Filter '*.json' | ForEach-Object {
+            try { $job = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return }
+            if ($job.status -eq 'running' -and "$($job.command)" -like 'scheduler *' -and $job.pid -and
+                (Get-Process -Id ([int]$job.pid) -ErrorAction SilentlyContinue)) { "$($job.command)" }
+        })
+        if ($busy.Count -gt 0) {
+            throw "Refusing to stop services while the worker runs: $($busy -join ', '); pass -DuringWorkerJob to override."
+        }
+    }
 }
 
 function Get-ProjectServiceProcesses {

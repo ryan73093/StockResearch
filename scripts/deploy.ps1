@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$DuringTradingWindow,
+    [switch]$DuringWorkerJob,
     [switch]$HomeAuthOnly
 )
 
@@ -19,6 +20,7 @@ if ($HomeAuthOnly) {
 
 $stopArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'stop-services.ps1'))
 if ($DuringTradingWindow) { $stopArguments += '-DuringTradingWindow' }
+if ($DuringWorkerJob) { $stopArguments += '-DuringWorkerJob' }
 & powershell.exe @stopArguments
 if ($LASTEXITCODE -ne 0) { throw 'stop-services.ps1 failed; nothing was installed.' }
 
