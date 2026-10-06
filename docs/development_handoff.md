@@ -42,7 +42,8 @@
 下一步（照順序）：
 1. S9-W03 收尾（見上）。
 2. S9-W04 收尾：舊 SQLite 台股資料流程已在暫停時一律不寫（10/06）；剩舊表的封存與清空（停服務、備份、Parquet 封存、清表、VACUUM，照資料庫安全規則）。
-3. 財報因子（10/06 程式完成）：14:40 後 `scripts\start-research.ps1 -Name statements`（財報表 → 因子強弱 → `gbm-1.2.0` → 12 個規則 → 統計）；data-a 完成後 `history chips` 重建（含上櫃 FinMind 歷史）。
+3. RL（R15 C1，10/06 程式完成）：14:40 後 `scripts\start-research.ps1 -Name rl`（約 15 分鐘）；結果寫進研究方法第 7 節。過了驗收（樣本外贏 T1 規則、回撤不更深）才做 C2：把部位調整接進真實帳戶引擎（帳戶部位隨日期變、要能減碼個股）並進前向觀察。
+4. 財報因子（10/06 程式完成）：14:40 後 `scripts\start-research.ps1 -Name statements`（財報表 → 因子強弱 → `gbm-1.2.0` → 12 個規則 → 統計）；data-a 完成後 `history chips` 重建（含上櫃 FinMind 歷史）。
 4. （已完成 10/06）模型年度重訓：worker `model_retrain` 交易日 22:45 檢查，2027-01 第一個交易日晚上會訓練 2027 年的模型。
 
 ## 另一個待決定的工作包：S5-W06 舊決策程式退場（等使用者決定範圍）
