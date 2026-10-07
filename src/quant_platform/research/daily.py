@@ -124,6 +124,9 @@ class DailyRule(BaseModel):
     # 2026-10-07 (the owner: 降換手): rank on each factor's average over the last `smooth` sessions
     # instead of the day's value; 0 = the day's value. Left out of the hash when 0.
     smooth: int = Field(default=0, ge=0, le=60)
+    # R15 C1b (2026-10-07): "q1" = the learned exit (research/exits.py) decides keep or sell for every
+    # holding each session; a sold stock is not bought back for 20 sessions. Left out of the hash when "none".
+    exit_model: Literal["none", "q1"] = "none"
 
     @field_validator("factors")
     @classmethod
@@ -151,6 +154,8 @@ class DailyRule(BaseModel):
             data.pop("account_filter", None)
         if not data.get("smooth"):
             data.pop("smooth", None)
+        if data.get("exit_model") == "none":
+            data.pop("exit_model", None)
         return data
 
     @property
@@ -350,7 +355,13 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
     current: list[str] = []
     bought: dict[str, int] = {}
     peak: dict[str, float] = {}           # R7: highest adjusted close since bought
-    stopped: dict[str, int] = {}          # R7: session count of the last stop-out
+    stopped: dict[str, int] = {}          # R7: session count of the last stop-out (or learned exit)
+    buy_price: dict[str, float] = {}      # C1b: adjusted close on the buying session
+    exit_agent = None
+    if getattr(rule, "exit_model", "none") != "none" and getattr(fp, "models", None) is not None:
+        from quant_platform.research.exits import EXIT_VERSION, ExitAgent
+
+        exit_agent = ExitAgent(fp, Path(fp.models) / EXIT_VERSION)
     for count, day in enumerate(sessions):
         if day not in checks:
             continue
@@ -369,6 +380,16 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
                 if price < peak[symbol] * (1 - rule.stop_loss):
                     current.remove(symbol)
                     stopped[symbol] = count
+        if exit_agent is not None and current:
+            for symbol in current:
+                price = fp.price(symbol, position)
+                if np.isfinite(price):
+                    peak[symbol] = max(peak.get(symbol, price), price)
+            held_for = {symbol: count - bought[symbol] for symbol in current}
+            for symbol in exit_agent.sells(position, list(current), held_for, buy_price, peak, ranked):
+                current.remove(symbol)
+                stopped[symbol] = count
+        if stopped:
             barred = {symbol for symbol, when in stopped.items() if count - when < STOP_COOLDOWN}
             ranked = [symbol for symbol in ranked if symbol not in barred]
         keep_zone = set(ranked[: rule.top * rule.keep])
@@ -395,8 +416,10 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
             chosen.append(symbol)
         current = kept + chosen
         bought = {symbol: bought.get(symbol, count) for symbol in current}
-        if rule.stop_loss:
+        if rule.stop_loss or exit_agent is not None:
             peak = {symbol: peak[symbol] if symbol in peak else fp.price(symbol, position) for symbol in current}
+        if exit_agent is not None:
+            buy_price = {symbol: buy_price.get(symbol, fp.price(symbol, position)) for symbol in current}
         output[day] = list(current)
     return output
 
@@ -761,6 +784,11 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
         from quant_platform.research.fundamentals import digest as statements_digest
 
         payload["statements"] = statements_digest(history, RECENT_END)
+    if rule.exit_model != "none":                              # C1b: the exit models are part of the input
+        from quant_platform.research.exits import digest as exits_digest
+        from quant_platform.research.exits import exits_dir
+
+        payload["exit"] = exits_digest(exits_dir(history))
     if any(name in MODEL_FACTORS for name in rule.factors):     # R15-B: the trained models are part of the input
         from quant_platform.research.model import MODELS, digest, model_dir
 
@@ -958,6 +986,19 @@ def turnover_batch() -> list[DailyRule]:
     return rules
 
 
+def exits_batch() -> list[DailyRule]:
+    """R15 C1b (2026-10-07): the best trend rule with the learned exit, alone and half in 0050."""
+    from quant_platform.research.exits import base_rule as exit_base
+
+    rules = []
+    for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+        rules.append(exit_base().model_copy(update={
+            "name": f"每天 站上 200 日均線：前 20 名、同產業最多 3 成、依波動度配置、學習出場{word}",
+            "core": core, "exit_model": "q1"}))
+    return rules
+
+
 BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch,
            "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch,
-           "model-excess": model_excess_batch, "statements": statement_batch, "turnover": turnover_batch}
+           "model-excess": model_excess_batch, "statements": statement_batch, "turnover": turnover_batch,
+           "exits": exits_batch}

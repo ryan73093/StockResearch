@@ -299,7 +299,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors", "daily", "snapshot", "model", "rl"),
+                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -394,6 +394,24 @@ def main() -> int:
             print(f"{item['label']}：{item['verdict']}；{first.get('label')} 排序相關 {first.get('ic')}（t={first.get('t')}），"
                   f"前段比平均每年 {first.get('top_excess_year')}、比 0050 {first.get('top_vs_0050_year')}", flush=True)
         print(f"已寫入 {path}")
+        return 0
+
+    if args.command == "exits":             # R15 C1b: train the learned exit, walk-forward
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import exits as research_exits
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start(f"學習出場（{research_exits.EXIT_VERSION}，逐年 {research_exits.FIRST_YEAR} 起）", command,
+                                    total=daily_research.RECENT_END.year - research_exits.FIRST_YEAR + 1) as job:
+            job.update(current="載入行情並重播規則的持股", force=True)
+            data, fp = daily_research.load(Path(args.base))
+            meta = research_exits.train(fp, research_exits.exits_dir(Path(args.base)), job=job)
+            sells = [item["sell_share"] for item in meta["years"].values()]
+            job.payload["summary"] = f"{len(meta['years'])} 個年度模型；平均賣出比例 {sum(sells) / len(sells):.1%}" if sells else "沒有模型"
+        for year, item in meta["years"].items():
+            print(f"{year}：訓練 {item['train_rows']:,} 筆、測試 {item['test_rows']:,} 筆；會賣 {item['sell_share']:.1%}；"
+                  f"賣掉的之後比替補多 {item['sold_outcome']}、留著的多 {item['kept_outcome']}", flush=True)
         return 0
 
     if args.command == "rl":                # R15 stage C1: the RL exposure overlay, walk-forward
