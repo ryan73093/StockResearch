@@ -2,6 +2,13 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-07 下午（二）— 舊台股資料表清空、上櫃籌碼進籌碼檔、部署
+
+- 14:40 新聞收集（10/06）：175 檔、1,398 則，沒有被打斷。
+- 14:52 部署（財報季更新、瘦身腳本 `-Tables`）：web、api 健康。
+- 14:52～14:53 `slim-legacy-tables.ps1 -Tables taiwan_data_records`：備份 `instanceackups\pre-slim-20261007-145258`，筆數與 10/04 封存相同（922,676），清空後 VACUUM，資料庫 1.54 GB → 0.65 GB；服務自動重啟（web 200、api 200）。回復：停服務後把備份資料夾的檔案複製回 `instance\`。S9-W04 完成。
+- 14:53～14:56 `history chips` 重建：加入上櫃 FinMind 籌碼歷史，外資持股 552 萬 → 817 萬列、2,191 檔、到 10/06；上市資料版本 `daily:351018bd…` 不變（上市＋上櫃版本會變，10/05 的 6 個上櫃規則成為舊版本，留著算嘗試次數）。
+
 ## 2026-10-07 下午 — 財報季更新
 
 - `fundamentals.due_quarter`（法定期限已過的最新一季：10/07 是 Q2、11/15 起是 Q3、隔年 4/1 起是 Q4）；`finmind.fetch_all(refresh_before=…)` 只重抓最新一列早於該季的檔，`active_codes` 只留近 20 個交易日有成交的代號；`history finmind --refresh-quarter due`；流程 `statements-refresh`（三種財報 → 財報表）；worker `statements_refresh` 每晚 22:15 檢查，每季一次經 `start-research.ps1` 在背景啟動（不佔住 worker，部署不會打斷），標記檔 `history/fundamentals/refresh-<季>.started`。
