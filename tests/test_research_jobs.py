@@ -57,3 +57,18 @@ def test_a_locked_progress_file_never_stops_the_program(tmp_path, monkeypatch):
         job.update(done=5, force=True)
         refusals["left"] = 0
     assert JobLog(tmp_path).jobs()[0]["status"] == "done"
+
+
+def test_a_pid_given_to_a_later_program_is_not_the_job(tmp_path):
+    """2026-10-07: a job stopped by a deploy kept 執行中 because Windows gave its PID to a new process."""
+    import os
+
+    log = JobLog(tmp_path)
+    job = log.start("新聞", "scheduler collect_news", total=10)
+    job.payload["pid"] = os.getpid()                    # alive, but created long after the job "started"
+    job.payload["started_at"] = "2020-01-01T09:00:00+08:00"
+    job._write(force=True)
+    fresh = log.start("現在的工作", "scheduler update_chips", total=1)
+    rows = {row["command"]: row["status"] for row in log.jobs()}
+    assert rows["scheduler collect_news"] == "stopped" and rows["scheduler update_chips"] == "running"
+    fresh.finish()

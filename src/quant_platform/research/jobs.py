@@ -15,7 +15,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Self
 from zoneinfo import ZoneInfo
@@ -26,7 +26,10 @@ WRITE_EVERY = 3.0   # seconds between progress writes
 RETRIES, RETRIES_FORCED, RETRY_PAUSE = 3, 20, 0.25
 
 
-def _alive(pid: int) -> bool:
+def _alive(pid: int, started_at: datetime | None = None) -> bool:
+    """Whether the job's process still runs. With ``started_at``, a process created more than two minutes
+    after the job started is another program that got the same number (2026-10-07: the news job a deploy
+    stopped on 10-06 still read 執行中 because its PID had been given to a new process)."""
     if pid <= 0:
         return False
     if sys.platform == "win32":
@@ -36,8 +39,19 @@ def _alive(pid: int) -> bool:
             return False
         code = ctypes.c_ulong()
         ok = kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+        created = None
+        if started_at is not None:
+            class FILETIME(ctypes.Structure):
+                _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
+
+            times = [FILETIME() for _ in range(4)]
+            if kernel.GetProcessTimes(handle, *[ctypes.byref(item) for item in times]):
+                ticks = (times[0].high << 32) | times[0].low          # 100 ns since 1601-01-01 UTC
+                created = datetime(1601, 1, 1, tzinfo=ZoneInfo("UTC")) + timedelta(microseconds=ticks // 10)
         kernel.CloseHandle(handle)
-        return bool(ok) and code.value == 259            # STILL_ACTIVE
+        if not (bool(ok) and code.value == 259):            # STILL_ACTIVE
+            return False
+        return created is None or started_at is None or created <= started_at + timedelta(minutes=2)
     try:
         os.kill(pid, 0)
     except OSError:
@@ -110,6 +124,10 @@ class JobLog:
         self.folder.mkdir(parents=True, exist_ok=True)
         started = _now()
         job_id = f"{started:%Y%m%d-%H%M%S}-{os.getpid()}"
+        suffix = 1
+        while (self.folder / f"{job_id}.json").exists():     # two jobs of one process within a second
+            suffix += 1
+            job_id = f"{started:%Y%m%d-%H%M%S}-{os.getpid()}-{suffix}"
         return Job(self.folder / f"{job_id}.json", {
             "id": job_id, "name": name, "command": command, "pid": os.getpid(), "status": "running",
             "started_at": started.isoformat(timespec="seconds"), "done": 0, "total": total, "current": current,
@@ -127,7 +145,8 @@ class JobLog:
                 item = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if item.get("status") == "running" and not _alive(int(item.get("pid") or 0)):
+            started = datetime.fromisoformat(item["started_at"]) if item.get("started_at") else None
+            if item.get("status") == "running" and not _alive(int(item.get("pid") or 0), started):
                 item["status"] = "stopped"
                 item["summary"] = item.get("summary") or "程式已不在執行（可能被停止或電腦重開）"
             item["status_label"] = STATUS_LABELS.get(item["status"], item["status"])

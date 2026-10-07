@@ -36,8 +36,10 @@ if (-not $DuringWorkerJob) {
     if (Test-Path -LiteralPath $jobsDir) {
         $busy = @(Get-ChildItem -LiteralPath $jobsDir -Filter '*.json' | ForEach-Object {
             try { $job = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return }
-            if ($job.status -eq 'running' -and "$($job.command)" -like 'scheduler *' -and $job.pid -and
-                (Get-Process -Id ([int]$job.pid) -ErrorAction SilentlyContinue)) { "$($job.command)" }
+            if ($job.status -ne 'running' -or "$($job.command)" -notlike 'scheduler *' -or -not $job.pid) { return }
+            $process = Get-Process -Id ([int]$job.pid) -ErrorAction SilentlyContinue
+            # the same PID given to a later program is not the job (2026-10-07)
+            if ($process -and $process.StartTime -le ([datetime]$job.started_at).AddMinutes(2)) { "$($job.command)" }
         })
         if ($busy.Count -gt 0) {
             throw "Refusing to stop services while the worker runs: $($busy -join ', '); pass -DuringWorkerJob to override."
