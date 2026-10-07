@@ -59,6 +59,13 @@ def deadline(quarter: date) -> date:
     return last + timedelta(days=1)
 
 
+def due_quarter(today: date) -> date:
+    """The latest quarter whose filing deadline has passed by ``today`` (its statements are usable)."""
+    ends = [date(year, month, day) for year in (today.year - 1, today.year)
+            for month, day in ((3, 31), (6, 30), (9, 30), (12, 31))]
+    return max(quarter for quarter in ends if deadline(quarter) <= today)
+
+
 def _read(path: Path) -> list[dict]:
     return json.loads(gzip.decompress(path.read_bytes()).decode("utf-8")).get("data") or []
 

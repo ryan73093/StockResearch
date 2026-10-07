@@ -54,6 +54,8 @@ def main() -> int:
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
                                             "chips", "tpex", "fundamentals"))
     parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報")
+    parser.add_argument("--refresh-quarter", help="finmind：季更新，due＝法定期限已過的最新一季；只重抓近期有交易、"
+                                                  "還沒有這一季的檔（2026-10-07）")
     parser.add_argument("--codes", default="twse", choices=("twse", "tpex", "all", "lists"),
                         help="finmind：上市、上櫃、全部，或 lists（下市清單、股票基本資料、期貨法人部位）")
     parser.add_argument("--exchange", default="twse,tpex", help="stocks：twse、tpex 或兩者")
@@ -160,9 +162,20 @@ def main() -> int:
         codes = {"twse": stock_codes(base), "tpex": tpex_codes(base),
                  "all": sorted(set(stock_codes(base)) | set(tpex_codes(base)))}[args.codes]
         market = {"twse": "上市", "tpex": "上櫃", "all": "上市＋上櫃"}[args.codes]
+        refresh = None
+        if args.refresh_quarter:             # the quarterly statements refresh: trading codes only
+            from datetime import date as day_type
+
+            from quant_platform.research.fundamentals import due_quarter
+            from quant_platform.research.history.finmind import active_codes
+
+            refresh = (due_quarter(day_type.today()) if args.refresh_quarter == "due"
+                       else day_type.fromisoformat(args.refresh_quarter))
+            codes = sorted(set(codes) & set(active_codes(base)))
+            market += f"，更新到 {refresh}"
         with JobLog(base.parent).start(f"下載 FinMind（{market}，{len(datasets)} 種 × {len(codes)} 檔：{'、'.join(datasets)}）"[:120],
                                        "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
-            result = fetch_all(base, token, codes, datasets, job=job)
+            result = fetch_all(base, token, codes, datasets, job=job, refresh_before=refresh)
         print(json.dumps(result, ensure_ascii=False)[:2000], flush=True)
         return 0
 

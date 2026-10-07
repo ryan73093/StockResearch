@@ -393,6 +393,38 @@ def update_chips(container: "Container", now: datetime | None = None) -> object 
     return fetched
 
 
+def start_statements_refresh(container: "Container", now: datetime | None = None, launch=None) -> object | None:
+    """Every evening at 22:15: once per quarter, after its filing deadline, start the statements refresh
+    in the background (scripts/start-research.ps1 -Name statements-refresh, outside the worker so a deploy
+    does not stop it); a marker file under history/fundamentals keeps it to once a quarter."""
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.fundamentals import due_quarter
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    research = _instance_dir(container.settings.database_url) / "research"
+    folder = research / "history" / "fundamentals"
+    if not (folder / "quarterly.parquet").is_file():
+        return None
+    due = due_quarter(local_now.date())
+    marker = folder / f"refresh-{due.isoformat()}.started"
+    if marker.is_file():
+        return None
+    marker.write_text(local_now.isoformat(timespec="seconds"), encoding="utf-8")
+    # the worker runs the installed package: the project is the instance folder's parent
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch(due)
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                        "-Name", "statements-refresh"], check=False, timeout=120)
+    logger.info("Statements refresh started for %s", due)
+    return due
+
+
 def retrain_models(container: "Container", now: datetime | None = None) -> object | None:
     """Every trading day at 22:45: a model that a forward-observed rule uses and that has no model for this
     year yet gets one (trained on everything before the year's first session). Once a year in practice."""
@@ -617,6 +649,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3 * 3600,
+    )
+    scheduler.add_job(
+        start_statements_refresh,
+        args=[container],
+        trigger=CronTrigger(hour=22, minute=15, timezone=timezone),
+        id="statements_refresh",
+        name="財報季更新（每晚 22:15 檢查，法定期限過後每季一次，背景啟動）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
         retrain_models,

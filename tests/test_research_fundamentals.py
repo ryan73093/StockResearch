@@ -2,7 +2,7 @@
 
 import gzip
 import json
-from datetime import date
+from datetime import date, datetime
 
 import numpy as np
 import pandas as pd
@@ -76,3 +76,51 @@ def test_a_trained_version_keeps_its_features(tmp_path):
     (tmp_path / "meta.json").write_text(json.dumps({"features": ["trend_200", "momentum_3"]}), encoding="utf-8")
     assert model.trained_features(tmp_path) == ("trend_200", "momentum_3")
     assert len(model.trained_features(tmp_path / "missing")) == 35
+
+
+def test_the_due_quarter_follows_the_filing_deadlines():
+    from quant_platform.research.fundamentals import due_quarter
+
+    assert due_quarter(date(2026, 10, 7)) == date(2026, 6, 30)
+    assert due_quarter(date(2026, 11, 14)) == date(2026, 6, 30) and due_quarter(date(2026, 11, 15)) == date(2026, 9, 30)
+    assert due_quarter(date(2027, 3, 31)) == date(2026, 9, 30) and due_quarter(date(2027, 4, 1)) == date(2026, 12, 31)
+
+
+def test_the_refresh_requests_only_files_without_the_due_quarter(tmp_path):
+    from quant_platform.research.history.finmind import fetch_all, path_for
+
+    for code, newest in (("1101", "2026-03-31"), ("2330", "2026-06-30")):
+        path = path_for(tmp_path, "TaiwanStockFinancialStatements", code)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(gzip.compress(json.dumps({"data": [{"date": newest, "type": "EPS", "value": 1.0}]}).encode()))
+    asked = []
+
+    def get(dataset, code, token, end):
+        asked.append(code)
+        return {"data": [{"date": "2026-06-30", "type": "EPS", "value": 2.0}]}
+
+    result = fetch_all(tmp_path, "t", ["1101", "2330"], ["TaiwanStockFinancialStatements"], get=get,
+                       sleep=lambda _s: None, refresh_before=date(2026, 6, 30),
+                       now=lambda: datetime(2026, 10, 7, 20, 0))      # outside the 13:30-15:30 pause
+    assert asked == ["1101"] and result["requested"] == 1 and result["skipped"] == 1
+    refreshed = json.loads(gzip.decompress(path_for(tmp_path, "TaiwanStockFinancialStatements", "1101").read_bytes()))
+    assert refreshed["data"][0]["date"] == "2026-06-30"
+
+
+def test_the_worker_starts_the_refresh_once_a_quarter(tmp_path):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.scheduler.runner import start_statements_refresh
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'r.db'}"))
+    folder = tmp_path / "research" / "history" / "fundamentals"
+    folder.mkdir(parents=True)
+    (folder / "quarterly.parquet").write_bytes(b"x")
+    started = []
+    moment = datetime(2026, 11, 15, 22, 15, tzinfo=ZoneInfo("Asia/Taipei"))
+    assert start_statements_refresh(container, moment, launch=started.append) == date(2026, 9, 30)
+    assert start_statements_refresh(container, moment, launch=started.append) is None        # once a quarter
+    assert started == [date(2026, 9, 30)] and (folder / "refresh-2026-09-30.started").is_file()

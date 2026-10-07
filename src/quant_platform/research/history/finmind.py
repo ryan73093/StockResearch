@@ -143,9 +143,40 @@ def _quiet(now: datetime) -> bool:
     return now.weekday() < 5 and QUIET[0] <= now.time() <= QUIET[1]
 
 
+def _newest(path: Path) -> date | None:
+    try:
+        rows = read_rows(path.parents[3], path.parent.name, path.name.split(".")[0])   # history/raw/finmind/<set>/x
+    except (OSError, ValueError):
+        return None
+    days = [str(row.get("date") or "")[:10] for row in rows]
+    days = [day for day in days if len(day) == 10]
+    return date.fromisoformat(max(days)) if days else None
+
+
+def active_codes(base: Path, sessions: int = 20) -> list[str]:
+    """The listed and TPEx codes quoted in the last ``sessions`` sessions (delisted ones are not refreshed)."""
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    codes: set[str] = set()
+    for exchange in ("twse", "tpex"):
+        files = sorted((base / "stocks" / exchange).glob("*.parquet"))
+        if not files:
+            continue
+        table = pq.read_table(files[-1], columns=["date", "code"])
+        days = sorted(set(pc.unique(table["date"]).to_pylist()))[-sessions:]
+        if days:
+            table = table.filter(pc.greater_equal(table["date"], days[0]))
+            codes.update(table["code"].to_pylist())
+    return sorted(codes)
+
+
 def fetch_all(base: Path, token: str, codes: Iterable[str], datasets: Iterable[str] = tuple(DATASETS), job=None,
               get: Callable[[str, str, str, date], dict] = http_get, sleep: Callable[[float], None] = time.sleep,
-              now: Callable[[], datetime] = lambda: datetime.now(TAIPEI), per_hour: int = PER_HOUR) -> dict[str, object]:
+              now: Callable[[], datetime] = lambda: datetime.now(TAIPEI), per_hour: int = PER_HOUR,
+              refresh_before: date | None = None) -> dict[str, object]:
+    """Download each (dataset, code) once; with ``refresh_before`` (the quarterly statements refresh,
+    2026-10-07) a file whose newest row is older than that date is requested again and replaced."""
     codes, datasets = list(codes), list(datasets)
     total = len(codes) * len(datasets)
     interval = 3600.0 / per_hour
@@ -156,7 +187,7 @@ def fetch_all(base: Path, token: str, codes: Iterable[str], datasets: Iterable[s
     for dataset in datasets:
         for code in codes:
             path = path_for(base, dataset, code)
-            if path.is_file():
+            if path.is_file() and (refresh_before is None or (_newest(path) or date.min) >= refresh_before):
                 done += 1
                 skipped += 1
                 continue
