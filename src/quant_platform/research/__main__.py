@@ -299,7 +299,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits"),
+                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -394,6 +394,31 @@ def main() -> int:
             print(f"{item['label']}：{item['verdict']}；{first.get('label')} 排序相關 {first.get('ic')}（t={first.get('t')}），"
                   f"前段比平均每年 {first.get('top_excess_year')}、比 0050 {first.get('top_vs_0050_year')}", flush=True)
         print(f"已寫入 {path}")
+        return 0
+
+    if args.command == "execution":         # R4: the tracked rules' stock orders against the odd-lot auctions
+        from quant_platform.research import execution
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("盤後零股能不能成交（T0 候選與 T1 的個股委託）", command) as job:
+            report = execution.run(Path(args.base), RESEARCH, broker_costs(args.broker), job=job)
+            folder = RESEARCH / "execution"
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"execution-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+            path.write_text(json.dumps(report, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+            job.payload["summary"] = f"{len(report['rules'])} 個規則、{report['sessions']} 個抽樣交易日"
+        for item in report["rules"]:
+            part = item["all"]
+            if not part.get("orders"):
+                print(f"{item['name']}：抽樣日沒有委託", flush=True)
+                continue
+            cost = part["cost_bps"]
+            print(f"{item['name']}：抽樣委託 {part['orders']} 筆；沒成交 {part['no_trade']:.0%}、"
+                  f"限價內成交 {part['filled']:.0%}、剛好在限價 {part['at_limit']:.0%}、超出限價 {part['not_filled']:.0%}；"
+                  f"成交價離收盤 中位 {cost['median']} 平均 {cost['mean']} bps（引擎 {part['engine_bps']:g}）；"
+                  f"多付約 {item['extra_cost']:,} 元（期末的 {item['extra_cost_share']:.1%}）", flush=True)
+        print(f"已寫入 {path}", flush=True)
         return 0
 
     if args.command == "exits":             # R15 C1b: train the learned exit, walk-forward

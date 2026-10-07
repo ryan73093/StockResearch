@@ -29,8 +29,9 @@ RECENT = date(2020, 10, 26)
 LIMIT_PREMIUMS_BPS = (0, 10, 20, 30, 50, 100, 150)
 
 
-def parse_odd_lot(payload: object, codes: set[str]) -> dict[str, dict[str, float | int | None]]:
-    """TWT53U: 代號, 名稱, 成交股數, 筆數, 金額, 成交價, 買價, 買量, 賣價, 賣量."""
+def parse_odd_lot(payload: object, codes: set[str] | None) -> dict[str, dict[str, float | int | None]]:
+    """TWT53U: 代號, 名稱, 成交股數, 筆數, 金額, 成交價, 買價, 買量, 賣價, 賣量 (the best bid and ask
+    left after the auction). ``codes=None`` keeps every security."""
     if not isinstance(payload, dict) or payload.get("stat") != "OK":
         return {}
     output = {}
@@ -38,10 +39,11 @@ def parse_odd_lot(payload: object, codes: set[str]) -> dict[str, dict[str, float
         if not isinstance(item, list) or len(item) < 10:
             continue
         code = str(item[0]).strip()
-        if code in codes:
+        if codes is None or code in codes:
             output[code] = {
                 "shares": integer(item[2]), "trades": integer(item[3]), "price": number(item[5]),
-                "bid": number(item[6]), "ask": number(item[8]),
+                "bid": number(item[6]), "bid_shares": integer(item[7]), "ask": number(item[8]),
+                "ask_shares": integer(item[9]),
             }
     return output
 
