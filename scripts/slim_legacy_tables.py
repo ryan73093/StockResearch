@@ -60,10 +60,13 @@ def slim(job, database: Path = DATABASE, manifest_path: Path = MANIFEST, tables=
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--backup", required=True, help="slim-legacy-tables.ps1 的備份資料夾（必須存在）")
+    parser.add_argument("--tables", default=",".join(TABLES),
+                        help="要清空的已封存表，逗號分隔（2026-10-07 起可只清指定的表，例如 taiwan_data_records）")
     args = parser.parse_args()
+    tables = tuple(name.strip() for name in args.tables.split(",") if name.strip())
     if not Path(args.backup, "quant_platform.db").is_file():
         raise SystemExit("找不到備份，停止")
     with JobLog(ROOT / "instance" / "research").start("資料庫瘦身（清空已封存的舊研究表、VACUUM）",
                                                        "scripts/slim_legacy_tables.py " + " ".join(sys.argv[1:])) as job:
-        result = slim(job)
+        result = slim(job, tables=tables)
     print(json.dumps(result, ensure_ascii=False))

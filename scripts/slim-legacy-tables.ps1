@@ -3,6 +3,8 @@
 # again. The log and the backup path go to instance\research\logs\slim-<time>.log. Not between 13:30 and
 # 14:40 (stop-services.ps1 refuses). Start detached:
 #   Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scripts\slim-legacy-tables.ps1'
+param([string]$Tables = "")
+# -Tables (2026-10-07): only these archived tables, comma separated (e.g. taiwan_data_records).
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -25,7 +27,9 @@ try {
     Write-Log "backup: $backup"
     $env:PYTHONPATH = "src"
     $env:PYTHONIOENCODING = "utf-8"
-    & (Join-Path $root ".venv\Scripts\python.exe") (Join-Path $root "scripts\slim_legacy_tables.py") --backup $backup 2>&1 | Out-File -Append -Encoding utf8 $log
+    $slimArguments = @((Join-Path $root "scripts\slim_legacy_tables.py"), "--backup", $backup)
+    if ($Tables) { $slimArguments += @("--tables", $Tables) }
+    & (Join-Path $root ".venv\Scripts\python.exe") @slimArguments 2>&1 | Out-File -Append -Encoding utf8 $log
     Write-Log "slim exit $LASTEXITCODE"
 }
 catch {
