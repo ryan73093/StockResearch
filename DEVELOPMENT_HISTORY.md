@@ -6,7 +6,7 @@
 
 - 14:40 新聞收集（10/06）：175 檔、1,398 則，沒有被打斷。
 - 14:52 部署（財報季更新、瘦身腳本 `-Tables`）：web、api 健康。
-- 14:52～14:53 `slim-legacy-tables.ps1 -Tables taiwan_data_records`：備份 `instanceackups\pre-slim-20261007-145258`，筆數與 10/04 封存相同（922,676），清空後 VACUUM，資料庫 1.54 GB → 0.65 GB；服務自動重啟（web 200、api 200）。回復：停服務後把備份資料夾的檔案複製回 `instance\`。S9-W04 完成。
+- 14:52～14:53 `slim-legacy-tables.ps1 -Tables taiwan_data_records`：備份 `instance\backups\pre-slim-20261007-145258`，筆數與 10/04 封存相同（922,676），清空後 VACUUM，資料庫 1.54 GB → 0.65 GB；服務自動重啟（web 200、api 200）。回復：停服務後把備份資料夾的檔案複製回 `instance\`。S9-W04 完成。
 - 14:53～14:56 `history chips` 重建：加入上櫃 FinMind 籌碼歷史，外資持股 552 萬 → 817 萬列、2,191 檔、到 10/06；上市資料版本 `daily:351018bd…` 不變（上市＋上櫃版本會變，10/05 的 6 個上櫃規則成為舊版本，留著算嘗試次數）。
 
 ## 2026-10-07 下午 — 財報季更新
