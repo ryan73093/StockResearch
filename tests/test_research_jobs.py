@@ -19,6 +19,18 @@ def test_a_job_reports_progress_and_its_end(tmp_path):
     assert log.running() == 0
 
 
+def test_a_finished_job_reads_complete_even_if_the_last_step_was_not_reported(tmp_path):
+    log = JobLog(tmp_path)
+    with log.start("逐年模型", "x", total=3) as job:
+        for number in range(3):
+            job.update(done=number, force=True)              # reported as each year starts: 0, 1, 2
+    assert log.jobs()[0]["done"] == 3 and log.jobs()[0]["percent"] == 100
+    with pytest.raises(ValueError), log.start("半途失敗", "y", total=3) as job:
+        job.update(done=1, force=True)
+        raise ValueError("x")
+    assert {row["name"]: row["done"] for row in log.jobs()}["半途失敗"] == 1
+
+
 def test_a_failed_job_and_a_vanished_process(tmp_path):
     log = JobLog(tmp_path)
     with pytest.raises(ValueError), log.start("壞掉的程式", "x"):

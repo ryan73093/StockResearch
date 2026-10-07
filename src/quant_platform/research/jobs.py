@@ -102,6 +102,8 @@ class Job:
 
     def finish(self, status: str = "done", summary: str = "") -> None:
         self.payload.update({"status": status, "summary": summary, "finished_at": _now().isoformat(timespec="seconds")})
+        if status == "done" and self.payload.get("total"):     # loops report a step as it starts, not as it ends
+            self.payload["done"] = self.payload["total"]
         self._write(force=True)
 
     def __enter__(self) -> Self:
