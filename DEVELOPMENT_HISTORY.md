@@ -2,6 +2,11 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-07 下午 — 財報季更新
+
+- `fundamentals.due_quarter`（法定期限已過的最新一季：10/07 是 Q2、11/15 起是 Q3、隔年 4/1 起是 Q4）；`finmind.fetch_all(refresh_before=…)` 只重抓最新一列早於該季的檔，`active_codes` 只留近 20 個交易日有成交的代號；`history finmind --refresh-quarter due`；流程 `statements-refresh`（三種財報 → 財報表）；worker `statements_refresh` 每晚 22:15 檢查，每季一次經 `start-research.ps1` 在背景啟動（不佔住 worker，部署不會打斷），標記檔 `history/fundamentals/refresh-<季>.started`。
+- 測試時踩到：下載函式在 13:30～15:30 會等額度，測試把等待換成立即返回，結果在這段時間變成無限迴圈（14:0x 跑測試時卡住 5 分鐘，已停掉）；測試改成固定在晚上 20:00。全部 540 通過、1 略過。Commit：`1aafea2`。
+
 ## 2026-10-07 — 第一個 T0 候選、RL C1 結果、10/06 排程全部正常
 
 - 背景結果（10/06 14:42 起，`start-research.ps1`）：因子強弱 35 個因子（EPS 年增「強」，毛利率「反向」，其餘財報因子弱）；`gbm-1.2.0`（35 個特徵）樣本外 IC +0.066；`statements` 批次 12 個規則中「機器學習（含財報）、一半放 0050」過全部門檻（1,268 萬、+167%／+31%、視窗 69%／71%、回撤 −33.6%）＝第一個 T0 候選，10/06 15:30 自動進前向觀察；單一財報因子 10 個全 T3。統計 120 個規則：DSR 0.00、PBO 0.07。
