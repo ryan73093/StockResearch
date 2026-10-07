@@ -4,15 +4,11 @@
   {% for key, label, href in [
     ('overview', '總覽', '/research'),
     ('pool', '選手池・全部規則', '/research/pool'),
-    ('rules', '規則排行', '/research?tab=rules'),
+    ('forward', '前向觀察', '/research?tab=forward'),
     ('factors', '因子強弱', '/research?tab=factors'),
     ('ml', '機器學習與 RL', '/research?tab=ml'),
-    ('forward', '前向觀察', '/research?tab=forward'),
-    ('promotion', '晉級流程', '/research?tab=promotion'),
-    ('agent', 'AI 研究員', '/research?tab=agent'),
-    ('legacy', '舊版模型比較', '/research?tab=legacy'),
     ('jobs', '執行中的程式', '/research?tab=jobs'),
-    ('method', '研究方法', '/system#project'),
+    ('legacy', '舊設計紀錄', '/research?tab=legacy'),
   ] %}
   <a href="{{ href }}"{% if research_tab == key %} aria-current="true"{% endif %}>{{ label }}{% if key == 'jobs' and running_jobs %} <span class="badge badge--warn">{{ running_jobs }}</span>{% endif %}</a>
   {% endfor %}

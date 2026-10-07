@@ -26,6 +26,9 @@
           <a href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span></a>
         {% endfor %}
       </nav>
+      <nav class="sidenav sidenav--sub" aria-label="市場與個股">
+        <a href="/market"{% if active_nav == 'market' %} aria-current="page"{% endif %}>{{ icon('market') }}<span>市場總覽</span></a>
+      </nav>
       <a class="sidesearch-link" href="/stock"{% if active_nav == 'stock' %} aria-current="page"{% endif %}>{{ icon('search') }}<span>查個股</span></a>
       <form class="sidesearch" action="/stock" method="get" role="search">
         <label class="visually-hidden" for="sidesearch">查個股</label>
@@ -52,7 +55,8 @@
       <header class="appbar">
         <a class="brand" href="/" aria-label="交易研究分析平台首頁">{{ brand_mark() }}<span>交易研究分析平台</span></a>
         <span class="session session--{{ market_session.tone }}" title="{{ market_session.detail }}"><span class="session__dot"></span><span class="session__short">{{ market_session.short }}</span></span>
-        <a class="icon-btn" href="/stock" aria-label="查個股">{{ icon('search') }}</a>
+        <a class="icon-btn" href="/market" aria-label="市場總覽"{% if active_nav == 'market' %} aria-current="page"{% endif %}>{{ icon('market') }}</a>
+        <a class="icon-btn" href="/stock" aria-label="查個股"{% if active_nav == 'stock' %} aria-current="page"{% endif %}>{{ icon('search') }}</a>
         <a class="icon-btn" href="/help" aria-label="使用教學">{{ icon('help') }}</a>
         <button type="button" class="icon-btn" data-theme-toggle aria-label="切換深色或淺色主題">
           <span class="when-dark">{{ icon('sun') }}</span><span class="when-light">{{ icon('moon') }}</span>

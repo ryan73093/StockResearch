@@ -181,7 +181,34 @@ def _taipei_text(value: datetime | None, pattern: str = "%m/%d %H:%M") -> str:
     return _aware(value).astimezone(TAIPEI).strftime(pattern) if value else "尚無"
 
 
-RESEARCH_TABS = ("overview", "rules", "factors", "ml", "forward", "promotion", "agent", "legacy", "jobs")
+# 2026-10-07: the old design's tabs (ranking, promotion, AI researcher, legacy model) became one "舊設計紀錄".
+RESEARCH_TABS = ("overview", "factors", "ml", "forward", "jobs", "legacy")
+OLD_RESEARCH_TABS = {"rules": "ranking", "promotion": "promotion", "agent": "agent"}
+BEST_TIERS = ("T0", "T0 候選", "T1")
+CONCLUSIONS_HEADING = "目前結論（網站"
+
+
+def research_conclusions(path: Path) -> list[str]:
+    """The bullets under research_method.md's "目前結論（網站…）" heading, as small HTML (bold and code);
+    the document is the one place the conclusions are written."""
+    from markupsafe import escape
+
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    output, inside = [], False
+    for line in lines:
+        if line.startswith("#"):
+            if inside:
+                break
+            inside = CONCLUSIONS_HEADING in line
+            continue
+        if inside and line.startswith("- "):
+            text = str(escape(line[2:].strip()))
+            text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+            output.append(re.sub(r"`(.+?)`", r"<code>\1</code>", text))
+    return output
 
 
 def ml_view(research_dir: Path) -> dict[str, object]:
@@ -781,6 +808,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         tab = request.args.get("tab", "overview")
         if tab == "tools":                 # S9-W05: the legacy pages moved to the system page
             return redirect(url_for("v2.system") + "#legacy-tools")
+        if tab in OLD_RESEARCH_TABS:
+            return redirect(url_for("v2.research", tab="legacy") + "#" + OLD_RESEARCH_TABS[tab])
         tab = tab if tab in RESEARCH_TABS else "overview"
         reports_dir = research_dir / "reports"
         ranking = trial_ranking(research_dir / "trials.jsonl", "development")
@@ -793,6 +822,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             best_dsr = {"name": best["name"], "value": best["dsr"]["deflated_sharpe"], "trials": best["dsr"].get("trials")}
         forward_rows = ForwardTracker(research_dir).summary()
         round_view = round_summary(research_dir / "trials.jsonl", "development", stats)
+        jobs = JobLog(research_dir).jobs()
+        overview = pool_view(research_dir, basis=_default_basis(research_dir)) if tab == "overview" else None
         return render_template(
             "v2/research.html",
             active_nav="research",
@@ -805,11 +836,16 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
             stock_forward=StockForwardTracker(research_dir).summary(),
-            research_tab=tab, jobs=JobLog(research_dir).jobs(), factor_report=latest_factor_strength(research_dir / "factors"),
+            research_tab=tab, jobs=jobs, factor_report=latest_factor_strength(research_dir / "factors"),
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
             ml=ml_view(research_dir) if tab == "ml" else None,
             factor_columns=factor_columns(latest_factor_strength(research_dir / "factors")),
-            overview=pool_view(research_dir, basis=_default_basis(research_dir)) if tab == "overview" else None,
+            overview=overview,
+            best=[row for row in overview["daily"] if row["tier"] in BEST_TIERS] if overview else [],
+            forward_map={row["rule_hash"]: row for row in overview["forward_stocks"]} if overview else {},
+            conclusions=research_conclusions(_project_root() / DOCS["research_method"][1]) if tab == "overview" else [],
+            recent_jobs=[job for job in jobs if job.get("status") != "running"
+                         and not str(job.get("command") or "").startswith("scheduler")][:6],
             round_view=round_view,
             legacy=challenger_view(latest_challenger(research_dir / "legacy")),
             ranking=ranking,
@@ -872,7 +908,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         from quant_platform.research.snapshot import market_view
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        return render_template("v2/market.html", active_nav="today", market=market_view(load_snapshot(research_dir)))
+        return render_template("v2/market.html", active_nav="market", market=market_view(load_snapshot(research_dir)))
 
     @blueprint.get("/stock")
     def stock_search():
@@ -885,7 +921,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         results = search(snapshot, query, limit=21) if query else []
         if results and (len(results) == 1 or results[0]["code"] == query.upper()):
             return redirect(url_for("v2.stock_page", code=results[0]["code"]))
-        return render_template("v2/stock.html", active_nav="research", page=None, query=query, results=results[:20],
+        return render_template("v2/stock.html", active_nav="stock", page=None, query=query, results=results[:20],
                                more=len(results) > 20, snapshot_date=(snapshot or {}).get("date"))
 
     @blueprint.get("/stock/<code>")
@@ -908,9 +944,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                                     "share": value / row["value"], "date": row["date"]})
         page = stock_view(research_dir / "history", research_dir, code, snapshot, holders, verdicts)
         if page is None:
-            return render_template("v2/stock.html", active_nav="research", page=None, query=code, results=[],
+            return render_template("v2/stock.html", active_nav="stock", page=None, query=code, results=[],
                                    snapshot_date=(snapshot or {}).get("date"), missing=True), 404
-        return render_template("v2/stock.html", active_nav="research", page=page, query="", results=[],
+        return render_template("v2/stock.html", active_nav="stock", page=page, query="", results=[],
                                snapshot_date=(snapshot or {}).get("date"))
 
     @blueprint.get("/research/jobs.json")

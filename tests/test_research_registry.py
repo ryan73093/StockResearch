@@ -119,7 +119,7 @@ def test_research_page_ranks_candidate_trials(tmp_path):
     client = create_app(build_container(
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False)
     )).test_client()
-    assert "個候選試驗" not in client.get("/research?tab=rules").get_data(as_text=True)
+    assert "個候選試驗" not in client.get("/research?tab=legacy").get_data(as_text=True)
 
     registry = TrialRegistry(tmp_path / "research" / "trials.jsonl")
     for threshold in (0.05, 0.2):
@@ -130,7 +130,7 @@ def test_research_page_ranks_candidate_trials(tmp_path):
         run_trial(kind="candidate", spec=spec, period="development", market=MARKET, plan=PLAN,
                   registry=registry, reports_dir=tmp_path / "research" / "reports", window_months=(3,))
 
-    body = client.get("/research?tab=rules").get_data(as_text=True)
+    body = client.get("/research?tab=legacy").get_data(as_text=True)
     assert "目前資料版本 2 個候選試驗" in body and "回撤 5%" in body and "開發期" in body
 
 

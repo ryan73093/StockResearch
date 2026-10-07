@@ -187,7 +187,7 @@ def test_research_page_lists_the_latest_baseline_reports(tmp_path):
     client = create_app(build_container(
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False)
     )).test_client()
-    assert "尚無回測結果" in client.get("/research").get_data(as_text=True)
+    assert "尚無回測結果" in client.get("/research?tab=legacy").get_data(as_text=True)
 
     report = compare_to_benchmark(BASELINES["ma_value"], market(), PLAN, window_months=(1,))
     report.update(generated_at="20261001-010000", period="full", kind="baseline")
@@ -200,7 +200,7 @@ def test_research_page_lists_the_latest_baseline_reports(tmp_path):
                      "strategy": {**report["strategy"], "spec_hash": f"{index:064d}", "spec": f"候選 {index}"}}
         (folder / f"development-{index}.json").write_text(json.dumps(candidate, ensure_ascii=False), encoding="utf-8")
 
-    body = client.get("/research").get_data(as_text=True)
+    body = client.get("/research?tab=legacy").get_data(as_text=True)
     assert "定期不定額（200 日均線）" in body and "定期定額對照" in body
     assert "全期間 XIRR" in client.get("/plan").get_data(as_text=True)
 

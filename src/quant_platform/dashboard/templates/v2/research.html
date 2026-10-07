@@ -16,22 +16,52 @@
 
 {% if research_tab == 'overview' %}
 <section class="card">
-  <div class="card__head"><h2>研究現況</h2>{% if overview %}<span class="muted small">比較方式：{{ overview.basis_label }}</span>{% endif %}</div>
-  {% if overview %}{% set c = overview.counts %}
+  <div class="card__head"><h2>研究現況 <span class="badge">2015-06 起、每天決策</span></h2><span class="muted small">啟動資金 30 萬＋每月 5 日 1 萬，對同樣的錢全部買 0050</span></div>
+  {% if overview %}
   <div class="kpis kpis--four">
-    <div class="kpi"><div class="kpi__label">試過的不同規則</div><div class="kpi__value">{{ overview.attempts }}</div></div>
-    <div class="kpi"><div class="kpi__label">新設計（每天決策）過門檻</div><div class="kpi__value">{{ overview.daily_passed }}／{{ overview.daily|length }}</div></div>
+    <div class="kpi"><div class="kpi__label">試過的規則</div><div class="kpi__value">{{ overview.daily|length }}<small>（含舊設計共 {{ overview.attempts }}）</small></div></div>
+    <div class="kpi"><div class="kpi__label">T0／T0 候選</div><div class="kpi__value">{{ overview.daily_tiers['T0'] }}／{{ overview.daily_tiers['T0 候選'] }}</div></div>
+    <div class="kpi"><div class="kpi__label">T1（贏 0050、波動大）</div><div class="kpi__value">{{ overview.daily_tiers['T1'] }}</div></div>
     <div class="kpi"><div class="kpi__label">前向觀察中</div><div class="kpi__value">{{ overview.forward_stocks|length }}</div></div>
-    <div class="kpi"><div class="kpi__label">執行中的程式</div><div class="kpi__value">{{ running_count }}</div></div>
   </div>
   {% endif %}
-  <ul class="reasons" style="margin-top:12px">
-    <li>每一個試過的規則、走到哪一關、為什麼被淘汰：<a href="/research/pool">選手池・全部規則</a>；點規則名稱看它每一次的模擬回測紀錄與資產走勢。</li>
-    <li>哪些因子強、哪些弱：<a href="/research?tab=factors">因子強弱</a>。</li>
-    <li>從 10/05 起用真實行情記錄的規則：<a href="/research?tab=forward">前向觀察</a>。</li>
-    <li>現在在跑哪些程式、什麼時候跑完：<a href="/research?tab=jobs">執行中的程式</a>。</li>
-    <li>研究怎麼做、目前結論、淘汰的方向與後續路線圖：<a href="/system#project">研究方法</a>。</li>
-  </ul>
+  {% if conclusions %}
+  <h3 style="margin:16px 0 6px;font-size:15px">目前結論</h3>
+  <ul class="reasons">{% for item in conclusions %}<li>{{ item|safe }}</li>{% endfor %}</ul>
+  {% endif %}
+  <p class="muted small" style="margin:10px 0 0">完整的方法、數字與淘汰原因：<a href="/system#project">研究方法</a>（第 7～9 節）；每個規則走到哪一關：<a href="/research/pool">選手池・全部規則</a>。</p>
+</section>
+
+<section class="card" id="best">
+  <div class="card__head"><h2>目前最好的規則 <span class="badge">T0、T0 候選、T1</span></h2><a class="small" href="/research/pool">全部規則</a></div>
+  {% if best %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th>等級</th><th class="num">2015-06 起期末（0050）</th><th class="num">比 0050<br>2015-06 起／2020-10 起</th><th class="num">最大回撤（0050）</th><th class="num">每月下單</th><th class="num">前向觀察<br>天數・相對 0050</th></tr></thead>
+      <tbody>
+      {% for row in best %}{% set fwd = forward_map.get(row.spec_hash) %}
+        <tr>
+          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong></td>
+          <td data-label="等級"><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--warn' }}">{{ row.tier }}</span></td>
+          <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
+          <td class="num" data-label="比 0050">{% if row.excess is not none %}<span class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.excess) }}</span>{% else %}—{% endif %}／{% if row.since_2020_excess is not none %}<span class="{{ 'up' if row.since_2020_excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.since_2020_excess) }}</span>{% else %}—{% endif %}</td>
+          <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
+          <td class="num" data-label="每月下單">{{ '%.0f 筆' % row.orders_per_month if row.orders_per_month else '—' }}</td>
+          <td class="num" data-label="前向觀察">{% if fwd and fwd.sessions %}{{ fwd.sessions }} 天{% if fwd.excess is not none %}・<span class="{{ 'up' if fwd.excess > 0 else ('down' if fwd.excess < 0 else '') }}">{{ '{:+.2%}'.format(fwd.excess) }}</span>{% endif %}{% elif row.forward_since %}<span class="muted small">{{ row.forward_since[5:] }} 起</span>{% else %}<span class="muted small">下個交易日 15:30 加入</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">T0 候選要前向觀察滿 60 個交易日仍不輸 0050 才是 T0；T1 贏 0050，但回撤比 0050 深超過 5 個百分點。前向觀察的相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入，明細在<a href="/research?tab=forward">前向觀察</a>。歷史結果只作研究參考。</p>
+  {% else %}<p class="muted" style="margin:0">還沒有過門檻的規則。</p>{% endif %}
+</section>
+
+<section class="card">
+  <div class="card__head"><h2>最近完成的研究程式</h2><a class="small" href="/research?tab=jobs">全部{% if running_count %}（{{ running_count }} 個在跑）{% endif %}</a></div>
+  {% if recent_jobs %}
+  <ul class="reasons">{% for job in recent_jobs %}<li><span class="badge {{ 'badge--ok' if job.status == 'done' else 'badge--bad' }}">{{ job.status_label }}</span> {{ job.name }}<span class="muted small">（{{ (job.finished_at or job.started_at or '')[5:16].replace('-', '/').replace('T', ' ') }}）</span>{% if job.summary %}：{{ job.summary }}{% endif %}</li>{% endfor %}</ul>
+  {% else %}<p class="muted" style="margin:0">還沒有紀錄。</p>{% endif %}
 </section>
 {% endif %}
 
@@ -169,8 +199,16 @@
 </section>
 {% if running_count %}<script>setTimeout(function () { location.reload(); }, 60000);</script>{% endif %}
 {% endif %}
-{% if research_tab == 'agent' %}
-<section class="card">
+{% if research_tab == 'legacy' %}
+<section class="card card--quiet">
+  <div class="card__head"><h2>舊設計紀錄 <span class="badge">備查</span></h2></div>
+  <p style="margin:0">2026-10-04 以前的研究：2004–2016 開發期、每月檢查、ETF 與個股規則、AI 研究員的提案、舊版機器學習模型。沒有規則同時通過多重檢定與驗證期，研究因此改成新設計（2015-06 起、每天決策）。這裡的數字不再用來挑規則，只留著備查；這些規則仍計入試驗次數。</p>
+  <p class="small" style="margin:8px 0 0">跳到：<a href="#agent">AI 研究員</a>・<a href="#weekly">每週研究報告、定期定額對照、第一批結論</a>・<a href="#legacy">舊版模型比較</a>・<a href="#promotion">晉級流程</a>・<a href="#ranking">試驗排行與個股規則</a></p>
+</section>
+{% endif %}
+
+{% if research_tab == 'legacy' %}
+<section class="card" id="agent">
   <div class="card__head">
     <h2>AI 研究員 <span class="badge {{ 'badge--ok' if agent.enabled and agent.configured else 'badge--warn' }}">{{ ('每晚 %d:00' % agent.hour) if agent.enabled and agent.configured else ('未設定金鑰' if agent.enabled else '已關閉') }}</span></h2>
     <span class="muted small">{{ agent.model }}・本月 US${{ '%.4f' % agent.spent_usd }}／上限 US${{ '%.2f' % agent.budget_usd }}</span>
@@ -200,7 +238,7 @@
 </section>
 {% endif %}
 
-{% if research_tab == 'overview' %}
+{% if research_tab == 'legacy' %}
 <section class="card" id="weekly">
   <div class="card__head">
     <h2>本週研究報告 <span class="badge">{{ weekly.start[5:].replace('-', '/') }}～{{ weekly.end[5:].replace('-', '/') }}</span></h2>
@@ -351,7 +389,7 @@
 {% endif %}
 {% endif %}
 
-{% if research_tab == 'promotion' %}
+{% if research_tab == 'legacy' %}
 <section class="card" id="promotion">
   <div class="card__head">
     <h2>晉級流程 <span class="badge">開發 → 驗證 → 最終驗證 → 前向 → 你核准</span></h2>
@@ -397,35 +435,6 @@
 {% endif %}
 
 {% if research_tab == 'forward' %}
-<section class="card">
-  <div class="card__head">
-    <h2>前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>
-    <span class="muted small">標準現金流：每月 5 日投入 10,000 元；每個交易日 15:30 記錄，只追加不改寫</span>
-  </div>
-  {% if forward_rows %}
-  <div class="table-wrap table-wrap--stack">
-    <table class="table--stack">
-      <thead><tr><th>策略</th><th class="num">已記錄交易日</th><th class="num">投入（元）</th><th class="num">目前資產（元）</th><th class="num">相對定期定額</th><th>最新紀錄</th></tr></thead>
-      <tbody>
-      {% for row in forward_rows %}
-        <tr>
-          <td data-primary><strong>{{ row.name }}</strong>{% if row.benchmark %}<span class="badge">基準</span>{% endif %}</td>
-          <td class="num" data-label="已記錄交易日">{{ row.sessions }}</td>
-          <td class="num" data-label="投入">{{ '{:,.0f}'.format(row.contributed) }}</td>
-          <td class="num" data-label="目前資產">{{ '{:,.0f}'.format(row.value) }}</td>
-          <td class="num {{ 'up' if (row.excess or 0) > 0 else ('down' if (row.excess or 0) < 0 else '') }}" data-label="相對定期定額">{{ '—' if row.benchmark or row.excess is none else '{:+.2%}'.format(row.excess) }}</td>
-          <td class="small" data-label="最新紀錄">{{ row.date }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <p class="note">晉級門檻要求至少 8 週前向模擬且流程無異常；前向績效只作觀察，不單獨決定晉級。</p>
-  {% else %}
-  <p class="muted" style="margin:0">尚無紀錄。長歷史研究資料建立後，每個交易日 15:30 會記錄內建基準（之後加上晉級中的候選）的當日狀態。</p>
-  {% endif %}
-</section>
-
 <section class="card" id="stock-forward">
   <div class="card__head">
     <h2>個股規則前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>
@@ -475,11 +484,40 @@
   <p class="muted" style="margin:0">尚無追蹤中的個股規則。兩段期間都贏的規則會在下一個交易日 15:30 自動加入。</p>
   {% endif %}
 </section>
+
+<section class="card">
+  <div class="card__head">
+    <h2>ETF 基準前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>
+    <span class="muted small">標準現金流：每月 5 日投入 10,000 元；每個交易日 15:30 記錄，只追加不改寫</span>
+  </div>
+  {% if forward_rows %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>策略</th><th class="num">已記錄交易日</th><th class="num">投入（元）</th><th class="num">目前資產（元）</th><th class="num">相對定期定額</th><th>最新紀錄</th></tr></thead>
+      <tbody>
+      {% for row in forward_rows %}
+        <tr>
+          <td data-primary><strong>{{ row.name }}</strong>{% if row.benchmark %}<span class="badge">基準</span>{% endif %}</td>
+          <td class="num" data-label="已記錄交易日">{{ row.sessions }}</td>
+          <td class="num" data-label="投入">{{ '{:,.0f}'.format(row.contributed) }}</td>
+          <td class="num" data-label="目前資產">{{ '{:,.0f}'.format(row.value) }}</td>
+          <td class="num {{ 'up' if (row.excess or 0) > 0 else ('down' if (row.excess or 0) < 0 else '') }}" data-label="相對定期定額">{{ '—' if row.benchmark or row.excess is none else '{:+.2%}'.format(row.excess) }}</td>
+          <td class="small" data-label="最新紀錄">{{ row.date }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">晉級門檻要求至少 8 週前向模擬且流程無異常；前向績效只作觀察，不單獨決定晉級。</p>
+  {% else %}
+  <p class="muted" style="margin:0">尚無紀錄。長歷史研究資料建立後，每個交易日 15:30 會記錄內建基準（之後加上晉級中的候選）的當日狀態。</p>
+  {% endif %}
+</section>
 {% endif %}
 
-{% if research_tab == 'rules' %}
+{% if research_tab == 'legacy' %}
 {% if ranking.total %}
-<section class="card">
+<section class="card" id="ranking">
   <div class="card__head">
     <h2>試驗排行 <span class="badge">{{ ranking.period_label }}</span></h2>
     <span class="muted small">目前資料版本 {{ ranking.total }} 個候選試驗（含未勝出的）{% if ranking.older %}；舊版資料 {{ ranking.older }} 筆保留在紀錄中、不列入排行{% endif %}{% if not ranking.chain_ok %}・<span class="badge badge--bad">紀錄雜湊鏈異常</span>{% endif %}</span>

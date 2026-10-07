@@ -178,6 +178,9 @@ h1, h2, h3, p, li, dd { overflow-wrap: anywhere; }
 }
 .sidenav a:hover { text-decoration: none; background: var(--surface-2); color: var(--text); }
 .sidenav a[aria-current="page"] { background: var(--accent-bg); color: var(--accent); }
+/* 2026-10-07: 市場與個股 under the five main pages, set apart by a rule */
+.sidenav--sub { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.icon-btn[aria-current="page"], .sidesearch-link[aria-current="page"] { background: var(--accent-bg); color: var(--accent); }
 
 .theme-toggle {
   display: flex; align-items: center; justify-content: center; width: 100%;

@@ -185,7 +185,7 @@ def test_research_page_explains_why_nothing_is_promoted_and_guards_approval(tmp_
     development_setup(tmp_path / "research", dsr=0.42)
     client = create_app(container).test_client()
 
-    body = client.get("/research?tab=promotion").get_data(as_text=True)
+    body = client.get("/research?tab=legacy").get_data(as_text=True)
     assert "晉級流程" in body and "目前沒有候選進入晉級流程" in body and "最佳 DSR 0.42" in body
 
     url = f"/research/promotions/{SPEC.spec_hash}/approve"

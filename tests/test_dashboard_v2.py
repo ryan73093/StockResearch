@@ -200,3 +200,34 @@ def test_ml_tab_shows_the_models_and_the_rl_report(tmp_path):
     body = client.get("/research?tab=ml").get_data(as_text=True)
     assert "gbm-1.1.0" in body and "+0.050" in body and "+3.00%" in body
     assert "rl-overlay-1.0.0" in body and "RL 調整部位" in body and "平均 60%" in body and "3 次" in body
+
+
+def test_research_overview_is_the_new_design_and_the_old_tabs_became_one_record(client):
+    """2026-10-07: 總覽 shows the new design; ranking, promotion, AI researcher and legacy model are 舊設計紀錄."""
+    body = client.get("/research").get_data(as_text=True)
+    assert "目前最好的規則" in body and "最近完成的研究程式" in body
+    assert "本週研究報告" not in body and "定期定額對照" not in body and "第一批研究結論" not in body
+    for old, anchor in (("rules", "ranking"), ("promotion", "promotion"), ("agent", "agent")):
+        moved = client.get(f"/research?tab={old}")
+        assert moved.status_code == 302 and moved.headers["Location"].endswith(f"tab=legacy#{anchor}")
+    record = client.get("/research?tab=legacy").get_data(as_text=True)
+    assert "舊設計紀錄" in record and all(f'id="{anchor}"' in record for anchor in ("agent", "weekly", "promotion"))
+
+
+def test_research_conclusions_come_from_the_method_document(tmp_path):
+    from pathlib import Path
+
+    from quant_platform.dashboard.v2 import research_conclusions
+
+    doc = tmp_path / "method.md"
+    doc.write_text("## 7. 結論\n\n### 目前結論（網站研究總覽顯示這一段）\n\n- **最好的規則**：A <b>\n- 用 `x` 跑\n\n"
+                   "### 下一節\n\n- 不算這行\n", encoding="utf-8")
+    assert research_conclusions(doc) == ["<strong>最好的規則</strong>：A &lt;b&gt;", "用 <code>x</code> 跑"]
+    assert research_conclusions(tmp_path / "missing.md") == []
+    assert research_conclusions(Path("docs/research_method.md"))        # the real document keeps the section
+
+
+def test_market_overview_has_its_own_entry(client):
+    body = client.get("/market").get_data(as_text=True)
+    assert "<span>市場總覽</span>" in body and 'href="/market" aria-current="page"' in body
+    assert 'href="/stock" aria-current="page"' in client.get("/stock").get_data(as_text=True)
