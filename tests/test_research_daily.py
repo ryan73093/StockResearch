@@ -290,3 +290,20 @@ def test_holding_controls_are_part_of_the_rule_only_when_on():
     assert "weighting" not in base.canonical() and "account_filter" not in base.canonical()
     batch = daily.holdings_batch()
     assert len({rule.rule_hash for rule in batch} | {base.rule_hash}) == 7 and len({rule.name for rule in batch}) == 6
+
+
+def test_smoothing_ranks_on_the_recent_average_and_stays_out_of_the_hash_at_zero():
+    days = weekdays(date(2023, 1, 2), date(2024, 3, 29))
+    # A rises steadily; B jumps up on the last day only: the day's momentum ranks B first, the 5-day average A
+    a = [10 * 1.003 ** n for n in range(len(days))]
+    b = [10.0] * (len(days) - 1) + [10.5]                       # +5% today: a 1% five-day average
+    c = [10.0] * len(days)
+    data = market(days, {"A.TW": dict(zip(days, a)), "B.TW": dict(zip(days, b)), "C.TW": dict(zip(days, c))})
+    fp = FactorPanel(Panel(data))
+    last = len(days) - 1
+    plain = DailyRule(name="x", factors={"reversal_5d": -1.0}, top=3)          # = last week's return
+    smooth = plain.model_copy(update={"smooth": 5})
+    assert fp.ranked(plain, last)[0] == "B.TW" and fp.ranked(smooth, last)[0] == "A.TW"
+    assert fp.smoothed("reversal_5d", 5)[:, last] == pytest.approx(fp.matrix("reversal_5d")[:, last - 4:last + 1].mean(axis=1))
+    assert "smooth" not in plain.canonical() and smooth.rule_hash != plain.rule_hash
+    assert len({rule.rule_hash for rule in daily.turnover_batch()}) == 4

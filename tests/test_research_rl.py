@@ -45,3 +45,12 @@ def test_the_agent_learns_to_leave_a_losing_rule_and_beats_holding_it_out_of_sam
     # holding the rule nets about nothing (good and bad stretches cancel); switching to 0050 in the bad ones wins
     assert overall["rl"]["growth"] > overall["rule"]["growth"] + 0.10 and overall["rl"]["growth"] > overall["0050"]["growth"]
     assert 0.2 < overall["average_share"] < 0.9 and report["years"] and report["shares"]
+
+
+def test_the_switch_penalty_comes_from_the_reward_not_the_account():
+    plain = rl.step(np.array([0.0]), np.array([0.0]), np.array([0.0]), np.array([1.0]), np.array([1.0]), np.array([1.0]))
+    penalised = rl.step(np.array([0.0]), np.array([0.0]), np.array([0.0]), np.array([1.0]), np.array([1.0]),
+                        np.array([1.0]), switch_penalty=0.02)
+    assert penalised[1] == pytest.approx(plain[1])                       # the account pays 0.5% either way
+    assert penalised[0] == pytest.approx(plain[0] - 0.02)
+    assert rl.VERSIONS[rl.LATEST_RL]["switch_penalty"] == 0.02

@@ -304,6 +304,8 @@ def main() -> int:
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
     parser.add_argument("--family", default="etf", choices=("etf", "stocks", "daily"), help="stats：ETF、個股或每天決策規則")
+    parser.add_argument("--rl-version", default="rl-overlay-1.1.0", choices=("rl-overlay-1.0.0", "rl-overlay-1.1.0"),
+                        help="rl：版本（1.1.0 換部位在獎勵裡多扣 2%%）")
     parser.add_argument("--model-version", default="gbm-1.2.0", choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
@@ -400,13 +402,14 @@ def main() -> int:
         from quant_platform.research.jobs import JobLog
 
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
-        out = RESEARCH / "rl" / research_rl.RL_VERSION
-        with JobLog(RESEARCH).start(f"強化學習部位調整（{research_rl.RL_VERSION}，2017 起逐年、5 個種子）", command,
+        version = args.rl_version
+        out = RESEARCH / "rl" / version
+        with JobLog(RESEARCH).start(f"強化學習部位調整（{version}，2017 起逐年、5 個種子）", command,
                                     total=10) as job:
             job.update(current="載入行情並重播規則帳戶", force=True)
             data, fp = daily_research.load(Path(args.base))
             overlay = research_rl.build_overlay(data, fp, broker_costs(args.broker))
-            report = research_rl.walk_forward(overlay, out, job=job)
+            report = research_rl.walk_forward(overlay, out, job=job, version=version)
             overall = report["overall"]
             job.payload["summary"] = (f"樣本外 {report['test_from']}～{report['test_to']}：RL {overall['rl']['growth']:+.0%}"
                                       f"（回撤 {overall['rl']['max_drawdown']:.0%}）、規則 {overall['rule']['growth']:+.0%}"

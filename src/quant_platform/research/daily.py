@@ -121,6 +121,9 @@ class DailyRule(BaseModel):
     # 200-session average value, the stock part is held in 0050 instead; back above, the stocks return.
     weighting: Literal["equal", "inverse_vol"] = "equal"
     account_filter: Literal["none", "own_200"] = "none"
+    # 2026-10-07 (the owner: 降換手): rank on each factor's average over the last `smooth` sessions
+    # instead of the day's value; 0 = the day's value. Left out of the hash when 0.
+    smooth: int = Field(default=0, ge=0, le=60)
 
     @field_validator("factors")
     @classmethod
@@ -146,6 +149,8 @@ class DailyRule(BaseModel):
             data.pop("weighting", None)
         if data.get("account_filter") == "none":
             data.pop("account_filter", None)
+        if not data.get("smooth"):
+            data.pop("smooth", None)
         return data
 
     @property
@@ -286,9 +291,20 @@ class FactorPanel:
         return ((self.panel.close[:, position] >= rule.min_price) & (self.turnover_20[:, position] >= rule.min_turnover)
                 & (self.age[:, position] >= rule.min_history))
 
+    def smoothed(self, factor: str, sessions: int) -> np.ndarray:
+        """The factor averaged over the last ``sessions`` sessions (symbols × sessions; days with no value
+        are skipped, so a stock with fewer days averages what it has)."""
+        if sessions <= 1:
+            return self.matrix(factor)
+        key = f"{factor}@{sessions}"
+        if key not in self._cache:
+            frame = pd.DataFrame(self.matrix(factor).T).rolling(sessions, min_periods=1).mean()
+            self._cache[key] = np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
+        return self._cache[key]
+
     def ranked(self, rule: DailyRule, position: int) -> list[str]:
         mask = self.eligible(rule, position)
-        columns = {name: self.matrix(name)[:, position] for name in rule.factors}
+        columns = {name: self.smoothed(name, getattr(rule, "smooth", 0))[:, position] for name in rule.factors}
         for values in columns.values():
             mask &= np.isfinite(values)
         if not mask.any():
@@ -930,6 +946,18 @@ def statement_batch() -> list[DailyRule]:
     return rules
 
 
+def turnover_batch() -> list[DailyRule]:
+    """2026-10-07 (the owner: 都要): the T0 candidate trades about 37 times a month; two ways to trade less,
+    fixed in advance — rank on the model score's 5-session average (still deciding daily), or decide once a
+    week — each alone and half in 0050."""
+    rules = []
+    for label, extra in (("分數取近 5 日平均", {"smooth": 5}), ("每週決策", {"check": "weekly"})):
+        for core, word in ((0.0, ""), (0.5, "、一半放 0050")):
+            rules.append(DailyRule(name=f"機器學習（含財報）：前 20 名、同產業最多 3 成、{label}{word}",
+                                   factors={"ml_gbm_statements": 1.0}, industry_cap=0.3, core=core, **extra))
+    return rules
+
+
 BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch,
            "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch,
-           "model-excess": model_excess_batch, "statements": statement_batch}
+           "model-excess": model_excess_batch, "statements": statement_batch, "turnover": turnover_batch}

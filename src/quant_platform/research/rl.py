@@ -34,6 +34,10 @@ import numpy as np
 import pandas as pd
 
 RL_VERSION = "rl-overlay-1.0.0"
+# 1.1.0 (2026-10-07, the owner: 都要): 1.0.0 switched 26-79 times a year and lost to a fixed half; the same
+# agent pays an extra 2% of the account in its reward (not in the account) for every 100% it moves.
+VERSIONS = {"rl-overlay-1.0.0": {"switch_penalty": 0.0}, "rl-overlay-1.1.0": {"switch_penalty": 0.02}}
+LATEST_RL = "rl-overlay-1.1.0"
 LEVELS = (0.0, 0.5, 1.0)
 SWITCH_COST = 0.005
 DRAWDOWN_PENALTY = 0.5
@@ -111,14 +115,17 @@ def build_overlay(data, fp, costs, rule=None) -> Overlay:
 
 # --- the environment -----------------------------------------------------------------------------
 def step(stock_next: np.ndarray, bench_next: np.ndarray, share: np.ndarray, previous: np.ndarray,
-         value: np.ndarray, peak: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """One session for every environment: returns (reward, value, peak, drawdown)."""
+         value: np.ndarray, peak: np.ndarray, switch_penalty: float = 0.0
+         ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """One session for every environment: returns (reward, value, peak, drawdown). ``switch_penalty`` is
+    taken from the reward only (the account pays SWITCH_COST)."""
     growth = share * stock_next + (1 - share) * bench_next - SWITCH_COST * np.abs(share - previous)
     drawdown_before = value / peak - 1
     value = value * (1 + growth)
     peak = np.maximum(peak, value)
     drawdown = value / peak - 1
-    reward = np.log1p(growth) - np.log1p(bench_next) - DRAWDOWN_PENALTY * np.maximum(0.0, drawdown_before - drawdown)
+    reward = (np.log1p(growth) - np.log1p(bench_next) - DRAWDOWN_PENALTY * np.maximum(0.0, drawdown_before - drawdown)
+              - switch_penalty * np.abs(share - previous))
     return reward, value, peak, drawdown
 
 
@@ -179,7 +186,7 @@ def train_policy(overlay: Overlay, low: int, high: int, seed: int, config: dict 
                 estimate = nets.value(torch.from_numpy(state)).squeeze(-1)
             new_share = levels[action.numpy()]
             reward, value, peak, drawdown = step(overlay.stock[day + 1], overlay.bench[day + 1], new_share, share,
-                                                 value, peak)
+                                                 value, peak, config.get("switch_penalty", 0.0))
             observations.append(state)
             actions.append(action.numpy())
             logps.append(distribution.log_prob(action).numpy())
@@ -266,7 +273,8 @@ def _summary(values: np.ndarray, years: float) -> dict[str, float]:
 
 
 def walk_forward(overlay: Overlay, out_dir: str | Path | None = None, seeds: tuple[int, ...] = SEEDS,
-                 first_year: int = FIRST_TEST_YEAR, config: dict | None = None, job=None) -> dict[str, object]:
+                 first_year: int = FIRST_TEST_YEAR, config: dict | None = None, job=None,
+                 version: str = RL_VERSION) -> dict[str, object]:
     """Train for each test year on the sessions before it, run it; return the report (and save it)."""
     ready = int(np.argmax(np.isfinite(overlay.features).all(axis=1)))       # every feature known from here
     years = sorted({day.year for day in overlay.days if day.year >= first_year})
@@ -277,7 +285,8 @@ def walk_forward(overlay: Overlay, out_dir: str | Path | None = None, seeds: tup
         high = max(index for index, day in enumerate(overlay.days) if day.year == year) + 1
         if job:
             job.update(done=number, current=f"{year} 年（訓練 {overlay.days[ready]}～{overlay.days[low - 1]}）", force=True)
-        policies = [train_policy(overlay, ready, low, seed + year, config) for seed in seeds]
+        policies = [train_policy(overlay, ready, low, seed + year, {**VERSIONS[version], **(config or {})})
+                    for seed in seeds]
         start_share = shares_all[-1] if shares_all else 1.0
         shares = run_policy(policies, overlay, low, high, start_share)
         shares_all.extend(shares.tolist())
@@ -294,7 +303,8 @@ def walk_forward(overlay: Overlay, out_dir: str | Path | None = None, seeds: tup
     shares_all = np.array(shares_all)
     total = len(shares_all) / 245
     report = {
-        "version": RL_VERSION, "config": {**CONFIG, **(config or {})}, "levels": list(LEVELS), "switch_cost": SWITCH_COST,
+        "version": version, "config": {**CONFIG, **VERSIONS[version], **(config or {})}, "levels": list(LEVELS),
+        "switch_cost": SWITCH_COST,
         "drawdown_penalty": DRAWDOWN_PENALTY, "features": list(FEATURES), "seeds": list(seeds),
         "base_rule": base_rule().name, "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "test_from": overlay.days[first].isoformat(), "test_to": overlay.days[-1].isoformat(), "years": report_years,
