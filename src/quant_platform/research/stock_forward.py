@@ -321,6 +321,7 @@ class StockForwardTracker:
                     account_parking,
                     daily_rankings,
                     daily_weights,
+                    exposure_schedule,
                     load_industries,
                     market_closes,
                     simulate_daily,
@@ -345,7 +346,8 @@ class StockForwardTracker:
                     ranks = daily_rankings(factor_panel, rule, start, last)
                     run = simulate_daily(data, rule, self._costs, start, last, ranks, plan, ledger=ledger,
                                          snapshots=snapshots, weights=daily_weights(factor_panel, rule, ranks),
-                                         parked=account_parking(data, factor_panel, rule, self._costs))
+                                         parked=account_parking(data, factor_panel, rule, self._costs),
+                                         exposure=exposure_schedule(data, factor_panel, rule, self._costs))
                 benchmark = simulate_daily(data, None, self._costs, start, last, plan=plan)
             else:
                 rule = StockRule.model_validate(item["rule"])
@@ -459,6 +461,7 @@ class StockForwardTracker:
             account_parking,
             daily_rankings,
             daily_weights,
+            exposure_schedule,
             simulate_daily,
         )
         from quant_platform.research.legacy_challenger import RunResult, _tax_kind, _tick
@@ -484,7 +487,8 @@ class StockForwardTracker:
                 ranks = daily_rankings(factor_panel, rule, first, end)
                 part = simulate_daily(data, rule, self._costs, first, end, ranks, segment_plan, ledger=part_ledger,
                                       snapshots=part_book, weights=daily_weights(factor_panel, rule, ranks),
-                                      parked=account_parking(data, factor_panel, rule, self._costs))
+                                      parked=account_parking(data, factor_panel, rule, self._costs),
+                                      exposure=exposure_schedule(data, factor_panel, rule, self._costs))
             else:
                 part = simulate_daily(data, None, self._costs, first, end, plan=segment_plan, ledger=part_ledger,
                                       snapshots=part_book)

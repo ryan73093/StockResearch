@@ -53,9 +53,34 @@ INSTRUCTIONS = """你是台股量化研究員，只負責提出「每天收盤�
 1. 你只看得到 2015-06～2020-09 的結果；2020-10 以後的結果、規則的等級與前向紀錄都不提供，也不要猜。
 2. 每一個提出的規則都算一次試驗，試越多越難證明有效。每次最多 {max_proposals} 個，只提出有明確經濟理由、而且和已試過的不同的想法：不要只改參數（例如前 20 改前 30），因子組合與 0050 比例和已試過的一樣的會被拒絕。
 3. 規則會用 2015-06～2026-09 的完整資料、同一套門檻檢驗，過的才會進前向觀察。
+rule 的寫法範例：{{"name": "AI：趨勢＋營收", "factors": {{"trend_200": 1.0, "revenue_yoy": 0.5}}, "top": 20, "check": "weekly", "industry_cap": 0.3, "weighting": "equal", "core": 0}}
 只輸出一個 JSON 物件：
 {{"analysis": "對目前結果的觀察",
   "proposals": [{{"family": "押注的因子類別", "hypothesis": "假設", "rationale": "為什麼可能贏 0050", "failure": "可能失敗的原因", "rule": {{...}}}}]}}"""
+
+
+def _factors(raw) -> dict[str, float] | None:
+    """The factors as the model wrote them: a {name: weight} object, or a list of {name, weight} objects,
+    [name, weight] pairs or names (2026-10-09: the first real round answered with a list)."""
+    pairs = []
+    if isinstance(raw, dict):
+        pairs = list(raw.items())
+    elif isinstance(raw, list):
+        for entry in raw:
+            if isinstance(entry, dict):
+                pairs.append((entry.get("name") or entry.get("factor"), entry.get("weight", 1.0)))
+            elif isinstance(entry, (list, tuple)) and len(entry) == 2:
+                pairs.append((entry[0], entry[1]))
+            elif isinstance(entry, str):
+                pairs.append((entry, 1.0))
+            else:
+                return None
+    else:
+        return None
+    try:
+        return {str(name): float(weight) for name, weight in pairs if name}
+    except (TypeError, ValueError):
+        return None
 
 
 def _early_gap(report: dict) -> float | None:
@@ -150,7 +175,10 @@ class DailyResearcher:
             if len(accepted) >= MAX_PROPOSALS:
                 rejected.append({"name": name, "reason": f"超過每次 {MAX_PROPOSALS} 個"})
                 continue
-            factors = raw.get("factors") or {}
+            factors = _factors(raw.get("factors"))
+            if factors is None:
+                rejected.append({"name": name, "reason": "因子的寫法看不懂"})
+                continue
             unknown = [factor for factor in factors if factor not in RULE_FACTORS or factor == "ml_gbm"]
             if unknown or not 1 <= len(factors) <= 3 or any(not isinstance(w, (int, float)) or w == 0 or abs(w) > 1
                                                             for w in factors.values()):
@@ -203,7 +231,13 @@ class DailyResearcher:
             entry.update(status="budget_exceeded" if isinstance(exc, BudgetExceeded) else "llm_error", error=str(exc))
             self.journal.append(entry)
             return entry
-        proposals, rejected = self.validate(payload, self.tried())
+        try:
+            proposals, rejected = self.validate(payload, self.tried())
+        except Exception as exc:                    # a reply we cannot read is still on record (and was paid for)
+            entry.update(status="invalid_reply", error=f"{type(exc).__name__}: {exc}"[:300],
+                         reply=json.dumps(payload, ensure_ascii=False)[:3000])
+            self.journal.append(entry)
+            return entry
         # pre-registration: the proposals are on record before any of them runs
         self.journal.append({**entry, "status": "registered", "analysis": str(payload.get("analysis", ""))[:1500],
                              "registered": [{"name": rule.name, "rule": rule.canonical(), **notes} for rule, notes in proposals],

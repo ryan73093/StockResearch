@@ -64,9 +64,11 @@ switch ($Name) {
         Invoke-Step "rl" @("-m", "quant_platform.research", "rl", "--broker", "cathay", "--rl-version", "rl-overlay-1.1.0")
     }
     "lowdd" {
-        # 2026-10-09: 100% stocks aiming at a drawdown within 5 points of 0050's; the statistics.
+        # 2026-10-09: 100% stocks aiming at a drawdown within 5 points of 0050's (calm stocks; volatility
+        # scaling into cash), then the statistics.
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "lowdd", "--broker", "cathay")
-        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "2-volscale" @("-m", "quant_platform.research", "daily", "--name", "volscale", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "news-events" {
         # R15 D (2026-10-09): score the collected headlines not scored yet (also every trading day 21:45).
@@ -96,7 +98,7 @@ switch ($Name) {
     }
     "rl-sleeves" {
         # R15 stage C3 (2026-10-09): the RL allocator across the model rule, the trend rule and 0050.
-        Invoke-Step "rl" @("-m", "quant_platform.research", "rl-sleeves", "--broker", "cathay", "--sleeves-version", "rl-sleeves-1.1.0")
+        Invoke-Step "rl" @("-m", "quant_platform.research", "rl-sleeves", "--broker", "cathay", "--sleeves-version", "rl-sleeves-2.0.0")
     }
     "execution" {
         # R4 (2026-10-07): the tracked rules' stock orders against the cached odd-lot auctions.

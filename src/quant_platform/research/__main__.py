@@ -312,8 +312,9 @@ def main() -> int:
     parser.add_argument("--family", default="etf", choices=("etf", "stocks", "daily"), help="stats：ETF、個股或每天決策規則")
     parser.add_argument("--rl-version", default="rl-overlay-1.1.0", choices=("rl-overlay-1.0.0", "rl-overlay-1.1.0"),
                         help="rl：版本（1.1.0 換部位在獎勵裡多扣 2%%）")
-    parser.add_argument("--sleeves-version", default="rl-sleeves-1.1.0", choices=("rl-sleeves-1.0.0", "rl-sleeves-1.1.0"),
-                        help="rl-sleeves：版本（1.1.0 訓練回合從隨機組合開始）")
+    parser.add_argument("--sleeves-version", default="rl-sleeves-2.0.0",
+                        choices=("rl-sleeves-1.0.0", "rl-sleeves-1.1.0", "rl-sleeves-2.0.0"),
+                        help="rl-sleeves：版本（1.1.0 隨機起點；2.0.0 第三個位置是現金、回撤懲罰加倍）")
     parser.add_argument("--model-version", default="gbm-1.2.0", choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
@@ -495,14 +496,16 @@ def main() -> int:
                                     total=10) as job:
             job.update(current="載入行情並重播三個家族的帳戶", force=True)
             data, fp = daily_research.load(Path(args.base))
-            families = rl_sleeves.build_families(data, fp, broker_costs(args.broker))
+            families = rl_sleeves.build_families(data, fp, broker_costs(args.broker),
+                                                 third=rl_sleeves.VERSIONS[version]["third"])
             report = rl_sleeves.walk_forward(families, RESEARCH / "rl" / version, job=job, version=version)
             overall = report["overall"]
             job.payload["summary"] = (
                 f"樣本外 {report['test_from']}～{report['test_to']}：RL 年化 {overall['rl']['annual']:.1%}"
                 f"（回撤 {overall['rl']['max_drawdown']:.0%}）、訓練期最好的固定組合 {overall['best_fixed_result']['annual']:.1%}"
-                f"（{overall['best_fixed_result']['max_drawdown']:.0%}）、各 1/4＋一半 0050 {overall['quarters_half_0050']['annual']:.1%}、"
-                f"0050 {overall['0050']['annual']:.1%}")
+                f"（{overall['best_fixed_result']['max_drawdown']:.0%}）、各半＋波動大時減碼 {overall['vol_scaled']['annual']:.1%}"
+                f"（{overall['vol_scaled']['max_drawdown']:.0%}）、0050 {overall['0050']['annual']:.1%}"
+                f"（{overall['0050']['max_drawdown']:.0%}）；{'通過' if report['acceptance']['passed'] else '未通過'}")
         for year, item in report["years"].items():
             print(f"{year}：RL {item['rl']['growth']:+.1%}（回撤 {item['rl']['max_drawdown']:.0%}、平均 {item['average']}、"
                   f"換 {item['moves']} 次）；訓練期最好的固定 {item['best_fixed']} {item['best_fixed_result']['growth']:+.1%}；"

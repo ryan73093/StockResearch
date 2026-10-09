@@ -3,21 +3,27 @@
 C1 let an agent choose only how much of one stock rule to hold against 0050, and it learned about half —
 what a fixed half does without learning. Here the agent chooses between different families: every session,
 after the close, it splits the account across the weekly model rule's stocks, the volatility-weighted trend
-rule's stocks and 0050, picking one of eight fixed mixes. The two stock rules win and lose at partly
-different times (their monthly gaps to 0050 correlate 0.75; half of their worst months differ), so there is
-something to learn that a fixed share cannot do: lean to the family that is working.
+rule's stocks and a third place, picking one of eight fixed mixes. The two stock rules win and lose at partly
+different times (their monthly gaps to 0050 correlate 0.75; half of their worst months differ).
+
+Versions: 1.0.0 and 1.1.0 used 0050 as the third place. 2.0.0 (2026-10-09, 使用者：0050 我自己有部位、RL 也要修正、
+好的策略要知道什麼時候賣) uses **cash** instead — the agent's choice is when to step out of the stocks — and
+weighs drawdowns twice as heavily (penalty 1.0 instead of 0.5).
 
 The environment replays each family's own account with the research engine (fees, tax and dividends inside
-its returns) as daily unit-value returns; moving money between families costs 0.5% of the amount moved,
-and the reward also pays 2% of it (as rl-overlay-1.1.0) to discourage churning. Reward: that session's log
-return above 0050's, minus half of any deepening of the account's drawdown. State: each family's 5/20/60-
-session returns, 20-session volatility and 250-session drawdown, the gaps between them, the share of stocks
-above their 200-day average, TAIEX against its 200-day average, the current mix and the account's drawdown.
+its returns) as daily unit-value returns; moving money between places costs 0.5% of the amount moved, and
+the reward also pays 2% of it to discourage churning. Reward: that session's log return above 0050's (the
+benchmark), minus the drawdown penalty times any deepening of the account's drawdown. State: the two
+families' and 0050's 5/20/60-session returns, 20-session volatility and 250-session drawdown, the gaps
+between them, the share of stocks above their 200-day average, TAIEX against its 200-day average, the
+current mix and the account's drawdown.
 
-Learning is C1's: PPO, random 250-session episodes with noise on the state, five seeds, walk-forward (the
-policy for year Y learns only from sessions before Y). It is judged on 2017 on against every family alone,
-the fixed mixes, and — the fair test for anything learned — the mix that was best on the training years,
-chosen again each year. Settings fixed in advance.
+Learning: PPO, random 250-session episodes with noise on the state, five seeds, walk-forward (the policy for
+year Y learns only from sessions before Y). Judged on 2017 on against each family alone, the fixed mixes,
+the mix that was best on the training years and, for 2.0.0, the simple rule it has to beat: the two families
+half each with the stock part cut when their volatility runs above its usual level (as ``vol_scale`` "v1").
+2.0.0 passes when it beats 0050, its drawdown is within 5 points of 0050's, and it earns more than that simple
+rule without a deeper drawdown. Settings fixed in advance.
 """
 
 from __future__ import annotations
@@ -34,20 +40,23 @@ RL_SLEEVES_VERSION = "rl-sleeves-1.0.0"
 # 1.1.0 (2026-10-09): 1.0.0 started every training episode at a quarter, a quarter and half in 0050 and,
 # with moves charged, learned to stay there (its average mix 28/26/47 ≈ that fixed mix, which did slightly
 # better). Each training episode now starts at a random mix of the menu, so staying put earns nothing.
-VERSIONS = {"rl-sleeves-1.0.0": {"random_start": False}, "rl-sleeves-1.1.0": {"random_start": True}}
-LATEST_SLEEVES = "rl-sleeves-1.1.0"
-FAMILIES = ("model", "trend", "0050")
-FAMILY_LABELS = {"model": "機器學習每週", "trend": "站上 200 日均線（依波動度）", "0050": "0050"}
+# 2.0.0 (2026-10-09): cash in place of 0050, drawdowns weighed twice (the owner holds 0050 apart).
+VERSIONS = {"rl-sleeves-1.0.0": {"random_start": False, "third": "0050", "drawdown_penalty": 0.5},
+            "rl-sleeves-1.1.0": {"random_start": True, "third": "0050", "drawdown_penalty": 0.5},
+            "rl-sleeves-2.0.0": {"random_start": True, "third": "cash", "drawdown_penalty": 1.0}}
+LATEST_SLEEVES = "rl-sleeves-2.0.0"
+FAMILY_LABELS = {"model": "機器學習每週", "trend": "站上 200 日均線（依波動度）", "0050": "0050", "cash": "現金"}
 MENU = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (0.5, 0.5, 0.0), (0.5, 0.0, 0.5), (0.0, 0.5, 0.5),
         (1 / 3, 1 / 3, 1 / 3), (0.25, 0.25, 0.5))
-MOVE_COST = 0.005            # of the amount moved between families
+MOVE_COST = 0.005            # of the amount moved between places
 SWITCH_PENALTY = 0.02        # in the reward only
-DRAWDOWN_PENALTY = 0.5
+DRAWDOWN_PENALTY = 0.5       # 1.x; 2.0.0 takes its own from VERSIONS
 FEATURE_NOISE = 0.1
 FIRST_TEST_YEAR = 2017
 SEEDS = (0, 1, 2, 3, 4)
 CONFIG = {"iterations": 150, "envs": 64, "episode": 250, "epochs": 4, "minibatch": 2048, "lr": 3e-4,
           "gamma": 0.99, "lam": 0.95, "clip": 0.2, "hidden": 64, "entropy": 0.01, "value": 0.5}
+VOL_WINDOW, VOL_BASELINE, VOL_STEP, VOL_BAND = 21, 750, 0.25, 1.25       # as daily.exposure_schedule
 
 
 def family_rules():
@@ -63,17 +72,23 @@ def family_rules():
 @dataclass
 class Families:
     days: list[date]
-    returns: np.ndarray      # sessions × families: each family's return of each session (0 on the first)
+    returns: np.ndarray      # sessions × 3: the model family, the trend family, the third place (0050 or cash)
     features: np.ndarray     # sessions × features, known at each session's close
     names: list[str]
+    bench: np.ndarray        # 0050's return of each session (the reward's and the report's benchmark)
+    third: str = "0050"
+
+    @property
+    def places(self) -> tuple[str, str, str]:
+        return ("model", "trend", self.third)
 
 
-def _features(returns: np.ndarray, breadth: np.ndarray, taiex: np.ndarray) -> tuple[np.ndarray, list[str]]:
+def _features(returns: np.ndarray, bench: np.ndarray, breadth: np.ndarray, taiex: np.ndarray) -> tuple[np.ndarray, list[str]]:
+    """The two families' and 0050's own statistics, their gaps and the market's (the same list whatever the
+    third place is)."""
     columns: dict[str, pd.Series] = {}
-    logs = {}
-    for index, name in enumerate(FAMILIES):
-        log = pd.Series(np.log1p(returns[:, index]))
-        logs[name] = log
+    for name, series in (("model", returns[:, 0]), ("trend", returns[:, 1]), ("0050", bench)):
+        log = pd.Series(np.log1p(series))
         value = np.exp(log.cumsum())
         columns[f"{name}_return_5"] = log.rolling(5).sum()
         columns[f"{name}_return_20"] = log.rolling(20).sum()
@@ -89,7 +104,7 @@ def _features(returns: np.ndarray, breadth: np.ndarray, taiex: np.ndarray) -> tu
     return np.column_stack([np.asarray(columns[name], dtype=float) for name in names]), names
 
 
-def build_families(data, fp, costs) -> Families:
+def build_families(data, fp, costs, third: str = "0050") -> Families:
     """Replay each family's stock account and 0050 from the shadow's warm-up on, as unit-value returns."""
     from quant_platform.research.daily import SHADOW_WARMUP, daily_rankings, daily_weights, simulate_daily
     from quant_platform.research.metrics import unit_values
@@ -97,9 +112,9 @@ def build_families(data, fp, costs) -> Families:
 
     sessions = fp.sessions
     start, end = sessions[min(SHADOW_WARMUP, len(sessions) - 1)], sessions[-1]
-    series = []
+    series = {}
     days = None
-    for name in FAMILIES:
+    for name in ("model", "trend", "0050"):
         if name == "0050":
             run = simulate_daily(data, None, costs, start, end)
         else:
@@ -107,9 +122,10 @@ def build_families(data, fp, costs) -> Families:
             ranks = daily_rankings(fp, rule, start, end)
             run = simulate_daily(data, rule, costs, start, end, ranks, weights=daily_weights(fp, rule, ranks))
         units = np.asarray(unit_values(run.values, run.flows))
-        series.append(np.r_[0.0, units[1:] / units[:-1] - 1])
+        series[name] = np.nan_to_num(np.r_[0.0, units[1:] / units[:-1] - 1])
         days = list(run.days)
-    returns = np.nan_to_num(np.column_stack(series))
+    bench = series["0050"]
+    returns = np.column_stack([series["model"], series["trend"], bench if third == "0050" else np.zeros(len(bench))])
     positions = [fp.index[day] for day in days]
     trend, eligible = fp.matrix("trend_200"), eligibility(fp)
     breadth = []
@@ -121,23 +137,23 @@ def build_families(data, fp, costs) -> Families:
         taiex = np.array([fp.market[position] / average[position] - 1 for position in positions])
     else:
         taiex = np.full(len(positions), np.nan)
-    features, names = _features(returns, np.array(breadth), taiex)
-    return Families(days, returns, features, names)
+    features, names = _features(returns, bench, np.array(breadth), taiex)
+    return Families(days, returns, features, names, bench, third)
 
 
 # --- the environment -----------------------------------------------------------------------------
 def step(returns_next: np.ndarray, weights: np.ndarray, previous: np.ndarray, value: np.ndarray, peak: np.ndarray,
-         switch_penalty: float = SWITCH_PENALTY) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+         bench_next: np.ndarray, switch_penalty: float = SWITCH_PENALTY, drawdown_penalty: float = DRAWDOWN_PENALTY
+         ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """One session for every environment (rows): returns (reward, value, peak, drawdown). Moving money
-    between families costs MOVE_COST of the amount moved (half the sum of the weight changes)."""
+    between places costs MOVE_COST of the amount moved (half the sum of the weight changes)."""
     moved = 0.5 * np.abs(weights - previous).sum(axis=1)
     growth = (weights * returns_next).sum(axis=1) - MOVE_COST * moved
     drawdown_before = value / peak - 1
     value = value * (1 + growth)
     peak = np.maximum(peak, value)
     drawdown = value / peak - 1
-    bench = returns_next[:, FAMILIES.index("0050")]
-    reward = (np.log1p(growth) - np.log1p(bench) - DRAWDOWN_PENALTY * np.maximum(0.0, drawdown_before - drawdown)
+    reward = (np.log1p(growth) - np.log1p(bench_next) - drawdown_penalty * np.maximum(0.0, drawdown_before - drawdown)
               - switch_penalty * moved)
     return reward, value, peak, drawdown
 
@@ -162,10 +178,11 @@ def train_policy(families: Families, low: int, high: int, seed: int, config: dic
     import torch
 
     config = {**CONFIG, **(config or {})}
+    penalty = config.get("drawdown_penalty", DRAWDOWN_PENALTY)
     rng = np.random.default_rng(seed)
     torch.manual_seed(seed)
     mean, std = _normaliser(families.features, low, high)
-    inputs = families.features.shape[1] + len(FAMILIES) + 1
+    inputs = families.features.shape[1] + len(MENU[0]) + 1
     hidden = config["hidden"]
     policy = torch.nn.Sequential(torch.nn.Linear(inputs, hidden), torch.nn.Tanh(), torch.nn.Linear(hidden, hidden),
                                  torch.nn.Tanh(), torch.nn.Linear(hidden, len(MENU)))
@@ -182,7 +199,7 @@ def train_policy(families: Families, low: int, high: int, seed: int, config: dic
         if config.get("random_start"):
             weights = menu[rng.integers(0, len(MENU), size=envs)]
         else:
-            weights = np.tile(menu[-1], (envs, 1))              # 1.0.0: a quarter, a quarter, half in 0050
+            weights = np.tile(menu[-1], (envs, 1))              # 1.0.0: a quarter, a quarter, half in the third
         value, peak, drawdown = np.ones(envs), np.ones(envs), np.zeros(envs)
         observations, actions, logps, rewards, values = [], [], [], [], []
         for offset in range(length):
@@ -195,7 +212,8 @@ def train_policy(families: Families, low: int, high: int, seed: int, config: dic
                 estimate = critic(torch.from_numpy(state)).squeeze(-1)
             chosen = menu[action.numpy()]
             reward, value, peak, drawdown = step(families.returns[day + 1], chosen, weights, value, peak,
-                                                 config.get("switch_penalty", SWITCH_PENALTY))
+                                                 families.bench[day + 1], config.get("switch_penalty", SWITCH_PENALTY),
+                                                 penalty)
             observations.append(state)
             actions.append(action.numpy())
             logps.append(distribution.log_prob(action).numpy())
@@ -241,7 +259,7 @@ def run_policy(policies: list, families: Families, low: int, high: int, start: n
     import torch
 
     menu = np.array(MENU)
-    chosen_all = np.empty((high - low, len(FAMILIES)))
+    chosen_all = np.empty((high - low, len(MENU[0])))
     weights, drawdown, value, peak = start.copy(), 0.0, 1.0, 1.0
     for offset, day in enumerate(range(low, high)):
         picks = []
@@ -272,6 +290,28 @@ def path(families: Families, mixes: np.ndarray, low: int, start: np.ndarray | No
     return np.array(values)
 
 
+def bench_path(families: Families, low: int, count: int) -> np.ndarray:
+    return np.cumprod(np.r_[1.0, 1 + families.bench[low + 1: low + count]])
+
+
+def vol_scaled(families: Families, low: int, count: int) -> np.ndarray:
+    """The simple rule RL 2.0.0 must beat: the two families half each, the stock part cut when their
+    volatility runs above 1.25 times its usual level (quarters, rest in cash), moves paid."""
+    halves = pd.Series(0.5 * families.returns[:, 0] + 0.5 * families.returns[:, 1])
+    now = halves.rolling(VOL_WINDOW).std()
+    usual = now.rolling(VOL_BASELINE, min_periods=VOL_WINDOW * 6).median()
+    ratio = (VOL_BAND * usual / now).clip(upper=1.0).fillna(1.0).to_numpy()
+    exposure = np.floor(ratio / VOL_STEP) * VOL_STEP
+    values = [1.0]
+    previous = exposure[low]
+    for offset in range(count - 1):
+        level = exposure[low + offset]
+        growth = level * float(halves.iloc[low + offset + 1]) - MOVE_COST * abs(level - previous)
+        values.append(values[-1] * (1 + growth))
+        previous = level
+    return np.array(values)
+
+
 def _summary(values: np.ndarray, years: float) -> dict[str, float]:
     peak = np.maximum.accumulate(values)
     return {"growth": round(float(values[-1] - 1), 4),
@@ -279,47 +319,60 @@ def _summary(values: np.ndarray, years: float) -> dict[str, float]:
             "max_drawdown": round(float((values / peak - 1).min()), 4)}
 
 
-def best_fixed(families: Families, low: int, high: int) -> int:
-    """The menu mix with the highest growth on [low, high) held throughout (what hindsight on the
-    training years would pick)."""
+def best_fixed(families: Families, low: int, high: int, drawdown_penalty: float = DRAWDOWN_PENALTY) -> int:
+    """The menu mix with the best growth less the drawdown penalty on [low, high) held throughout (what
+    hindsight on the training years would pick)."""
     scores = []
     for mix in np.array(MENU):
         values = path(families, np.tile(mix, (high - low, 1)), low)
         peak = np.maximum.accumulate(values)
-        scores.append(np.log(values[-1]) - DRAWDOWN_PENALTY * float(-(values / peak - 1).min()))
+        scores.append(np.log(values[-1]) - drawdown_penalty * float(-(values / peak - 1).min()))
     return int(np.argmax(scores))
+
+
+def _baselines(families: Families, low: int, count: int, span: float) -> dict[str, dict[str, float]]:
+    menu = np.array(MENU)
+    return {
+        "model": _summary(path(families, np.tile(menu[0], (count, 1)), low), span),
+        "trend": _summary(path(families, np.tile(menu[1], (count, 1)), low), span),
+        "third": _summary(path(families, np.tile(menu[2], (count, 1)), low), span),
+        "halves": _summary(path(families, np.tile(menu[3], (count, 1)), low), span),
+        "thirds": _summary(path(families, np.tile(menu[6], (count, 1)), low), span),
+        "quarters_half": _summary(path(families, np.tile(menu[7], (count, 1)), low), span),
+        "vol_scaled": _summary(vol_scaled(families, low, count), span),
+        "0050": _summary(bench_path(families, low, count), span),
+    }
 
 
 def walk_forward(families: Families, out_dir: str | Path | None = None, seeds: tuple[int, ...] = SEEDS,
                  first_year: int = FIRST_TEST_YEAR, config: dict | None = None, job=None,
                  version: str = RL_SLEEVES_VERSION) -> dict[str, object]:
     """Train for each test year on the sessions before it, run it; the report (saved when ``out_dir``)."""
+    settings = {**VERSIONS[version], **(config or {})}
+    penalty = settings.get("drawdown_penalty", DRAWDOWN_PENALTY)
     menu = np.array(MENU)
     ready = int(np.argmax(np.isfinite(families.features).all(axis=1)))
     years = sorted({day.year for day in families.days if day.year >= first_year})
     mixes_all, fixed_all, report_years = [], [], {}
     start = menu[-1]
+    places = families.places
     for number, year in enumerate(years):
         low = next(index for index, day in enumerate(families.days) if day.year == year)
         high = max(index for index, day in enumerate(families.days) if day.year == year) + 1
         if job:
             job.update(done=number, current=f"{year} 年（訓練 {families.days[ready]}～{families.days[low - 1]}）", force=True)
-        policies = [train_policy(families, ready, low, seed + year, {**VERSIONS[version], **(config or {})})
-                    for seed in seeds]
+        policies = [train_policy(families, ready, low, seed + year, settings) for seed in seeds]
         mixes = run_policy(policies, families, low, high, start)
-        chosen = best_fixed(families, ready, low)
+        chosen = best_fixed(families, ready, low, penalty)
         fixed = np.tile(menu[chosen], (high - low, 1))
         sessions, span = high - low, (high - low) / 245
         report_years[str(year)] = {
-            "sessions": sessions, "average": {name: round(float(mixes[:, index].mean()), 3) for index, name in enumerate(FAMILIES)},
+            "sessions": sessions, "average": {name: round(float(mixes[:, index].mean()), 3) for index, name in enumerate(places)},
             "moves": int((np.abs(np.diff(np.vstack([start, mixes]), axis=0)).sum(axis=1) > 1e-9).sum()),
             "best_fixed": [round(value, 3) for value in MENU[chosen]],
             "rl": _summary(path(families, mixes, low, start), span),
             "best_fixed_result": _summary(path(families, fixed, low), span),
-            **{name: _summary(path(families, np.tile(np.eye(len(FAMILIES))[index], (sessions, 1)), low), span)
-               for index, name in enumerate(FAMILIES)},
-            "thirds": _summary(path(families, np.tile(menu[6], (sessions, 1)), low), span),
-            "quarters_half_0050": _summary(path(families, np.tile(menu[7], (sessions, 1)), low), span),
+            **_baselines(families, low, sessions, span),
         }
         mixes_all.append(mixes)
         fixed_all.append(fixed)
@@ -327,24 +380,29 @@ def walk_forward(families: Families, out_dir: str | Path | None = None, seeds: t
     first = next(index for index, day in enumerate(families.days) if day.year == years[0])
     mixes_all, fixed_all = np.vstack(mixes_all), np.vstack(fixed_all)
     count, span = len(mixes_all), len(mixes_all) / 245
+    overall = {
+        "rl": _summary(path(families, mixes_all, first, menu[-1]), span),
+        "best_fixed_result": _summary(path(families, fixed_all, first), span),
+        **_baselines(families, first, count, span),
+        "average": {name: round(float(mixes_all[:, index].mean()), 3) for index, name in enumerate(places)},
+    }
+    rl, bench, simple = overall["rl"], overall["0050"], overall["vol_scaled"]
     report = {
-        "version": version, "config": {**CONFIG, **VERSIONS[version], **(config or {})}, "menu": [list(mix) for mix in MENU],
-        "families": [FAMILY_LABELS[name] for name in FAMILIES], "move_cost": MOVE_COST, "switch_penalty": SWITCH_PENALTY,
-        "drawdown_penalty": DRAWDOWN_PENALTY, "features": families.names, "seeds": list(seeds),
-        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "version": version, "config": {**CONFIG, **settings}, "menu": [list(mix) for mix in MENU],
+        "families": [FAMILY_LABELS[name] for name in places], "third": families.third,
+        "move_cost": MOVE_COST, "switch_penalty": SWITCH_PENALTY, "drawdown_penalty": penalty,
+        "features": families.names, "seeds": list(seeds), "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "test_from": families.days[first].isoformat(), "test_to": families.days[-1].isoformat(), "years": report_years,
-        "overall": {
-            "rl": _summary(path(families, mixes_all, first, menu[-1]), span),
-            "best_fixed_result": _summary(path(families, fixed_all, first), span),
-            **{name: _summary(path(families, np.tile(np.eye(len(FAMILIES))[index], (count, 1)), first), span)
-               for index, name in enumerate(FAMILIES)},
-            "thirds": _summary(path(families, np.tile(menu[6], (count, 1)), first), span),
-            "quarters_half_0050": _summary(path(families, np.tile(menu[7], (count, 1)), first), span),
-            "average": {name: round(float(mixes_all[:, index].mean()), 3) for index, name in enumerate(FAMILIES)},
+        "overall": overall,
+        "acceptance": {
+            "beats_0050": rl["annual"] > bench["annual"],
+            "drawdown_within_5": rl["max_drawdown"] >= bench["max_drawdown"] - 0.05,
+            "beats_simple_rule": rl["annual"] > simple["annual"] and rl["max_drawdown"] >= simple["max_drawdown"],
         },
         "mixes": {families.days[first + index].isoformat(): [round(float(value), 3) for value in row]
                   for index, row in enumerate(mixes_all)},
     }
+    report["acceptance"]["passed"] = all(report["acceptance"].values())
     if out_dir is not None:
         folder = Path(out_dir)
         folder.mkdir(parents=True, exist_ok=True)

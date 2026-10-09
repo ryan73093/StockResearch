@@ -307,3 +307,46 @@ def test_smoothing_ranks_on_the_recent_average_and_stays_out_of_the_hash_at_zero
     assert fp.smoothed("reversal_5d", 5)[:, last] == pytest.approx(fp.matrix("reversal_5d")[:, last - 4:last + 1].mean(axis=1))
     assert "smooth" not in plain.canonical() and smooth.rule_hash != plain.rule_hash
     assert len({rule.rule_hash for rule in daily.turnover_batch()}) == 4
+
+
+def test_volatility_scaling_trims_to_cash_and_buys_back_by_hand():
+    """2026-10-09 (使用者：知道什麼時候要賣): the stock part follows the exposure; the rest is cash, never 0050."""
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 12))
+    closes = {f"{1101 + n}.TW": {day: 10.0 for day in days} for n in range(3)}
+    data = market(days, closes)
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, min_hold=0, vol_scale="v1")
+    ranks = {day: list(closes) for day in days}
+    exposure = {day: (0.5 if date(2024, 1, 8) <= day < date(2024, 1, 11) else 1.0) for day in days}
+    plan = SeedPlan(initial=100_000, monthly_amount=0)
+    ledger, books = [], {}
+    run = simulate_daily(data, rule, FREE, days[0], days[-1], ranks, plan, ledger=ledger, snapshots=books, exposure=exposure)
+    held = lambda day: sum(count * 10.0 for symbol, count in books[day][1].items() if symbol != "0050.TW")
+    assert held(date(2024, 1, 5)) == pytest.approx(100_000, rel=0.005)              # fully invested
+    assert held(date(2024, 1, 8)) == pytest.approx(50_000, rel=0.005)               # trimmed to half (whole shares)
+    assert books[date(2024, 1, 8)][0] == pytest.approx(50_000, rel=0.005)           # the rest is cash
+    assert held(date(2024, 1, 11)) == pytest.approx(100_000, rel=0.005)             # bought back
+    assert not any(entry["symbol"] == "0050.TW" for entry in ledger)
+    assert run.values[-1] == pytest.approx(100_000 - run.taxes) and run.taxes > 0     # only the 0.3% tax on the trim
+    assert "vol_scale" not in rule.model_copy(update={"vol_scale": "none"}).canonical()
+
+
+def test_the_exposure_falls_when_the_rule_turns_volatile():
+    rng = np.random.default_rng(7)
+    days = weekdays(date(2019, 1, 1), date(2024, 12, 31))
+    noise = [0.004] * 1200 + [0.04] * (len(days) - 1200)                            # calm, then wild
+    closes = {}
+    for number in range(4):
+        price, series = 20.0, {}
+        for index, day in enumerate(days):
+            price *= 1 + 0.0004 + rng.normal(0, noise[index])
+            series[day] = max(price, 10.5)
+        closes[f"{1101 + number}.TW"] = series
+    data = market(days, closes)
+    fp = FactorPanel(Panel(data))
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, vol_scale="v1")
+    schedule = daily.exposure_schedule(data, fp, rule, FREE)
+    calm = [schedule[day] for day in days[1000:1190] if day in schedule]
+    wild = [schedule[day] for day in days[1230:1300] if day in schedule]
+    assert np.mean(calm) >= 0.9 and max(wild) <= 0.5                          # invested in ordinary times, then cut
+    assert all(value in (0.0, 0.25, 0.5, 0.75, 1.0) for value in schedule.values())
+    assert daily.exposure_schedule(data, fp, rule.model_copy(update={"vol_scale": "none"}), FREE) is None

@@ -154,17 +154,19 @@
 {% if report.kind == 'sleeves' %}
 <section class="card">
   <div class="card__head"><h2>強化學習：在策略家族間分配 <span class="badge">{{ report.version }}</span></h2><span class="muted small">樣本外 {{ report.test_from }}～{{ report.test_to }}</span></div>
-  <p class="small" style="margin:0 0 10px">每個交易日收盤後，RL 從 {{ report.menu|length }} 種固定比例中挑一種，把帳戶分給「{{ report.families|join('」「') }}」；家族之間移動要付 0.5% 成本。每一年只用那一年以前的資料訓練，{{ report.seeds|length }} 個種子平均。公平的對照是「訓練期最好的固定組合」：每年用那年以前的資料事後挑出最好的一種，之後不再改。</p>
+  <p class="small" style="margin:0 0 10px">每個交易日收盤後，RL 從 {{ report.menu|length }} 種固定比例中挑一種，把帳戶分給「{{ report.families|join('」「') }}」；移動要付 0.5% 成本，回撤懲罰 {{ report.drawdown_penalty }}。每一年只用那一年以前的資料訓練，{{ report.seeds|length }} 個種子平均。{% if report.third == 'cash' %}這一版不放 0050：第三個位置是現金，RL 要學的是什麼時候退出個股；要贏過簡單規則「兩個家族各半、波動大時減碼到現金」才算通過。{% else %}公平的對照是「訓練期最好的固定組合」：每年用那年以前的資料事後挑出最好的一種，之後不再改。{% endif %}{% if report.acceptance %} <span class="badge {{ 'badge--ok' if report.acceptance.passed else 'badge--bad' }}">{{ '通過' if report.acceptance.passed else '未通過' }}</span>{% endif %}</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th>做法</th><th class="num">樣本外總報酬</th><th class="num">年化</th><th class="num">最大回撤</th></tr></thead>
       <tbody>
-      {% for key, label in (('rl', 'RL 分配'), ('best_fixed_result', '訓練期最好的固定組合'), ('model', report.families[0] ~ '（全部）'), ('trend', report.families[1] ~ '（全部）'), ('thirds', '三份各 1/3'), ('quarters_half_0050', '兩個家族各 1/4、一半 0050'), ('0050', '全部 0050')) %}
-        {% set item = report.overall[key] %}
+      {% for key, label in (('rl', 'RL 分配'), ('best_fixed_result', '訓練期最好的固定組合'), ('vol_scaled', '兩個家族各半、波動大時減碼到現金（簡單規則）'), ('halves', '兩個家族各半'), ('model', report.families[0] ~ '（全部）'), ('trend', report.families[1] ~ '（全部）'), ('thirds', '三份各 1/3'), ('quarters_half', '兩個家族各 1/4、一半' ~ report.families[2]), ('quarters_half_0050', '兩個家族各 1/4、一半 0050'), ('0050', '全部 0050（比較基準）')) %}
+        {% set item = report.overall.get(key) %}
+        {% if item %}
         <tr><td data-primary><strong>{{ label }}</strong></td>
             <td class="num {{ 'up' if item.growth > 0 else 'down' }}" data-label="總報酬">{{ '{:+.0%}'.format(item.growth) }}</td>
             <td class="num" data-label="年化">{{ '{:.1%}'.format(item.annual) }}</td>
             <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(item.max_drawdown) }}</td></tr>
+        {% endif %}
       {% endfor %}
       </tbody>
     </table>
@@ -172,7 +174,7 @@
   <svg class="rule-chart" viewBox="0 0 {{ report.chart.width }} {{ report.chart.height }}" preserveAspectRatio="none" role="img" aria-label="各家族佔帳戶" style="margin-top:12px">
     {% for points in report.chart.lines %}<polyline class="{{ ('line-rule', 'line-put', 'line-bench')[loop.index0] }}" points="{{ points }}"/>{% endfor %}
   </svg>
-  <div class="legend"><span><i style="background:var(--accent)"></i>{{ report.families[0] }}</span><span><i style="background:var(--muted)"></i>{{ report.families[1] }}</span><span><i style="background:var(--warn)"></i>0050</span><span>佔帳戶（下緣 0%、上緣 100%）；平均 {% for key, value in report.overall.average.items() %}{{ '{:.0%}'.format(value) }}{% if not loop.last %}／{% endif %}{% endfor %}</span></div>
+  <div class="legend"><span><i style="background:var(--accent)"></i>{{ report.families[0] }}</span><span><i style="background:var(--muted)"></i>{{ report.families[1] }}</span><span><i style="background:var(--warn)"></i>{{ report.families[2] }}</span><span>佔帳戶（下緣 0%、上緣 100%）；平均 {% for key, value in report.overall.average.items() %}{{ '{:.0%}'.format(value) }}{% if not loop.last %}／{% endif %}{% endfor %}</span></div>
   <details style="margin-top:10px"><summary class="small">逐年</summary>
     <div class="table-wrap table-wrap--stack">
       <table class="table--stack">

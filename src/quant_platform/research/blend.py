@@ -121,14 +121,15 @@ class BlendAccount:
     the selection period (as ``daily.evaluate`` does for a single rule); ``run`` any stretch of it."""
 
     def __init__(self, data, fp, blend: BlendRule, costs, start: date, end: date) -> None:
-        from quant_platform.research.daily import account_parking, daily_rankings, daily_weights
+        from quant_platform.research.daily import account_parking, daily_rankings, daily_weights, exposure_schedule
 
         self.data, self.blend, self.costs = data, blend, costs
         self.parts = []
         for sleeve in blend.sleeves:
             ranks = daily_rankings(fp, sleeve.rule, start, end)
-            self.parts.append((sleeve, ranks, daily_weights(fp, sleeve.rule, ranks), account_parking(data, fp, sleeve.rule, costs)))
-        self.first = max(next((day for day in sorted(ranks) if ranks[day]), start) for _sleeve, ranks, _w, _p in self.parts)
+            self.parts.append((sleeve, ranks, daily_weights(fp, sleeve.rule, ranks), account_parking(data, fp, sleeve.rule, costs),
+                               exposure_schedule(data, fp, sleeve.rule, costs)))
+        self.first = max(next((day for day in sorted(ranks) if ranks[day]), start) for _sleeve, ranks, *_rest in self.parts)
 
     def run(self, start: date, end: date, plan=None, ledger: list | None = None, snapshots: dict | None = None) -> RunResult:
         from quant_platform.research.daily import simulate_daily
@@ -136,10 +137,11 @@ class BlendAccount:
 
         plan = plan or SeedPlan()
         runs, ledgers, books = [], [], []
-        for sleeve, ranks, weights, parked in self.parts:
+        for sleeve, ranks, weights, parked, exposure in self.parts:
             part_ledger, part_book = ([] if ledger is not None else None), ({} if snapshots is not None else None)
             runs.append(simulate_daily(self.data, sleeve.rule, self.costs, start, end, ranks, scaled(plan, sleeve.share),
-                                       ledger=part_ledger, snapshots=part_book, weights=weights, parked=parked))
+                                       ledger=part_ledger, snapshots=part_book, weights=weights, parked=parked,
+                                       exposure=exposure))
             ledgers.append(part_ledger)
             books.append(part_book)
         if self.blend.core:
@@ -250,6 +252,18 @@ def low_drawdown_batch() -> list:
         BlendRule(name="組合：機器學習每週＋站上 200 日均線＋60 日低波動 各半",
                   sleeves=(Sleeve(rule=model, share=0.5), Sleeve(rule=trend_calm, share=0.5))),
     ]
+
+
+def vol_scale_batch() -> list:
+    """2026-10-09 (使用者：好的策略應該要能夠避免回撤、知道什麼時候要賣): the three best 100%-stock rules with
+    the stock part scaled down when their own volatility runs above its usual level (vol_scale "v1", cash
+    for the rest). Fixed in advance; judged by the same gate (drawdown within 5 points of 0050's)."""
+    model, trend = family_rules_for_blends()
+    model_v = model.model_copy(update={"name": model.name + "、波動大時減碼（現金）", "vol_scale": "v1"})
+    trend_v = trend.model_copy(update={"name": trend.name + "、波動大時減碼（現金）", "vol_scale": "v1"})
+    return [trend_v, model_v,
+            BlendRule(name="組合：機器學習每週＋站上 200 日均線（依波動度）各半、波動大時減碼（現金）",
+                      sleeves=(Sleeve(rule=model_v, share=0.5), Sleeve(rule=trend_v, share=0.5)))]
 
 
 def blend_batch() -> list[BlendRule]:

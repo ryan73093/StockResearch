@@ -132,6 +132,11 @@ class DailyRule(BaseModel):
     # bought (holdings are kept); "v1-off" = the same rule computing nothing different, the forward control.
     # Left out of the hash when "none". News exists only from 2026-10-05: forward observation only.
     news_veto: Literal["none", "v1", "v1-off"] = "none"
+    # 2026-10-09 (使用者：好的策略應該要能夠避免回撤、知道什麼時候要賣): "v1" = the stock part is scaled by
+    # the rule's own recent volatility against its usual level, the rest held in cash (never 0050) —
+    # momentum crashes come after its volatility has jumped (Barroso & Santa-Clara 2015; Daniel & Moskowitz
+    # 2016). Left out of the hash when "none". See ``exposure_schedule``.
+    vol_scale: Literal["none", "v1"] = "none"
 
     @field_validator("factors")
     @classmethod
@@ -163,6 +168,8 @@ class DailyRule(BaseModel):
             data.pop("exit_model", None)
         if data.get("news_veto") == "none":
             data.pop("news_veto", None)
+        if data.get("vol_scale") == "none":
+            data.pop("vol_scale", None)
         return data
 
     @property
@@ -449,7 +456,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                    ranks: dict[date, list[str]] | None = None, plan=None,
                    ledger: list[dict[str, object]] | None = None,
                    snapshots: dict | None = None, weights: dict[date, dict[str, float]] | None = None,
-                   parked: set[date] | None = None) -> RunResult:
+                   parked: set[date] | None = None, exposure: dict[date, float] | None = None) -> RunResult:
     """``rule=None`` is the benchmark: the same cash flow into 0050 on the day it arrives. ``weights``:
     each pick's share of the stock part on its check day (equal when absent). ``parked``: days the stock
     part is held in 0050 (the stocks are sold and 0050 bought the same close; on the first day after,
@@ -463,6 +470,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
     picks: list[str] = []
     shares_of: dict[str, float] = {}
     was_parked = False
+    applied = 1.0                                # share of the stock part invested (vol_scale; the rest is cash)
     minimum = max(rule.min_trade, 1.0) if rule else 1.0
 
     def price(symbol: str, day: date) -> float:
@@ -538,20 +546,29 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                 excess = units[BENCHMARK] * price(BENCHMARK, day) - total * rule.core
                 if excess >= minimum:
                     sell_all(BENCHMARK, day, excess)
-            if today is not None or contribution or park != was_parked:
+            level = exposure.get(day, applied) if exposure is not None else 1.0
+            moved = level != applied
+            if today is not None or contribution or park != was_parked or moved:
                 total = cash + sum(count * price(symbol, day) for symbol, count in units.items() if count > 0)
                 targets: dict[str, float] = {}
                 if rule.core > 0 or park:
                     targets[BENCHMARK] = total * (1.0 if park else rule.core)
                 for symbol in picks:
                     share = shares_of.get(symbol, 1 / len(picks)) if shares_of else 1 / len(picks)
-                    targets[symbol] = targets.get(symbol, 0.0) + total * (1 - rule.core) * share
+                    targets[symbol] = targets.get(symbol, 0.0) + total * (1 - rule.core) * level * share
+                if moved and level < applied:            # volatility up: trim every holding to its target
+                    for symbol in picks:
+                        excess = units[symbol] * price(symbol, day) - targets.get(symbol, 0.0)
+                        if units[symbol] > 0 and excess >= minimum:
+                            sell_all(symbol, day, excess)
                 orders = []
                 for symbol, target in targets.items():
                     held_value = units[symbol] * price(symbol, day)
                     gap = target - held_value
-                    if gap > 0 and (held_value <= 0 or contribution or (park and symbol == BENCHMARK)):
+                    if gap > 0 and (held_value <= 0 or contribution or (park and symbol == BENCHMARK)
+                                    or (moved and level > applied)):
                         orders.append((gap, symbol))
+                applied = level
                 for gap, symbol in sorted(orders, reverse=True):
                     amount = min(gap, cash)
                     if amount >= minimum:
@@ -564,6 +581,37 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         if snapshots is not None:
             snapshots[day] = (cash, {symbol: count for symbol, count in units.items() if count > 0})
     return result
+
+
+VOL_WINDOW = 21          # sessions of the rule's own returns for its current volatility (about a month)
+VOL_BASELINE = 750       # sessions whose median volatility is its usual level (about three years)
+VOL_STEP = 0.25          # the invested share moves in quarters: fewer trades
+VOL_BAND = 1.25          # fully invested until the volatility runs 25% above its usual level
+
+
+def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel) -> dict[date, float] | None:
+    """vol_scale "v1": for every session, the share of the stock part to hold — 1.25 times the usual
+    volatility of the rule's own stock account (the median of its 21-session volatility over the past 750
+    sessions) divided by its 21-session volatility now, at most 1, rounded down to a quarter: fully invested
+    in ordinary times, half at twice the usual volatility, a quarter at four times; the rest stays in cash.
+    Known at the close it is used on (the account without scaling, replayed from SHADOW_WARMUP). None when off."""
+    if getattr(rule, "vol_scale", "none") == "none":
+        return None
+    shadow = rule.model_copy(update={"vol_scale": "none", "core": 0.0, "account_filter": "none"})
+    sessions = fp.sessions
+    start, end = sessions[min(SHADOW_WARMUP, len(sessions) - 1)], sessions[-1]
+    ranks = daily_rankings(fp, shadow, start, end)
+    run = simulate_daily(data, shadow, costs, start, end, ranks, weights=daily_weights(fp, shadow, ranks))
+    units = pd.Series(unit_values(run.values, run.flows))
+    volatility = units.pct_change(fill_method=None).rolling(VOL_WINDOW).std()
+    usual = volatility.rolling(VOL_BASELINE, min_periods=VOL_WINDOW * 6).median()
+    output = {}
+    for day, now, normal in zip(run.days, volatility.to_numpy(), usual.to_numpy(), strict=True):
+        if not (np.isfinite(now) and np.isfinite(normal)) or now <= 0:
+            output[day] = 1.0
+            continue
+        output[day] = float(np.floor(min(1.0, VOL_BAND * normal / now) / VOL_STEP) * VOL_STEP)
+    return output
 
 
 def daily_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]) -> dict[date, dict[str, float]] | None:
@@ -689,8 +737,10 @@ def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostMode
     weights, parked = daily_weights(fp, rule, ranks), account_parking(data, fp, rule, costs)
     first = next((day for day in sorted(ranks) if ranks[day]), RECENT_START)
 
+    exposure = exposure_schedule(data, fp, rule, costs)
+
     def account(start: date, end: date) -> RunResult:
-        return simulate_daily(data, rule, costs, start, end, ranks, weights=weights, parked=parked)
+        return simulate_daily(data, rule, costs, start, end, ranks, weights=weights, parked=parked, exposure=exposure)
 
     report = account_report(data, account, first, costs, benchmark_cache)
     report["parked_sessions"] = len([day for day in parked or () if first <= day <= RECENT_END])
@@ -1074,6 +1124,13 @@ def t0_hunt_batch() -> list:
     return hunt()
 
 
+def vol_scale_batch() -> list:
+    """2026-10-09: the best 100%-stock rules scaled by their own volatility (research/blend.py ``vol_scale_batch``)."""
+    from quant_platform.research.blend import vol_scale_batch as scaled_batch
+
+    return scaled_batch()
+
+
 def low_drawdown_batch() -> list:
     """2026-10-09: 100% stocks with a shallower drawdown (research/blend.py ``low_drawdown_batch``)."""
     from quant_platform.research.blend import low_drawdown_batch as lowdd
@@ -1092,4 +1149,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch,
            "model-excess": model_excess_batch, "statements": statement_batch, "turnover": turnover_batch,
            "exits": exits_batch, "blends": blends_batch, "model-60": model_60_batch,
-           "t0hunt": t0_hunt_batch, "lowdd": low_drawdown_batch}
+           "t0hunt": t0_hunt_batch, "lowdd": low_drawdown_batch,
+           "volscale": vol_scale_batch}

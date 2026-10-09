@@ -93,6 +93,8 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
             traits.append("分數平均")
         if spec.get("exit_model") not in (None, "none"):
             traits.append("學習出場")
+        if spec.get("vol_scale") not in (None, "none"):
+            traits.append("波動大時減碼")
         if spec.get("news_veto") == "v1":
             traits.append("新聞否決")
         elif spec.get("news_veto") == "v1-off":

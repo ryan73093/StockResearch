@@ -166,6 +166,7 @@ def replay(data, fp, rule, costs) -> tuple[list[dict], object]:
         account_parking,
         daily_rankings,
         daily_weights,
+        exposure_schedule,
         simulate_daily,
     )
 
@@ -178,7 +179,8 @@ def replay(data, fp, rule, costs) -> tuple[list[dict], object]:
     ranks = daily_rankings(fp, rule, RECENT_START, RECENT_END)
     weights, parked = daily_weights(fp, rule, ranks), account_parking(data, fp, rule, costs)
     first = next((day for day in sorted(ranks) if ranks[day]), RECENT_START)
-    result = simulate_daily(data, rule, costs, first, RECENT_END, ranks, ledger=ledger, weights=weights, parked=parked)
+    result = simulate_daily(data, rule, costs, first, RECENT_END, ranks, ledger=ledger, weights=weights, parked=parked,
+                            exposure=exposure_schedule(data, fp, rule, costs))
     return ledger, result
 
 

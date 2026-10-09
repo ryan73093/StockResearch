@@ -107,3 +107,12 @@ def test_the_researcher_runs_once_a_week(tmp_path):
     assert not dr.ran_within(tmp_path, 6, now)
     Journal(tmp_path / "journal.jsonl").append({"version": dr.VERSION, "status": "ok", "started_at": "2026-10-09T14:00:00+00:00"})
     assert dr.ran_within(tmp_path, 6, now) and not dr.ran_within(tmp_path, 6, datetime(2026, 10, 17, 14, tzinfo=UTC))
+
+
+def test_factors_written_as_a_list_are_read():
+    """2026-10-09: the first real round wrote the factors as a list of objects."""
+    assert dr._factors({"trend_200": 1}) == {"trend_200": 1.0}
+    assert dr._factors([{"name": "trend_200", "weight": 1}, {"factor": "revenue_yoy", "weight": 0.5}]) == {
+        "trend_200": 1.0, "revenue_yoy": 0.5}
+    assert dr._factors([["eps_growth", -1]]) == {"eps_growth": -1.0} and dr._factors(["rsi_14"]) == {"rsi_14": 1.0}
+    assert dr._factors("trend_200") is None and dr._factors([{"name": "x", "weight": "強"}]) is None
