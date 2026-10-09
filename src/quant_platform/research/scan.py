@@ -66,11 +66,11 @@ def weekly(factors: tuple[str, ...]) -> bool:
     return any(name in MODEL_FACTORS or name in CHIP_FACTORS for name in factors)
 
 
-def candidates(names: list[str] | None = None, largest: int = 3) -> list[dict]:
-    """Every set of 1..``largest`` signals × universe (all, large) × weighting (equal, calm)."""
+def candidates(names: list[str] | None = None, largest: int = 3, smallest: int = 1) -> list[dict]:
+    """Every set of ``smallest``..``largest`` signals × universe (all, large) × weighting (equal, calm)."""
     names = names or signals()
     output = []
-    for size in range(1, largest + 1):
+    for size in range(smallest, largest + 1):
         for group in combinations(names, size):
             for universe in ("all", "large"):
                 for weighting in ("equal", "inverse_vol"):
@@ -310,10 +310,17 @@ def _count_lines(path: Path) -> int:
         return 0
 
 
-def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 600) -> list[dict]:
+def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 600,
+              seeds: list[dict] | None = None) -> list[dict]:
     """The passing candidates, best development-period excess first, skipping any whose daily returns
-    correlate above CORRELATION_LIMIT with one already taken."""
+    correlate above CORRELATION_LIMIT with one already taken — or with a ``seeds`` candidate (an earlier
+    scan's finalists: a new scan adds strategies, not near-copies of ones already run)."""
     ranked = sorted((row for row in rows if passes(row)), key=lambda row: -row["excess"])[:pool]
+    earlier = []
+    for seed in seeds or []:
+        _metrics, (returns, _entries) = evaluate(arrays, seed, costs)
+        if np.std(returns) > 0:
+            earlier.append((seed, returns))
     taken: list[tuple[dict, np.ndarray]] = []
     for row in ranked:
         if len(taken) >= count:
@@ -322,14 +329,37 @@ def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 6
         _metrics, (returns, _entries) = evaluate(arrays, candidate, costs)
         if np.std(returns) == 0:
             continue
-        if any(np.corrcoef(returns, other)[0, 1] > CORRELATION_LIMIT for _row, other in taken):
+        if any(np.corrcoef(returns, other)[0, 1] > CORRELATION_LIMIT for _row, other in earlier + taken):
             continue
         taken.append((row, returns))
     return [row for row, _returns in taken]
 
 
+def earlier_finalists(research: Path) -> list[dict]:
+    """Every registered scan rule (named 掃描：…) as a candidate, to keep new finalists different."""
+    output, seen = [], set()
+    path = research / "trials.jsonl"
+    if not path.is_file():
+        return output
+    for line in path.read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        if not str(record.get("spec_name", "")).startswith("掃描："):
+            continue
+        try:
+            spec = json.loads((research / "reports" / record["report_file"]).read_text(encoding="utf-8"))["spec"]
+        except (OSError, ValueError, KeyError):
+            continue
+        key = record["spec_hash"]
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append({"factors": list(spec["factors"]), "universe": "large" if spec.get("large_caps") else "all",
+                       "weighting": spec.get("weighting", "equal"), "check": spec.get("check", "daily")})
+    return output
+
+
 def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 80, largest: int = 3,
-             names: list[str] | None = None, job=None) -> dict:
+             names: list[str] | None = None, job=None, smallest: int = 1) -> dict:
     """Both stages; returns the summary written next to the screen results."""
     from quant_platform.research import daily
     from quant_platform.research.registry import TrialRegistry
@@ -341,7 +371,7 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
     data, fp = daily.load(base)
     fingerprint = daily.fingerprint(base)
     arrays = prepare(data, fp, costs, folder / "arrays")
-    items = candidates(names, largest)
+    items = candidates(names, largest, smallest)
     if job:
         job.update(done=0, total=len(items) + count, current=f"第一階段：{len(items):,} 個候選（2015-06～2020-09）",
                    force=True)
@@ -350,7 +380,8 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                   progress=(lambda done: job.update(done=done, current=f"第一階段：{done:,}／{len(items):,}"))
                   if job else None)
     pd.DataFrame([{**row, "factors": "+".join(row["factors"])} for row in rows]).to_parquet(folder / "screen.parquet")
-    chosen = finalists(arrays, rows, costs, count)
+    seeds = earlier_finalists(research)
+    chosen = finalists(arrays, rows, costs, count, seeds=seeds)
     registry = TrialRegistry(research / "trials.jsonl")
     cache: dict = {}
     results = []
@@ -366,7 +397,8 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                         "since_2020": report["since_2020"]["excess"], "drawdown": report["strategy"]["max_drawdown"],
                         "reasons": reasons, "tier": daily.tier(record.metrics)[0]})
     summary = {"version": SCAN_VERSION, "stamp": stamp, "development": [str(arrays.days[0]), str(DEV_END)],
-               "signals": arrays.names, "candidates": len(items), "passed_screen": sum(passes(row) for row in rows),
+               "signals": arrays.names, "sizes": [smallest, largest], "earlier_finalists": len(seeds),
+               "candidates": len(items), "passed_screen": sum(passes(row) for row in rows),
                "finalists": len(chosen), "minutes": round((time.time() - started) / 60, 1), "results": results,
                "tiers": dict(Counter(item["tier"] for item in results))}
     (folder / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")

@@ -341,6 +341,8 @@ def main() -> int:
     parser.add_argument("--base", default=str(DEFAULT_BASE))
     parser.add_argument("--workers", type=int, default=6, help="scan：第一階段同時跑幾個程序")
     parser.add_argument("--finalists", type=int, default=80, help="scan：第二階段用完整引擎跑幾個")
+    parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
+    parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
     parser.add_argument("--use-plan", action="store_true", help="用網站上最新版投資計畫的每月金額與薪資日")
     args = parser.parse_args()
     if args.use_plan:
@@ -584,12 +586,14 @@ def main() -> int:
         from quant_platform.research import scan
         from quant_platform.research.jobs import JobLog
 
-        count = len(scan.candidates())
+        count = len(scan.candidates(None, args.signals_max, args.signals_min))
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
-        with JobLog(RESEARCH).start(f"大規模策略搜尋（{scan.SCAN_VERSION}，{count:,} 個候選，第一階段 2015-06～2020-09）",
+        with JobLog(RESEARCH).start(f"大規模策略搜尋（{args.signals_min}～{args.signals_max} 個訊號一組，{count:,} 個候選，"
+                                    f"第一階段 2015-06～2020-09）",
                                     command, total=count + args.finalists) as job:
             summary = scan.run_scan(Path(args.base), RESEARCH, broker_costs(args.broker), workers=args.workers,
-                                    count=args.finalists, job=job)
+                                    count=args.finalists, job=job, largest=args.signals_max,
+                                    smallest=args.signals_min)
             job.payload["summary"] = (f"{summary['candidates']:,} 個候選、{summary['passed_screen']:,} 個過第一階段、"
                                       f"{summary['finalists']} 個完整回測：{summary['tiers']}")
         for item in summary["results"]:

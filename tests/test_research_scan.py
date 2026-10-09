@@ -51,7 +51,8 @@ def test_the_fast_account_picks_what_the_engine_picks():
     values = fp.matrix("momentum_3")[:, first:last + 1]
     eligible = np.column_stack([fp.eligible(rule, position) for position in range(first, last + 1)])
     score = np.where(eligible, values, np.nan).astype(np.float32)
-    industry = np.array([hash(fp.industry(symbol)) % 97 for symbol in fp.symbols])
+    groups = sorted({fp.industry(symbol) for symbol in fp.symbols})
+    industry = np.array([groups.index(fp.industry(symbol)) for symbol in fp.symbols])
     _returns, _entries, history = scan.account(score, np.ones(len(days), dtype=bool), industry,
                                               np.zeros_like(score), None, 0.0, 0.0, record=True)
     for index, day in enumerate(days[:-1]):
@@ -95,3 +96,16 @@ def test_the_space_is_wide_all_stock_and_every_rule_is_valid():
     assert all(rule.core == 0 and rule.top == 20 and not uses_0050(rule.canonical()) for rule in rules)
     assert scan.to_rule({"factors": ["ml_gbm_60", "trend_200"], "universe": "large", "weighting": "equal",
                          "check": "weekly"}).large_caps == 100
+
+
+def test_a_later_scan_skips_near_copies_of_earlier_finalists(tmp_path):
+    data, fp = planted()
+    arrays = scan.prepare(data, fp, FREE, tmp_path / "arrays")
+    items = scan.candidates(["momentum_6", "momentum_12_1", "trend_200"], largest=2, smallest=2)
+    assert len(items) == 3 * 4 and all(len(item["factors"]) == 2 for item in items)
+    rows = scan.screen(tmp_path / "arrays", items, FREE, 0, tmp_path)
+    alone = scan.finalists(arrays, rows, FREE, 10)
+    assert alone
+    again = scan.finalists(arrays, rows, FREE, 10, seeds=[{key: row[key] for key in ("factors", "universe", "weighting", "check")}
+                                                       for row in alone])
+    assert again == []                                   # each one is a copy of a seed (correlation 1)
