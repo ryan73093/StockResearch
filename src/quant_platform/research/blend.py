@@ -228,6 +228,30 @@ def t0_hunt_batch() -> list:
     ]
 
 
+def low_drawdown_batch() -> list:
+    """2026-10-09 (使用者：回撤門檻維持；0050 自己持有): 100% stocks, aiming at a drawdown within 5 points of
+    0050's while still beating it. Fixed in advance: trend among calm stocks, the model among calm stocks
+    (low-volatility momentum crashes less), and two blends that add a calm family."""
+    from quant_platform.research.daily import DailyRule
+
+    model, trend = family_rules_for_blends()
+    calm = DailyRule(name="每天 60 日低波動：前 20 名、同產業最多 3 成", factors={"low_volatility_60": 1.0},
+                     industry_cap=0.3)
+    trend_calm = DailyRule(name="每天 站上 200 日均線＋60 日低波動：前 20 名、同產業最多 3 成",
+                           factors={"trend_200": 1.0, "low_volatility_60": 1.0}, industry_cap=0.3)
+    model_calm = DailyRule(name="機器學習（含財報）＋60 日低波動：前 20 名、同產業最多 3 成、每週決策",
+                           factors={"ml_gbm_statements": 1.0, "low_volatility_60": 1.0}, industry_cap=0.3, check="weekly")
+    third = 1 / 3
+    return [
+        trend_calm,
+        model_calm,
+        BlendRule(name="組合：機器學習每週＋站上 200 日均線（依波動度）＋60 日低波動 各 1/3",
+                  sleeves=(Sleeve(rule=model, share=third), Sleeve(rule=trend, share=third), Sleeve(rule=calm, share=third))),
+        BlendRule(name="組合：機器學習每週＋站上 200 日均線＋60 日低波動 各半",
+                  sleeves=(Sleeve(rule=model, share=0.5), Sleeve(rule=trend_calm, share=0.5))),
+    ]
+
+
 def blend_batch() -> list[BlendRule]:
     """Fixed in advance: the weekly model rule and the volatility-weighted trend rule (both T1 alone), half
     each, a quarter each with half in 0050, and a third each with a third in 0050."""

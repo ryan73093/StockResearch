@@ -1074,6 +1074,13 @@ def t0_hunt_batch() -> list:
     return hunt()
 
 
+def low_drawdown_batch() -> list:
+    """2026-10-09: 100% stocks with a shallower drawdown (research/blend.py ``low_drawdown_batch``)."""
+    from quant_platform.research.blend import low_drawdown_batch as lowdd
+
+    return lowdd()
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1085,4 +1092,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch,
            "model-excess": model_excess_batch, "statements": statement_batch, "turnover": turnover_batch,
            "exits": exits_batch, "blends": blends_batch, "model-60": model_60_batch,
-           "t0hunt": t0_hunt_batch}
+           "t0hunt": t0_hunt_batch, "lowdd": low_drawdown_batch}
