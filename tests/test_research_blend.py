@@ -117,7 +117,7 @@ def test_a_qualifying_blend_is_tracked_forward_and_reconciles(tmp_path):
         data_fingerprint="daily:x", report_file="b.json",
         metrics={"full_period_excess": 0.4, "since_2020_excess": 0.2, "max_drawdown": -0.2, "benchmark_max_drawdown": -0.3,
                  "windows": {"1y": {"count": 50, "win_ratio": 0.7}, "3y": {"count": 30, "win_ratio": 0.8, "median_excess": 0.1}}})
-    tracker = StockForwardTracker(tmp_path, min_quotes=1)
+    tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
     written = tracker.record(date(2026, 10, 2), now=at(date(2026, 10, 2)))
     assert tracker.tracked()[0]["kind"] == "blend"
     assert len(written) == 1 and written[0]["contributed"] == 300_000

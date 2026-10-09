@@ -35,6 +35,7 @@
 | D18 | 研究新設計（2026-10-04，S9-W02）：2015-06 起挑規則、2020-10 起另外檢查、每個交易日都能決策、帳戶是啟動資金 30 萬＋每月 1 萬；分級 T0～T3；T0 候選與 T1 自動前向觀察，T0 要前向 60 個交易日不輸 0050 | 2005 年的市場制度（漲跌幅 7%、沒有盤中零股）和現在不同；只在月初決策不符合實際 |
 | D19 | 長時間研究程式脫離 worker 與助理工作階段（2026-10-06）：`scripts\start-research.ps1` 以 WMI 建立程序，登錄在 `instance/research/jobs/`（網站「執行中的程式」）；助理啟動後就結束這一輪，不輪詢 | 2026-10-06 曾被桌面版更新與部署打斷；研究不佔 worker、部署不會中斷它 |
 | D20 | 機器學習與強化學習只在研究層（2026-10-06）：逐年滾動訓練（只用該年以前的樣本）、模型版本記住訓練時的特徵、試驗輸入含模型檔雜湊；模型分數當成因子給規則用 | 可重現、不偷看未來；模型更新會成為新的試驗，不會悄悄改變舊結果 |
+| D22 | LLM 費用一個總上限（使用者 2026-10-09）：所有模型呼叫每月合計 US$5，新聞評分與 AI 研究員各有分額，超過就停止呼叫；每次呼叫記錄 token 與費用 | 預算可控、不會一個用途吃光另一個 |
 | D21 | 個股規則進每日建議要經過 S10（提案，2026-10-07）：R4 執行可行性 → T0 → 使用者核准 → 計畫可選 → 今日頁產生個股零股委託；在那之前研究規則只出現在研究頁與前向觀察 | 研究結果還沒經過前向驗證與成交可行性檢查，不能直接變成交易建議 |
 
 ## 圖 1：現況架構總覽（2026-10-07）
@@ -108,9 +109,10 @@ sequenceDiagram
     W->>R: 15:30 前向觀察（T0 候選、T1 與舊規則，從起始日重算並對帳）
     W->>R: 15:45 個股與市場快照（35 個因子、百分位）
     W->>R: 21:30 每晚籌碼與月營收（官方日報）
+    W->>R: 21:45 新聞事件評分（LLM，每月預算內）
     W->>R: 22:15 財報季更新檢查（法定期限過後每季一次，背景執行）
     W->>R: 22:45 模型年度重訓檢查（缺今年的模型才訓練）
-    Note over W: 03:00 資料庫備份；週日 23:30 每週研究報告；06:30 美股流程（二～六）
+    Note over W: 03:00 資料庫備份；週六 22:00 AI 研究員（背景）；週日 23:30 每週研究報告；06:30 美股流程（二～六）
 ```
 
 另外：開機與每 15 分鐘的補跑檢查（漏跑的每日流程）、每小時的交易日曆與除權息預告更新。13:30～14:40 與 15:14～15:50 不停服務、不部署（`stop-services.ps1` 擋下）；研究的長時間程式也避開 13:30～14:40。
@@ -265,6 +267,9 @@ flowchart LR
 | `research/model.py` | 機器學習基準（R15 B 段）：`MODELS`（因子 → 版本與標籤：`ml_gbm` gbm-1.0.0 排名、`ml_gbm_excess` gbm-1.1.0 超額報酬、`ml_gbm_statements` gbm-1.2.0 含財報 35 個特徵）、`train`（每年一個梯度提升模型，只用標籤在該年以前結束的樣本；meta 保留其他年份）、`train_year`（年度重訓，worker `model_retrain` 交易日 22:45 檢查）、`scores`（每個交易日用該年的模型）、`digest`；模型檔在 `research/models/<版本>/` |
 | `research/exits.py` | 學習個股出場（R15 C1b，`exit-1.0.0`）：每檔持股每天預測「留著比換成規則的下一名」之後 20 個交易日多賺多少，少於一趟成本就賣、20 個交易日不買回；逐年滾動的梯度提升；`DailyRule.exit_model="q1"`；CLI `research exits`。未通過（研究方法第 7 節） |
 | `research/blend.py` | 組合帳戶（2026-10-09）：`BlendRule`（2～4 個每天決策規則各佔一份錢，其餘買 0050；各份不再平衡）、`BlendAccount`（各份照比例分到啟動資金與每月投入，逐日加總價值、交易與持股）、`evaluate_blend`／`run_blend_trial`（和單一規則同一套 `daily.account_report` 門檻、滾動視窗與登錄）、`parse_spec`；前向觀察 `kind: blend`；批次 `daily --name blends`、流程 `blends` |
+| `research/categories.py` | 策略分類（2026-10-09）：`classify(spec)` 依因子分成機器學習、組合帳戶、趨勢動能、反轉、低波動、價值殖利率、籌碼、營收財報、成交量規模、多因子，並列特性（0050 比例、決策頻率、配置、風控、股票池、提出者）；`summary` 每類的規則數、等級分布與最好的規則；選手池「策略分類」與篩選 |
+| `research/news_events.py` | 新聞事件（R15 D，2026-10-09）：`headlines`（同一則只留一次、列出被歸到的股票）、`score_day`（50 則一次呼叫、固定欄位、存 `history/news_events/<日>.parquet`、不重評）、`run`、`veto_matrix`（利空且有數字或風險旗標：評分後下一個交易日起到新聞日後 10 個交易日）、`summary`；`DailyRule.news_veto`（`v1` 否決新買、`v1-off` 對照）；worker `news_events` 交易日 21:45、CLI `research news-events` |
+| `research/agent/daily_researcher.py` | AI 研究員新設計（S9-W07，2026-10-09）：`DailyResearcher.build_prompt`（因子清單、2015-06～2020-10 因子強弱、已試規則 2015-06～2020-09 比 0050 的差距、自己的提案）、`validate`（允許的欄位與選項、近似規則拒絕）、`run_round`（事先登錄 → 回測登錄）、`proposals`、`ran_within`；worker `daily_researcher` 每週六 22:00 背景、CLI `research researcher`。`research/stock_forward.py` 的 `META_AI`／`decide_meta`／`meta_run`：前向帳戶「AI 研究員（整體）」 |
 | `research/rl_sleeves.py` | 強化學習 C3（2026-10-09，`rl-sleeves-1.0.0`）：每天在機器學習每週、站上 200 日均線（依波動度）、0050 三個家族之間從 8 種固定比例挑一種；移動成本 0.5%、獎勵另扣 2%；PPO、逐年滾動、5 個種子；對照每個家族、固定比例與「訓練期最好的固定組合」；CLI `research rl-sleeves`、流程 `rl-sleeves`，報告 `research/rl/rl-sleeves-1.0.0/` |
 | `research/execution.py` | 成交可行性（R4）：把 T0 候選與 T1 規則的每筆個股委託，和快取的盤後零股競價（TWT53U，每 10 個交易日一天）比：有沒有成交、限價收盤 ±1% 內能否成交、漲跌停、成交價離收盤、委託佔競價量；CLI `research execution`，報告 `research/execution/` |
 | `research/rl.py` | 強化學習部位調整（R15 C1；版本 `rl-overlay-1.0.0`、`1.1.0`〔換部位在獎勵裡多扣 2%〕，兩版都未通過）：`build_overlay`（用研究引擎重播底層規則的個股帳戶與 0050，成每日報酬與 13 個狀態）、`step`（一個交易日的部位、成本、回撤懲罰）、`train_policy`（PPO，PyTorch）、`run_policy`（5 個種子的貪婪選擇平均）、`walk_forward`（逐年訓練與測試，報告存 `research/rl/<版本>/report.json`）；CLI `research rl`、`start-research.ps1 -Name rl` |

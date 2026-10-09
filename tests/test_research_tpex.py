@@ -133,7 +133,7 @@ def test_forward_daily_rule_on_both_markets_holds_tpex_stocks_and_the_listed_rul
     folder = tmp_path / "forward" / "stocks"
     folder.mkdir(parents=True)
     (folder / "tracked.json").write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
-    tracker = StockForwardTracker(tmp_path, min_quotes=1)
+    tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
     written = tracker.record(date(2026, 10, 2), now=datetime.combine(date(2026, 10, 2), time(16), TAIPEI))
     held = {record["name"]: {item["code"] for item in record["holdings"]} for record in written}
     assert "6488" not in held["動能 twse"] and "6488" in held["動能 all"]

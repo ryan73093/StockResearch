@@ -41,7 +41,7 @@
       <tbody>
       {% for row in best %}{% set fwd = forward_map.get(row.spec_hash) %}
         <tr>
-          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong></td>
+          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong><br><span class="muted small">{{ row.category.family }}{% if row.category.detail %}（{{ row.category.detail }}）{% endif %}</span></td>
           <td data-label="等級"><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--warn' }}">{{ row.tier }}</span></td>
           <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
           <td class="num" data-label="比 0050">{% if row.excess is not none %}<span class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.excess) }}</span>{% else %}—{% endif %}／{% if row.since_2020_excess is not none %}<span class="{{ 'up' if row.since_2020_excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.since_2020_excess) }}</span>{% else %}—{% endif %}</td>
@@ -238,6 +238,53 @@
 {% else %}
 <section class="card"><p class="muted">強化學習還沒有跑出結果（研究 › 執行中的程式）。</p></section>
 {% endfor %}
+{% endif %}
+
+{% if research_tab == 'news' and news %}
+<section class="card">
+  <div class="card__head"><h2>新聞事件 <span class="badge">LLM 只讀標題、輸出固定欄位</span></h2><span class="muted small">{{ news.prompt_version }}</span></div>
+  <div class="kpis kpis--four">
+    <div class="kpi"><div class="kpi__label">本月 LLM 總花費</div><div class="kpi__value">US${{ '%.2f' % news.spend.total }}<small>／上限 {{ '%.0f' % news.spend.total_cap }}</small></div></div>
+    <div class="kpi"><div class="kpi__label">新聞評分</div><div class="kpi__value">US${{ '%.2f' % news.spend.news }}<small>／{{ '%.0f' % news.spend.news_cap }}</small></div></div>
+    <div class="kpi"><div class="kpi__label">AI 研究員</div><div class="kpi__value">US${{ '%.2f' % news.spend.researcher }}<small>／{{ '%.0f' % news.spend.researcher_cap }}</small></div></div>
+    <div class="kpi"><div class="kpi__label">已評分／待評</div><div class="kpi__value">{{ news.days|length }}<small> 天／{{ news.pending|length }} 天</small></div></div>
+  </div>
+  <p class="small" style="margin:12px 0 0">每個交易日 21:45，把 14:40 收集到的新聞標題（成交值前 150 檔與前向持股）交給模型，整理成：講的是哪家公司、類型、利多或利空、有沒有具體數字、比之前好或差、風險旗標。同一則標題只評一次、50 則一次呼叫；評過的日子不重評（新模型可能知道後來的事）。超過預算就停，隔天再補。</p>
+  {% if news.days %}
+  <div class="table-wrap table-wrap--stack" style="margin-top:10px">
+    <table class="table--stack">
+      <thead><tr><th>新聞日期</th><th class="num">標題</th><th class="num">講到股票</th><th class="num">利多</th><th class="num">利空</th><th class="num">否決旗標</th><th class="num">沒評到</th></tr></thead>
+      <tbody>
+      {% for day in news.days %}
+        <tr><td data-primary><strong>{{ day.day }}</strong></td><td class="num" data-label="標題">{{ day.headlines }}</td><td class="num" data-label="講到股票">{{ day.about }}</td>
+            <td class="num up" data-label="利多">{{ day.good }}</td><td class="num down" data-label="利空">{{ day.bad }}</td><td class="num" data-label="否決旗標">{{ day.veto }}</td><td class="num" data-label="沒評到">{{ day.unscored }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if news.types %}<p class="small" style="margin:8px 0 0">類型：{% for name, count in news.types.items() %}{{ name }} {{ count }}{% if not loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
+  {% else %}<p class="muted" style="margin:10px 0 0">還沒有評分結果{% if news.pending %}（待評 {{ news.pending|join('、') }}）{% endif %}。</p>{% endif %}
+</section>
+
+<section class="card">
+  <div class="card__head"><h2>新聞否決實驗 <span class="badge">只前向、評估一年</span></h2></div>
+  <p class="small" style="margin:0 0 10px">事先登錄：機器學習每週、一半 0050 的規則，同一天開始跑兩個帳戶。一個在「近 {{ news.veto_sessions }} 個交易日內有利空、而且有具體數字或風險旗標」時不新買那檔（持有的不強制賣）；另一個是對照組，完全一樣但不看新聞。旗標從評分後的下一個交易日才生效。</p>
+  {% if news.pair %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>帳戶</th><th class="num">記錄天數</th><th class="num">目前資產</th><th class="num">相對 0050</th></tr></thead>
+      <tbody>{% for row in news.pair %}<tr><td data-primary><strong><a href="/research/forward/{{ row.rule_hash }}">{{ row.name }}</a></strong><span class="muted small"> {{ row.since }} 起</span></td><td class="num" data-label="天數">{{ row.sessions }}</td><td class="num" data-label="資產">{{ '{:,.0f}'.format(row.value) }}</td><td class="num" data-label="相對 0050">{{ '{:+.2%}'.format(row.excess) if row.excess is not none else '—' }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted" style="margin:0">下一個交易日 15:30 開始記錄。</p>{% endif %}
+</section>
+
+{% if news.flags %}
+<section class="card">
+  <div class="card__head"><h2>最近的利空旗標</h2><span class="muted small">有具體數字或風險旗標的利空，否決實驗會用到</span></div>
+  <ul class="reasons">{% for item in news.flags %}<li><strong>{{ item.news_day }}</strong> <a href="/stock/{{ item.stock_id }}">{{ item.stock_id }}</a> <span class="badge badge--bad">{{ item.type }}</span>{% if item.risk %} <span class="badge badge--warn">風險</span>{% endif %} {% if item.link %}<a href="{{ item.link }}" rel="noopener noreferrer" target="_blank">{{ item.title }}</a>{% else %}{{ item.title }}{% endif %}</li>{% endfor %}</ul>
+</section>
+{% endif %}
 {% endif %}
 
 {% if research_tab == 'jobs' %}

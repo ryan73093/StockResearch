@@ -305,7 +305,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves"),
+                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -364,6 +364,43 @@ def main() -> int:
 
     if args.command == "agent":
         return _agent(args)
+    if args.command == "researcher":        # S9-W07 (2026-10-09): one weekly round of the new-design researcher
+        from quant_platform.config.settings import Settings
+        from quant_platform.research.agent import daily_researcher
+        from quant_platform.research.jobs import JobLog
+
+        researcher = daily_researcher.build(Settings.from_env(), RESEARCH)
+        if args.dry_run:
+            instructions, user_input = researcher.build_prompt()
+            print(instructions, "\n----\n", user_input, flush=True)
+            return 0
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start(f"AI 研究員（{daily_researcher.VERSION}，每週最多 {daily_researcher.MAX_PROPOSALS} 個規則）",
+                                    command) as job:
+            job.update(current="請模型提出規則（只看 2015-06～2020-09 的結果）", force=True)
+            entry = researcher.run_round(Path(args.base))
+            job.payload["summary"] = (f"{entry.get('status')}：提出並回測 {len(entry.get('accepted') or [])} 個、"
+                                      f"拒絕 {len(entry.get('rejected') or [])} 個" + (f"；{entry.get('error')}" if entry.get("error") else ""))
+        for item in entry.get("accepted") or []:
+            print(f"#{item['trial_id']} {item['name']}：{item.get('hypothesis', '')}", flush=True)
+        for item in entry.get("rejected") or []:
+            print(f"拒絕 {item.get('name')}：{item.get('reason')}", flush=True)
+        return 0 if entry.get("status") == "ok" else 1
+    if args.command == "news-events":       # R15 D (2026-10-09): score the collected headlines not scored yet
+        from quant_platform.config.settings import Settings
+        from quant_platform.research import news_events
+        from quant_platform.research.jobs import JobLog
+
+        client = news_events.build_client(Settings.from_env(), RESEARCH)
+        if client is None:
+            print("新聞事件評分沒有啟用或沒有 OPENAI_API_KEY", file=sys.stderr)
+            return 1
+        with JobLog(RESEARCH).start("新聞事件評分（LLM，每月預算內）", "python -m quant_platform.research news-events") as job:
+            outcome = news_events.run(client, Path(args.base), job=job)
+            job.payload["summary"] = f"評了 {len(outcome['scored'])} 天、待評 {outcome['pending']} 天" + (
+                f"；停止：{outcome['error']}" if outcome["error"] else "")
+        print(json.dumps(outcome, ensure_ascii=False, default=str), flush=True)
+        return 0 if not outcome["error"] else 1
     if args.command == "legacy":
         return _legacy(args)
     if args.command == "stocks":

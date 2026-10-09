@@ -124,11 +124,16 @@ class Settings:
     # AI researcher (S4-W04, research/agent/): OpenAI Responses API like VectorDB.
     research_agent_enabled: bool = True
     research_agent_model: str = "gpt-6-luna"
-    research_agent_monthly_budget_usd: float = 3.0
+    research_agent_monthly_budget_usd: float = 1.0
     research_agent_rounds_per_night: int = 3
     research_agent_specs_per_round: int = 4
     research_agent_trials_per_night: int = 12
     research_agent_hour: int = 22
+    # 2026-10-09 (使用者：兩個都做，上限 5 美元): every model call together stays under this a month; the
+    # news event scoring (research/news_events.py) and the AI researcher each have a share of it.
+    llm_monthly_budget_usd: float = 5.0
+    news_events_enabled: bool = True
+    news_events_monthly_budget_usd: float = 4.0
     rag_local_dimensions: int = 384
     local_embedding_backend: str = "hash"
     local_embedding_model: str = "BAAI/bge-small-zh-v1.5"
@@ -220,7 +225,10 @@ class Settings:
             openai_timeout_seconds=int(os.getenv("OPENAI_TIMEOUT_SECONDS", "45")),
             research_agent_enabled=os.getenv("RESEARCH_AGENT_ENABLED", "true").lower() in {"1", "true", "yes"},
             research_agent_model=os.getenv("RESEARCH_AGENT_MODEL", "gpt-6-luna").strip(),
-            research_agent_monthly_budget_usd=max(0.0, float(os.getenv("RESEARCH_AGENT_MONTHLY_BUDGET_USD", "3"))),
+            research_agent_monthly_budget_usd=max(0.0, float(os.getenv("RESEARCH_AGENT_MONTHLY_BUDGET_USD", "1"))),
+            llm_monthly_budget_usd=max(0.0, float(os.getenv("LLM_MONTHLY_BUDGET_USD", "5"))),
+            news_events_enabled=os.getenv("NEWS_EVENTS_ENABLED", "true").lower() in {"1", "true", "yes"},
+            news_events_monthly_budget_usd=max(0.0, float(os.getenv("NEWS_EVENTS_MONTHLY_BUDGET_USD", "4"))),
             research_agent_rounds_per_night=max(0, min(10, int(os.getenv("RESEARCH_AGENT_ROUNDS_PER_NIGHT", "3")))),
             research_agent_specs_per_round=max(1, min(10, int(os.getenv("RESEARCH_AGENT_SPECS_PER_ROUND", "4")))),
             research_agent_trials_per_night=max(0, min(50, int(os.getenv("RESEARCH_AGENT_TRIALS_PER_NIGHT", "12")))),

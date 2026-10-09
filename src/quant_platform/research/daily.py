@@ -76,11 +76,11 @@ TECHNICAL = {
     "bollinger_b": "布林通道位置 %B（20 日）",
     "breakout_55": "接近 55 日高點（突破）",
 }
-from quant_platform.research.chips import CHIP_FACTORS, ChipStore
+from quant_platform.research.chips import CHIP_FACTORS, EVENT_FACTORS, ChipStore
 from quant_platform.research.fundamentals import STATEMENT_FACTORS, FundamentalStore
 
 # 2026-10-06: five quarterly statement factors (research/fundamentals.py), dated by the filing deadline
-FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS}
+FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS, **EVENT_FACTORS}
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
 MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
                  "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
@@ -128,6 +128,10 @@ class DailyRule(BaseModel):
     # R15 C1b (2026-10-07): "q1" = the learned exit (research/exits.py) decides keep or sell for every
     # holding each session; a sold stock is not bought back for 20 sessions. Left out of the hash when "none".
     exit_model: Literal["none", "q1"] = "none"
+    # R15 D (2026-10-09): "v1" = a stock with a bad-news flag in force (research/news_events.py) is not newly
+    # bought (holdings are kept); "v1-off" = the same rule computing nothing different, the forward control.
+    # Left out of the hash when "none". News exists only from 2026-10-05: forward observation only.
+    news_veto: Literal["none", "v1", "v1-off"] = "none"
 
     @field_validator("factors")
     @classmethod
@@ -157,6 +161,8 @@ class DailyRule(BaseModel):
             data.pop("smooth", None)
         if data.get("exit_model") == "none":
             data.pop("exit_model", None)
+        if data.get("news_veto") == "none":
+            data.pop("news_veto", None)
         return data
 
     @property
@@ -200,6 +206,18 @@ class FactorPanel:
         self.turnover_120 = turnover.rolling(120, min_periods=1).mean().to_numpy().T
         self.age = np.arange(len(self.sessions))[None, :] - panel.first[:, None]
 
+    def news_vetoed(self, position: int) -> set[str]:
+        """The stocks under a bad-news flag at ``position`` (R15 D); none without the chip store's history."""
+        if "__news_veto__" not in self._cache:
+            if self.chips is None:
+                self._cache["__news_veto__"] = np.zeros((len(self.symbols), len(self.sessions)), dtype=bool)
+            else:
+                from quant_platform.research.news_events import veto_matrix
+
+                self._cache["__news_veto__"] = veto_matrix(Path(self.chips._folder).parent, self.sessions, self.symbols)
+        column = self._cache["__news_veto__"][:, position]
+        return {self.symbols[row] for row in np.flatnonzero(column)}
+
     def matrix(self, factor: str) -> np.ndarray:
         if factor not in self._cache:
             with warnings.catch_warnings():
@@ -224,7 +242,7 @@ class FactorPanel:
             if not store.available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
             return store.matrix(factor).T                           # back to sessions × symbols
-        if factor in CHIP_FACTORS:
+        if factor in CHIP_FACTORS or factor in EVENT_FACTORS:
             if self.chips is None or not self.chips.available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
             return self.chips.matrix(factor).T                      # back to sessions × symbols
@@ -404,10 +422,11 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
             for symbol in kept:
                 counts[fp.industry(symbol)] += 1
         chosen = []
+        vetoed = fp.news_vetoed(position) if getattr(rule, "news_veto", "none") == "v1" else set()
         for symbol in ranked:
             if len(kept) + len(chosen) >= rule.top:
                 break
-            if symbol in held:
+            if symbol in held or symbol in vetoed:
                 continue
             if limit:
                 group = fp.industry(symbol)
@@ -1048,6 +1067,13 @@ def model_60_batch() -> list[DailyRule]:
             for core, word in ((0.0, ""), (0.5, "、一半放 0050"))]
 
 
+def t0_hunt_batch() -> list:
+    """2026-10-09: the revenue event factor and three more blends (research/blend.py ``t0_hunt_batch``)."""
+    from quant_platform.research.blend import t0_hunt_batch as hunt
+
+    return hunt()
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1058,4 +1084,5 @@ def blends_batch() -> list:
 BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch,
            "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch,
            "model-excess": model_excess_batch, "statements": statement_batch, "turnover": turnover_batch,
-           "exits": exits_batch, "blends": blends_batch, "model-60": model_60_batch}
+           "exits": exits_batch, "blends": blends_batch, "model-60": model_60_batch,
+           "t0hunt": t0_hunt_batch}

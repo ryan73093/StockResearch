@@ -109,6 +109,8 @@ MAINTENANCE_JOBS = (
     (time(22, 15), "財報季更新", "每晚檢查；法定期限過後每季一次，背景重抓還沒有新一季的財報並重建財報表"),
     (time(22, 45), "機器學習模型年度重訓", "交易日檢查；前向觀察用到的模型缺今年的才訓練（一年一次）"),
     (time(21, 30), "每晚籌碼與基本面", "交易日；證交所與櫃買的外資持股、本益比、融資融券、三大法人日報與月營收彙總表"),
+    (time(21, 45), "新聞事件評分（LLM）", "交易日；還沒評過的新聞標題整理成事件欄位，LLM 每月總預算 5 美元內"),
+    (time(22, 0), "AI 研究員", "每週六；背景提出最多 2 個新規則並回測，只看 2015-06～2020-09 的結果"),
     (time(23, 30), "每週研究報告", "每週日；把本週研究報告存檔"),
 )
 BACKGROUND_JOBS = (
@@ -194,10 +196,30 @@ def _taipei_text(value: datetime | None, pattern: str = "%m/%d %H:%M") -> str:
 
 
 # 2026-10-07: the old design's tabs (ranking, promotion, AI researcher, legacy model) became one "舊設計紀錄".
-RESEARCH_TABS = ("overview", "factors", "ml", "forward", "jobs", "legacy")
+RESEARCH_TABS = ("overview", "factors", "ml", "news", "forward", "jobs", "legacy")
 OLD_RESEARCH_TABS = {"rules": "ranking", "promotion": "promotion", "agent": "agent"}
 BEST_TIERS = ("T0", "T0 候選", "T1")
 CONCLUSIONS_HEADING = "目前結論（網站"
+
+
+def news_view(research_dir: Path, settings) -> dict[str, object]:
+    """R15 D (2026-10-09): the scored news, this month's LLM spend against the caps, and the veto pair."""
+    from quant_platform.research import news_events
+    from quant_platform.research.agent.daily_researcher import OPERATION as RESEARCHER_OPERATION
+    from quant_platform.research.agent.llm import UsageLedger
+
+    ledger = UsageLedger(research_dir / "agent" / "usage.jsonl")
+    now = datetime.now(UTC)
+    pair = [row for row in StockForwardTracker(research_dir).summary() if "新聞" in row["name"]]
+    return {
+        **news_events.summary(research_dir / "history"),
+        "spend": {"total": ledger.month_spend(now), "total_cap": settings.llm_monthly_budget_usd,
+                  "news": ledger.month_spend(now, (news_events.OPERATION,)), "news_cap": settings.news_events_monthly_budget_usd,
+                  "researcher": ledger.month_spend(now, (RESEARCHER_OPERATION, "research_round", "connection_check")),
+                  "researcher_cap": settings.research_agent_monthly_budget_usd},
+        "enabled": settings.news_events_enabled, "pair": pair, "prompt_version": news_events.PROMPT_VERSION,
+        "veto_sessions": news_events.VETO_SESSIONS,
+    }
 
 
 def research_conclusions(path: Path) -> list[str]:
@@ -865,6 +887,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             research_tab=tab, jobs=jobs, factor_report=latest_factor_strength(research_dir / "factors"),
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
             ml=ml_view(research_dir) if tab == "ml" else None,
+            news=news_view(research_dir, dependencies.settings) if tab == "news" else None,
             factor_columns=factor_columns(latest_factor_strength(research_dir / "factors")),
             overview=overview,
             best=best,

@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from quant_platform.research.costs import CostModel, broker_costs
@@ -59,6 +60,68 @@ def plan_of(item: dict[str, object]):
     if item.get("plan") == "lump_sum":
         return LumpSumPlan(float(item.get("amount") or LUMP_SUM))
     return STANDARD_PLAN
+
+
+META_AI = {"rule_hash": "meta-ai-researcher-v1", "name": "AI 研究員（整體）：每季跟隨它最好的合格規則",
+           "kind": "meta-ai",
+           "reason": "AI 研究員本身當成一個策略（使用者 2026-10-09）：開始那天與每季第一個交易日，換到它提出、"
+                     "等級最好（T0 → T0 候選 → T1，再比 2015-06 起比 0050 多多少）的規則；還沒有合格的就放 0050。"
+                     "換規則那天以收盤賣掉原持股（含費稅），再照新規則買。"}
+REVIEW_MONTHS = (1, 4, 7, 10)
+
+
+def review_days(sessions: list[date], start: date, last: date) -> list[date]:
+    """The meta account's decision days: its first session and the first session of each quarter after it."""
+    days = [day for day in sessions if start <= day <= last]
+    if not days:
+        return []
+    output = [days[0]]
+    for previous, day in zip(days, days[1:]):
+        if day.month in REVIEW_MONTHS and day.month != previous.month:
+            output.append(day)
+    return output
+
+
+def best_ai_rule(research_dir: str | Path) -> dict[str, object] | None:
+    """The researcher's best qualifying rule now: T0, then T0 候選, then T1; ties by the excess since 2015-06."""
+    from quant_platform.research.agent.daily_researcher import proposals
+    from quant_platform.research.daily import TIERS, tier
+
+    base = Path(research_dir)
+    mine = {item["spec_hash"] for item in proposals(base)}
+    latest = {}
+    for record in TrialRegistry(base / "trials.jsonl").records():
+        if record.spec_hash in mine and record.kind == "candidate" and record.period == "recent":
+            latest[record.spec_hash] = record
+    best = None
+    for spec_hash, record in latest.items():
+        grade, _why = tier(record.metrics)
+        if grade not in ("T0", "T0 候選", "T1"):
+            continue
+        key = (TIERS.index(grade), -(record.metrics.get("full_period_excess") or 0))
+        if best is None or key < best[0]:
+            try:
+                spec = json.loads((base / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            except (OSError, ValueError, KeyError):
+                continue
+            best = (key, {"rule_hash": spec_hash, "name": record.spec_name, "tier": grade, "spec": spec,
+                          "trial_id": record.trial_id})
+    return best[1] if best else None
+
+
+def forward_only() -> list[tuple[object, str]]:
+    """Experiments that can only be judged forward (no history to test them on), tracked in pairs from the
+    same day: R15 D (2026-10-09) — the weekly model rule half in 0050 with the bad-news veto and its control."""
+    from quant_platform.research.daily import DailyRule
+
+    base = DailyRule(name="機器學習（含財報）：前 20 名、同產業最多 3 成、每週決策、一半放 0050",
+                     factors={"ml_gbm_statements": 1.0}, industry_cap=0.3, check="weekly", core=0.5)
+    return [
+        (base.model_copy(update={"name": base.name + "、新聞利空不買（LLM）", "news_veto": "v1"}),
+         "R15 D 新聞否決實驗：LLM 標出利空且有數字或風險旗標的股票不新買（只前向；和下一列同一天開始比）"),
+        (base.model_copy(update={"name": base.name + "、新聞否決對照組", "news_veto": "v1-off"}),
+         "R15 D 對照組：同一規則、同一天開始、不看新聞（和上一列比）"),
+    ]
 
 
 def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:
@@ -112,7 +175,9 @@ def qualifying_rules(research_dir: str | Path, plan_kind: str = "SeedPlan") -> l
 
 
 class StockForwardTracker:
-    def __init__(self, research_dir: str | Path, costs: CostModel | None = None, min_quotes: int = 100) -> None:
+    def __init__(self, research_dir: str | Path, costs: CostModel | None = None, min_quotes: int = 100,
+                 experiments: bool = True) -> None:
+        self._experiments = experiments      # the forward-only experiments and the AI researcher's account
         self._base = Path(research_dir)
         self._history = self._base / "history"
         self._folder = self._base / "forward" / "stocks"
@@ -133,10 +198,24 @@ class StockForwardTracker:
         return json.loads(self.tracked_path.read_text(encoding="utf-8"))
 
     def sync(self, today: date) -> list[dict[str, object]]:
-        """Add rules that newly won both periods, starting today (never earlier than the forward start)."""
+        """Add rules that newly won both periods, starting today (never earlier than the forward start), and
+        the forward-only experiments (FORWARD_ONLY) the first time this runs after they were defined."""
         items = self.tracked()
         known = {item["rule_hash"] for item in items}
         added = []
+        if self._experiments and META_AI["rule_hash"] not in known:
+            added.append({**META_AI, "rule": {}, "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
+                          "since": max(FORWARD_START, today).isoformat(),
+                          "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
+            known.add(META_AI["rule_hash"])
+        for rule, reason in (forward_only() if self._experiments else []):
+            if rule.rule_hash in known:
+                continue
+            added.append({"rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.model_dump(mode="json"),
+                          "kind": "daily", "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
+                          "since": max(FORWARD_START, today).isoformat(), "reason": reason,
+                          "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
+            known.add(rule.rule_hash)
         for rule, reason in qualifying_rules(self._base):
             if rule.rule_hash in known:
                 continue
@@ -212,7 +291,7 @@ class StockForwardTracker:
             ledger: list[dict[str, object]] = []
             snapshots: dict = {}
             plan = plan_of(item)
-            if item.get("kind") in ("daily", "blend"):
+            if item.get("kind") in ("daily", "blend", "meta-ai"):
                 from quant_platform.research.blend import BlendAccount, BlendRule
                 from quant_platform.research.daily import (
                     DailyRule,
@@ -234,7 +313,10 @@ class StockForwardTracker:
                     ChipStore(self._history, panel.sessions, panel.symbols, panel.close),
                     market_closes(self._history, panel.sessions), models_root(self._history))
                 loaded[universe][3] = factor_panel
-                if item.get("kind") == "blend":
+                if item.get("kind") == "meta-ai":
+                    rule = SimpleNamespace(rule_hash=item["rule_hash"], name=item["name"])
+                    run = self.meta_run(data, factor_panel, start, last, plan, ledger, snapshots)
+                elif item.get("kind") == "blend":
                     rule = BlendRule.model_validate(item["rule"])
                     run = BlendAccount(data, factor_panel, rule, self._costs, start, last).run(
                         start, last, plan, ledger=ledger, snapshots=snapshots)
@@ -319,6 +401,108 @@ class StockForwardTracker:
             })
         return rows
 
+    @property
+    def meta_path(self) -> Path:
+        return self._folder / "meta_ai.jsonl"
+
+    def meta_decisions(self) -> list[dict[str, object]]:
+        if not self.meta_path.is_file():
+            return []
+        return [json.loads(line) for line in self.meta_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def decide_meta(self, sessions: list[date], start: date, last: date, choose=None) -> list[dict[str, object]]:
+        """Log a decision for every review day up to ``last`` that has none (made with what is known now and
+        never recomputed: a late run decides with today's knowledge, and says so)."""
+        decisions = self.meta_decisions()
+        done = {item["date"] for item in decisions}
+        new = []
+        for day in review_days(sessions, start, last):
+            if day.isoformat() in done:
+                continue
+            chosen = (choose or best_ai_rule)(self._base)
+            new.append({"date": day.isoformat(), "decided_at": datetime.now(TAIPEI).isoformat(timespec="seconds"),
+                        "rule_hash": chosen["rule_hash"] if chosen else None, "name": chosen["name"] if chosen else "0050",
+                        "tier": chosen["tier"] if chosen else None, "spec": chosen["spec"] if chosen else None,
+                        "trial_id": chosen["trial_id"] if chosen else None})
+        if new:
+            self._folder.mkdir(parents=True, exist_ok=True)
+            with self.meta_path.open("a", encoding="utf-8") as handle:
+                for item in new:
+                    handle.write(json.dumps(item, ensure_ascii=False) + "\n")
+        return decisions + new
+
+    def meta_run(self, data, factor_panel, start: date, last: date, plan, ledger: list, snapshots: dict, choose=None):
+        """The researcher-as-a-strategy account: one segment per decision, the holdings sold at the switch
+        day's close (fees and tax) and the proceeds carried into the next rule bought the same close."""
+        from quant_platform.research.daily import (
+            DailyRule,
+            account_parking,
+            daily_rankings,
+            daily_weights,
+            simulate_daily,
+        )
+        from quant_platform.research.legacy_challenger import RunResult, _tax_kind, _tick
+        from quant_platform.research.costs import fill_price
+
+        decisions = [item for item in self.decide_meta(data.sessions, start, last, choose)
+                     if start.isoformat() <= item["date"] <= last.isoformat()]
+        days_all = [day for day in data.sessions if start <= day <= last]
+        bounds = [date.fromisoformat(item["date"]) for item in decisions] + [None]
+        combined = RunResult("meta-ai", [], [], [], [])
+        carry = None
+        for number, decision in enumerate(decisions):
+            first = bounds[number]
+            following = bounds[number + 1]
+            end = days_all[days_all.index(following) - 1] if following else last
+            if carry is None:
+                segment_plan = plan
+            else:
+                segment_plan = SeedPlan(initial=carry, monthly_amount=plan.monthly_amount, day_of_month=plan.day_of_month)
+            part_ledger, part_book = [], {}
+            if decision.get("spec"):
+                rule = DailyRule.model_validate(decision["spec"])
+                ranks = daily_rankings(factor_panel, rule, first, end)
+                part = simulate_daily(data, rule, self._costs, first, end, ranks, segment_plan, ledger=part_ledger,
+                                      snapshots=part_book, weights=daily_weights(factor_panel, rule, ranks),
+                                      parked=account_parking(data, factor_panel, rule, self._costs))
+            else:
+                part = simulate_daily(data, None, self._costs, first, end, plan=segment_plan, ledger=part_ledger,
+                                      snapshots=part_book)
+            if carry is not None:                   # the carried money is not new money
+                part.flows[0] -= carry
+                part.contributions = [(when, amount - (carry if when == first else 0.0)) for when, amount in part.contributions]
+                part.contributions = [(when, amount) for when, amount in part.contributions if amount > 1e-9]
+            ledger.extend(part_ledger)
+            snapshots.update(part_book)
+            combined.days += part.days
+            combined.values += part.values
+            combined.flows += part.flows
+            combined.contributions += part.contributions
+            combined.trades += part.trades
+            combined.fees += part.fees
+            combined.taxes += part.taxes
+            combined.bought += part.bought
+            combined.sold += part.sold
+            if following:                           # sell everything at the next decision day's close
+                cash, units = part_book[end]
+                sells = []
+                for symbol, count in units.items():
+                    count = count * data.factors.get(symbol, {}).get(following, 1.0)
+                    close = data.closes.get(symbol, {}).get(following) or data.last_close(symbol, following) or 0.0
+                    price = fill_price(close, "SELL", self._costs.slippage_bps, _tick(symbol))
+                    amount = count * price
+                    fee, tax = self._costs.fee(amount), self._costs.tax(amount, _tax_kind(symbol), "SELL")
+                    cash += amount - fee - tax
+                    combined.fees += fee
+                    combined.taxes += tax
+                    combined.trades += 1
+                    combined.sold += amount
+                    sells.append({"day": following, "symbol": symbol, "side": "SELL", "shares": count, "price": price,
+                                  "fee": fee, "tax": tax})
+                ledger.extend(sells)
+                carry = cash
+        return combined
+
     def detail(self, rule_hash: str) -> dict[str, object] | None:
         """One tracked rule's forward record (使用者 2026-10-09：要看它買了哪些股票、做了哪些操作): every
         recorded day's value against 0050, today's holdings with their weights, and every trade and
@@ -344,7 +528,9 @@ class StockForwardTracker:
         series = [{"date": record["date"], "value": record["value"], "benchmark": record["benchmark_value"],
                    "contributed": record["contributed"]} for record in days]
         problems = reconcile(days).get(rule_hash, [])
+        decisions = self.meta_decisions() if item.get("kind") == "meta-ai" else []
         return {"item": item, "latest": latest, "holdings": holdings, "trades": trades, "adjustments": adjustments,
+                "decisions": list(reversed(decisions)),
                 "series": series, "sessions": len(days), "problems": problems,
                 "buys": sum(1 for trade in trades if trade["side"] == "BUY"),
                 "sells": sum(1 for trade in trades if trade["side"] == "SELL")}

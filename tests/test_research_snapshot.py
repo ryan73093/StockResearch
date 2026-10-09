@@ -60,7 +60,7 @@ def test_snapshot_ranks_every_factor_across_both_markets(tmp_path):
     assert tpex["ranks"]["trend_200"] == 1.0 and flat["ranks"]["trend_200"] == 0.0
     assert tpex["values"]["momentum_3"] == pytest.approx(1.002 ** 63 - 1, rel=1e-4)
     assert tpex["eligible"] and tpex["values"]["foreign_holding"] is None          # no chip data here
-    assert sum(len(factors) for _title, factors in GROUPS) == len(snapshot["labels"]) == 35
+    assert sum(len(factors) for _title, factors in GROUPS) == len(snapshot["labels"]) == 36
 
 
 def test_display_search_bars_and_view(tmp_path):

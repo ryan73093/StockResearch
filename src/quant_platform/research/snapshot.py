@@ -31,7 +31,7 @@ GROUPS = (
     ("波動、成交與股利", ("low_volatility_60", "low_volatility_250", "liquidity", "volume_surge", "dividend_yield")),
     ("籌碼", ("foreign_holding", "foreign_holding_change", "foreign_buy_20", "trust_buy_20", "margin_growth_20",
              "short_margin_ratio")),
-    ("基本面", ("earnings_yield", "book_to_price", "revenue_yoy", "revenue_yoy_3m", "market_cap", "roe_ttm",
+    ("基本面", ("earnings_yield", "book_to_price", "revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "roe_ttm",
              "gross_margin", "operating_margin_change", "eps_growth", "low_debt")),
 )
 

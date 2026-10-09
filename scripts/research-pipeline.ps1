@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -62,6 +62,21 @@ switch ($Name) {
     "rl" {
         # R15 stage C1 (2026-10-06): the RL exposure overlay on the best trend rule, walk-forward 2017 on.
         Invoke-Step "rl" @("-m", "quant_platform.research", "rl", "--broker", "cathay", "--rl-version", "rl-overlay-1.1.0")
+    }
+    "news-events" {
+        # R15 D (2026-10-09): score the collected headlines not scored yet (also every trading day 21:45).
+        Invoke-Step "1-score" @("-m", "quant_platform.research", "news-events")
+    }
+    "ai-researcher" {
+        # S9-W07 (2026-10-09): one weekly round of the new-design AI researcher, then the statistics.
+        Invoke-Step "1-round" @("-m", "quant_platform.research", "researcher")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "t0hunt" {
+        # 2026-10-09: factor strength (with the revenue event factor), five fixed rules, the statistics.
+        Invoke-Step "1-factors" @("-m", "quant_platform.research", "factors", "--recent")
+        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "t0hunt", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "model-60" {
         # 2026-10-09: the model that learns the next 60 sessions (gbm-1.3.0), its two rules, the statistics.

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import warnings
 from datetime import date
 from pathlib import Path
 
@@ -39,6 +40,11 @@ CHIP_FACTORS = {
     "revenue_yoy_3m": "近 3 個月營收年增率",
     "market_cap": "市值（大型股）",
 }
+# 2026-10-09: an event factor, fresh revenue news only. Quantified fundamental news drifts for weeks after
+# it is public while the 70-day revenue_yoy holds stale months (AI-methods review); this one exists only in
+# the 20 sessions after a monthly revenue is announced. Kept apart so the 2026-10-04 chip batch stays as run.
+EVENT_FACTORS = {"revenue_accel": "月營收加速（公布後 20 個交易日內：最新年增率減前 3 個月平均）"}
+ACCEL_SESSIONS = 20
 FIELDS = {
     "TaiwanStockShareholding": ("ForeignInvestmentSharesRatio", "NumberOfSharesIssued"),
     "TaiwanStockPER": ("PER", "PBR"),
@@ -187,8 +193,10 @@ class ChipStore:
         frame = frame.fillna(0).where(started)
         return frame.rolling(window, min_periods=window).sum().shift(1)
 
-    def _revenue(self) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Latest month's revenue year-on-year growth and the 3-month sum's, as known on each session."""
+    def _revenue(self, accel: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Latest month's revenue year-on-year growth and the 3-month sum's, as known on each session; with
+        ``accel`` the latest growth minus the previous three months' average, for ACCEL_SESSIONS after it
+        is announced (first element)."""
         table = pq.read_table(self._folder / "TaiwanStockMonthRevenue.parquet").to_pandas()
         table = table.sort_values(["code", "date"])
         table["key"] = table["year"] * 12 + table["month"]
@@ -201,13 +209,22 @@ class ChipStore:
         previous_three = three_by_key.reindex(list(zip(table["code"], table["key"] - 12))).to_numpy()
         table["yoy3"] = table["three"].to_numpy() / previous_three - 1
         sessions = pd.to_datetime(pd.Index(self.sessions))
+        columns = [("yoy", 70), ("yoy3", 70)]
+        if accel:
+            yoy_by_key = table.set_index(["code", "key"])["yoy"]
+            earlier = np.column_stack([yoy_by_key.reindex(list(zip(table["code"], table["key"] - lag))).to_numpy()
+                                       for lag in (1, 2, 3)])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)       # no earlier month known: unknown
+                table["accel"] = table["yoy"].to_numpy() - np.nanmean(earlier, axis=1)
+            columns = [("accel", ACCEL_SESSIONS)]
         outputs = []
-        for column in ("yoy", "yoy3"):
+        for column, limit in columns:
             frame = table.pivot_table(index="available", columns="code", values=column, aggfunc="last")
             frame.index = pd.to_datetime(frame.index) + pd.Timedelta(days=1)   # usable the day after
-            frame = frame.reindex(sessions.union(frame.index)).ffill(limit=70).reindex(sessions)
+            frame = frame.reindex(sessions.union(frame.index)).ffill(limit=limit).reindex(sessions)
             outputs.append(frame.reindex(columns=self._codes))
-        return outputs[0], outputs[1]
+        return (outputs[0], outputs[0]) if accel else (outputs[0], outputs[1])
 
     def matrix(self, factor: str) -> np.ndarray:
         """symbols × sessions."""
@@ -236,6 +253,8 @@ class ChipStore:
         elif factor in ("revenue_yoy", "revenue_yoy_3m"):
             latest, three = self._revenue()
             frame = latest if factor == "revenue_yoy" else three
+        elif factor == "revenue_accel":
+            frame = self._revenue(accel=True)[0]
         elif factor == "market_cap":
             shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued")
             close = pd.DataFrame(self._close.T, index=shares.index, columns=shares.columns)

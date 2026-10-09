@@ -65,3 +65,24 @@ def test_chip_factors_use_only_what_was_public_at_each_session(tmp_path):
     yoy = store.matrix("revenue_yoy")
     assert yoy[0, after] == pytest.approx(0.2) and (np.isnan(yoy[0, before]) or yoy[0, before] == pytest.approx(0.2))
     assert np.isnan(yoy[0, days.index(date(2024, 1, 9))]) or yoy[0, days.index(date(2024, 1, 9))] != pytest.approx(0.2)
+
+
+def test_revenue_acceleration_lives_only_after_an_announcement(tmp_path):
+    """2026-10-09: the latest growth minus the previous three months' average, for 20 sessions after it is public."""
+    from quant_platform.research.chips import ACCEL_SESSIONS
+
+    days = weekdays(date(2023, 1, 2), date(2024, 5, 31))
+    revenue = [{"revenue_year": 2023, "revenue_month": month, "revenue": 100.0,
+                "create_time": date(2023 + (month == 12), month % 12 + 1, 8).isoformat()} for month in range(1, 13)]
+    revenue += [{"revenue_year": 2024, "revenue_month": 1, "revenue": 110.0, "create_time": "2024-02-08"},
+                {"revenue_year": 2024, "revenue_month": 2, "revenue": 140.0, "create_time": "2024-03-08"}]
+    write_raw(tmp_path, "TaiwanStockMonthRevenue", "1101", revenue)
+    write_raw(tmp_path, "TaiwanStockShareholding", "1101",
+              [{"date": d.isoformat(), "ForeignInvestmentSharesRatio": 10.0, "NumberOfSharesIssued": 1_000} for d in days])
+    build(tmp_path)
+    accel = ChipStore(tmp_path, days, ["1101.TW"], np.full((1, len(days)), 50.0)).matrix("revenue_accel")[0]
+    # February 2024: +40% on a year ago; the three months before it: January +10%, December and November unknown
+    first = days.index(date(2024, 3, 11))                     # announced 03-08 (Thu), usable from the next session
+    assert accel[first] == pytest.approx(0.30) and np.isnan(accel[days.index(date(2024, 3, 8))])
+    assert accel[first + 10] == pytest.approx(0.30)
+    assert np.isnan(accel[first + ACCEL_SESSIONS + 2])        # stale news is gone

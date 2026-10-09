@@ -12,6 +12,40 @@
 {% block content %}
 {% include "v2/_research_tabs.html" %}
 {% set c = pool.counts %}
+{% if pool.categories %}
+<section class="card" id="categories">
+  <div class="card__head"><h2>策略分類 <span class="badge">{{ pool.daily|length }} 個規則</span></h2><span class="muted small">依規則押注的因子分類；點分類名稱只看那一類</span></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>分類</th><th class="num">規則數</th><th class="num">T0／T0 候選</th><th class="num">T1</th><th class="num">T2</th><th class="num">T3</th><th>這一類最好的規則</th></tr></thead>
+      <tbody>
+      {% for item in pool.categories %}
+        <tr>
+          <td data-primary><strong><a href="#daily" data-pick-family="{{ item.family }}">{{ item.family }}</a></strong><br><span class="muted small">{{ item.note }}</span></td>
+          <td class="num" data-label="規則數">{{ item.count }}</td>
+          <td class="num" data-label="T0／T0 候選">{% set top = item.tiers['T0'] + item.tiers['T0 候選'] %}{% if top %}<span class="badge badge--ok">{{ item.tiers['T0'] }}／{{ item.tiers['T0 候選'] }}</span>{% else %}0{% endif %}</td>
+          <td class="num" data-label="T1">{{ item.tiers['T1'] }}</td>
+          <td class="num" data-label="T2">{{ item.tiers['T2'] }}</td>
+          <td class="num" data-label="T3">{{ item.tiers['T3'] }}</td>
+          <td data-label="最好的規則" data-wide><a href="/research/rules/{{ item.best.spec_hash }}">{{ item.best.name }}</a> <span class="badge {{ 'badge--ok' if item.best.tier in ('T0', 'T0 候選') else ('badge--warn' if item.best.tier == 'T1' else ('badge--bad' if item.best.tier == 'T3' else '')) }}">{{ item.best.tier }}</span>{% if item.best.excess is not none %} <span class="small {{ 'up' if item.best.excess > 0 else 'down' }}">比 0050 {{ '{:+.0%}'.format(item.best.excess) }}</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">分類看規則押注的是哪一類因子；同時用兩類以上的叫多因子，用到機器學習分數的歸機器學習，帳戶分成幾份的歸組合帳戶。每個規則的特性（是否放 0050、每天或每週決策、依波動度配置、停損等）列在下表的分類欄。</p>
+</section>
+{% endif %}
+<section class="card" id="ai-researcher">
+  <div class="card__head"><h2>AI 研究員（整體） <span class="badge">也是一個策略</span></h2></div>
+  {% set ai = pool.ai_researcher %}
+  <div>
+    <strong>AI 研究員（整體）</strong>：把 AI 研究員本身當成一個策略。它每週六提出最多 2 個規則（只看 2015-06～2020-09 的結果），每個都登錄成試驗、用同一套門檻；
+    目前提出 {{ ai.trials }} 個規則{% if ai.rules %}（{% for row in ai.rules %}<a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> {{ row.tier }}{% if not loop.last %}、{% endif %}{% endfor %}）{% endif %}。
+    它的前向帳戶{% if ai.decision %}目前跟隨「{{ ai.decision.name }}」（{{ ai.decision.date }} 決定）{% else %}從下一個交易日開始，先放 0050{% endif %}，每季第一個交易日換到它最好的合格規則：
+    <a href="/research/forward/{{ ai.meta_hash }}">看持股與交易</a>{% if ai.forward and ai.forward.sessions %}（{{ ai.forward.sessions }} 天、相對 0050 {{ '{:+.2%}'.format(ai.forward.excess) if ai.forward.excess is not none else '—' }}）{% endif %}。
+  </div>
+</section>
 <section class="card" id="daily">
   <div class="card__head"><h2>新設計：2015-06 起、每天決策 <span class="badge">{{ pool.daily|length }} 個規則</span></h2></div>
   <div class="kpis kpis--four" style="margin-bottom:12px">
@@ -20,13 +54,21 @@
   <p class="small" style="margin:0 0 10px">分級：<strong>T0</strong> 全部門檻都過，而且前向觀察滿 60 個交易日仍不輸 0050，可以由你核准採用；<strong>T0 候選</strong> 全部門檻都過，等前向觀察；<strong>T1</strong> 兩段期間都贏、視窗勝率也夠，但回撤比 0050 深超過 5 個百分點（贏但波動大）；<strong>T2</strong> 只有部分期間贏；<strong>T3</strong> 輸 0050。T0 候選與 T1 自動進前向觀察。</p>
   <p class="muted small" style="margin:0 0 10px">帳戶：啟動資金 30 萬、每月 5 日再投入 1 萬，整個帳戶都能買賣；每個交易日收盤後檢查，掉出保留區才賣、新進榜才買；比同樣的錢買 0050。門檻：2015-06 起與 2020-10 起都贏 0050、3 年視窗勝率 ≥ 60% 且中位為正、1 年視窗勝率 ≥ 50%、回撤不比 0050 深超過 5 個百分點。最後以 2026-10-05 起的前向觀察判斷。</p>
   {% if pool.daily %}
+  <div class="filters">
+    <input type="search" id="daily-search" placeholder="搜尋規則名稱" aria-label="搜尋規則名稱">
+    <select id="daily-family" aria-label="分類"><option value="">全部分類</option>{% for family in pool.category_order %}<option value="{{ family }}">{{ family }}</option>{% endfor %}</select>
+    <select id="daily-tier" aria-label="等級"><option value="">全部等級</option>{% for grade in ('T0', 'T0 候選', 'T1', 'T2', 'T3') %}<option value="{{ grade }}">{{ grade }}</option>{% endfor %}</select>
+    <select id="daily-trait" aria-label="特性"><option value="">全部特性</option>{% for trait in pool.traits %}<option value="{{ trait }}">{{ trait }}</option>{% endfor %}</select>
+    <span class="muted small" id="daily-count"></span>
+  </div>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th>等級</th><th class="num">2015-06 起期末（0050）</th><th class="num">比 0050</th><th class="num">2020-10 起比 0050</th><th class="num">1 年／3 年視窗勝率</th><th class="num">最大回撤（0050）</th><th class="num">費稅佔投入・每月下單</th></tr></thead>
+      <thead><tr><th>規則</th><th>分類</th><th>等級</th><th class="num">2015-06 起期末（0050）</th><th class="num">比 0050</th><th class="num">2020-10 起比 0050</th><th class="num">1 年／3 年視窗勝率</th><th class="num">最大回撤（0050）</th><th class="num">費稅佔投入・每月下單</th></tr></thead>
       <tbody>
       {% for row in pool.daily %}
-        <tr data-name="{{ row.name }}">
+        <tr data-name="{{ row.name }}" data-family="{{ row.category.family }}" data-tier="{{ row.tier }}" data-traits="|{{ row.category.traits|join('|') }}|">
           <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong>{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
+          <td data-label="分類" data-wide><span class="badge">{{ row.category.family }}</span>{% if row.category.detail %} <span class="small">{{ row.category.detail }}</span>{% endif %}<br><span class="muted small">{{ row.category.traits|join('・') }}</span></td>
           <td data-label="等級" data-wide><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--warn' if row.tier == 'T1' else ('badge--bad' if row.tier == 'T3' else '')) }}">{{ row.tier }}</span> <span class="small">{{ row.tier_reason }}</span></td>
           <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
           <td class="num {{ 'up' if (row.excess or 0) > 0 else 'down' }}" data-label="比 0050">{{ '{:+.0%}'.format(row.excess) if row.excess is not none else '—' }}</td>
@@ -143,6 +185,27 @@
   {{ rule_table(pool.rules) }}
 </section>
 <script>
+(function () {
+  var search = document.getElementById('daily-search');
+  if (!search) { return; }
+  var family = document.getElementById('daily-family'), tier = document.getElementById('daily-tier'),
+      trait = document.getElementById('daily-trait'), count = document.getElementById('daily-count');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('#daily tbody tr'));
+  function apply() {
+    var text = search.value.trim(), shown = 0;
+    rows.forEach(function (row) {
+      var ok = (!text || row.dataset.name.indexOf(text) >= 0) && (!family.value || row.dataset.family === family.value)
+        && (!tier.value || row.dataset.tier === tier.value) && (!trait.value || row.dataset.traits.indexOf('|' + trait.value + '|') >= 0);
+      row.hidden = !ok; if (ok) { shown += 1; }
+    });
+    count.textContent = '顯示 ' + shown + '／' + rows.length + ' 個';
+  }
+  [search, family, tier, trait].forEach(function (el) { el.addEventListener('input', apply); });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pick-family]'), function (link) {
+    link.addEventListener('click', function () { family.value = link.dataset.pickFamily; apply(); });
+  });
+  apply();
+})();
 (function () {
   var search = document.getElementById('rule-search'), status = document.getElementById('rule-status'),
       family = document.getElementById('rule-family'), count = document.getElementById('rule-count');

@@ -103,12 +103,14 @@ class UsageLedger:
                 continue
         return rows
 
-    def month_spend(self, now: datetime) -> float:
+    def month_spend(self, now: datetime, operations: tuple[str, ...] | None = None) -> float:
+        """This month's spend; only the calls whose operation is in ``operations`` when given."""
         local = now.astimezone(TAIPEI)
         month = f"{local:%Y-%m}"
         return round(sum(
             float(entry.get("cost_usd") or 0) for entry in self.entries()
             if str(entry.get("month", "")) == month
+            and (operations is None or str(entry.get("operation", "")) in operations)
         ), 8)
 
 
@@ -123,7 +125,15 @@ class ResponsesClient:
         max_output_tokens: int = 6000,
         post: Callable[[str, dict, dict[str, str], float], dict] | None = None,
         clock: Callable[[], datetime] | None = None,
+        operations: tuple[str, ...] | None = None,
+        total_budget_usd: float | None = None,
+        label: str = "AI 研究員",
     ) -> None:
+        # 2026-10-09 (使用者：上限 5 美元): every model call shares one monthly total; a purpose
+        # (``operations``) has its own cap inside it, so the news scoring cannot starve the researcher.
+        self._operations = operations
+        self._total = total_budget_usd
+        self._label = label
         self._key = api_key
         self.model = model
         self._ledger = ledger
@@ -134,8 +144,14 @@ class ResponsesClient:
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def budget_status(self) -> dict[str, float]:
-        spent = self._ledger.month_spend(self._clock())
-        return {"spent_usd": spent, "budget_usd": self._budget, "remaining_usd": max(0.0, self._budget - spent)}
+        now = self._clock()
+        spent = self._ledger.month_spend(now, self._operations)
+        status = {"spent_usd": spent, "budget_usd": self._budget, "remaining_usd": max(0.0, self._budget - spent)}
+        if self._total is not None:
+            total = self._ledger.month_spend(now)
+            status.update(total_spent_usd=total, total_budget_usd=self._total,
+                          remaining_usd=max(0.0, min(self._budget - spent, self._total - total)))
+        return status
 
     def json_call(self, instructions: str, user_input: str, operation: str, context: str = "") -> tuple[dict, dict]:
         """One Responses call that must answer with a JSON object; returns (object, usage)."""
@@ -146,7 +162,11 @@ class ResponsesClient:
         status = self.budget_status()
         if status["spent_usd"] >= self._budget:
             raise BudgetExceeded(
-                f"本月 AI 研究員預算 US${self._budget:.2f} 已用完（已用 US${status['spent_usd']:.4f}），停止呼叫"
+                f"本月{self._label}預算 US${self._budget:.2f} 已用完（已用 US${status['spent_usd']:.4f}），停止呼叫"
+            )
+        if self._total is not None and status["total_spent_usd"] >= self._total:
+            raise BudgetExceeded(
+                f"本月 LLM 總預算 US${self._total:.2f} 已用完（已用 US${status['total_spent_usd']:.4f}），停止呼叫"
             )
         if "json" not in user_input.lower():
             # The json_object format requires the word in the input messages (HTTP 400 otherwise).

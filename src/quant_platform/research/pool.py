@@ -18,6 +18,8 @@ from quant_platform.research.promotion import (
     drawdown_gate,
     window_gate,
 )
+from quant_platform.research.categories import FAMILY_ORDER, classify
+from quant_platform.research.categories import summary as category_summary
 from quant_platform.research.registry import TrialRegistry, current_basis, distinct_rules
 from quant_platform.research.reports import latest_stats
 
@@ -196,6 +198,21 @@ PERIOD_LABELS = {"recent": "近期 2015-06 起・每天決策", "development": "
 PERIOD_ORDER = ("recent", "development", "validation", "holdout", "full")
 
 
+_SPECS: dict[str, dict] = {}
+
+
+def _spec_of(base: Path, report_file: str | None) -> dict:
+    """A trial's rule spec from its report (reports never change once written, so kept after the first read)."""
+    if not report_file:
+        return {}
+    if report_file not in _SPECS:
+        try:
+            _SPECS[report_file] = json.loads((base / "reports" / report_file).read_text(encoding="utf-8")).get("spec") or {}
+        except (OSError, ValueError):
+            return {}
+    return _SPECS[report_file]
+
+
 def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
     """The new design (S9-W02): every daily-decision rule's latest run on 2015-06..2026-09 with the
     owner's account, passed rules first."""
@@ -231,9 +248,26 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
             "xirr": metrics.get("xirr"), "benchmark_xirr": metrics.get("benchmark_xirr"),
             "cost_share": metrics.get("cost_share"), "orders_per_month": metrics.get("orders_per_month"),
             "forward_since": since.get(spec_hash), "report_file": record.report_file,
+            "category": classify(_spec_of(base, record.report_file), origin.get(spec_hash, "")),
         })
     rows.sort(key=lambda row: (TIERS.index(row["tier"]), -(row["excess"] if row["excess"] is not None else -9)))
     return rows
+
+
+def ai_researcher_view(research_dir: str | Path, daily_rules: list[dict[str, object]]) -> dict[str, object]:
+    """The AI researcher as a strategy (2026-10-09): its rules in the pool, the trials it used, what its
+    forward account holds and when it next decides."""
+    from quant_platform.research.agent.daily_researcher import proposals
+    from quant_platform.research.stock_forward import META_AI, StockForwardTracker
+
+    base = Path(research_dir)
+    mine = {item["spec_hash"] for item in proposals(base)}
+    rules = [row for row in daily_rules if row["spec_hash"] in mine]
+    tracker = StockForwardTracker(base)
+    decisions = tracker.meta_decisions()
+    forward = next((row for row in tracker.summary() if row["rule_hash"] == META_AI["rule_hash"]), None)
+    return {"rules": rules, "trials": len(mine), "decision": decisions[-1] if decisions else None,
+            "forward": forward, "meta_hash": META_AI["rule_hash"]}
 
 
 def plan_label(plan: dict) -> str:
@@ -450,6 +484,10 @@ def pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> d
         "high_win": high_win, "both_periods": both, "ai_rounds": ai_rounds(research_dir),
         "forward_stocks": StockForwardTracker(research_dir).summary(),
         "daily": daily_rules, "daily_passed": sum(1 for row in daily_rules if row["passed"]),
+        "categories": category_summary(daily_rules),
+        "ai_researcher": ai_researcher_view(research_dir, daily_rules),
+        "category_order": [family for family in FAMILY_ORDER if any(row["category"]["family"] == family for row in daily_rules)],
+        "traits": sorted({trait for row in daily_rules for trait in row["category"]["traits"]}),
         "daily_tiers": {grade: sum(1 for row in daily_rules if row["tier"] == grade)
                         for grade in ("T0", "T0 候選", "T1", "T2", "T3")},
         "status_labels": STATUS_LABELS, "basis": basis, "basis_label": BASIS_LABELS[basis], "bases": BASIS_LABELS,

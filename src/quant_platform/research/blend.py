@@ -193,6 +193,41 @@ def parse_spec(spec: dict):
     return BlendRule.model_validate(spec) if spec.get("kind") == "blend" else DailyRule.model_validate(spec)
 
 
+def family_rules_for_blends():
+    from quant_platform.research.daily import DailyRule
+
+    model = DailyRule(name="機器學習（含財報）：前 20 名、同產業最多 3 成、每週決策", factors={"ml_gbm_statements": 1.0},
+                      industry_cap=0.3, check="weekly")
+    trend = DailyRule(name="每天 站上 200 日均線：前 20 名、同產業最多 3 成、依波動度配置", factors={"trend_200": 1.0},
+                      industry_cap=0.3, weighting="inverse_vol")
+    return model, trend
+
+
+def t0_hunt_batch() -> list:
+    """2026-10-09 (使用者：再繼續找 T0), fixed in advance: the revenue event factor weekly (alone and half in
+    0050); the model with the trend-plus-revenue rule (T1); the model, the trend rule and trend-plus-revenue
+    a sixth each; the model with the revenue event rule; each blend half in 0050."""
+    from quant_platform.research.daily import DailyRule
+
+    model, trend = family_rules_for_blends()
+    trend_revenue = DailyRule(name="每天 站上 200 日均線＋月營收年增：前 20 名、同產業最多 3 成",
+                              factors={"trend_200": 1.0, "revenue_yoy": 1.0}, industry_cap=0.3)
+    event = DailyRule(name="每週 月營收加速：前 20 名、同產業最多 3 成", factors={"revenue_accel": 1.0},
+                      industry_cap=0.3, check="weekly")
+    sixth = 1 / 6
+    return [
+        event,
+        event.model_copy(update={"name": event.name + "、一半放 0050", "core": 0.5}),
+        BlendRule(name="組合：機器學習每週＋站上 200 日均線＋月營收年增 各 1/4、一半放 0050",
+                  sleeves=(Sleeve(rule=model, share=0.25), Sleeve(rule=trend_revenue, share=0.25)), core=0.5),
+        BlendRule(name="組合：機器學習每週＋趨勢（依波動度）＋趨勢＋月營收 各 1/6、一半放 0050",
+                  sleeves=(Sleeve(rule=model, share=sixth), Sleeve(rule=trend, share=sixth),
+                           Sleeve(rule=trend_revenue, share=sixth)), core=0.5),
+        BlendRule(name="組合：機器學習每週＋月營收加速每週 各 1/4、一半放 0050",
+                  sleeves=(Sleeve(rule=model, share=0.25), Sleeve(rule=event, share=0.25)), core=0.5),
+    ]
+
+
 def blend_batch() -> list[BlendRule]:
     """Fixed in advance: the weekly model rule and the volatility-weighted trend rule (both T1 alone), half
     each, a quarter each with half in 0050, and a third each with a third in 0050."""

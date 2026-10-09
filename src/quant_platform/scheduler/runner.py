@@ -526,6 +526,27 @@ def collect_news(container: "Container", now: datetime | None = None) -> object 
         return collect(base, day, codes, container.settings.finmind_token, job=job)
 
 
+def score_news_events(container: "Container", now: datetime | None = None, client=None) -> object | None:
+    """R15 D (2026-10-09): at 21:45 on trading days, the collected headlines not scored yet turned into event
+    fields by the model (research/news_events.py), inside the monthly LLM budget."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import news_events
+    from quant_platform.research.jobs import JobLog
+
+    research = _instance_dir(container.settings.database_url) / "research"
+    base = research / "history"
+    if not news_events.pending_days(base):
+        return None
+    client = client or news_events.build_client(container.settings, research)
+    if client is None:
+        return None
+    with JobLog(research).start("新聞事件評分（LLM，每月預算內）", "scheduler score_news_events") as job:
+        outcome = news_events.run(client, base, job=job, now=now)
+        job.payload["summary"] = (f"評了 {len(outcome['scored'])} 天、待評 {outcome['pending']} 天"
+                                  + (f"；停止：{outcome['error']}" if outcome["error"] else ""))
+    return outcome
+
+
 def run_research_agent(container: "Container") -> object | None:
     """S4-W04: one night of the AI researcher (development period only)."""
     from quant_platform.container import _instance_dir
@@ -541,13 +562,9 @@ def run_research_agent(container: "Container") -> object | None:
         return None
     market = load_market(available_assets(base), base)
     entries = []
-    if container.settings.research_agent_enabled:
-        entries = build_agent(container.settings, research).run_night(market)
-        logger.info(
-            "AI researcher: %s rounds, %s trials, status %s",
-            len(entries), sum(len(entry.get("accepted") or []) for entry in entries),
-            [entry.get("status") for entry in entries],
-        )
+    # S9-W07 (2026-10-09): the ETF-era researcher (2004-2016, ETF specs) no longer runs; the new-design one
+    # runs once a week from start_daily_researcher. build_agent stays for the research page's status.
+    _ = build_agent
     # S4-W06: candidates that pass every gate move on (validation, holdout once, forward).
     # The aggressive track's drawdown limit is the owner's current plan tolerance (none: closed).
     limits = promotion_limits(container.investment_plan_service.current())
@@ -555,6 +572,30 @@ def run_research_agent(container: "Container") -> object | None:
     if events:
         logger.info("Promotion: %s", [(event.name, event.stage, event.outcome) for event in events])
     return len(entries)
+
+
+def start_daily_researcher(container: "Container", now: datetime | None = None, launch=None) -> object | None:
+    """S9-W07 (2026-10-09): Saturdays at the researcher hour, one round of the new-design AI researcher in the
+    background (scripts/start-research.ps1 -Name ai-researcher), when it is on."""
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+
+    from quant_platform.research.agent.daily_researcher import ran_within
+
+    if not container.settings.research_agent_enabled:
+        return None
+    if ran_within(_instance_dir(container.settings.database_url) / "research", 6, now):
+        return None                                 # a round already ran this week (a manual one counts)
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch()
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                        "-Name", "ai-researcher"], check=False, timeout=120)
+    logger.info("AI researcher round started")
+    return True
 
 
 def save_weekly_research_report(container: "Container", now: datetime | None = None) -> object | None:
@@ -684,6 +725,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
+        score_news_events,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=21, minute=45, timezone=timezone),
+        id="news_events",
+        name="新聞事件評分（交易日 21:45，LLM，每月預算內）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
+    )
+    scheduler.add_job(
         build_stock_snapshot,
         args=[container],
         trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=45, timezone=timezone),
@@ -721,11 +773,22 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         args=[container],
         trigger=CronTrigger(hour=container.settings.research_agent_hour, minute=0, timezone=timezone),
         id="research_agent",
-        name=f"AI 研究員（每晚 {container.settings.research_agent_hour}:00，只用開發期）",
+        name=f"舊設計晉級檢查（每晚 {container.settings.research_agent_hour}:00）",
         replace_existing=True,
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        start_daily_researcher,
+        args=[container],
+        trigger=CronTrigger(day_of_week="sat", hour=container.settings.research_agent_hour, minute=0, timezone=timezone),
+        id="daily_researcher",
+        name=f"AI 研究員（每週六 {container.settings.research_agent_hour}:00，背景執行，每月預算內）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
         notify_plan_advice,

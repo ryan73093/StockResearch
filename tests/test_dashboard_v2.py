@@ -252,3 +252,11 @@ def test_every_project_document_exists(client):
     missing = [path for _label, path in DOCS.values() if not Path(path).is_file()]
     assert missing == []
     assert "樣本外" in client.get("/system/docs/ai_methods").get_json()["markdown"]
+
+
+def test_news_tab_categories_and_the_ai_researcher_card(client):
+    """2026-10-09: the news event tab, the pool's categories and the AI researcher as a strategy."""
+    news = client.get("/research?tab=news").get_data(as_text=True)
+    assert "新聞事件" in news and "本月 LLM 總花費" in news and "新聞否決實驗" in news and "上限 5" in news
+    pool = client.get("/research/pool").get_data(as_text=True)
+    assert "AI 研究員（整體）" in pool and "每季第一個交易日" in pool

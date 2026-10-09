@@ -28,6 +28,13 @@
 </section>
 {% endif %}
 
+{% if forward.decisions %}
+<section class="card">
+  <div class="card__head"><h2>每季決定 <span class="badge">AI 研究員（整體）</span></h2><span class="muted small">決定當時寫下、之後不重算</span></div>
+  <ul class="reasons">{% for item in forward.decisions %}<li><strong>{{ item.date }}</strong>：{% if item.rule_hash %}跟隨「<a href="/research/rules/{{ item.rule_hash }}">{{ item.name }}</a>」（{{ item.tier }}，試驗 #{{ item.trial_id }}）{% else %}AI 研究員還沒有合格的規則，放 0050{% endif %}<span class="muted small">（{{ item.decided_at[:16].replace('T', ' ') }} 決定）</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
 {% if chart %}
 <section class="card">
   <div class="card__head"><h2>資產走勢</h2><span class="muted small">每個交易日 15:30 用當天收盤記錄</span></div>

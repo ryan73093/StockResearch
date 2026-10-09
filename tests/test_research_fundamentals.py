@@ -75,7 +75,7 @@ def test_a_trained_version_keeps_its_features(tmp_path):
 
     (tmp_path / "meta.json").write_text(json.dumps({"features": ["trend_200", "momentum_3"]}), encoding="utf-8")
     assert model.trained_features(tmp_path) == ("trend_200", "momentum_3")
-    assert len(model.trained_features(tmp_path / "missing")) == 35
+    assert len(model.trained_features(tmp_path / "missing")) == 36            # 2026-10-09: + revenue_accel
 
 
 def test_the_due_quarter_follows_the_filing_deadlines():
