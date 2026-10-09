@@ -283,8 +283,14 @@ def _daily(args, registry: TrialRegistry) -> int:
                                          daily_research.fingerprint(Path(args.base), rule.universe), {})
             data, fp, fingerprint, cache = loaded[rule.universe]
             job.update(done=index, current=rule.name)
-            record, report = daily_research.run_trial(rule, args.base, registry, RESEARCH / "reports", costs, data, fp,
-                                                      fingerprint, cache, stamp)
+            if getattr(rule, "kind", None) == "blend":    # 2026-10-09: one account across strategy families
+                from quant_platform.research.blend import run_blend_trial
+
+                record, report = run_blend_trial(rule, args.base, registry, RESEARCH / "reports", costs, data, fp,
+                                                 fingerprint, cache)
+            else:
+                record, report = daily_research.run_trial(rule, args.base, registry, RESEARCH / "reports", costs, data,
+                                                          fp, fingerprint, cache, stamp)
             reasons = record.metrics.get("reasons") or []
             passed += not reasons
             verdict = "過門檻" if not reasons else "；".join(reasons)
@@ -299,7 +305,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution"),
+                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -437,6 +443,33 @@ def main() -> int:
         for year, item in meta["years"].items():
             print(f"{year}：訓練 {item['train_rows']:,} 筆、測試 {item['test_rows']:,} 筆；會賣 {item['sell_share']:.1%}；"
                   f"賣掉的之後比替補多 {item['sold_outcome']}、留著的多 {item['kept_outcome']}", flush=True)
+        return 0
+
+    if args.command == "rl-sleeves":        # R15 stage C3: the RL allocator across strategy families
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import rl_sleeves
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        version = rl_sleeves.RL_SLEEVES_VERSION
+        with JobLog(RESEARCH).start(f"強化學習：在策略家族間分配（{version}，2017 起逐年、5 個種子）", command,
+                                    total=10) as job:
+            job.update(current="載入行情並重播三個家族的帳戶", force=True)
+            data, fp = daily_research.load(Path(args.base))
+            families = rl_sleeves.build_families(data, fp, broker_costs(args.broker))
+            report = rl_sleeves.walk_forward(families, RESEARCH / "rl" / version, job=job)
+            overall = report["overall"]
+            job.payload["summary"] = (
+                f"樣本外 {report['test_from']}～{report['test_to']}：RL 年化 {overall['rl']['annual']:.1%}"
+                f"（回撤 {overall['rl']['max_drawdown']:.0%}）、訓練期最好的固定組合 {overall['best_fixed_result']['annual']:.1%}"
+                f"（{overall['best_fixed_result']['max_drawdown']:.0%}）、各 1/4＋一半 0050 {overall['quarters_half_0050']['annual']:.1%}、"
+                f"0050 {overall['0050']['annual']:.1%}")
+        for year, item in report["years"].items():
+            print(f"{year}：RL {item['rl']['growth']:+.1%}（回撤 {item['rl']['max_drawdown']:.0%}、平均 {item['average']}、"
+                  f"換 {item['moves']} 次）；訓練期最好的固定 {item['best_fixed']} {item['best_fixed_result']['growth']:+.1%}；"
+                  f"機器學習 {item['model']['growth']:+.1%}；趨勢 {item['trend']['growth']:+.1%}；0050 {item['0050']['growth']:+.1%}",
+                  flush=True)
+        print(json.dumps(report["overall"], ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "rl":                # R15 stage C1: the RL exposure overlay, walk-forward

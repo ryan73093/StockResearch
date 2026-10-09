@@ -231,3 +231,13 @@ def test_market_overview_has_its_own_entry(client):
     body = client.get("/market").get_data(as_text=True)
     assert "<span>市場總覽</span>" in body and 'href="/market" aria-current="page"' in body
     assert 'href="/stock" aria-current="page"' in client.get("/stock").get_data(as_text=True)
+
+
+def test_the_stylesheet_url_changes_with_its_content():
+    import hashlib
+    from pathlib import Path
+
+    from quant_platform.dashboard import v2
+
+    sheet = Path(v2.__file__).parent / "static" / "css" / "v2.css"
+    assert v2.ASSET_VERSION == hashlib.sha256(sheet.read_bytes()).hexdigest()[:10]

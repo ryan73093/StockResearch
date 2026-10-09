@@ -47,7 +47,7 @@
           <td class="num" data-label="比 0050">{% if row.excess is not none %}<span class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.excess) }}</span>{% else %}—{% endif %}／{% if row.since_2020_excess is not none %}<span class="{{ 'up' if row.since_2020_excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.since_2020_excess) }}</span>{% else %}—{% endif %}</td>
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
           <td class="num" data-label="每月下單">{{ '%.0f 筆' % row.orders_per_month if row.orders_per_month else '—' }}</td>
-          <td class="num" data-label="前向觀察">{% if fwd and fwd.sessions %}{{ fwd.sessions }} 天{% if fwd.excess is not none %}・<span class="{{ 'up' if fwd.excess > 0 else ('down' if fwd.excess < 0 else '') }}">{{ '{:+.2%}'.format(fwd.excess) }}</span>{% endif %}{% elif row.forward_since %}<span class="muted small">{{ row.forward_since[5:] }} 起</span>{% else %}<span class="muted small">下個交易日 15:30 加入</span>{% endif %}</td>
+          <td class="num" data-label="前向觀察">{% if fwd and fwd.sessions %}<a href="/research/forward/{{ row.spec_hash }}">{{ fwd.sessions }} 天</a>{% if fwd.excess is not none %}・<span class="{{ 'up' if fwd.excess > 0 else ('down' if fwd.excess < 0 else '') }}">{{ '{:+.2%}'.format(fwd.excess) }}</span>{% endif %}{% elif row.forward_since %}<span class="muted small">{{ row.forward_since[5:] }} 起</span>{% else %}<span class="muted small">下個交易日 15:30 加入</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -56,6 +56,31 @@
   <p class="note">T0 候選要前向觀察滿 60 個交易日仍不輸 0050 才是 T0；T1 贏 0050，但回撤比 0050 深超過 5 個百分點。前向觀察的相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入，明細在<a href="/research?tab=forward">前向觀察</a>。歷史結果只作研究參考。</p>
   {% else %}<p class="muted" style="margin:0">還沒有過門檻的規則。</p>{% endif %}
 </section>
+
+{% if yearly and yearly.rows %}
+<section class="card" id="yearly">
+  <div class="card__head"><h2>每一年的報酬 <span class="badge">T0、T0 候選、T1</span></h2><span class="muted small">啟動資金 30 萬＋每月 1 萬的帳戶；綠色＝那一年贏 0050</span></div>
+  <div class="table-wrap">
+    <table class="table--years">
+      <thead><tr><th>規則</th>{% for year in yearly.years %}<th class="num">{{ year }}{% if yearly.months[year] < 12 %}<br><span class="muted small">{{ yearly.months[year] }} 個月</span>{% endif %}</th>{% endfor %}<th class="num">贏的年數</th></tr></thead>
+      <tbody>
+        <tr><td><strong>0050（同樣的錢）</strong></td>{% for year in yearly.years %}{% set value = yearly.benchmark.get(year) %}<td class="num">{{ '{:+.0%}'.format(value) if value is not none else '—' }}</td>{% endfor %}<td></td></tr>
+        {% for row in yearly.rows %}{% set wins = namespace(count=0, total=0) %}
+        <tr>
+          <td><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--warn' }}">{{ row.tier }}</span></td>
+          {% for year in yearly.years %}{% set item = row.years.get(year) %}
+          {% if item %}{% set wins.total = wins.total + 1 %}{% if item.strategy > item.benchmark %}{% set wins.count = wins.count + 1 %}{% endif %}{% endif %}
+          <td class="num {{ ('up' if item.strategy > item.benchmark else 'down') if item else '' }}" title="{{ '0050 {:+.1%}'.format(item.benchmark) if item else '' }}">{{ '{:+.0%}'.format(item.strategy) if item else '—' }}</td>
+          {% endfor %}
+          <td class="num">{{ wins.count }}／{{ wins.total }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">挑規則的期間是 2015-06～2026-09，所以 2015 只有 7 個月、2026 只有 9 個月；之後的表現看前向觀察。每年的報酬扣掉當月投入的錢（每月 5 日投入，算作那個月投入了八成時間）後各月連乘，是約略值。T0 候選與 T1 都是在這段期間挑出來的，歷史數字會比未來好看，只作研究參考。</p>
+</section>
+{% endif %}
 
 <section class="card">
   <div class="card__head"><h2>最近完成的研究程式</h2><a class="small" href="/research?tab=jobs">全部{% if running_count %}（{{ running_count }} 個在跑）{% endif %}</a></div>
@@ -126,6 +151,49 @@
 </section>
 
 {% for report in ml.rl %}
+{% if report.kind == 'sleeves' %}
+<section class="card">
+  <div class="card__head"><h2>強化學習：在策略家族間分配 <span class="badge">{{ report.version }}</span></h2><span class="muted small">樣本外 {{ report.test_from }}～{{ report.test_to }}</span></div>
+  <p class="small" style="margin:0 0 10px">每個交易日收盤後，RL 從 {{ report.menu|length }} 種固定比例中挑一種，把帳戶分給「{{ report.families|join('」「') }}」；家族之間移動要付 0.5% 成本。每一年只用那一年以前的資料訓練，{{ report.seeds|length }} 個種子平均。公平的對照是「訓練期最好的固定組合」：每年用那年以前的資料事後挑出最好的一種，之後不再改。</p>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>做法</th><th class="num">樣本外總報酬</th><th class="num">年化</th><th class="num">最大回撤</th></tr></thead>
+      <tbody>
+      {% for key, label in (('rl', 'RL 分配'), ('best_fixed_result', '訓練期最好的固定組合'), ('model', report.families[0] ~ '（全部）'), ('trend', report.families[1] ~ '（全部）'), ('thirds', '三份各 1/3'), ('quarters_half_0050', '兩個家族各 1/4、一半 0050'), ('0050', '全部 0050')) %}
+        {% set item = report.overall[key] %}
+        <tr><td data-primary><strong>{{ label }}</strong></td>
+            <td class="num {{ 'up' if item.growth > 0 else 'down' }}" data-label="總報酬">{{ '{:+.0%}'.format(item.growth) }}</td>
+            <td class="num" data-label="年化">{{ '{:.1%}'.format(item.annual) }}</td>
+            <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(item.max_drawdown) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <svg class="rule-chart" viewBox="0 0 {{ report.chart.width }} {{ report.chart.height }}" preserveAspectRatio="none" role="img" aria-label="各家族佔帳戶" style="margin-top:12px">
+    {% for points in report.chart.lines %}<polyline class="{{ ('line-rule', 'line-put', 'line-bench')[loop.index0] }}" points="{{ points }}"/>{% endfor %}
+  </svg>
+  <div class="legend"><span><i style="background:var(--accent)"></i>{{ report.families[0] }}</span><span><i style="background:var(--muted)"></i>{{ report.families[1] }}</span><span><i style="background:var(--warn)"></i>0050</span><span>佔帳戶（下緣 0%、上緣 100%）；平均 {% for key, value in report.overall.average.items() %}{{ '{:.0%}'.format(value) }}{% if not loop.last %}／{% endif %}{% endfor %}</span></div>
+  <details style="margin-top:10px"><summary class="small">逐年</summary>
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>年</th><th class="num">RL（回撤）</th><th class="num">訓練期最好的固定組合</th><th class="num">{{ report.families[0] }}</th><th class="num">{{ report.families[1] }}</th><th class="num">0050</th><th class="num">換組合</th></tr></thead>
+        <tbody>
+        {% for year, item in report.years.items() %}
+          <tr><td data-primary><strong>{{ year }}</strong></td>
+              <td class="num" data-label="RL">{{ '{:+.0%}'.format(item.rl.growth) }}<span class="muted small">（{{ '{:.0%}'.format(item.rl.max_drawdown) }}）</span></td>
+              <td class="num" data-label="訓練期最好的固定">{{ '{:+.0%}'.format(item.best_fixed_result.growth) }}<span class="muted small">（{% for value in item.best_fixed %}{{ '{:.0%}'.format(value) }}{% if not loop.last %}／{% endif %}{% endfor %}）</span></td>
+              <td class="num" data-label="{{ report.families[0] }}">{{ '{:+.0%}'.format(item.model.growth) }}</td>
+              <td class="num" data-label="{{ report.families[1] }}">{{ '{:+.0%}'.format(item.trend.growth) }}</td>
+              <td class="num" data-label="0050">{{ '{:+.0%}'.format(item['0050'].growth) }}</td>
+              <td class="num" data-label="換組合">{{ item.moves }} 次</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  <p class="note">用每日報酬計算（不含每月投入），只比較分配本身。驗收：樣本外贏「訓練期最好的固定組合」，回撤不更深；過了才接進帳戶引擎與前向觀察。</p>
+</section>
+{% else %}
 <section class="card">
   <div class="card__head"><h2>強化學習：部位調整 <span class="badge">{{ report.version }}</span></h2><span class="muted small">樣本外 {{ report.test_from }}～{{ report.test_to }}</span></div>
   <p class="small" style="margin:0 0 10px">底層規則「{{ report.base_rule }}」照常選股；RL 每個交易日收盤後決定個股佔帳戶 0%、50% 或 100%（其餘 0050），預測每一年只用那一年以前的資料訓練，{{ report.seeds|length }} 個種子平均。</p>
@@ -166,6 +234,7 @@
   </details>
   <p class="note">這裡用每日報酬計算（不含每月投入），只比較部位調整本身；過了「樣本外贏規則、回撤不更深」才接進真實帳戶引擎與前向觀察。</p>
 </section>
+{% endif %}
 {% else %}
 <section class="card"><p class="muted">強化學習還沒有跑出結果（研究 › 執行中的程式）。</p></section>
 {% endfor %}
@@ -447,7 +516,7 @@
       <tbody>
       {% for row in stock_forward %}
         <tr>
-          <td data-primary><strong>{{ row.name }}</strong><span class="muted small"> {{ row.since }} 起</span>{% if row.final %} <span class="badge {{ 'badge--ok' if row.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if row.final.passed else '未通過' }} {{ '{:+.0%}'.format(row.final.excess) }}</span>{% endif %}</td>
+          <td data-primary><strong><a href="/research/forward/{{ row.rule_hash }}">{{ row.name }}</a></strong><span class="muted small"> {{ row.since }} 起</span>{% if row.final %} <span class="badge {{ 'badge--ok' if row.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if row.final.passed else '未通過' }} {{ '{:+.0%}'.format(row.final.excess) }}</span>{% endif %}</td>
           <td class="num" data-label="已記錄交易日">{{ row.sessions }}{% if row.late %}<span class="muted small">（補記 {{ row.late }}）</span>{% endif %}</td>
           <td class="num" data-label="投入">{{ '{:,.0f}'.format(row.contributed) }}</td>
           <td class="num" data-label="目前資產">{{ '{:,.0f}'.format(row.value) }}</td>

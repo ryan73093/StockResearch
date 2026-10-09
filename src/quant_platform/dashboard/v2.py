@@ -6,6 +6,7 @@ research pages stay reachable from 研究 until S8 retires them.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -38,7 +39,8 @@ from quant_platform.research.factors import latest as latest_factor_strength
 from quant_platform.research.factors import columns as factor_columns
 from quant_platform.research.factors import table as factor_table
 from quant_platform.research.jobs import JobLog
-from quant_platform.research.pool import basis_counts, pool_view, rule_detail
+from quant_platform.research.pool import _svg as value_chart
+from quant_platform.research.pool import basis_counts, pool_view, rule_detail, yearly_matrix
 from quant_platform.research.stock_forward import StockForwardTracker
 from quant_platform.research.promotion import PromotionPipeline, promotion_limits
 from quant_platform.research.weekly import weekly_report
@@ -48,7 +50,16 @@ from quant_platform.research.reports import latest_reports, latest_stats, report
 logger = logging.getLogger(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 WEEKDAYS = "一二三四五六日"
-ASSET_VERSION = "2.5.3"
+def _asset_version() -> str:
+    """Follows the stylesheet's content, so a browser fetches the new one after every deploy that changes it
+    (2026-10-09: a fixed "2.5.3" kept serving the cached sheet)."""
+    try:
+        return hashlib.sha256((Path(__file__).parent / "static" / "css" / "v2.css").read_bytes()).hexdigest()[:10]
+    except OSError:
+        return "2.5.3"
+
+
+ASSET_VERSION = _asset_version()
 THEME_COOKIE = "sr_theme"
 THEMES = ("dark", "light")
 DOCS = {
@@ -235,9 +246,21 @@ def ml_view(research_dir: Path) -> dict[str, object]:
             report = json.loads(path.read_text(encoding="utf-8"))
         except ValueError:
             continue
+        width, height = 720, 120
+        if report.get("mixes"):              # R15 C3: the mix across strategy families, one line per family
+            mixes = report["mixes"]
+            days = list(mixes)
+            lines = []
+            for index in range(len(report.get("families") or [])):
+                lines.append(" ".join(f"{step * width / max(len(days) - 1, 1):.1f},{height - 6 - mixes[day][index] * (height - 12):.1f}"
+                                      for step, day in enumerate(days)))
+            report["kind"] = "sleeves"
+            report["chart"] = {"lines": lines, "width": width, "height": height,
+                               "first": days[0] if days else "", "last": days[-1] if days else ""}
+            reports.append(report)
+            continue
         shares = report.get("shares") or {}
         days = list(shares)
-        width, height = 720, 120
         points = " ".join(f"{index * width / max(len(days) - 1, 1):.1f},{height - 6 - shares[day] * (height - 12):.1f}"
                           for index, day in enumerate(days))
         report["chart"] = {"points": points, "width": width, "height": height,
@@ -824,6 +847,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         round_view = round_summary(research_dir / "trials.jsonl", "development", stats)
         jobs = JobLog(research_dir).jobs()
         overview = pool_view(research_dir, basis=_default_basis(research_dir)) if tab == "overview" else None
+        best = [row for row in overview["daily"] if row["tier"] in BEST_TIERS] if overview else []
         return render_template(
             "v2/research.html",
             active_nav="research",
@@ -841,7 +865,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             ml=ml_view(research_dir) if tab == "ml" else None,
             factor_columns=factor_columns(latest_factor_strength(research_dir / "factors")),
             overview=overview,
-            best=[row for row in overview["daily"] if row["tier"] in BEST_TIERS] if overview else [],
+            best=best,
+            yearly=yearly_matrix(research_dir, best) if best else None,
             forward_map={row["rule_hash"]: row for row in overview["forward_stocks"]} if overview else {},
             conclusions=research_conclusions(_project_root() / DOCS["research_method"][1]) if tab == "overview" else [],
             recent_jobs=[job for job in jobs if job.get("status") != "running"
@@ -883,6 +908,17 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             abort(404)
         return render_template("v2/research_rule.html", active_nav="research", rule=detail, research_tab="pool",
                                jobs=JobLog(research_dir).jobs())
+
+    @blueprint.get("/research/forward/<rule_hash>")
+    def research_forward(rule_hash: str):
+        """One forward-observed rule: holdings, every trade since it started, value against 0050."""
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        detail = StockForwardTracker(research_dir).detail(rule_hash)
+        if detail is None:
+            abort(404)
+        chart = value_chart({row["date"]: [row["value"], row["benchmark"], row["contributed"]] for row in detail["series"]})
+        return render_template("v2/research_forward.html", active_nav="research", forward=detail, chart=chart,
+                               research_tab="forward", jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/rules/<spec_hash>.json")
     def research_rule_json(spec_hash: str):

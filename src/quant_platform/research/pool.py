@@ -230,7 +230,7 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
             "max_drawdown": metrics.get("max_drawdown"), "benchmark_max_drawdown": metrics.get("benchmark_max_drawdown"),
             "xirr": metrics.get("xirr"), "benchmark_xirr": metrics.get("benchmark_xirr"),
             "cost_share": metrics.get("cost_share"), "orders_per_month": metrics.get("orders_per_month"),
-            "forward_since": since.get(spec_hash),
+            "forward_since": since.get(spec_hash), "report_file": record.report_file,
         })
     rows.sort(key=lambda row: (TIERS.index(row["tier"]), -(row["excess"] if row["excess"] is not None else -9)))
     return rows
@@ -258,6 +258,13 @@ def describe_rule(spec: dict) -> list[str]:
     """A stock rule in plain words (ETF specs: their name and assets)."""
     from quant_platform.research.stock_rules import FACTORS
 
+    if spec.get("kind") == "blend":                     # 2026-10-09: one account across strategy families
+        lines = [f"帳戶分成 {len(spec['sleeves']) + (1 if spec.get('core') else 0)} 份，每份各自照自己的規則操作，"
+                 "啟動資金與每月投入都照比例分；各份之間不再平衡"]
+        lines += [f"{sleeve['share']:.0%}：{sleeve['rule']['name']}" for sleeve in spec["sleeves"]]
+        if spec.get("core"):
+            lines.append(f"{spec['core']:.0%}：0050（錢進來就買，不賣）")
+        return lines
     if "factor" not in spec:
         return [str(spec.get("description") or spec.get("name") or "")]
     factors = [FACTORS.get(spec["factor"], spec["factor"])] + [
@@ -291,6 +298,52 @@ def _svg(curve: dict[str, list[float]], width: int = 640, height: int = 220) -> 
 
     return {"rule": points(0), "benchmark": points(1), "put_in": points(2), "width": width, "height": height,
             "first": months[0], "last": months[-1], "peak": peak}
+
+
+FLOW_WEIGHT = 0.8   # the month's contribution arrives on the 5th: invested for most of the month
+
+
+def yearly_returns(curve: dict[str, list[float]]) -> dict[str, dict[str, float]]:
+    """Calendar-year returns of the rule and of 0050 from the report's month-end curve [rule, 0050,
+    contributed so far] (使用者 2026-10-09：每一年的績效). Each month's return nets out that month's
+    contribution (Modified Dietz, the contribution weighted 0.8); the first month treats the money put in
+    as there from the start; the months compound within the year. ``months`` counts the year's months."""
+    output: dict[str, dict[str, float]] = {}
+    previous: list[float] | None = None
+    for month in sorted(curve):
+        values = curve[month]
+        flow = values[2] - (previous[2] if previous else 0.0)
+        item = output.setdefault(month[:4], {"strategy": 1.0, "benchmark": 1.0, "months": 0})
+        for column, key in ((0, "strategy"), (1, "benchmark")):
+            start = previous[column] if previous else 0.0
+            base = start + FLOW_WEIGHT * flow if previous else flow
+            change = (values[column] - start - flow) / base if base > 0 else 0.0
+            item[key] *= 1 + change
+        item["months"] += 1
+        previous = values
+    return {year: {"strategy": round(item["strategy"] - 1, 4), "benchmark": round(item["benchmark"] - 1, 4),
+                   "months": item["months"]} for year, item in output.items()}
+
+
+def yearly_matrix(research_dir: str | Path, rows: list[dict[str, object]]) -> dict[str, object]:
+    """Yearly returns of the given new-design rules (the overview's T0／T1 list) and of 0050."""
+    base = Path(research_dir)
+    table, years, benchmark = [], set(), {}
+    for row in rows:
+        try:
+            report = json.loads((base / "reports" / str(row.get("report_file"))).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        returns = yearly_returns(report.get("curve") or {})
+        if not returns:
+            continue
+        years.update(returns)
+        if not benchmark:
+            benchmark = {year: item["benchmark"] for year, item in returns.items()}
+        table.append({"name": row["name"], "spec_hash": row["spec_hash"], "tier": row["tier"], "years": returns})
+    ordered = sorted(years)
+    months = {year: max((item["years"].get(year, {}).get("months", 0) for item in table), default=0) for year in ordered}
+    return {"years": ordered, "months": months, "rows": table, "benchmark": benchmark}
 
 
 def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] | None:
@@ -340,6 +393,7 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
             "reasons": reasons, "screen": not has_windows and record.period != "recent",
             "one": _window(metrics, "1y"), "since_2020_excess": metrics.get("since_2020_excess"),
             "yearly": {year: round(value, 4) for year, value in sorted(yearly.items())},
+            "returns": yearly_returns(report.get("curve") or {}),
             "chart": _svg(report.get("curve") or {}), "report_file": record.report_file,
         })
     runs.sort(key=lambda run: (PERIOD_ORDER.index(run["period"]) if run["period"] in PERIOD_ORDER else 9, run["created_at"]))

@@ -1,0 +1,95 @@
+{% extends "v2/base.html" %}
+{% block title %}{{ forward.item.name }} · 前向觀察{% endblock %}
+{% block heading %}
+{% set latest = forward.latest %}
+<header class="page-head">
+  <div>
+    <h1>{{ forward.item.name }}</h1>
+    <p class="page-head__sub">前向觀察：{{ forward.item.since }} 起、已記錄 {{ forward.sessions }} 個交易日{% if latest %}（最新 {{ latest.date }}）{% endif %}</p>
+  </div>
+  <div class="page-head__meta"><a href="/research?tab=forward">回前向觀察</a>・<a href="/research/rules/{{ forward.item.rule_hash }}">回測紀錄</a></div>
+</header>
+{% endblock %}
+{% block content %}
+{% include "v2/_research_tabs.html" %}
+{% set latest = forward.latest %}
+
+{% if latest %}
+<div class="kpis kpis--page kpis--four">
+  <div class="kpi"><div class="kpi__label">目前資產</div><div class="kpi__value">{{ '{:,.0f}'.format(latest.value) }}<small> 元</small></div></div>
+  <div class="kpi"><div class="kpi__label">同樣的錢買 0050</div><div class="kpi__value">{{ '{:,.0f}'.format(latest.benchmark_value) }}<small> 元</small></div></div>
+  <div class="kpi"><div class="kpi__label">相對 0050（÷ 投入）</div><div class="kpi__value {{ 'up' if (latest.excess or 0) > 0 else ('down' if (latest.excess or 0) < 0 else '') }}">{{ '{:+.2%}'.format(latest.excess) if latest.excess is not none else '—' }}</div></div>
+  <div class="kpi"><div class="kpi__label">投入・現金</div><div class="kpi__value">{{ '{:,.0f}'.format(latest.contributed) }}<small>・現金 {{ '{:,.0f}'.format(latest.cash) }}</small></div></div>
+</div>
+
+{% if forward.problems %}
+<section class="card"><div class="card__head"><h2>對帳 <span class="badge badge--bad">{{ forward.problems|length }} 項不符</span></h2></div>
+  <ul class="reasons">{% for problem in forward.problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if chart %}
+<section class="card">
+  <div class="card__head"><h2>資產走勢</h2><span class="muted small">每個交易日 15:30 用當天收盤記錄</span></div>
+  <svg class="rule-chart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" preserveAspectRatio="none" role="img" aria-label="前向觀察資產走勢">
+    <polyline class="line-put" points="{{ chart.put_in }}"/>
+    <polyline class="line-bench" points="{{ chart.benchmark }}"/>
+    <polyline class="line-rule" points="{{ chart.rule }}"/>
+  </svg>
+  <div class="legend"><span><i style="background:var(--accent)"></i>這個規則</span><span><i style="background:var(--warn)"></i>同樣的錢買 0050</span><span><i style="background:var(--muted)"></i>累計投入</span><span>{{ chart.first }}～{{ chart.last }}</span></div>
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card__head"><h2>目前持股 <span class="badge">{{ forward.holdings|length }} 檔</span></h2><span class="muted small">{{ latest.date }} 收盤</span></div>
+  {% if forward.holdings %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>股票</th><th class="num">股數</th><th class="num">收盤</th><th class="num">市值</th><th class="num">佔帳戶</th></tr></thead>
+      <tbody>
+      {% for row in forward.holdings %}
+        <tr>
+          <td data-primary><strong>{% if row.code != '0050' %}<a href="/stock/{{ row.code }}">{{ row.code }} {{ row.name }}</a>{% else %}0050 元大台灣50{% endif %}</strong></td>
+          <td class="num" data-label="股數">{{ '{:,.2f}'.format(row.units).rstrip('0').rstrip('.') }}</td>
+          <td class="num" data-label="收盤">{{ '{:,.2f}'.format(row.close) }}</td>
+          <td class="num" data-label="市值">{{ '{:,.0f}'.format(row.value) }}</td>
+          <td class="num" data-label="佔帳戶">{{ '{:.1%}'.format(row.weight) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted" style="margin:0">目前沒有持股。</p>{% endif %}
+</section>
+
+<section class="card">
+  <div class="card__head"><h2>每一筆交易 <span class="badge">買 {{ forward.buys }}・賣 {{ forward.sells }}</span></h2><span class="muted small">新的在上；費稅累計 {{ '{:,}'.format(latest.fees_total + latest.taxes_total) }} 元</span></div>
+  {% if forward.trades %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>日期</th><th>操作</th><th>股票</th><th class="num">股數</th><th class="num">成交價</th><th class="num">金額</th><th class="num">手續費＋稅</th></tr></thead>
+      <tbody>
+      {% for trade in forward.trades %}
+        <tr>
+          <td data-primary><strong>{{ trade.date }}</strong></td>
+          <td data-label="操作"><span class="badge {{ 'badge--ok' if trade.side == 'BUY' else 'badge--warn' }}">{{ '買進' if trade.side == 'BUY' else '賣出' }}</span></td>
+          <td data-label="股票">{% if trade.code != '0050' %}<a href="/stock/{{ trade.code }}">{{ trade.code }} {{ trade.name }}</a>{% else %}0050 元大台灣50{% endif %}</td>
+          <td class="num" data-label="股數">{{ '{:,.0f}'.format(trade.shares) }}</td>
+          <td class="num" data-label="成交價">{{ '{:,.2f}'.format(trade.price) }}</td>
+          <td class="num" data-label="金額">{{ '{:,.0f}'.format(trade.amount) }}</td>
+          <td class="num" data-label="手續費＋稅">{{ '{:,}'.format(trade.fee + trade.tax) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted" style="margin:0">還沒有交易。</p>{% endif %}
+  {% if forward.adjustments %}
+  <p class="small" style="margin:10px 0 0">除權息調整：{% for entry in forward.adjustments %}{{ entry.date }} {{ entry.code }} 股數 ×{{ '%.4f' % entry.factor }}{% if not loop.last %}；{% endif %}{% endfor %}（股利以再投入的股數計）</p>
+  {% endif %}
+  <p class="note">成交價＝當天收盤價加減 0.2%（買進較貴、賣出較便宜），和研究回測相同；盤後零股實測（R4）多數在收盤價成交，這個假設偏保守。這是模擬帳戶，不是實際下單。</p>
+</section>
+{% else %}
+<section class="card"><p class="muted" style="margin:0">這個規則 {{ forward.item.since }} 加入，還沒有第一筆紀錄；每個交易日 15:30 記錄。</p></section>
+{% endif %}
+{% endblock %}

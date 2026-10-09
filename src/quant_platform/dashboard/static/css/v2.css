@@ -349,6 +349,13 @@ details.card[open] > summary { margin-bottom: 12px; }
 
 /* ---------- tables ---------- */
 .table-wrap { overflow-x: auto; margin: 0 -18px; -webkit-overflow-scrolling: touch; }
+/* 2026-10-09: rules × years; the rule column stays in view while the years scroll */
+.table--years { font-size: 13px; }
+.table--years th.num, .table--years td.num { white-space: nowrap; }
+.table--years td:first-child, .table--years th:first-child {
+  position: sticky; left: 0; z-index: 1; background: var(--surface); white-space: normal;
+  min-width: 220px; max-width: 280px; box-shadow: 1px 0 0 var(--border);
+}
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td {
   text-align: left; padding: 10px 10px; border-bottom: 1px solid var(--border);

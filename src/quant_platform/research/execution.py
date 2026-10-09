@@ -169,10 +169,15 @@ def replay(data, fp, rule, costs) -> tuple[list[dict], object]:
         simulate_daily,
     )
 
+    ledger: list[dict] = []
+    if getattr(rule, "kind", None) == "blend":           # 2026-10-09: every sleeve's orders
+        from quant_platform.research.blend import BlendAccount
+
+        account = BlendAccount(data, fp, rule, costs, RECENT_START, RECENT_END)
+        return ledger, account.run(account.first, RECENT_END, ledger=ledger)
     ranks = daily_rankings(fp, rule, RECENT_START, RECENT_END)
     weights, parked = daily_weights(fp, rule, ranks), account_parking(data, fp, rule, costs)
     first = next((day for day in sorted(ranks) if ranks[day]), RECENT_START)
-    ledger: list[dict] = []
     result = simulate_daily(data, rule, costs, first, RECENT_END, ranks, ledger=ledger, weights=weights, parked=parked)
     return ledger, result
 

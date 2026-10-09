@@ -63,7 +63,8 @@ def plan_of(item: dict[str, object]):
 
 def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:
     """Daily-decision rules (S9-W02) that pass the new design's gate on 2015-06..2026-09."""
-    from quant_platform.research.daily import DailyRule, tier
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.daily import tier
 
     base = Path(research_dir)
     latest: dict[str, object] = {}
@@ -81,7 +82,7 @@ def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:
             continue
         reason = (f"新設計 {grade}：2015-06 起比 0050 {record.metrics.get('full_period_excess'):+.1%}、"
                   f"2020-10 起 {record.metrics.get('since_2020_excess'):+.1%}（試驗 #{record.trial_id}）")
-        output.append((DailyRule.model_validate(spec), reason))
+        output.append((parse_spec(spec), reason))      # a daily rule, or a blend of them (2026-10-09)
     return output
 
 
@@ -148,7 +149,7 @@ class StockForwardTracker:
             if rule.rule_hash in known:
                 continue
             added.append({"rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.model_dump(mode="json"),
-                          "kind": "daily", "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
+                          "kind": "blend" if getattr(rule, "kind", None) == "blend" else "daily", "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
                           "since": max(FORWARD_START, today).isoformat(), "reason": reason,
                           "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
             known.add(rule.rule_hash)
@@ -211,7 +212,8 @@ class StockForwardTracker:
             ledger: list[dict[str, object]] = []
             snapshots: dict = {}
             plan = plan_of(item)
-            if item.get("kind") == "daily":
+            if item.get("kind") in ("daily", "blend"):
+                from quant_platform.research.blend import BlendAccount, BlendRule
                 from quant_platform.research.daily import (
                     DailyRule,
                     ChipStore,
@@ -225,7 +227,6 @@ class StockForwardTracker:
                     simulate_daily,
                 )
 
-                rule = DailyRule.model_validate(item["rule"])
                 from quant_platform.research.model import models_root
 
                 factor_panel = factor_panel or FactorPanel(
@@ -233,10 +234,16 @@ class StockForwardTracker:
                     ChipStore(self._history, panel.sessions, panel.symbols, panel.close),
                     market_closes(self._history, panel.sessions), models_root(self._history))
                 loaded[universe][3] = factor_panel
-                ranks = daily_rankings(factor_panel, rule, start, last)
-                run = simulate_daily(data, rule, self._costs, start, last, ranks, plan, ledger=ledger, snapshots=snapshots,
-                                     weights=daily_weights(factor_panel, rule, ranks),
-                                     parked=account_parking(data, factor_panel, rule, self._costs))
+                if item.get("kind") == "blend":
+                    rule = BlendRule.model_validate(item["rule"])
+                    run = BlendAccount(data, factor_panel, rule, self._costs, start, last).run(
+                        start, last, plan, ledger=ledger, snapshots=snapshots)
+                else:
+                    rule = DailyRule.model_validate(item["rule"])
+                    ranks = daily_rankings(factor_panel, rule, start, last)
+                    run = simulate_daily(data, rule, self._costs, start, last, ranks, plan, ledger=ledger,
+                                         snapshots=snapshots, weights=daily_weights(factor_panel, rule, ranks),
+                                         parked=account_parking(data, factor_panel, rule, self._costs))
                 benchmark = simulate_daily(data, None, self._costs, start, last, plan=plan)
             else:
                 rule = StockRule.model_validate(item["rule"])
@@ -311,6 +318,36 @@ class StockForwardTracker:
                 "final": finals.get(item["rule_hash"]),
             })
         return rows
+
+    def detail(self, rule_hash: str) -> dict[str, object] | None:
+        """One tracked rule's forward record (使用者 2026-10-09：要看它買了哪些股票、做了哪些操作): every
+        recorded day's value against 0050, today's holdings with their weights, and every trade and
+        ex-rights adjustment since it started, newest first."""
+        item = next((entry for entry in self.tracked() if entry["rule_hash"] == rule_hash), None)
+        if item is None:
+            return None
+        by_day: dict[str, dict] = {}
+        for record in self.records():
+            if record["rule_hash"] == rule_hash:
+                by_day[record["date"]] = record          # a re-recorded day keeps its latest record
+        days = [by_day[day] for day in sorted(by_day)]
+        latest = days[-1] if days else None
+        holdings = []
+        if latest:
+            total = latest["value"] or 1.0
+            holdings = sorted(({**row, "weight": row["value"] / total} for row in latest["holdings"]),
+                              key=lambda row: -row["value"])
+        trades = [{**trade, "date": record["date"], "amount": trade["shares"] * trade["price"]}
+                  for record in reversed(days) for trade in record["trades_today"]]
+        adjustments = [{**entry, "date": record["date"]} for record in reversed(days)
+                       for entry in record.get("adjustments_today") or []]
+        series = [{"date": record["date"], "value": record["value"], "benchmark": record["benchmark_value"],
+                   "contributed": record["contributed"]} for record in days]
+        problems = reconcile(days).get(rule_hash, [])
+        return {"item": item, "latest": latest, "holdings": holdings, "trades": trades, "adjustments": adjustments,
+                "series": series, "sessions": len(days), "problems": problems,
+                "buys": sum(1 for trade in trades if trade["side"] == "BUY"),
+                "sells": sum(1 for trade in trades if trade["side"] == "SELL")}
 
 
 def final_validation(research_dir: str | Path) -> dict[str, dict[str, object]]:

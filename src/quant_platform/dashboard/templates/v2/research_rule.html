@@ -18,7 +18,7 @@
   </div>
   <ul class="reasons">{% for line in rule.description %}<li>{{ line }}</li>{% endfor %}</ul>
   {% if rule.forward %}
-  <p class="small" style="margin:10px 0 0">前向觀察：{{ rule.forward.since }} 起、已記錄 {{ rule.forward.sessions }} 個交易日{% if rule.forward.sessions %}，資產 {{ '{:,.0f}'.format(rule.forward.value) }} 元、同樣的錢買 0050 {{ '{:,.0f}'.format(rule.forward.benchmark_value) }} 元{% endif %}（<a href="/research?tab=forward">看持股與交易</a>）。</p>
+  <p class="small" style="margin:10px 0 0">前向觀察：{{ rule.forward.since }} 起、已記錄 {{ rule.forward.sessions }} 個交易日{% if rule.forward.sessions %}，資產 {{ '{:,.0f}'.format(rule.forward.value) }} 元、同樣的錢買 0050 {{ '{:,.0f}'.format(rule.forward.benchmark_value) }} 元{% endif %}（<a href="/research/forward/{{ rule.spec_hash }}">看持股與每一筆交易</a>）。</p>
   {% endif %}
 </section>
 
@@ -59,7 +59,19 @@
   {% else %}
   <p class="muted small">這次回測在 2026-10-04 之前跑的，沒有存逐月資產；只有逐年差距。</p>
   {% endif %}
-  {% if run.yearly %}
+  {% if run.returns %}
+  <div class="table-wrap" style="margin-top:10px">
+    <table>
+      <thead><tr><th>年</th>{% for year, item in run.returns.items() %}<th class="num">{{ year }}{% if item.months < 12 %}<span class="muted small">（{{ item.months }} 個月）</span>{% endif %}</th>{% endfor %}</tr></thead>
+      <tbody>
+        <tr><td>這個規則</td>{% for year, item in run.returns.items() %}<td class="num {{ 'up' if item.strategy > item.benchmark else 'down' }}">{{ '{:+.0%}'.format(item.strategy) }}</td>{% endfor %}</tr>
+        <tr><td>同樣的錢買 0050</td>{% for year, item in run.returns.items() %}<td class="num">{{ '{:+.0%}'.format(item.benchmark) }}</td>{% endfor %}</tr>
+        {% if run.yearly %}<tr><td>差距（百分點）</td>{% for year, value in run.yearly.items() %}<td class="num {{ 'up' if value > 0 else ('down' if value < 0 else '') }}">{{ '%+.0f' % (value * 100) }}</td>{% endfor %}</tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">每年的報酬扣掉當月投入的錢（每月 5 日投入，算作那個月投入了八成時間），各月連乘；綠色＝那一年贏 0050。差距是各月「規則淨值報酬 − 0050 淨值報酬」相加。</p>
+  {% elif run.yearly %}
   <div class="table-wrap" style="margin-top:10px">
     <table>
       <thead><tr><th>年</th>{% for year in run.yearly %}<th class="num">{{ year }}</th>{% endfor %}</tr></thead>

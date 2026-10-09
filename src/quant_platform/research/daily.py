@@ -587,11 +587,20 @@ def _excess(run: RunResult, benchmark: RunResult) -> float:
 def window_stats(data: LegacyData, rule: DailyRule, costs: CostModel, ranks: dict[date, list[str]], months: int,
                  start: date, end: date, cache: dict, weights: dict | None = None,
                  parked: set[date] | None = None) -> dict[str, object]:
+    return account_windows(
+        data, lambda first, last: simulate_daily(data, rule, costs, first, last, ranks, weights=weights, parked=parked),
+        costs, months, start, end, cache)
+
+
+def account_windows(data: LegacyData, account, costs: CostModel, months: int, start: date, end: date,
+                    cache: dict) -> dict[str, object]:
+    """Rolling windows of ``months`` from every month start: ``account(first, last)`` (a fresh account of
+    the owner's cash flow) against the same money in 0050."""
     excesses = []
     for first in _month_starts(data.sessions, start, end, months):
         total = first.year * 12 + first.month - 1 + months
         last = date(total // 12, total % 12 + 1, 1) - timedelta(days=1)
-        run = simulate_daily(data, rule, costs, first, last, ranks, weights=weights, parked=parked)
+        run = account(first, last)
         if (first, last) not in cache:
             cache[(first, last)] = simulate_daily(data, None, costs, first, last)
         if run.contributed:
@@ -656,29 +665,40 @@ def tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
 
 def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel,
              benchmark_cache: dict | None = None) -> dict[str, object]:
-    cache = benchmark_cache if benchmark_cache is not None else {}
     ranks = daily_rankings(fp, rule, RECENT_START, RECENT_END)
     weights, parked = daily_weights(fp, rule, ranks), account_parking(data, fp, rule, costs)
     first = next((day for day in sorted(ranks) if ranks[day]), RECENT_START)
-    run = simulate_daily(data, rule, costs, first, RECENT_END, ranks, weights=weights, parked=parked)
+
+    def account(start: date, end: date) -> RunResult:
+        return simulate_daily(data, rule, costs, start, end, ranks, weights=weights, parked=parked)
+
+    report = account_report(data, account, first, costs, benchmark_cache)
+    report["parked_sessions"] = len([day for day in parked or () if first <= day <= RECENT_END])
+    return {"engine": ENGINE_VERSION, "spec": rule.canonical(), "rule_hash": rule.rule_hash, "label": rule.label, **report}
+
+
+def account_report(data: LegacyData, account, first: date, costs: CostModel,
+                   benchmark_cache: dict | None = None) -> dict[str, object]:
+    """What every account is judged by: ``account(start, end)`` runs the owner's cash flow from ``start``.
+    From ``first`` and from 2020-10, the rolling windows, the monthly gaps, the activity and the curve,
+    each against the same money in 0050."""
+    cache = benchmark_cache if benchmark_cache is not None else {}
+    run = account(first, RECENT_END)
     benchmark = simulate_daily(data, None, costs, first, RECENT_END)
-    regime_run = simulate_daily(data, rule, costs, REGIME_START, RECENT_END, ranks, weights=weights, parked=parked)
+    regime_run = account(REGIME_START, RECENT_END)
     regime_benchmark = simulate_daily(data, None, costs, REGIME_START, RECENT_END)
     yearly: dict[str, float] = {}
     active = _monthly_active(run, benchmark)
     for month, value in active.items():
         yearly[month[:4]] = yearly.get(month[:4], 0.0) + value
     return {
-        "engine": ENGINE_VERSION, "spec": rule.canonical(), "rule_hash": rule.rule_hash, "label": rule.label,
         "start": first.isoformat(), "end": RECENT_END.isoformat(),
         "strategy": run.summary(), "benchmark": benchmark.summary(),
         "full_period_excess": round(_excess(run, benchmark), 6),
         "since_2020": {"start": REGIME_START.isoformat(), "strategy": regime_run.summary(),
                        "benchmark": regime_benchmark.summary(), "excess": round(_excess(regime_run, regime_benchmark), 6)},
-        "windows": {key: window_stats(data, rule, costs, ranks, months, first, RECENT_END, cache.setdefault(key, {}),
-                                      weights, parked)
+        "windows": {key: account_windows(data, account, costs, months, first, RECENT_END, cache.setdefault(key, {}))
                     for key, months in WINDOWS.items()},
-        "parked_sessions": len([day for day in parked or () if first <= day <= RECENT_END]),
         "monthly_active_returns": active, "yearly": {year: round(value, 4) for year, value in sorted(yearly.items())},
         "activity": activity(run), "curve": curve(run, benchmark),
     }
@@ -776,45 +796,66 @@ def fingerprint(history: str | Path, universe: str = "twse") -> str:
 def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, reports_dir: Path, costs: CostModel,
               data: LegacyData, fp: FactorPanel, data_fingerprint: str, benchmark_cache: dict | None = None,
               stamp: str | None = None) -> tuple[object, dict]:
-    plan = {"kind": "SeedPlan", "initial": SeedPlan().initial, "monthly_amount": SeedPlan().monthly_amount,
-            "day_of_month": 5}
     payload = {"rule": rule.canonical(), "period": PERIOD, "costs": costs.as_dict(), "data": data_fingerprint,
-               "engine": ENGINE_VERSION, "plan": plan}
-    if any(name in STATEMENT_FACTORS for name in rule.factors):  # the statements are part of the input
+               "engine": ENGINE_VERSION, "plan": SEED_PLAN}
+    payload.update(input_digests(history, list(rule.factors), rule.exit_model != "none"))
+    return record_trial(registry, reports_dir, rule.rule_hash, rule.name, payload,
+                        lambda: evaluate(data, fp, rule, costs, benchmark_cache), data_fingerprint, "daily", ENGINE_VERSION,
+                        stamp)
+
+
+SEED_PLAN = {"kind": "SeedPlan", "initial": SeedPlan().initial, "monthly_amount": SeedPlan().monthly_amount,
+             "day_of_month": 5}
+
+
+def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool) -> dict[str, object]:
+    """The files besides prices a run reads, as part of its input: statements, the exit models, the
+    trained factor models."""
+    payload: dict[str, object] = {}
+    if any(name in STATEMENT_FACTORS for name in factor_names):  # the statements are part of the input
         from quant_platform.research.fundamentals import digest as statements_digest
 
         payload["statements"] = statements_digest(history, RECENT_END)
-    if rule.exit_model != "none":                              # C1b: the exit models are part of the input
+    if uses_exit:                                              # C1b: the exit models are part of the input
         from quant_platform.research.exits import digest as exits_digest
         from quant_platform.research.exits import exits_dir
 
         payload["exit"] = exits_digest(exits_dir(history))
-    if any(name in MODEL_FACTORS for name in rule.factors):     # R15-B: the trained models are part of the input
+    if any(name in MODEL_FACTORS for name in factor_names):     # R15-B: the trained models are part of the input
         from quant_platform.research.model import MODELS, digest, model_dir
 
-        used = [name for name in rule.factors if name in MODEL_FACTORS]
+        used = [name for name in factor_names if name in MODEL_FACTORS]
         if used == ["ml_gbm"]:                   # the form the gbm-1.0.0 trials were registered with
             payload["model"] = {"version": MODELS["ml_gbm"]["version"],
                                 "digest": digest(model_dir(history, MODELS["ml_gbm"]["version"]))}
         else:
             payload["model"] = {name: {"version": MODELS[name]["version"],
                                        "digest": digest(model_dir(history, MODELS[name]["version"]))} for name in used}
+    return payload
+
+
+def record_trial(registry: TrialRegistry, reports_dir: Path, spec_hash: str, spec_name: str, payload: dict,
+                 build_report, data_fingerprint: str, family: str, engine: str,
+                 stamp: str | None = None) -> tuple[object, dict]:
+    """Register one run on the selection period: the same input (``payload``) is looked up, not rerun;
+    otherwise ``build_report()`` runs it, the report is saved and the metrics registered with the gate."""
     input_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
     existing = registry.find("candidate", PERIOD, input_hash)
     if existing is not None:
         return existing, json.loads((reports_dir / existing.report_file).read_text(encoding="utf-8"))
-    report = evaluate(data, fp, rule, costs, benchmark_cache)
+    plan = payload["plan"]
+    report = build_report()
     report["data_fingerprint"] = data_fingerprint
     report["plan"] = plan
     if "model" in payload:
         report["model"] = payload["model"]
     stamp = stamp or datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     reports_dir.mkdir(parents=True, exist_ok=True)
-    report_file = f"{PERIOD}-daily-{rule.rule_hash[:8]}-{stamp}.json"
+    report_file = f"{PERIOD}-{family}-{spec_hash[:8]}-{stamp}.json"
     (reports_dir / report_file).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     strategy, benchmark = report["strategy"], report["benchmark"]
     metrics = {
-        "engine": ENGINE_VERSION, "start": report["start"], "end": report["end"], "plan": plan,
+        "engine": engine, "start": report["start"], "end": report["end"], "plan": plan,
         "xirr": strategy["xirr"], "benchmark_xirr": benchmark["xirr"], "max_drawdown": strategy["max_drawdown"],
         "benchmark_max_drawdown": benchmark["max_drawdown"], "final_value": strategy["final_value"],
         "benchmark_final_value": benchmark["final_value"], "contributed": strategy["contributed"],
@@ -826,7 +867,7 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
         "orders_per_month": report["activity"].get("orders_per_month"),
     }
     metrics["reasons"] = gate(metrics)
-    record = registry.register(kind="candidate", period=PERIOD, spec_hash=rule.rule_hash, spec_name=rule.name,
+    record = registry.register(kind="candidate", period=PERIOD, spec_hash=spec_hash, spec_name=spec_name,
                                input_hash=input_hash, data_fingerprint=data_fingerprint, report_file=report_file,
                                metrics=metrics)
     return record, report
@@ -998,7 +1039,14 @@ def exits_batch() -> list[DailyRule]:
     return rules
 
 
+def blends_batch() -> list:
+    """2026-10-09: accounts split across strategy families (research/blend.py)."""
+    from quant_platform.research.blend import blend_batch
+
+    return blend_batch()
+
+
 BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch,
            "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch,
            "model-excess": model_excess_batch, "statements": statement_batch, "turnover": turnover_batch,
-           "exits": exits_batch}
+           "exits": exits_batch, "blends": blends_batch}

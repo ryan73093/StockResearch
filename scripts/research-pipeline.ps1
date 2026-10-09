@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -62,6 +62,15 @@ switch ($Name) {
     "rl" {
         # R15 stage C1 (2026-10-06): the RL exposure overlay on the best trend rule, walk-forward 2017 on.
         Invoke-Step "rl" @("-m", "quant_platform.research", "rl", "--broker", "cathay", "--rl-version", "rl-overlay-1.1.0")
+    }
+    "blends" {
+        # 2026-10-09: accounts split across strategy families (research/blend.py), then the statistics.
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "blends", "--broker", "cathay")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "rl-sleeves" {
+        # R15 stage C3 (2026-10-09): the RL allocator across the model rule, the trend rule and 0050.
+        Invoke-Step "rl" @("-m", "quant_platform.research", "rl-sleeves", "--broker", "cathay")
     }
     "execution" {
         # R4 (2026-10-07): the tracked rules' stock orders against the cached odd-lot auctions.
