@@ -1164,6 +1164,13 @@ def large_cap_batch() -> list:
     return large()
 
 
+def large_cap_second_batch() -> list:
+    """2026-10-09: three more large-cap rules (research/blend.py ``large_cap_second_batch``)."""
+    from quant_platform.research.blend import large_cap_second_batch as second
+
+    return second()
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1176,4 +1183,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "model-excess": model_excess_batch, "statements": statement_batch, "turnover": turnover_batch,
            "exits": exits_batch, "blends": blends_batch, "model-60": model_60_batch,
            "t0hunt": t0_hunt_batch, "lowdd": low_drawdown_batch,
-           "volscale": vol_scale_batch, "largecap": large_cap_batch}
+           "volscale": vol_scale_batch, "largecap": large_cap_batch,
+           "largecap2": large_cap_second_batch}

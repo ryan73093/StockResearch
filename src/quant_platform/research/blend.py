@@ -292,6 +292,27 @@ def large_cap_batch() -> list:
                       sleeves=(Sleeve(rule=model, share=0.5), Sleeve(rule=trend, share=0.5)))]
 
 
+def large_cap_second_batch() -> list:
+    """2026-10-09, after the first large-cap batch (trend among the 100 largest: +293%, drawdown -44%, a
+    third of the costs; the model and the trend rule half each: drawdown -39.2%, 0.2 points past the gate).
+    Fixed in advance, one hypothesis each, all 100% stocks among the 100 largest, top 20, at most 3 in 10
+    from one industry: (1) the best full-market configuration, trend weighted by calmness, moved to the
+    large caps (does the universe help the champion?); (2) trend confirmed by revenue growth (a price and a
+    fundamental factor, both strong); (3) one list scored on trend and the model together (stocks both
+    signals agree on, instead of two lists side by side)."""
+    from quant_platform.research.daily import DailyRule
+
+    common = {"industry_cap": 0.3, "large_caps": LARGE_CAPS}
+    return [
+        DailyRule(name="大型股（市值前 100）站上 200 日均線：前 20 名、同產業最多 3 成、依波動度配置",
+                  factors={"trend_200": 1.0}, weighting="inverse_vol", **common),
+        DailyRule(name="大型股（市值前 100）站上 200 日均線＋月營收年增：前 20 名、同產業最多 3 成",
+                  factors={"trend_200": 1.0, "revenue_yoy": 1.0}, **common),
+        DailyRule(name="大型股（市值前 100）站上 200 日均線＋機器學習 同時排名：前 20 名、同產業最多 3 成、每週決策",
+                  factors={"trend_200": 1.0, "ml_gbm_statements": 1.0}, check="weekly", **common),
+    ]
+
+
 def blend_batch() -> list[BlendRule]:
     """Fixed in advance: the weekly model rule and the volatility-weighted trend rule (both T1 alone), half
     each, a quarter each with half in 0050, and a third each with a third in 0050."""
