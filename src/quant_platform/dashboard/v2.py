@@ -72,6 +72,7 @@ DOCS = {
     "line": ("LINE 設定", "docs/line-notifications.md"),
     "research_method": ("研究方法", "docs/research_method.md"),
     "ai_methods": ("AI 方法評估", "reports/AI 交易方法 實證與架構.md"),
+    "taiwan_quant": ("台股量化做法", "reports/台股量化 開源專案與實證.md"),
 }
 JOB_LABELS = {
     "daily_market_data": "日線行情",

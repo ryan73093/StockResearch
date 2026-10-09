@@ -48,9 +48,11 @@ PARAMS = {"max_iter": 300, "learning_rate": 0.05, "max_leaf_nodes": 31, "min_sam
 
 
 def features() -> tuple[str, ...]:
-    from quant_platform.research.daily import FACTOR_LABELS
+    """The model's inputs: every rule factor except the 2026-10-10 trend-quality ones, which a later model
+    version would add on purpose (a saved version keeps its own list, ``trained_features``)."""
+    from quant_platform.research.daily import FACTOR_LABELS, TREND_QUALITY
 
-    return tuple(FACTOR_LABELS)
+    return tuple(name for name in FACTOR_LABELS if name not in TREND_QUALITY)
 
 
 def models_root(history: str | Path) -> Path:

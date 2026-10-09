@@ -252,6 +252,7 @@ def test_every_project_document_exists(client):
     missing = [path for _label, path in DOCS.values() if not Path(path).is_file()]
     assert missing == []
     assert "樣本外" in client.get("/system/docs/ai_methods").get_json()["markdown"]
+    assert "營收" in client.get("/system/docs/taiwan_quant").get_json()["markdown"]
 
 
 def test_news_tab_categories_and_the_ai_researcher_card(client):

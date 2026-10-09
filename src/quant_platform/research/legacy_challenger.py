@@ -118,6 +118,9 @@ class LegacyData:
     factors: dict[str, dict[date, float]]               # units multiplier at that session's open
     predictions: dict[date, dict[str, float]]            # decision session → symbol → predicted return
     notes: dict[str, object] = field(default_factory=dict)
+    # 2026-10-10: raw opening prices (same-day close / open is the intraday return, daily.py ``imom_12``);
+    # empty where the source has none.
+    opens: dict[str, dict[date, float]] = field(default_factory=dict)
 
     def last_close(self, symbol: str, day: date) -> float | None:
         series = self.closes.get(symbol, {})

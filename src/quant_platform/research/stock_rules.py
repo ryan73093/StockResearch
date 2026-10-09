@@ -151,11 +151,14 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
     base = Path(base)
     closes: dict[str, dict[date, float]] = {}
     traded: dict[str, dict[date, float]] = {}
+    opens: dict[str, dict[date, float]] = {}
     for year in range(first_year, last_year + 1):
         for row in read_year(base / "stocks" / "twse" / f"{year}.parquet"):
             symbol = f"{row['code']}.TW"
             closes.setdefault(symbol, {})[row["date"]] = float(row["close"])
             traded.setdefault(symbol, {})[row["date"]] = float(row["turnover"] or 0)
+            if row.get("open"):
+                opens.setdefault(symbol, {})[row["date"]] = float(row["open"])
     moved: dict[str, date] = {}
     if "tpex" in UNIVERSES[universe]:
         first_listed = {symbol: min(series) for symbol, series in closes.items()}
@@ -168,6 +171,8 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
                     moved[code] = listed
                 closes.setdefault(symbol, {})[day] = float(row["close"])
                 traded.setdefault(symbol, {})[day] = float(row["turnover"] or 0)
+                if row.get("open"):
+                    opens.setdefault(symbol, {})[day] = float(row["open"])
     benchmark = {row["date"]: float(row["close"]) for row in read_series(base / "daily" / "0050.parquet")
                  if row["close"] and first_year <= row["date"].year <= last_year}
     closes[BENCHMARK] = benchmark
@@ -182,7 +187,8 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
     sessions = sorted(row["date"] for row in read_series(base / "daily" / "TAIEX.parquet")
                       if first_year <= row["date"].year <= last_year)
     return LegacyData(sessions=sessions, closes=closes, traded_value=traded, factors=factors, predictions={},
-                      notes={"symbols": len(closes) - 1, "years": [first_year, last_year], "universe": universe})
+                      notes={"symbols": len(closes) - 1, "years": [first_year, last_year], "universe": universe},
+                      opens=opens)
 
 
 def _year_digest(path: Path, until: date | None) -> str:
@@ -252,7 +258,13 @@ class Panel:
         self.turnover = np.full((len(symbols), count), np.nan)
         self.cash = np.zeros((len(symbols), count))      # cash dividend per unit on its ex-date
         self.first = np.full(len(symbols), count)
+        self.open = np.full((len(symbols), count), np.nan)   # raw opens (2026-10-10), NaN where unknown
+        opens = getattr(data, "opens", None) or {}
         for row, symbol in enumerate(symbols):
+            for day, value in opens.get(symbol, {}).items():
+                position = self.index.get(day)
+                if position is not None and value > 0:
+                    self.open[row, position] = value
             growth = 1.0
             factors = data.factors.get(symbol, {})
             for day, close in sorted(data.closes[symbol].items()):

@@ -80,7 +80,17 @@ from quant_platform.research.chips import CHIP_FACTORS, EVENT_FACTORS, ChipStore
 from quant_platform.research.fundamentals import STATEMENT_FACTORS, FundamentalStore
 
 # 2026-10-06: five quarterly statement factors (research/fundamentals.py), dated by the filing deadline
-FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS, **EVENT_FACTORS}
+# 2026-10-10 (Taiwan-quant review, reports/台股量化 開源專案與實證.md): three trend-quality measures over the
+# 12 months before the last one (sessions -251..-21): how continuous the move was (Da, Gurun & Warachka
+# 2014), the part earned inside the trading day (Taiwan: intraday momentum persists, overnight reverses),
+# and the part not shared with the stock's industry (residual momentum, Blitz et al. 2011).
+TREND_QUALITY = {
+    "fip_12": "趨勢連續性（12 個月扣最近 1 個月：上漲日比例減下跌日比例，依方向）",
+    "imom_12": "日內動能（12 個月扣最近 1 個月：開盤到收盤的累積報酬）",
+    "resid_mom_12": "產業殘差動能（12 個月扣最近 1 個月：扣掉同產業平均後的累積報酬÷其標準差）",
+}
+QUALITY_WINDOW, QUALITY_SKIP = 231, 21
+FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS, **EVENT_FACTORS, **TREND_QUALITY}
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
 MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
                  "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
@@ -96,7 +106,7 @@ class DailyRule(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     factors: dict[str, float] = Field(min_length=1, max_length=4)   # factor -> weight; negative reverses
     top: int = Field(default=20, ge=3, le=50)
-    check: Literal["daily", "weekly", "monthly"] = "daily"
+    check: Literal["daily", "weekly", "monthly", "revenue"] = "daily"    # revenue: after the 10th (2026-10-10)
     keep: int = Field(default=3, ge=1, le=5)
     min_hold: int = Field(default=20, ge=0, le=250)                 # sessions
     core: float = Field(default=0.0, ge=0.0, le=0.9)                # share of the account in 0050
@@ -142,6 +152,10 @@ class DailyRule(BaseModel):
     # the picks still get equal amounts, so no stock is held at its market-value share. 0 = no limit, left
     # out of the hash.
     large_caps: int = Field(default=0, ge=0, le=300)
+    # 2026-10-10: "v1" = no new buys of lottery-like stocks — the stocks in the top fifth by 60-session
+    # idiosyncratic volatility (against TAIEX) or the top tenth by the largest one-day gain in 21
+    # sessions; holdings are kept by the usual rules. Left out of the hash when "none".
+    exclude: Literal["none", "v1"] = "none"
 
     @field_validator("factors")
     @classmethod
@@ -177,6 +191,8 @@ class DailyRule(BaseModel):
             data.pop("vol_scale", None)
         if not data.get("large_caps"):
             data.pop("large_caps", None)
+        if data.get("exclude") == "none":
+            data.pop("exclude", None)
         return data
 
     @property
@@ -309,7 +325,82 @@ class FactorPanel:
             return ((p - (mean - 2 * deviation)) / (4 * deviation)).to_numpy()
         if factor == "breakout_55":
             return (p / p.rolling(55).max()).to_numpy()
+        if factor in TREND_QUALITY:
+            return self._trend_quality(factor)
         raise ValueError(factor)
+
+    def _trend_quality(self, factor: str) -> np.ndarray:
+        """sessions × symbols; every value uses sessions -251..-21 only (TREND_QUALITY)."""
+        p = self._prices
+        returns = p.pct_change(fill_method=None)
+        window, skip = QUALITY_WINDOW, QUALITY_SKIP
+        if factor == "fip_12":
+            up = (returns > 0).astype(float).where(returns.notna())
+            down = (returns < 0).astype(float).where(returns.notna())
+            balance = (up.rolling(window, min_periods=window // 2).mean()
+                       - down.rolling(window, min_periods=window // 2).mean())
+            direction = np.sign(p / p.shift(window) - 1)
+            return (direction * balance).shift(skip).to_numpy()
+        if factor == "imom_12":
+            with np.errstate(divide="ignore", invalid="ignore"):
+                intraday = pd.DataFrame(np.log(self.panel.close / self.panel.open).T)
+            return intraday.rolling(window, min_periods=window // 2).sum().shift(skip).to_numpy()
+        # resid_mom_12: the day's return minus its industry's equal-weighted average (TAIEX's, or every
+        # stock's without it, when the industry has fewer than five stocks that day)
+        values = returns.to_numpy()
+        if self.market is not None:
+            market = pd.Series(self.market).pct_change(fill_method=None).to_numpy()
+        else:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                market = np.nanmean(values, axis=1)
+        residual = values - market[:, None]
+        groups: dict[str, list[int]] = defaultdict(list)
+        for column, symbol in enumerate(self.symbols):
+            groups[self.industry(symbol)].append(column)
+        for columns in groups.values():
+            block = values[:, columns]
+            known = np.isfinite(block).sum(axis=1)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                average = np.nanmean(block, axis=1)
+            usable = known >= 5
+            residual[np.ix_(usable, columns)] = block[usable] - average[usable, None]
+        frame = pd.DataFrame(residual)
+        total = frame.rolling(window, min_periods=window // 2).sum()
+        spread = frame.rolling(window, min_periods=window // 2).std()
+        return (total / spread.where(spread > 0)).shift(skip).to_numpy()
+
+    def excluded(self, position: int) -> set[str]:
+        """exclude "v1": the traded stocks in the top fifth by 60-session idiosyncratic volatility or the
+        top tenth by their largest one-day gain in 21 sessions, at ``position``."""
+        if "__ivol__" not in self._cache:
+            returns = self._prices.pct_change(fill_method=None)
+            if self.market is not None:
+                market = pd.Series(self.market).pct_change(fill_method=None)
+            else:
+                market = returns.mean(axis=1)
+            window, least = 60, 40
+            mean_r = returns.rolling(window, min_periods=least).mean()
+            mean_m = market.rolling(window, min_periods=least).mean()
+            cross = returns.mul(market, axis=0).rolling(window, min_periods=least).mean()
+            variance_m = (market ** 2).rolling(window, min_periods=least).mean() - mean_m ** 2
+            variance_r = (returns ** 2).rolling(window, min_periods=least).mean() - mean_r ** 2
+            covariance = cross - mean_r.mul(mean_m, axis=0)
+            beta = covariance.div(variance_m.where(variance_m > 0), axis=0)
+            residual = variance_r - (beta ** 2).mul(variance_m, axis=0)
+            self._cache["__ivol__"] = np.ascontiguousarray(np.sqrt(residual.clip(lower=0)).to_numpy(dtype=np.float32).T)
+            self._cache["__max21__"] = np.ascontiguousarray(returns.rolling(21).max().to_numpy(dtype=np.float32).T)
+        base = np.isfinite(self.panel.close[:, position]) & (self.age[:, position] >= 60)
+        output: set[str] = set()
+        for key, share in (("__ivol__", 0.2), ("__max21__", 0.1)):
+            column = self._cache[key][:, position]
+            known = base & np.isfinite(column)
+            if known.sum() < 10:
+                continue
+            threshold = np.quantile(column[known], 1 - share)
+            output |= {self.symbols[row] for row in np.flatnonzero(known & (column >= threshold))}
+        return output
 
     def industry(self, symbol: str) -> str:
         return self.industries.get(symbol.split(".")[0], "未分類")
@@ -388,6 +479,18 @@ def check_days(sessions: list[date], check: str) -> set[date]:
                 seen.add(week)
                 output.add(day)
         return output
+    if check == "revenue":
+        # 2026-10-10: once a month after every monthly revenue is public. The deadline is the 10th, moved to
+        # the next session when it is not one; decide on the session after it.
+        output: set[date] = set()
+        by_month: dict[tuple[int, int], list[date]] = defaultdict(list)
+        for day in sessions:
+            if day.day >= 10:
+                by_month[(day.year, day.month)].append(day)
+        for days in by_month.values():
+            if len(days) >= 2:
+                output.add(sorted(days)[1])
+        return output
     return {day for day, _amount in STANDARD_PLAN.schedule(sessions, sessions[0], sessions[-1])} if sessions else set()
 
 
@@ -449,6 +552,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
                 counts[fp.industry(symbol)] += 1
         chosen = []
         vetoed = fp.news_vetoed(position) if getattr(rule, "news_veto", "none") == "v1" else set()
+        if getattr(rule, "exclude", "none") == "v1":
+            vetoed = vetoed | fp.excluded(position)       # no new buys; holdings keep their usual rules
         for symbol in ranked:
             if len(kept) + len(chosen) >= rule.top:
                 break
@@ -1171,6 +1276,34 @@ def large_cap_second_batch() -> list:
     return second()
 
 
+def evidence_batch() -> list[DailyRule]:
+    """2026-10-10, registered before any of the new factors' strength was looked at: the six ideas ranked
+    by the Taiwan-quant review (reports/台股量化 開源專案與實證.md), all 100% stocks, top 20, at most 3 in 10
+    from one industry. (1) the revenue calendar: trend plus 3-month revenue growth, deciding once a month
+    after every revenue is public, on the T0 candidate's frame; (2) trend plus its continuity, equal
+    amounts (run only if continuity is not just calmness: see the design check in research_method);
+    (3) intraday momentum on the T0 candidate's frame; (4) industry-residual momentum, equal amounts;
+    (5) the full-market trend rule refusing lottery-like stocks; (6) a four-factor score like FinLab's
+    published one (revenue, 6-month momentum, ROE, calmness) on the revenue calendar — calibrating how much
+    a public backtest shrinks on this engine."""
+    large = {"industry_cap": 0.3, "large_caps": 100}
+    return [
+        DailyRule(name="大型股（市值前 100）站上 200 日均線＋近 3 個月營收年增：前 20 名、同產業最多 3 成、營收公布後換股、依波動度配置",
+                  factors={"trend_200": 1.0, "revenue_yoy_3m": 1.0}, check="revenue", weighting="inverse_vol", **large),
+        DailyRule(name="大型股（市值前 100）站上 200 日均線＋趨勢連續性：前 20 名、同產業最多 3 成、每檔等額",
+                  factors={"trend_200": 1.0, "fip_12": 1.0}, **large),
+        DailyRule(name="大型股（市值前 100）日內動能：前 20 名、同產業最多 3 成、依波動度配置",
+                  factors={"imom_12": 1.0}, weighting="inverse_vol", **large),
+        DailyRule(name="大型股（市值前 100）產業殘差動能：前 20 名、同產業最多 3 成、每檔等額",
+                  factors={"resid_mom_12": 1.0}, **large),
+        DailyRule(name="每天 站上 200 日均線：前 20 名、同產業最多 3 成、依波動度配置、不買樂透型股票",
+                  factors={"trend_200": 1.0}, industry_cap=0.3, weighting="inverse_vol", exclude="v1"),
+        DailyRule(name="四因子 近 3 個月營收年增＋6 個月動能＋ROE＋60 日低波動：前 20 名、同產業最多 3 成、營收公布後換股",
+                  factors={"revenue_yoy_3m": 1.0, "momentum_6": 1.0, "roe_ttm": 1.0, "low_volatility_60": 1.0},
+                  check="revenue", industry_cap=0.3),
+    ]
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1184,4 +1317,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "exits": exits_batch, "blends": blends_batch, "model-60": model_60_batch,
            "t0hunt": t0_hunt_batch, "lowdd": low_drawdown_batch,
            "volscale": vol_scale_batch, "largecap": large_cap_batch,
-           "largecap2": large_cap_second_batch}
+           "largecap2": large_cap_second_batch, "evidence": evidence_batch}

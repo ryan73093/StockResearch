@@ -12,7 +12,7 @@ from __future__ import annotations
 
 FAMILY_FACTORS = {
     "趨勢動能": ("trend_200", "momentum_12_1", "momentum_6", "momentum_3", "high_52w", "breakout_55",
-                 "ma_cross_20_60", "macd_hist", "rsi_14", "kd_k", "bollinger_b"),
+                 "ma_cross_20_60", "macd_hist", "rsi_14", "kd_k", "bollinger_b", "fip_12", "imom_12", "resid_mom_12"),
     "反轉": ("reversal_1", "reversal_5d"),
     "低波動": ("low_volatility_60", "low_volatility_250", "low_max_return"),
     "價值殖利率": ("dividend_yield", "earnings_yield", "book_to_price"),
@@ -76,13 +76,16 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
             family = families[0] if families else "其他"
         traits.append(_core(float(spec.get("core") or 0)))
         check = spec.get("check") or spec.get("rebalance")
-        traits.append({"weekly": "每週決策", "monthly": "每月決策", "quarterly": "每季決策"}.get(str(check), "每天決策"))
+        traits.append({"weekly": "每週決策", "monthly": "每月決策", "quarterly": "每季決策",
+                       "revenue": "營收公布後每月決策"}.get(str(check), "每天決策"))
         if spec.get("weighting") == "inverse_vol":
             traits.append("依波動度配置")
         if spec.get("industry_cap"):
             traits.append("產業上限")
         if spec.get("universe") == "all":
             traits.append("上市＋上櫃")
+        if spec.get("exclude") not in (None, "none"):
+            traits.append("不買樂透型股票")
         if spec.get("large_caps"):               # equal amounts unless weighted by calmness (its own trait)
             equal = spec.get("weighting", "equal") == "equal"
             traits.append(f"只挑市值前 {spec['large_caps']} 大" + ("、每檔等額" if equal else ""))

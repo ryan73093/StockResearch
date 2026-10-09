@@ -47,7 +47,8 @@ def test_walk_forward_models_never_see_the_year_they_score_and_find_the_planted_
         first = next(index for index, day in enumerate(fp.sessions) if day.year == year)
         assert all(column + model.HORIZON < first for column in model.training_columns(fp, samples, year))
     meta = model.train(fp, tmp_path, "data:x", [2015, 2016])
-    assert set(meta["years"]) == {"2015", "2016"} and meta["features"] == list(FACTOR_LABELS)
+    assert set(meta["years"]) == {"2015", "2016"} and meta["features"] == list(model.features())
+    assert len(model.features()) == len(FACTOR_LABELS) - 3                 # not the 2026-10-10 trend quality
     assert meta["years"]["2015"]["train_until"] < "2015-01-01"
     assert all(meta["years"][year]["ic"] > 0.1 and meta["years"][year]["ic_positive"] > 0.9 for year in ("2015", "2016"))
     assert all(meta["years"][year]["top_fifth_rank_gap"] > 0.05 for year in ("2015", "2016"))
