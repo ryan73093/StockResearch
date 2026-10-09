@@ -38,7 +38,7 @@ class BlendRule(BaseModel):
 
     kind: Literal["blend"] = "blend"
     name: str = Field(min_length=1, max_length=80)
-    sleeves: tuple[Sleeve, ...] = Field(min_length=2, max_length=4)
+    sleeves: tuple[Sleeve, ...] = Field(min_length=2, max_length=30)    # 30 (2026-10-10): every T0 candidate
     core: float = Field(default=0.0, ge=0.0, le=0.9)          # share bought into 0050 as the money arrives
 
     @model_validator(mode="after")

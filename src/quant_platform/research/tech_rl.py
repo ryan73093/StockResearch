@@ -39,11 +39,17 @@ COST_IN, COST_OUT = 0.0035, 0.0065           # fee 0.1425% + slippage 0.2%; sell
 FIRST_YEAR = 2016
 SEEDS = (0, 1, 2)
 CONFIG = {"iterations": 120, "envs": 512, "episode": 60, "gamma": 0.98, "lam": 0.95, "lr": 3e-4, "clip": 0.2,
-          "epochs": 4, "minibatch": 4096, "hidden": 64, "value": 0.5, "entropy": 0.01, "threads": 4}
+          "epochs": 4, "minibatch": 4096, "hidden": 64, "value": 0.5, "entropy": 0.01, "threads": 4, "step": 1}
+# 1.0.0 decided every session on the next session's excess: the reward was mostly noise and the robot
+# learned to stay out (training reward about 0, out-of-sample excess ±0.02% a session). 1.1.0 (2026-10-10)
+# decides once a week on the next five sessions' excess (half-year games of 26 decisions) and trains on
+# about twice as many decisions; the rule built on it decides weekly too.
+VERSIONS = {"tech-rl-1.0.0": {},
+            "tech-rl-1.1.0": {"step": 5, "episode": 26, "iterations": 300, "envs": 1024, "gamma": 0.9}}
 
 
-def tech_dir(history: str | Path) -> Path:
-    return Path(history).parent / "models" / TECH_VERSION
+def tech_dir(history: str | Path, version: str = TECH_VERSION) -> Path:
+    return Path(history).parent / "models" / version
 
 
 class Board:
@@ -127,8 +133,8 @@ def train_policy(board: Board, low: int, high: int, seed: int, config: dict | No
     policy, critic = _networks(config["hidden"])
     parameters = list(policy.parameters()) + list(critic.parameters())
     optimiser = torch.optim.Adam(parameters, lr=config["lr"])
-    length, envs = config["episode"], config["envs"]
-    starts_day, starts_symbol = np.nonzero(board.eligible[low: max(low + 1, high - length - 1)])
+    length, envs, stride = config["episode"], config["envs"], config.get("step", 1)
+    starts_day, starts_symbol = np.nonzero(board.eligible[low: max(low + 1, high - length * stride - 1)])
     if len(starts_day) == 0:
         raise ValueError("訓練期間沒有合格股票")
     starts_day = starts_day + low
@@ -150,17 +156,18 @@ def train_policy(board: Board, low: int, high: int, seed: int, config: dict | No
                 estimate = critic(torch.from_numpy(state)).squeeze(-1)
             want = (action.numpy() == 1) & board.eligible[day, symbol]
             cost = np.where(want & ~held, COST_IN, 0.0) + np.where(~want & held, COST_OUT, 0.0)
-            reward = np.where(want, board.excess[day, symbol], 0.0) - cost
+            earned = sum(board.excess[np.minimum(day + offset, high - 2), symbol] for offset in range(stride))
+            reward = np.where(want, earned, 0.0) - cost
             entry = np.where(want & ~held, price, entry)
             peak = np.where(want & ~held, price, peak)
-            held_n = np.where(want, np.where(held, held_n + 1, 1), 0)
+            held_n = np.where(want, np.where(held, held_n + stride, stride), 0)
             held = want
             observations.append(state)
             actions.append(action.numpy())
             logps.append(distribution.log_prob(action).numpy())
             rewards.append(reward)
             values.append(estimate.numpy())
-            day = np.minimum(day + 1, high - 1)
+            day = np.minimum(day + stride, high - 1)
             peak = np.where(held, np.maximum(peak, board.prices[day, symbol]), peak)
         rewards_ = np.array(rewards) * 100                       # daily log excess is small: scale for learning
         history.append(float(np.array(rewards).sum(axis=0).mean()))
@@ -257,12 +264,12 @@ class TechAgent:
     """The exit side in the engine: sell a holding when the agent, seeing its position, wants out; refuse
     new buys of stocks it does not want."""
 
-    def __init__(self, fp, folder: str | Path) -> None:
+    def __init__(self, fp, folder: str | Path, factor: str = "rl_tech") -> None:
         self.fp = fp
         self.policies = load_policies(Path(folder))
         self.board = shared_board(fp) if self.policies else None
         self.years = sorted(self.policies)
-        self._score = fp.matrix("rl_tech").T if self.policies else None     # sessions × symbols
+        self._score = fp.matrix(factor).T if self.policies else None        # sessions × symbols
 
     def _year(self, position: int) -> int | None:
         year = self.fp.sessions[position].year
@@ -294,14 +301,15 @@ class TechAgent:
         return [symbol for symbol, value in zip(current, chance) if value < 0.5]
 
 
-def simulate_agent(board: Board, policies: list, low: int, high: int) -> dict[str, float]:
-    """Out of sample, every eligible stock at once, the agent deciding in or out each session greedily:
-    the average excess of a session it is in, the share of stock-sessions in, holding length and entries."""
+def simulate_agent(board: Board, policies: list, low: int, high: int, stride: int = 1) -> dict[str, float]:
+    """Out of sample, every eligible stock at once, the agent deciding in or out every ``stride`` sessions
+    greedily: the average excess of a session it is in, the share of stock-sessions in, holding length and
+    entries."""
     count = board.excess.shape[1]
     held = np.zeros(count, dtype=bool)
     entry, peak, held_n = np.ones(count), np.ones(count), np.zeros(count)
     earned, in_sessions, entries, exits_, lengths = 0.0, 0, 0, 0, []
-    for day in range(low, high):
+    for day in range(low, high, stride):
         live = board.eligible[day]
         rows = np.flatnonzero(live | held)
         if not len(rows):
@@ -317,11 +325,14 @@ def simulate_agent(board: Board, policies: list, low: int, high: int) -> dict[st
         exits_ += int(gone.sum())
         lengths.extend(held_n[rows][gone].tolist())
         entry[rows[new]], peak[rows[new]] = price[new], price[new]
-        held_n[rows] = np.where(want, held_n[rows] + 1, 0)
+        held_n[rows] = np.where(want, held_n[rows] + stride, 0)
         held[rows] = want
-        earned += float(board.excess[day, rows][want].sum()) - COST_IN * int(new.sum()) - COST_OUT * int(gone.sum())
-        in_sessions += int(want.sum())
-        peak[rows] = np.where(want, np.maximum(peak[rows], board.prices[min(day + 1, board.sessions - 1), rows]), peak[rows])
+        span = range(day, min(day + stride, high))
+        earned += (float(sum(board.excess[index, rows][want].sum() for index in span))
+                   - COST_IN * int(new.sum()) - COST_OUT * int(gone.sum()))
+        in_sessions += int(want.sum()) * len(span)
+        later = min(day + stride, board.sessions - 1)
+        peak[rows] = np.where(want, np.maximum(peak[rows], board.prices[later, rows]), peak[rows])
     stock_sessions = int(board.eligible[low:high].sum())
     return {"excess_per_in_session": round(earned / in_sessions, 6) if in_sessions else None,
             "share_in": round(in_sessions / stock_sessions, 4) if stock_sessions else None,
@@ -329,11 +340,11 @@ def simulate_agent(board: Board, policies: list, low: int, high: int) -> dict[st
 
 
 def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] | None = None, job=None,
-          config: dict | None = None, seeds: tuple[int, ...] = SEEDS) -> dict[str, object]:
+          config: dict | None = None, seeds: tuple[int, ...] = SEEDS, version: str = TECH_VERSION) -> dict[str, object]:
     """Train and save the seeds' policies for every year; returns the meta with out-of-sample diagnostics."""
     import torch
 
-    config = {**CONFIG, **(config or {})}
+    config = {**CONFIG, **VERSIONS.get(version, {}), **(config or {})}
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     board = Board(fp)
@@ -343,7 +354,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
     for number, year in enumerate(years):
         start = next((index for index, day in enumerate(fp.sessions) if day.year >= year), board.sessions)
         end = next((index for index, day in enumerate(fp.sessions) if day.year > year), board.sessions)
-        if start - first_session < config["episode"] * 3:
+        if start - first_session < config["episode"] * config["step"] * 3:
             continue
         policies, curves = [], []
         for seed in seeds:
@@ -353,12 +364,13 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
             torch.save(policy.state_dict(), out / f"{year}-seed{seed}.pt")
             policies.append(policy)
             curves.append(curve)
-        check = simulate_agent(board, policies, start, max(start + 1, end - 1)) if start < board.sessions - 1 else {}
+        check = (simulate_agent(board, policies, start, max(start + 1, end - 1), config["step"])
+                 if start < board.sessions - 1 else {})
         diagnostics[str(year)] = {"trained_until": fp.sessions[start - 1].isoformat(),
                                   "training_reward_first": round(float(np.mean([curve[0] for curve in curves])), 5),
                                   "training_reward_last": round(float(np.mean([np.mean(curve[-10:]) for curve in curves])), 5),
                                   **check}
-    meta = {"version": TECH_VERSION, "features": list(TECH_FEATURES), "market": list(MARKET), "position": list(POSITION),
+    meta = {"version": version, "features": list(TECH_FEATURES), "market": list(MARKET), "position": list(POSITION),
             "costs": {"in": COST_IN, "out": COST_OUT}, "config": config, "seeds": list(seeds), "data": data_fingerprint,
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds"), "years": diagnostics}
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")

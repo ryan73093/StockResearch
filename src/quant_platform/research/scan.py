@@ -49,7 +49,7 @@ SHORT = {
     "earnings_yield": "本益比低", "book_to_price": "淨值比低", "roe_ttm": "ROE", "gross_margin": "毛利率",
     "operating_margin_change": "營益率增", "eps_growth": "EPS 成長", "low_debt": "負債低", "fip_12": "趨勢連續",
     "imom_12": "日內動能", "resid_mom_12": "殘差動能", "ml_gbm": "模型A", "ml_gbm_excess": "模型B",
-    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "rl_tech": "技術機器人",
+    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "rl_tech": "技術機器人", "rl_tech_weekly": "技術機器人週",
 }
 
 
@@ -322,6 +322,8 @@ def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 6
     ranked = sorted((row for row in rows if passes(row)), key=lambda row: -row["excess"])[:pool]
     earlier = []
     for seed in seeds or []:
+        if not set(seed["factors"]) <= set(arrays.names):   # a signal this scan's arrays do not have (a newer model)
+            continue
         _metrics, (returns, _entries) = evaluate(arrays, seed, costs)
         if np.std(returns) > 0:
             earlier.append((seed, returns))
@@ -363,29 +365,42 @@ def earlier_finalists(research: Path) -> list[dict]:
 
 
 def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 80, largest: int = 3,
-             names: list[str] | None = None, job=None, smallest: int = 1, require: str | None = None) -> dict:
-    """Both stages; returns the summary written next to the screen results."""
+             names: list[str] | None = None, job=None, smallest: int = 1, require: str | None = None,
+             resume: Path | None = None, pool: int = 600) -> dict:
+    """Both stages; returns the summary written next to the screen results. With ``resume`` (an earlier
+    scan's folder whose first stage finished) only the second stage runs, on that folder's arrays and rows."""
     from quant_platform.research import daily
     from quant_platform.research.registry import TrialRegistry
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    folder = research / "scans" / f"{SCAN_VERSION}-{stamp}"
+    folder = Path(resume) if resume else research / "scans" / f"{SCAN_VERSION}-{stamp}"
     if job:
         job.update(current="載入行情與因子", force=True)
     data, fp = daily.load(base)
     fingerprint = daily.fingerprint(base)
-    arrays = prepare(data, fp, costs, folder / "arrays")
-    items = candidates(names, largest, smallest, require)
-    if job:
-        job.update(done=0, total=len(items) + count, current=f"第一階段：{len(items):,} 個候選（2015-06～2020-09）",
-                   force=True)
     started = time.time()
-    rows = screen(folder / "arrays", items, costs, workers, folder,
-                  progress=(lambda done: job.update(done=done, current=f"第一階段：{done:,}／{len(items):,}"))
-                  if job else None)
+    if resume:
+        arrays = load_arrays(folder / "arrays")
+        rows = [json.loads(line) for path in sorted(folder.glob("screen-*.jsonl"))
+                for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        items = rows
+        sizes = sorted({len(row["factors"]) for row in rows}) or [smallest, largest]
+        smallest, largest = sizes[0], sizes[-1]
+        if job:
+            job.update(done=len(rows), total=len(rows) + count, current=f"接著跑第二階段（第一階段 {len(rows):,} 個已完成）",
+                       force=True)
+    else:
+        arrays = prepare(data, fp, costs, folder / "arrays")
+        items = candidates(names, largest, smallest, require)
+        if job:
+            job.update(done=0, total=len(items) + count, current=f"第一階段：{len(items):,} 個候選（2015-06～2020-09）",
+                       force=True)
+        rows = screen(folder / "arrays", items, costs, workers, folder,
+                      progress=(lambda done: job.update(done=done, current=f"第一階段：{done:,}／{len(items):,}"))
+                      if job else None)
     pd.DataFrame([{**row, "factors": "+".join(row["factors"])} for row in rows]).to_parquet(folder / "screen.parquet")
     seeds = earlier_finalists(research)
-    chosen = finalists(arrays, rows, costs, count, seeds=seeds)
+    chosen = finalists(arrays, rows, costs, count, pool=pool, seeds=seeds)
     registry = TrialRegistry(research / "trials.jsonl")
     cache: dict = {}
     results = []

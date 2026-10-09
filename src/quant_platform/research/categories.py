@@ -49,7 +49,7 @@ def _core(core: float) -> str:
 def _family(factor: str, weight: float) -> str:
     if factor.startswith("ml_gbm"):
         return "機器學習"
-    if factor == "rl_tech":
+    if factor.startswith("rl_tech"):
         return "技術分析機器人"
     family = FACTOR_FAMILY.get(factor, "其他")
     return OPPOSITE.get(family, family) if weight < 0 else family

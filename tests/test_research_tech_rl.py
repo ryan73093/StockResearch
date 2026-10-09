@@ -103,3 +103,17 @@ def test_the_new_model_leaves_out_monthly_revenue():
     assert not set(model.MONTHLY_REVENUE) & set(names) and {"fip_12", "imom_12", "resid_mom_12"} <= set(names)
     assert len(names) == 36 and model.VERSIONS["gbm-1.4.0"]["label"] == "excess"
     assert model.version_features("gbm-1.2.0") == model.features()
+
+
+def test_the_weekly_robot_decides_every_five_sessions(tmp_path):
+    _data, fp = trending()
+    meta = tech_rl.train(fp, tmp_path / "tech-rl-1.1.0", years=[2017], seeds=(0,), version="tech-rl-1.1.0",
+                         config={"iterations": 30, "envs": 128, "minibatch": 1024, "threads": 1})
+    assert meta["version"] == "tech-rl-1.1.0" and meta["config"]["step"] == 5 and meta["config"]["episode"] == 26
+    assert meta["years"]["2017"]["excess_per_in_session"] > 0           # the planted trend, five sessions at a time
+    fp.models = tmp_path
+    rule = DailyRule(name="x", factors={"rl_tech_weekly": 1.0}, exit_model="tech2", keep=5, min_hold=250, top=5,
+                     check="weekly")
+    days = [day for day in fp.sessions if day.year == 2017]
+    ranks = daily_rankings(fp, rule, days[0], days[-1])
+    assert ranks and all(len(names) <= 5 for names in ranks.values())

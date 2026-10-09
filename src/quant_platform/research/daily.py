@@ -98,7 +98,10 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_60": "機器學習綜合分數（35 個因子含財報、之後 60 個交易日超額報酬標籤、逐年滾動訓練）",
                  "ml_gbm_quality": "機器學習綜合分數（36 個因子含財報與趨勢品質、不含月營收、超額報酬標籤、逐年滾動訓練）"}
 # 2026-10-10 (使用者：純技術分析的 RL 機器人): research/tech_rl.py — sees only price and volume.
-TECH_FACTORS = {"rl_tech": "技術分析 RL 機器人：沒持有時想進場的機率（只看價格與成交量）"}
+TECH_FACTORS = {"rl_tech": "技術分析 RL 機器人：沒持有時想進場的機率（只看價格與成交量）",
+                "rl_tech_weekly": "技術分析 RL 機器人（每週決策版）：沒持有時想進場的機率（只看價格與成交量）"}
+TECH_FACTOR_VERSION = {"rl_tech": "tech-rl-1.0.0", "rl_tech_weekly": "tech-rl-1.1.0"}
+TECH_EXITS = {"tech1": "rl_tech", "tech2": "rl_tech_weekly"}          # exit_model -> the robot's score
 RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
@@ -140,7 +143,7 @@ class DailyRule(BaseModel):
     smooth: int = Field(default=0, ge=0, le=60)
     # R15 C1b (2026-10-07): "q1" = the learned exit (research/exits.py) decides keep or sell for every
     # holding each session; a sold stock is not bought back for 20 sessions. Left out of the hash when "none".
-    exit_model: Literal["none", "q1", "tech1"] = "none"   # tech1 (2026-10-10): the technical RL robot sells
+    exit_model: Literal["none", "q1", "tech1", "tech2"] = "none"   # tech1/tech2 (2026-10-10): the technical robot sells
     # R15 D (2026-10-09): "v1" = a stock with a bad-news flag in force (research/news_events.py) is not newly
     # bought (holdings are kept); "v1-off" = the same rule computing nothing different, the forward control.
     # Left out of the hash when "none". News exists only from 2026-10-05: forward observation only.
@@ -264,10 +267,9 @@ class FactorPanel:
         if factor in TECH_FACTORS:
             if self.models is None:
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
-            from quant_platform.research.tech_rl import TECH_VERSION
             from quant_platform.research.tech_rl import scores as tech_scores
 
-            return tech_scores(self, Path(self.models) / TECH_VERSION)            # sessions × symbols
+            return tech_scores(self, Path(self.models) / TECH_FACTOR_VERSION[factor])   # sessions × symbols
         if factor in MODEL_FACTORS:
             if self.models is None:
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
@@ -520,10 +522,11 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
         from quant_platform.research.exits import EXIT_VERSION, ExitAgent
 
         exit_agent = ExitAgent(fp, Path(fp.models) / EXIT_VERSION)
-        if rule.exit_model == "tech1":
-            from quant_platform.research.tech_rl import TECH_VERSION, TechAgent
+        if rule.exit_model in TECH_EXITS:
+            from quant_platform.research.tech_rl import TechAgent
 
-            exit_agent = TechAgent(fp, Path(fp.models) / TECH_VERSION)
+            factor = TECH_EXITS[rule.exit_model]
+            exit_agent = TechAgent(fp, Path(fp.models) / TECH_FACTOR_VERSION[factor], factor)
     for count, day in enumerate(sessions):
         if day not in checks:
             continue
@@ -1035,7 +1038,9 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         from quant_platform.research.tech_rl import digest as tech_digest
         from quant_platform.research.tech_rl import tech_dir
 
-        payload["tech"] = tech_digest(tech_dir(history))
+        used = [name for name in factor_names if name in TECH_FACTORS]
+        payload["tech"] = (tech_digest(tech_dir(history)) if used == ["rl_tech"]       # as the 1.0.0 trials were registered
+                           else {name: tech_digest(tech_dir(history, TECH_FACTOR_VERSION[name])) for name in used})
     if any(name in MODEL_FACTORS for name in factor_names):     # R15-B: the trained models are part of the input
         from quant_platform.research.model import MODELS, digest, model_dir
 
@@ -1338,6 +1343,35 @@ def tech_bot_batch() -> list[DailyRule]:
     ]
 
 
+def t0_equal_batch() -> list:
+    """2026-10-10 (RL 3.0's result: equal shares of the T0 candidates beat its own allocation): one account
+    split equally among every 100%-stock daily T0 candidate at the time it runs, the shares set when money
+    arrives (each sleeve runs its own rule with its share of the owner's cash flow)."""
+    from pathlib import Path as _Path
+
+    from quant_platform.research.blend import BlendRule, Sleeve
+    from quant_platform.research.rl_strategies import t0_candidates
+
+    specs = t0_candidates(_Path("instance") / "research")
+    if len(specs) < 2:
+        return []
+    share = 1 / len(specs)
+    sleeves = tuple(Sleeve(rule=DailyRule.model_validate(spec), share=share) for _trial, _name, spec in specs)
+    return [BlendRule(name=f"組合：全部 T0 候選平均分配（{len(specs)} 個策略、100% 個股）", sleeves=sleeves)]
+
+
+def tech_bot_weekly_batch() -> list[DailyRule]:
+    """2026-10-10: the robot's second version (tech-rl-1.1.0, weekly decisions on the next five sessions),
+    the same two rules as ``tech_bot_batch`` deciding weekly."""
+    return [
+        DailyRule(name="技術分析 RL 機器人（每週）：只看價格與成交量，自己決定買賣（前 20 名、同產業最多 3 成）",
+                  factors={"rl_tech_weekly": 1.0}, exit_model="tech2", keep=5, min_hold=250, industry_cap=0.3,
+                  check="weekly"),
+        DailyRule(name="技術分析 RL 機器人分數（每週）：前 20 名、同產業最多 3 成（一般保留與持有規則）",
+                  factors={"rl_tech_weekly": 1.0}, industry_cap=0.3, check="weekly"),
+    ]
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1352,4 +1386,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "t0hunt": t0_hunt_batch, "lowdd": low_drawdown_batch,
            "volscale": vol_scale_batch, "largecap": large_cap_batch,
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
-           "techbot": tech_bot_batch}
+           "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
+           "techbot2": tech_bot_weekly_batch}

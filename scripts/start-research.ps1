@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name)
+param([Parameter(Mandatory = $true)][ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name)
 # Start a long research run outside the assistant's process tree (2026-10-06): at 02:36 a Claude desktop
 # update closed the pipeline that had been started with Start-Process from the assistant's shell, and the
 # FinMind download with it, half-way. Win32_Process.Create makes the new process a child of the WMI

@@ -345,6 +345,10 @@ def main() -> int:
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
     parser.add_argument("--require", help="scan：只跑含這個訊號的組（例如新模型 ml_gbm_quality）")
+    parser.add_argument("--resume", help="scan：第一階段已完成的搜尋資料夾，只跑第二階段")
+    parser.add_argument("--pool", type=int, default=600, help="scan：從第一階段最好的前幾名裡挑彼此不同的最後名單")
+    parser.add_argument("--tech-version", default="tech-rl-1.0.0", choices=("tech-rl-1.0.0", "tech-rl-1.1.0"),
+                        help="tech-rl：機器人版本（1.1.0 每週決策）")
     parser.add_argument("--use-plan", action="store_true", help="用網站上最新版投資計畫的每月金額與薪資日")
     args = parser.parse_args()
     if args.use_plan:
@@ -615,12 +619,12 @@ def main() -> int:
 
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         years = list(range(tech_rl.FIRST_YEAR, daily_research.RECENT_END.year + 1))
-        with JobLog(RESEARCH).start(f"技術分析 RL 機器人（{tech_rl.TECH_VERSION}，逐年 {years[0]}～{years[-1]}、"
+        with JobLog(RESEARCH).start(f"技術分析 RL 機器人（{args.tech_version}，逐年 {years[0]}～{years[-1]}、"
                                     f"{len(tech_rl.SEEDS)} 個種子）", command, total=len(years)) as job:
             job.update(current="載入行情與技術因子", force=True)
             data, fp = daily_research.load(Path(args.base))
-            meta = tech_rl.train(fp, tech_rl.tech_dir(Path(args.base)), daily_research.fingerprint(Path(args.base)),
-                                 years, job=job)
+            meta = tech_rl.train(fp, tech_rl.tech_dir(Path(args.base), args.tech_version),
+                                 daily_research.fingerprint(Path(args.base)), years, job=job, version=args.tech_version)
             job.update(done=len(years), force=True)
             job.payload["summary"] = f"{len(meta['years'])} 個年度機器人"
         for year, item in meta["years"].items():
@@ -635,14 +639,17 @@ def main() -> int:
         from quant_platform.research import scan
         from quant_platform.research.jobs import JobLog
 
-        count = len(scan.candidates(None, args.signals_max, args.signals_min, args.require))
+        count = (sum(1 for path in Path(args.resume).glob("screen-*.jsonl") for _line in open(path, "rb"))
+                 if args.resume else len(scan.candidates(None, args.signals_max, args.signals_min, args.require)))
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
-        with JobLog(RESEARCH).start(f"大規模策略搜尋（{args.signals_min}～{args.signals_max} 個訊號一組，{count:,} 個候選，"
-                                    f"第一階段 2015-06～2020-09）",
+        title = (f"大規模策略搜尋：接著跑第二階段（第一階段 {count:,} 個已完成）" if args.resume else
+                 f"大規模策略搜尋（{args.signals_min}～{args.signals_max} 個訊號一組，{count:,} 個候選，第一階段 2015-06～2020-09）")
+        with JobLog(RESEARCH).start(title,
                                     command, total=count + args.finalists) as job:
             summary = scan.run_scan(Path(args.base), RESEARCH, broker_costs(args.broker), workers=args.workers,
                                     count=args.finalists, job=job, largest=args.signals_max,
-                                    smallest=args.signals_min, require=args.require)
+                                    smallest=args.signals_min, require=args.require,
+                                    resume=Path(args.resume) if args.resume else None, pool=args.pool)
             job.payload["summary"] = (f"{summary['candidates']:,} 個候選、{summary['passed_screen']:,} 個過第一階段、"
                                       f"{summary['finalists']} 個完整回測：{summary['tiers']}")
         for item in summary["results"]:

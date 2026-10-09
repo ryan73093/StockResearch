@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -110,6 +110,25 @@ switch ($Name) {
         Invoke-Step "4-tech-rules" @("-m", "quant_platform.research", "daily", "--name", "techbot", "--broker", "cathay")
         Invoke-Step "5-rl3" @("-m", "quant_platform.research", "rl-strategies", "--broker", "cathay")
         Invoke-Step "6-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "resume4" {
+        # 2026-10-10: the four-signal scan's second stage (its first stage finished; it stopped on a newer
+        # model's seed), then every T0 candidate in equal shares as one account, then the statistics.
+        Invoke-Step "1-scan4-stage2" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--finalists", "80", "--resume", "instance/research/scans/scan-1.0.0-20261010-021730")
+        Invoke-Step "2-t0equal" @("-m", "quant_platform.research", "daily", "--name", "t0equal", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "robot2" {
+        # 2026-10-10: the technical robot's second version (weekly decisions), its two rules, the statistics.
+        Invoke-Step "1-tech-rl" @("-m", "quant_platform.research", "tech-rl", "--tech-version", "tech-rl-1.1.0")
+        Invoke-Step "2-tech-rules" @("-m", "quant_platform.research", "daily", "--name", "techbot2", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "wide4" {
+        # 2026-10-10: the four-signal scan's second stage again, choosing distinct finalists from its best
+        # 5,000 (not 600: the top 600 were near-copies of each other), then the statistics.
+        Invoke-Step "1-scan4-wide" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--finalists", "80", "--pool", "5000", "--resume", "instance/research/scans/scan-1.0.0-20261010-021730")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "news-events" {
         # R15 D (2026-10-09): score the collected headlines not scored yet (also every trading day 21:45).

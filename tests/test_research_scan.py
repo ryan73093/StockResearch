@@ -113,3 +113,12 @@ def test_a_later_scan_skips_near_copies_of_earlier_finalists(tmp_path):
     again = scan.finalists(arrays, rows, FREE, 10, seeds=[{key: row[key] for key in ("factors", "universe", "weighting", "check")}
                                                        for row in alone])
     assert again == []                                   # each one is a copy of a seed (correlation 1)
+
+
+def test_seeds_with_a_newer_signal_are_skipped_and_a_finished_screen_resumes(tmp_path):
+    data, fp = planted()
+    arrays = scan.prepare(data, fp, FREE, tmp_path / "arrays")
+    items = scan.candidates(["momentum_6", "trend_200"], largest=1)
+    rows = scan.screen(tmp_path / "arrays", items, FREE, 0, tmp_path)
+    newer = {"factors": ["ml_gbm_quality"], "universe": "all", "weighting": "equal", "check": "weekly"}
+    assert scan.finalists(arrays, rows, FREE, 5, seeds=[newer]) == scan.finalists(arrays, rows, FREE, 5)
