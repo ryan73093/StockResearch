@@ -391,10 +391,12 @@ def test_the_large_cap_batch_is_all_stocks_one_rule_per_family():
 
 
 def test_the_second_large_cap_batch_tests_new_hypotheses_not_tweaks():
-    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.categories import classify, uses_0050
 
     first = {rule.rule_hash for rule in daily.BATCHES["largecap"]() if getattr(rule, "kind", None) != "blend"}
     rules = daily.BATCHES["largecap2"]()
     assert len(rules) == 3 and not first & {rule.rule_hash for rule in rules}
     assert all(rule.large_caps == 100 and rule.core == 0 and not uses_0050(rule.canonical()) for rule in rules)
     assert len({tuple(sorted(rule.factors)) + (rule.weighting,) for rule in rules}) == 3
+    calm = classify(rules[0].canonical())["traits"]                      # weighted by calmness: not equal amounts
+    assert "只挑市值前 100 大" in calm and "依波動度配置" in calm and not any("等額" in trait for trait in calm)
