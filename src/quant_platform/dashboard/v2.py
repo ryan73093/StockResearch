@@ -73,6 +73,7 @@ DOCS = {
     "research_method": ("研究方法", "docs/research_method.md"),
     "ai_methods": ("AI 方法評估", "reports/AI 交易方法 實證與架構.md"),
     "taiwan_quant": ("台股量化做法", "reports/台股量化 開源專案與實證.md"),
+    "ai_full": ("AI 與程式交易全面研究", "reports/AI 與程式交易可行方法全面研究.md"),
 }
 JOB_LABELS = {
     "daily_market_data": "日線行情",
