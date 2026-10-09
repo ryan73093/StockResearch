@@ -18,7 +18,7 @@ from quant_platform.research.promotion import (
     drawdown_gate,
     window_gate,
 )
-from quant_platform.research.categories import FAMILY_ORDER, classify
+from quant_platform.research.categories import FAMILY_ORDER, classify, uses_0050
 from quant_platform.research.categories import summary as category_summary
 from quant_platform.research.registry import TrialRegistry, current_basis, distinct_rules
 from quant_platform.research.reports import latest_stats
@@ -249,8 +249,10 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
             "cost_share": metrics.get("cost_share"), "orders_per_month": metrics.get("orders_per_month"),
             "forward_since": since.get(spec_hash), "report_file": record.report_file,
             "category": classify(_spec_of(base, record.report_file), origin.get(spec_hash, "")),
+            "uses_0050": uses_0050(_spec_of(base, record.report_file)),
         })
-    rows.sort(key=lambda row: (TIERS.index(row["tier"]), -(row["excess"] if row["excess"] is not None else -9)))
+    # 2026-10-09: rules that hold 0050 are listed last and never count as candidates (categories.NO_0050)
+    rows.sort(key=lambda row: (row["uses_0050"], TIERS.index(row["tier"]), -(row["excess"] if row["excess"] is not None else -9)))
     return rows
 
 
@@ -483,12 +485,13 @@ def pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> d
         "stock_pbo": (stock_stats.get("pbo") or {}).get("pbo"),
         "high_win": high_win, "both_periods": both, "ai_rounds": ai_rounds(research_dir),
         "forward_stocks": StockForwardTracker(research_dir).summary(),
-        "daily": daily_rules, "daily_passed": sum(1 for row in daily_rules if row["passed"]),
-        "categories": category_summary(daily_rules),
+        "daily": daily_rules, "daily_passed": sum(1 for row in daily_rules if row["passed"] and not row["uses_0050"]),
+        "categories": category_summary([row for row in daily_rules if not row["uses_0050"]]),
+        "excluded_0050": sum(1 for row in daily_rules if row["uses_0050"]),
         "ai_researcher": ai_researcher_view(research_dir, daily_rules),
         "category_order": [family for family in FAMILY_ORDER if any(row["category"]["family"] == family for row in daily_rules)],
         "traits": sorted({trait for row in daily_rules for trait in row["category"]["traits"]}),
-        "daily_tiers": {grade: sum(1 for row in daily_rules if row["tier"] == grade)
+        "daily_tiers": {grade: sum(1 for row in daily_rules if row["tier"] == grade and not row["uses_0050"])
                         for grade in ("T0", "T0 候選", "T1", "T2", "T3")},
         "status_labels": STATUS_LABELS, "basis": basis, "basis_label": BASIS_LABELS[basis], "bases": BASIS_LABELS,
     }

@@ -49,7 +49,8 @@ def test_proposals_are_checked_and_near_repeats_refused(tmp_path):
         proposal("沒有的因子", {"magic": 1.0}),
         proposal("舊模型", {"ml_gbm": 1.0}),
         proposal("前 12 名", {"revenue_accel": 1.0}, top=12),
-        proposal("營收加速＋外資", {"revenue_accel": 1.0, "foreign_buy_20": 0.5}, check="weekly", core=0.5),
+        proposal("營收加速＋外資", {"revenue_accel": 1.0, "foreign_buy_20": 0.5}, check="weekly"),
+        proposal("一半放 0050", {"eps_growth": 1.0}, core=0.5),                  # the owner holds 0050 apart
         proposal("低波動反轉", {"low_volatility_60": 1.0, "reversal_5d": -1.0}),
         proposal("第三個", {"eps_growth": 1.0}),
     ]}
@@ -57,7 +58,8 @@ def test_proposals_are_checked_and_near_repeats_refused(tmp_path):
     assert [rule.name for rule, _notes in accepted] == ["AI：營收加速＋外資", "AI：低波動反轉"]
     reasons = {item["name"]: item["reason"] for item in rejected}
     assert "相同" in reasons["同一組因子"] and "因子" in reasons["沒有的因子"] and "因子" in reasons["舊模型"]
-    assert "選項" in reasons["前 12 名"] and "超過" in reasons["第三個"] and len(rejected) == 5   # past the cap of 2
+    assert "選項" in reasons["前 12 名"] and "超過" in reasons["第三個"] and "0050" in reasons["一半放 0050"]
+    assert len(rejected) == 6                                               # the last valid one is past the cap of 2
 
 
 class FakeClient:
@@ -68,7 +70,7 @@ class FakeClient:
         return {"analysis": "a", "proposals": [{"family": "營收財報", "hypothesis": "營收加速後幾週會延續",
                                                 "rationale": "r", "failure": "f",
                                                 "rule": {"name": "營收加速", "factors": {"revenue_accel": 1.0},
-                                                         "check": "weekly", "core": 0.5}}]}, {"input_tokens": 1}
+                                                         "check": "weekly"}}]}, {"input_tokens": 1}
 
     def budget_status(self):
         return {"spent_usd": 0.01}

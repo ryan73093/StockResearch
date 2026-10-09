@@ -36,7 +36,7 @@ OPERATION = "research_daily_round"
 MAX_PROPOSALS = 2
 SEEN_UNTIL = "2020-09"                      # the last month of results the model sees
 TOPS = (10, 15, 20, 25, 30)
-CORES = (0.0, 0.5)
+CORES = (0.0,)                              # 2026-10-09: the owner holds 0050 apart; rules are all stocks
 CAPS = (0.0, 0.2, 0.3)
 
 INSTRUCTIONS = """你是台股量化研究員，只負責提出「每天收盤後決策的選股規則」，不做個別股票判斷，也不預測行情。
@@ -48,7 +48,7 @@ INSTRUCTIONS = """你是台股量化研究員，只負責提出「每天收盤�
 - check：daily（每天）、weekly（每週）、monthly（每月）檢查換股。
 - industry_cap：同產業最多佔幾成，0（不限）、0.2、0.3。
 - weighting：equal（等額）或 inverse_vol（依波動度，波動小的買多）。
-- core：帳戶放在 0050 的比例，0 或 0.5。
+- core：一律 0。帳戶全部買個股；0050 是使用者自己另外持有的部位，不要放進規則。
 規範：
 1. 你只看得到 2015-06～2020-09 的結果；2020-10 以後的結果、規則的等級與前向紀錄都不提供，也不要猜。
 2. 每一個提出的規則都算一次試驗，試越多越難證明有效。每次最多 {max_proposals} 個，只提出有明確經濟理由、而且和已試過的不同的想法：不要只改參數（例如前 20 改前 30），因子組合與 0050 比例和已試過的一樣的會被拒絕。
@@ -107,10 +107,15 @@ class DailyResearcher:
                  for name, label in RULE_FACTORS.items() if name != "ml_gbm"]
         strength = latest_strength(self._dir / "factors") or {}
         strength_lines = []
-        for item in strength.get("factors") or []:
+        factors = strength.get("factors") or {}
+        items = ([{"label": key, **value} for key, value in factors.items()] if isinstance(factors, dict)
+                 else list(factors))
+        for item in items:
+            if not isinstance(item, dict):
+                continue
             early = (item.get("periods") or {}).get("before_regime") or {}
             if early:
-                strength_lines.append(f"- {item['label']}：前五分之一比平均每年 {_pp(early.get('top_excess_year'))}、"
+                strength_lines.append(f"- {item.get('label')}：前五分之一比平均每年 {_pp(early.get('top_excess_year'))}、"
                                       f"比 0050 {_pp(early.get('top_vs_0050_year'))}、排序相關 {early.get('ic')}")
         tried = sorted(self.tried(), key=lambda row: (row["family"], row["name"]))
         tried_lines = [f"- [{row['family']}] {row['name']}：2015-06～2020-09 平均每年比 0050 {_pp(row['early_gap'])}"
@@ -154,7 +159,10 @@ class DailyResearcher:
             settings = {"top": raw.get("top", 20), "check": raw.get("check", "daily"),
                         "industry_cap": float(raw.get("industry_cap") or 0), "weighting": raw.get("weighting", "equal"),
                         "core": float(raw.get("core") or 0)}
-            if (settings["top"] not in TOPS or settings["core"] not in CORES or settings["industry_cap"] not in CAPS
+            if settings["core"] not in CORES:
+                rejected.append({"name": name, "reason": "不放 0050（使用者自己持有 0050）"})
+                continue
+            if (settings["top"] not in TOPS or settings["industry_cap"] not in CAPS
                     or settings["check"] not in ("daily", "weekly", "monthly")
                     or settings["weighting"] not in ("equal", "inverse_vol")):
                 rejected.append({"name": name, "reason": "設定超出允許的選項"})

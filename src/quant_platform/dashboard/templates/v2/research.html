@@ -561,7 +561,7 @@
     <table class="table--stack">
       <thead><tr><th>規則</th><th class="num">已記錄交易日</th><th class="num">投入（元）</th><th class="num">目前資產</th><th class="num">0050 定期定額</th><th class="num">相對 0050</th><th class="num">持股／費稅</th><th>對帳</th></tr></thead>
       <tbody>
-      {% for row in stock_forward %}
+      {% for row in stock_forward if not row.stopped %}
         <tr>
           <td data-primary><strong><a href="/research/forward/{{ row.rule_hash }}">{{ row.name }}</a></strong><span class="muted small"> {{ row.since }} 起</span>{% if row.final %} <span class="badge {{ 'badge--ok' if row.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if row.final.passed else '未通過' }} {{ '{:+.0%}'.format(row.final.excess) }}</span>{% endif %}</td>
           <td class="num" data-label="已記錄交易日">{{ row.sessions }}{% if row.late %}<span class="muted small">（補記 {{ row.late }}）</span>{% endif %}</td>
@@ -576,7 +576,13 @@
       </tbody>
     </table>
   </div>
-  {% for row in stock_forward if row.holdings or row.problems %}
+  {% set stopped = stock_forward|selectattr('stopped')|list %}
+  {% if stopped %}
+  <details style="margin-top:10px"><summary class="small">已停止的 {{ stopped|length }} 個帳戶（含 0050，你自己另外持有 0050；紀錄保留）</summary>
+    <ul class="reasons">{% for row in stopped %}<li><a href="/research/forward/{{ row.rule_hash }}">{{ row.name }}</a><span class="muted small">（{{ row.since }}～{{ row.stopped }}，{{ row.sessions }} 天）</span></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  {% for row in stock_forward if (row.holdings or row.problems) and not row.stopped %}
   <details style="margin-top:10px">
     <summary class="small">{{ row.name }}：{{ row.date }} 持股 {{ row.holdings|length }} 檔、現金 {{ '{:,.0f}'.format(row.cash) }} 元{% if row.last_trade_day %}；最近交易 {{ row.last_trade_day }}（{{ row.last_trades|length }} 筆）{% endif %}</summary>
     {% if row.problems %}<ul class="reasons">{% for problem in row.problems %}<li>{{ problem }}</li>{% endfor %}</ul>{% endif %}

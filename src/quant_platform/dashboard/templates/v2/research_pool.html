@@ -33,6 +33,7 @@
       </tbody>
     </table>
   </div>
+  <p class="note"><strong>只算 100% 個股的規則</strong>：0050 是你自己另外持有的部位，含 0050 的 {{ pool.excluded_0050 }} 個規則（一半放 0050、組合帳戶的 0050 份、跌破均線換 0050）只留紀錄、不採用、不進前向觀察。</p>
   <p class="note">分類看規則押注的是哪一類因子；同時用兩類以上的叫多因子，用到機器學習分數的歸機器學習，帳戶分成幾份的歸組合帳戶。每個規則的特性（是否放 0050、每天或每週決策、依波動度配置、停損等）列在下表的分類欄。</p>
 </section>
 {% endif %}
@@ -57,7 +58,7 @@
   <div class="filters">
     <input type="search" id="daily-search" placeholder="搜尋規則名稱" aria-label="搜尋規則名稱">
     <select id="daily-family" aria-label="分類"><option value="">全部分類</option>{% for family in pool.category_order %}<option value="{{ family }}">{{ family }}</option>{% endfor %}</select>
-    <select id="daily-tier" aria-label="等級"><option value="">全部等級</option>{% for grade in ('T0', 'T0 候選', 'T1', 'T2', 'T3') %}<option value="{{ grade }}">{{ grade }}</option>{% endfor %}</select>
+    <select id="daily-tier" aria-label="等級"><option value="">全部等級</option>{% for grade in ('T0', 'T0 候選', 'T1', 'T2', 'T3') %}<option value="{{ grade }}">{{ grade }}</option>{% endfor %}<option value="不採用">不採用（含 0050）</option></select>
     <select id="daily-trait" aria-label="特性"><option value="">全部特性</option>{% for trait in pool.traits %}<option value="{{ trait }}">{{ trait }}</option>{% endfor %}</select>
     <span class="muted small" id="daily-count"></span>
   </div>
@@ -66,10 +67,10 @@
       <thead><tr><th>規則</th><th>分類</th><th>等級</th><th class="num">2015-06 起期末（0050）</th><th class="num">比 0050</th><th class="num">2020-10 起比 0050</th><th class="num">1 年／3 年視窗勝率</th><th class="num">最大回撤（0050）</th><th class="num">費稅佔投入・每月下單</th></tr></thead>
       <tbody>
       {% for row in pool.daily %}
-        <tr data-name="{{ row.name }}" data-family="{{ row.category.family }}" data-tier="{{ row.tier }}" data-traits="|{{ row.category.traits|join('|') }}|">
+        <tr data-name="{{ row.name }}" data-family="{{ row.category.family }}" data-tier="{{ '不採用' if row.uses_0050 else row.tier }}" data-traits="|{{ row.category.traits|join('|') }}|">
           <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong>{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
           <td data-label="分類" data-wide><span class="badge">{{ row.category.family }}</span>{% if row.category.detail %} <span class="small">{{ row.category.detail }}</span>{% endif %}<br><span class="muted small">{{ row.category.traits|join('・') }}</span></td>
-          <td data-label="等級" data-wide><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--warn' if row.tier == 'T1' else ('badge--bad' if row.tier == 'T3' else '')) }}">{{ row.tier }}</span> <span class="small">{{ row.tier_reason }}</span></td>
+          <td data-label="等級" data-wide>{% if row.uses_0050 %}<span class="badge">不採用</span> <span class="small">含 0050（你自己另外持有 0050），回測等級 {{ row.tier }}</span>{% else %}<span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--warn' if row.tier == 'T1' else ('badge--bad' if row.tier == 'T3' else '')) }}">{{ row.tier }}</span> <span class="small">{{ row.tier_reason }}</span>{% endif %}</td>
           <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
           <td class="num {{ 'up' if (row.excess or 0) > 0 else 'down' }}" data-label="比 0050">{{ '{:+.0%}'.format(row.excess) if row.excess is not none else '—' }}</td>
           <td class="num {{ 'up' if (row.since_2020_excess or 0) > 0 else 'down' }}" data-label="2020-10 起">{{ '{:+.0%}'.format(row.since_2020_excess) if row.since_2020_excess is not none else '—' }}</td>

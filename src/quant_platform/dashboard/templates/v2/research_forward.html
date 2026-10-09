@@ -22,6 +22,10 @@
   <div class="kpi"><div class="kpi__label">投入・現金</div><div class="kpi__value">{{ '{:,.0f}'.format(latest.contributed) }}<small>・現金 {{ '{:,.0f}'.format(latest.cash) }}</small></div></div>
 </div>
 
+{% if forward.item.stopped %}
+<section class="card"><p style="margin:0"><span class="badge">已停止</span> {{ forward.item.stopped }} 起不再記錄：{{ forward.item.stop_reason }}。下面是停止前的紀錄。</p></section>
+{% endif %}
+
 {% if forward.problems %}
 <section class="card"><div class="card__head"><h2>對帳 <span class="badge badge--bad">{{ forward.problems|length }} 項不符</span></h2></div>
   <ul class="reasons">{% for problem in forward.problems %}<li>{{ problem }}</li>{% endfor %}</ul>

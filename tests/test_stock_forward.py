@@ -176,3 +176,35 @@ def test_the_ai_researcher_account_follows_its_best_rule_from_each_quarter(tmp_p
     assert mine[-1]["contributed"] == 300_000 + 10_000 * 4              # Oct, Nov, Dec, Jan: the carry is not money in
     assert reconcile(tracker.records()) == {}
     assert [item["name"] for item in tracker.meta_decisions()] == ["0050", rule.name]
+
+
+def test_accounts_that_hold_0050_stop_and_new_ones_are_not_tracked(tmp_path):
+    """2026-10-09: the owner holds 0050 apart; rules with a 0050 share stop being recorded (records kept)."""
+    from quant_platform.research.daily import DailyRule
+
+    days = weekdays(date(2024, 1, 1), date(2026, 10, 9))
+    build(tmp_path, days)
+    pure = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3)
+    half = pure.model_copy(update={"name": pure.name + "、一半放 0050", "core": 0.5})
+    (tmp_path / "reports").mkdir()
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    for number, rule in enumerate((pure, half)):
+        (tmp_path / "reports" / f"d{number}.json").write_text(json.dumps({"spec": rule.canonical()}, ensure_ascii=False),
+                                                             encoding="utf-8")
+        registry.register(kind="candidate", period="recent", spec_hash=rule.rule_hash, spec_name=rule.name,
+                          input_hash=f"d{number}", data_fingerprint="daily:x", report_file=f"d{number}.json",
+                          metrics={"full_period_excess": 0.4, "since_2020_excess": 0.2, "max_drawdown": -0.2,
+                                   "benchmark_max_drawdown": -0.3, "windows": {"1y": {"count": 50, "win_ratio": 0.7},
+                                   "3y": {"count": 30, "win_ratio": 0.8, "median_excess": 0.1}}})
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "tracked.json").write_text(json.dumps([{"rule_hash": "old-half", "name": "舊的一半 0050", "kind": "daily",
+                                                      "rule": half.model_dump(mode="json"), "since": "2026-10-01"}],
+                                                    ensure_ascii=False), encoding="utf-8")
+    tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
+    added = tracker.sync(date(2026, 10, 9))
+    assert [item["rule_hash"] for item in added] == [pure.rule_hash]            # the half-0050 rule is not added
+    old = next(item for item in tracker.tracked() if item["rule_hash"] == "old-half")
+    assert old["stopped"] == "2026-10-09" and "0050" in old["stop_reason"]
+    written = tracker.record(date(2026, 10, 9), now=at(date(2026, 10, 9)))
+    assert {record["rule_hash"] for record in written} == {pure.rule_hash}

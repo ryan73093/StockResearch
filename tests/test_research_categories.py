@@ -30,3 +30,15 @@ def test_the_summary_counts_tiers_and_names_the_best():
     first, second = summary(rows)
     assert first["family"] == "趨勢動能" and first["count"] == 2 and first["best"]["name"] == "乙"
     assert first["tiers"]["T1"] == 1 and second["family"] == "籌碼"
+
+
+def test_rules_that_hold_0050_are_marked():
+    """2026-10-09 (使用者：0050 我自己就有部位): a core share, a blend's 0050 part or the account filter."""
+    from quant_platform.research.categories import uses_0050
+
+    assert not uses_0050({"factors": {"trend_200": 1.0}})
+    assert uses_0050({"factors": {"trend_200": 1.0}, "core": 0.5})
+    assert uses_0050({"factors": {"trend_200": 1.0}, "account_filter": "own_200"})
+    assert uses_0050({"kind": "blend", "core": 0.5, "sleeves": [{"rule": {"factors": {"trend_200": 1.0}}, "share": 0.5}]})
+    assert not uses_0050({"kind": "blend", "core": 0.0, "sleeves": [{"rule": {"factors": {"trend_200": 1.0}}, "share": 0.5},
+                                                                     {"rule": {"factors": {"ml_gbm_statements": 1.0}}, "share": 0.5}]})

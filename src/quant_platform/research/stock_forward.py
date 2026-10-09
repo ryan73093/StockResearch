@@ -82,9 +82,17 @@ def review_days(sessions: list[date], start: date, last: date) -> list[date]:
     return output
 
 
+def _report_spec(base: Path, report_file: str | None) -> dict:
+    try:
+        return json.loads((base / "reports" / str(report_file)).read_text(encoding="utf-8"))["spec"]
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
 def best_ai_rule(research_dir: str | Path) -> dict[str, object] | None:
     """The researcher's best qualifying rule now: T0, then T0 候選, then T1; ties by the excess since 2015-06."""
     from quant_platform.research.agent.daily_researcher import proposals
+    from quant_platform.research.categories import uses_0050
     from quant_platform.research.daily import TIERS, tier
 
     base = Path(research_dir)
@@ -97,6 +105,8 @@ def best_ai_rule(research_dir: str | Path) -> dict[str, object] | None:
     for spec_hash, record in latest.items():
         grade, _why = tier(record.metrics)
         if grade not in ("T0", "T0 候選", "T1"):
+            continue
+        if uses_0050(_report_spec(base, record.report_file)):
             continue
         key = (TIERS.index(grade), -(record.metrics.get("full_period_excess") or 0))
         if best is None or key < best[0]:
@@ -114,8 +124,8 @@ def forward_only() -> list[tuple[object, str]]:
     same day: R15 D (2026-10-09) — the weekly model rule half in 0050 with the bad-news veto and its control."""
     from quant_platform.research.daily import DailyRule
 
-    base = DailyRule(name="機器學習（含財報）：前 20 名、同產業最多 3 成、每週決策、一半放 0050",
-                     factors={"ml_gbm_statements": 1.0}, industry_cap=0.3, check="weekly", core=0.5)
+    base = DailyRule(name="機器學習（含財報）：前 20 名、同產業最多 3 成、每週決策",
+                     factors={"ml_gbm_statements": 1.0}, industry_cap=0.3, check="weekly")
     return [
         (base.model_copy(update={"name": base.name + "、新聞利空不買（LLM）", "news_veto": "v1"}),
          "R15 D 新聞否決實驗：LLM 標出利空且有數字或風險旗標的股票不新買（只前向；和下一列同一天開始比）"),
@@ -127,6 +137,7 @@ def forward_only() -> list[tuple[object, str]]:
 def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:
     """Daily-decision rules (S9-W02) that pass the new design's gate on 2015-06..2026-09."""
     from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
     from quant_platform.research.daily import tier
 
     base = Path(research_dir)
@@ -142,6 +153,8 @@ def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:
         try:
             spec = json.loads((base / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
         except (OSError, ValueError, KeyError):
+            continue
+        if uses_0050(spec):                         # 2026-10-09: the owner holds 0050 apart (NO_0050)
             continue
         reason = (f"新設計 {grade}：2015-06 起比 0050 {record.metrics.get('full_period_excess'):+.1%}、"
                   f"2020-10 起 {record.metrics.get('since_2020_excess'):+.1%}（試驗 #{record.trial_id}）")
@@ -200,9 +213,16 @@ class StockForwardTracker:
     def sync(self, today: date) -> list[dict[str, object]]:
         """Add rules that newly won both periods, starting today (never earlier than the forward start), and
         the forward-only experiments (FORWARD_ONLY) the first time this runs after they were defined."""
+        from quant_platform.research.categories import NO_0050, uses_0050
+
         items = self.tracked()
         known = {item["rule_hash"] for item in items}
         added = []
+        stopped = False
+        for item in items:                          # 2026-10-09: accounts that hold 0050 stop (records kept)
+            if not item.get("stopped") and item.get("kind") in ("daily", "blend") and uses_0050(item.get("rule") or {}):
+                item.update(stopped=today.isoformat(), stop_reason=NO_0050)
+                stopped = True
         if self._experiments and META_AI["rule_hash"] not in known:
             added.append({**META_AI, "rule": {}, "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
                           "since": max(FORWARD_START, today).isoformat(),
@@ -232,7 +252,7 @@ class StockForwardTracker:
                           "since": max(FORWARD_START, today).isoformat(), "reason": reason,
                           "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
             known.add(rule.rule_hash)
-        if added:
+        if added or stopped:
             self._folder.mkdir(parents=True, exist_ok=True)
             self.tracked_path.write_text(json.dumps(items + added, ensure_ascii=False, indent=1), encoding="utf-8")
         return added
@@ -249,7 +269,7 @@ class StockForwardTracker:
         if today < FORWARD_START:
             return []
         self.sync(today)
-        items = [item for item in self.tracked() if date.fromisoformat(item["since"]) <= today]
+        items = [item for item in self.tracked() if date.fromisoformat(item["since"]) <= today and not item.get("stopped")]
         earlier = self.records()
         done = {(item["date"], item["rule_hash"]) for item in earlier}
         if not items:
@@ -397,7 +417,7 @@ class StockForwardTracker:
                 "last_trades": traded["trades_today"] if traded else [],
                 "late": sum(1 for record in mine if record.get("late")),
                 "problems": problems.get(item["rule_hash"], []), "replay_mismatches": mismatches,
-                "final": finals.get(item["rule_hash"]),
+                "final": finals.get(item["rule_hash"]), "stopped": item.get("stopped"), "stop_reason": item.get("stop_reason"),
             })
         return rows
 

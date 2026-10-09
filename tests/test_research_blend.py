@@ -107,9 +107,8 @@ def test_a_qualifying_blend_is_tracked_forward_and_reconciles(tmp_path):
     from quant_platform.research.stock_forward import StockForwardTracker, reconcile
 
     build(tmp_path, forward_days(date(2024, 1, 1), date(2026, 10, 9)))
-    mix = blend.BlendRule(name="組合：動能＋0050", sleeves=(blend.Sleeve(rule=UP, share=0.25),
-                                                       blend.Sleeve(rule=UP.model_copy(update={"top": 4}), share=0.25)),
-                          core=0.5)
+    mix = blend.BlendRule(name="組合：動能前 3＋前 4", sleeves=(blend.Sleeve(rule=UP, share=0.5),
+                                                          blend.Sleeve(rule=UP.model_copy(update={"top": 4}), share=0.5)))
     (tmp_path / "reports").mkdir()
     (tmp_path / "reports" / "b.json").write_text(json.dumps({"spec": mix.canonical()}, ensure_ascii=False), encoding="utf-8")
     TrialRegistry(tmp_path / "trials.jsonl").register(
@@ -121,6 +120,6 @@ def test_a_qualifying_blend_is_tracked_forward_and_reconciles(tmp_path):
     written = tracker.record(date(2026, 10, 2), now=at(date(2026, 10, 2)))
     assert tracker.tracked()[0]["kind"] == "blend"
     assert len(written) == 1 and written[0]["contributed"] == 300_000
-    assert any(row["code"] == "0050" for row in written[0]["holdings"])
+    assert written[0]["holdings"] and not any(row["code"] == "0050" for row in written[0]["holdings"])
     tracker.record(date(2026, 10, 5), now=at(date(2026, 10, 5)))
     assert tracker.records()[-1]["contributed"] == 310_000 and reconcile(tracker.records()) == {}

@@ -104,6 +104,17 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
     return output
 
 
+NO_0050 = "使用者 2026-10-09：0050 是自己另外持有的部位，策略一律 100% 個股；含 0050 的規則只留紀錄、不採用"
+
+
+def uses_0050(spec: dict) -> bool:
+    """A rule that keeps part of the account in 0050 (a core share, a blend's 0050 part) or moves into it (the
+    account filter): not a strategy the owner can use (NO_0050)."""
+    if spec.get("kind") == "blend":
+        return bool(spec.get("core")) or any(uses_0050(sleeve.get("rule") or {}) for sleeve in spec.get("sleeves") or [])
+    return bool(spec.get("core")) or spec.get("account_filter") not in (None, "none")
+
+
 def summary(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """Per category, in a fixed order: how many rules, how many in each tier, and the best one."""
     from quant_platform.research.daily import TIERS

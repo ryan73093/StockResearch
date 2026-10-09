@@ -871,7 +871,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         round_view = round_summary(research_dir / "trials.jsonl", "development", stats)
         jobs = JobLog(research_dir).jobs()
         overview = pool_view(research_dir, basis=_default_basis(research_dir)) if tab == "overview" else None
-        best = [row for row in overview["daily"] if row["tier"] in BEST_TIERS] if overview else []
+        best = [row for row in overview["daily"] if row["tier"] in BEST_TIERS and not row["uses_0050"]] if overview else []
         return render_template(
             "v2/research.html",
             active_nav="research",
