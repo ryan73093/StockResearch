@@ -266,6 +266,32 @@ def vol_scale_batch() -> list:
                       sleeves=(Sleeve(rule=model_v, share=0.5), Sleeve(rule=trend_v, share=0.5)))]
 
 
+LARGE_CAPS = 100
+
+
+def large_cap_batch() -> list:
+    """2026-10-09 (使用者：0050 不放進策略，也不要照 0050 的比例買台積電): 100% stocks picked only among the
+    100 largest listed stocks by market value (0050 holds the largest 50 at their market-value shares; these
+    rules pick 20 of the 100 and buy equal amounts, so no stock is more than about a twentieth). Large caps
+    beat the average stock since 2020-10 (factor strength: market value +5.5%, since 2024 +11.6%) and swing
+    less. Fixed in advance, one rule per factor family: trend, the model, foreign and trust buying, revenue
+    and earnings growth, and the model with the trend rule half each."""
+    from quant_platform.research.daily import DailyRule
+
+    common = {"industry_cap": 0.3, "large_caps": LARGE_CAPS}
+    trend = DailyRule(name="大型股（市值前 100）站上 200 日均線：前 20 名、同產業最多 3 成、每檔等額",
+                      factors={"trend_200": 1.0}, **common)
+    model = DailyRule(name="大型股（市值前 100）機器學習（含財報）：前 20 名、同產業最多 3 成、每週決策",
+                      factors={"ml_gbm_statements": 1.0}, check="weekly", **common)
+    flows = DailyRule(name="大型股（市值前 100）外資＋投信買超：前 20 名、同產業最多 3 成、每週決策",
+                      factors={"foreign_buy_20": 1.0, "trust_buy_20": 1.0}, check="weekly", **common)
+    growth = DailyRule(name="大型股（市值前 100）月營收年增＋每股盈餘成長：前 20 名、同產業最多 3 成、每週決策",
+                       factors={"revenue_yoy": 1.0, "eps_growth": 1.0}, check="weekly", **common)
+    return [trend, model, flows, growth,
+            BlendRule(name="組合：大型股機器學習每週＋大型股站上 200 日均線 各半",
+                      sleeves=(Sleeve(rule=model, share=0.5), Sleeve(rule=trend, share=0.5)))]
+
+
 def blend_batch() -> list[BlendRule]:
     """Fixed in advance: the weekly model rule and the volatility-weighted trend rule (both T1 alone), half
     each, a quarter each with half in 0050, and a third each with a third in 0050."""

@@ -137,6 +137,11 @@ class DailyRule(BaseModel):
     # momentum crashes come after its volatility has jumped (Barroso & Santa-Clara 2015; Daniel & Moskowitz
     # 2016). Left out of the hash when "none". See ``exposure_schedule``.
     vol_scale: Literal["none", "v1"] = "none"
+    # 2026-10-09 (使用者：只在大型股裡挑，但不要照 0050 的比例買台積電): only the ``large_caps`` largest listed
+    # stocks by market value (the previous close times shares issued, chips.py ``market_cap``) can be picked;
+    # the picks still get equal amounts, so no stock is held at its market-value share. 0 = no limit, left
+    # out of the hash.
+    large_caps: int = Field(default=0, ge=0, le=300)
 
     @field_validator("factors")
     @classmethod
@@ -170,6 +175,8 @@ class DailyRule(BaseModel):
             data.pop("news_veto", None)
         if data.get("vol_scale") == "none":
             data.pop("vol_scale", None)
+        if not data.get("large_caps"):
+            data.pop("large_caps", None)
         return data
 
     @property
@@ -319,8 +326,20 @@ class FactorPanel:
         return bool(not np.isfinite(average) or self.market[position] >= average)
 
     def eligible(self, rule: DailyRule, position: int) -> np.ndarray:
-        return ((self.panel.close[:, position] >= rule.min_price) & (self.turnover_20[:, position] >= rule.min_turnover)
+        mask = ((self.panel.close[:, position] >= rule.min_price) & (self.turnover_20[:, position] >= rule.min_turnover)
                 & (self.age[:, position] >= rule.min_history))
+        if getattr(rule, "large_caps", 0):
+            mask &= self.largest(rule.large_caps, position)
+        return mask
+
+    def largest(self, count: int, position: int) -> np.ndarray:
+        """The ``count`` stocks with the largest market value at ``position`` (none without market values)."""
+        values = self.matrix("market_cap")[:, position]
+        known = np.isfinite(values)
+        if known.sum() <= count:
+            return known
+        threshold = np.partition(values[known], -count)[-count]
+        return known & (values >= threshold)
 
     def smoothed(self, factor: str, sessions: int) -> np.ndarray:
         """The factor averaged over the last ``sessions`` sessions (symbols × sessions; days with no value
@@ -1138,6 +1157,13 @@ def low_drawdown_batch() -> list:
     return lowdd()
 
 
+def large_cap_batch() -> list:
+    """2026-10-09: picking among the 100 largest stocks only (research/blend.py ``large_cap_batch``)."""
+    from quant_platform.research.blend import large_cap_batch as large
+
+    return large()
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1150,4 +1176,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "model-excess": model_excess_batch, "statements": statement_batch, "turnover": turnover_batch,
            "exits": exits_batch, "blends": blends_batch, "model-60": model_60_batch,
            "t0hunt": t0_hunt_batch, "lowdd": low_drawdown_batch,
-           "volscale": vol_scale_batch}
+           "volscale": vol_scale_batch, "largecap": large_cap_batch}

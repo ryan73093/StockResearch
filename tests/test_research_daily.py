@@ -350,3 +350,41 @@ def test_the_exposure_falls_when_the_rule_turns_volatile():
     assert np.mean(calm) >= 0.9 and max(wild) <= 0.5                          # invested in ordinary times, then cut
     assert all(value in (0.0, 0.25, 0.5, 0.75, 1.0) for value in schedule.values())
     assert daily.exposure_schedule(data, fp, rule.model_copy(update={"vol_scale": "none"}), FREE) is None
+
+
+def test_large_caps_ranks_only_the_largest_and_buys_equal_amounts():
+    """2026-10-09: ``large_caps`` keeps the ranking to the N largest by market value that day; the
+    picks still get equal amounts (never market-value shares)."""
+    days = weekdays(date(2023, 1, 2), date(2024, 3, 29))
+    speeds = {"1101.TW": 1.004, "1102.TW": 1.003, "1103.TW": 1.002, "1104.TW": 1.001, "1105.TW": 1.0005}
+    data = market(days, {symbol: {day: 20 * speed ** n for n, day in enumerate(days)} for symbol, speed in speeds.items()})
+    fp = FactorPanel(Panel(data))
+    sizes = {"1101.TW": 1.0, "1102.TW": 5.0, "1103.TW": 4.0, "1104.TW": 3.0, "1105.TW": 9.0, "0050.TW": float("nan")}
+    caps = np.array([[np.log(sizes[symbol] * 1e10)] * len(days) for symbol in fp.symbols], dtype=np.float32)
+    late = len(days) - 20
+    caps[fp.symbols.index("1101.TW"), late:] = np.log(8e10)          # the fastest grows into the top 3
+    fp._cache["market_cap"] = caps
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, min_hold=0, large_caps=3)
+    assert fp.ranked(rule, late - 1) == ["1102.TW", "1103.TW", "1105.TW"]     # 1101 is the strongest but small
+    assert fp.ranked(rule, late) == ["1101.TW", "1102.TW", "1105.TW"]         # 1103 drops to fourth largest
+    plain = rule.model_copy(update={"large_caps": 0})
+    assert fp.ranked(plain, late - 1)[:3] == ["1101.TW", "1102.TW", "1103.TW"]
+    assert "large_caps" not in plain.canonical() and plain.rule_hash != rule.rule_hash
+    ledger = []
+    start = days[late - 5]
+    simulate_daily(data, rule, FREE, start, days[late - 1], daily_rankings(fp, rule, start, days[late - 1]),
+                   plan=SeedPlan(300_000, 0), ledger=ledger)
+    bought = [row["shares"] * row["price"] for row in ledger if row["side"] == "BUY"]
+    assert len(bought) == 3 and max(bought) - min(bought) < 0.01 * max(bought)   # a third each
+
+
+def test_the_large_cap_batch_is_all_stocks_one_rule_per_family():
+    from quant_platform.research import blend
+    from quant_platform.research.categories import classify, uses_0050
+
+    rules = daily.BATCHES["largecap"]()
+    singles = [rule for rule in rules if getattr(rule, "kind", None) != "blend"]
+    assert len(rules) == 5 and len({rule.rule_hash for rule in singles}) == 4
+    assert all(rule.large_caps == blend.LARGE_CAPS and rule.core == 0 and rule.weighting == "equal" for rule in singles)
+    assert all(not uses_0050(rule.canonical()) for rule in singles)
+    assert "只挑市值前 100 大、每檔等額" in classify(singles[0].canonical())["traits"]

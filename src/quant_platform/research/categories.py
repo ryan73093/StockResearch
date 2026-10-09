@@ -83,6 +83,8 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
             traits.append("產業上限")
         if spec.get("universe") == "all":
             traits.append("上市＋上櫃")
+        if spec.get("large_caps"):
+            traits.append(f"只挑市值前 {spec['large_caps']} 大、每檔等額")
         if spec.get("stop_loss"):
             traits.append("停損")
         if spec.get("market_filter") not in (None, "none"):
