@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -100,6 +100,16 @@ switch ($Name) {
         # from every earlier scan finalist too. Then the statistics.
         Invoke-Step "1-scan" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "80", "--signals-min", "4", "--signals-max", "4")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "robots" {
+        # 2026-10-10 (使用者：兩個都做＋純技術分析的 RL 機器人): the new model without monthly revenue and its
+        # scan, the technical RL robot and its rules, RL 3.0 across the T0 candidates, then the statistics.
+        Invoke-Step "1-model" @("-m", "quant_platform.research", "model", "--model-version", "gbm-1.4.0")
+        Invoke-Step "2-scan-model" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "20", "--require", "ml_gbm_quality")
+        Invoke-Step "3-tech-rl" @("-m", "quant_platform.research", "tech-rl")
+        Invoke-Step "4-tech-rules" @("-m", "quant_platform.research", "daily", "--name", "techbot", "--broker", "cathay")
+        Invoke-Step "5-rl3" @("-m", "quant_platform.research", "rl-strategies", "--broker", "cathay")
+        Invoke-Step "6-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "news-events" {
         # R15 D (2026-10-09): score the collected headlines not scored yet (also every trading day 21:45).

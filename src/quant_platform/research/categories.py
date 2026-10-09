@@ -24,10 +24,11 @@ FAMILY_FACTORS = {
 }
 FACTOR_FAMILY = {factor: family for family, factors in FAMILY_FACTORS.items() for factor in factors}
 OPPOSITE = {"趨勢動能": "反轉", "反轉": "趨勢動能"}
-FAMILY_ORDER = ("機器學習", "組合帳戶", "趨勢動能", "反轉", "低波動", "價值殖利率", "籌碼", "營收財報", "成交量規模",
+FAMILY_ORDER = ("機器學習", "技術分析機器人", "組合帳戶", "趨勢動能", "反轉", "低波動", "價值殖利率", "籌碼", "營收財報", "成交量規模",
                 "多因子", "其他")
 FAMILY_NOTES = {
     "機器學習": "把 35 個因子交給逐年滾動訓練的模型打分數",
+    "技術分析機器人": "強化學習的交易機器人，只看價格與成交量，自己決定買進和賣出",
     "組合帳戶": "帳戶分成幾份，各自照不同規則操作",
     "趨勢動能": "買正在漲、站上均線或接近高點的股票",
     "反轉": "買最近跌深或超賣的股票",
@@ -48,6 +49,8 @@ def _core(core: float) -> str:
 def _family(factor: str, weight: float) -> str:
     if factor.startswith("ml_gbm"):
         return "機器學習"
+    if factor == "rl_tech":
+        return "技術分析機器人"
     family = FACTOR_FAMILY.get(factor, "其他")
     return OPPOSITE.get(family, family) if weight < 0 else family
 

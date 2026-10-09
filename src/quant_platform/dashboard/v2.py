@@ -248,7 +248,7 @@ def research_conclusions(path: Path) -> list[str]:
 
 def ml_view(research_dir: Path) -> dict[str, object]:
     """2026-10-06: the walk-forward models' out-of-sample diagnostics and the RL overlay's report."""
-    models = []
+    models, tech = [], []
     folder = research_dir / "models"
     for path in sorted(folder.glob("*/meta.json")) if folder.is_dir() else []:
         try:
@@ -256,6 +256,12 @@ def ml_view(research_dir: Path) -> dict[str, object]:
         except ValueError:
             continue
         years = meta.get("years") or {}
+        if str(meta.get("version") or path.parent.name).startswith("tech-rl"):    # 2026-10-10: the technical robot
+            tech.append({"version": meta.get("version"), "years": years, "features": meta.get("features") or [],
+                         "seeds": meta.get("seeds") or [], "trained_at": (meta.get("trained_at") or "")[:16]})
+            continue
+        if str(meta.get("version") or path.parent.name).startswith("exit-"):
+            continue
 
         def average(key: str) -> float | None:
             values = [item.get(key) for item in years.values() if item.get(key) is not None]
@@ -272,6 +278,10 @@ def ml_view(research_dir: Path) -> dict[str, object]:
         except ValueError:
             continue
         width, height = 720, 120
+        if str(report.get("version", "")).startswith("rl-strategies"):     # 2026-10-10: RL 3.0
+            report["kind"] = "strategies"
+            reports.append(report)
+            continue
         if report.get("mixes"):              # R15 C3: the mix across strategy families, one line per family
             mixes = report["mixes"]
             days = list(mixes)
@@ -291,7 +301,7 @@ def ml_view(research_dir: Path) -> dict[str, object]:
         report["chart"] = {"points": points, "width": width, "height": height,
                            "first": days[0] if days else "", "last": days[-1] if days else ""}
         reports.append(report)
-    return {"models": models, "rl": reports}
+    return {"models": models, "rl": reports, "tech": tech}
 
 
 def _default_basis(research_dir: Path) -> str:

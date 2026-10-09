@@ -36,7 +36,11 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # 2026-10-09 (the AI-methods review, rank 1): the same as 1.2.0, learning the next 60 sessions' excess
           # return. Models that forecast 3 months and longer trade less and kept more after costs (Robeco 2023);
           # the 20-session model turns its holdings over about monthly. Registered once, no horizon search.
-          "ml_gbm_60": {"version": "gbm-1.3.0", "label": "excess", "horizon": 60}}
+          "ml_gbm_60": {"version": "gbm-1.3.0", "label": "excess", "horizon": 60},
+          # 2026-10-10 (使用者：月營收是落後指標、新版模型): the same as 1.2.0 without the three monthly revenue
+          # factors and with the three trend-quality ones (continuity, intraday momentum, industry residual)
+          "ml_gbm_quality": {"version": "gbm-1.4.0", "label": "excess", "features": "no_revenue_quality"}}
+MONTHLY_REVENUE = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel")
 VERSIONS = {spec["version"]: spec for spec in MODELS.values()}
 LATEST = "gbm-1.2.0"
 HORIZON = 20                # sessions the label looks ahead
@@ -78,15 +82,25 @@ def _rank(values: np.ndarray) -> np.ndarray:
     return pd.DataFrame(values).rank(axis=1, pct=True).to_numpy(dtype=np.float32)
 
 
-def trained_features(folder: str | Path) -> tuple[str, ...]:
-    """The features a saved version was trained with (its meta.json); the current list if none."""
+def version_features(version: str | None) -> tuple[str, ...]:
+    """The features a new version starts with: the shared list, or its own (gbm-1.4.0: every rule factor
+    except monthly revenue, the trend-quality ones included)."""
+    from quant_platform.research.daily import FACTOR_LABELS
+
+    if version and VERSIONS.get(version, {}).get("features") == "no_revenue_quality":
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE)
+    return features()
+
+
+def trained_features(folder: str | Path, version: str | None = None) -> tuple[str, ...]:
+    """The features a saved version was trained with (its meta.json); the version's starting list if none."""
     path = Path(folder) / "meta.json"
     if path.is_file():
         try:
             return tuple(json.loads(path.read_text(encoding="utf-8"))["features"])
         except (ValueError, KeyError):
             pass
-    return features()
+    return version_features(version)
 
 
 def feature_block(fp, columns: list[int], eligible: np.ndarray, names: tuple[str, ...] | None = None) -> np.ndarray:
@@ -163,7 +177,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
     list it was first trained with (a later year of the same version uses the same features)."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    names = trained_features(out)
+    names = trained_features(out, version)
     eligible = eligibility(fp)
     samples = sample_columns(len(fp.sessions))
     x = feature_block(fp, samples, eligible, names)
@@ -270,7 +284,7 @@ def scores(fp, out_dir: str | Path) -> np.ndarray:
     if not models:
         return output
     eligible = eligibility(fp)
-    names = trained_features(folder)              # gbm-1.0.0 and 1.1.0 learned 30 factors; more came later
+    names = trained_features(folder, folder.name)  # gbm-1.0.0 and 1.1.0 learned 30 factors; more came later
     by_year: dict[int, list[int]] = {}
     for column, day in enumerate(fp.sessions):
         usable = [year for year in models if year <= day.year]

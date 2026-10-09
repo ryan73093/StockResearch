@@ -89,9 +89,13 @@ def test_the_space_is_wide_all_stock_and_every_rule_is_valid():
     from quant_platform.research.categories import uses_0050
 
     names = scan.signals()
-    assert len(names) == 39 and not set(scan.LEFT_OUT) & set(names) and set(names) <= set(scan.SHORT)
+    count = len(names)
+    assert count >= 40 and not set(scan.LEFT_OUT) & set(names) and set(names) <= set(scan.SHORT)
     items = scan.candidates()
-    assert len(items) == (39 + 39 * 38 // 2 + 39 * 38 * 37 // 6) * 4
+    assert len(items) == (count + count * (count - 1) // 2 + count * (count - 1) * (count - 2) // 6) * 4
+    required = scan.candidates(require="ml_gbm_quality")
+    assert required and all("ml_gbm_quality" in item["factors"] for item in required)
+    assert len(required) == (1 + (count - 1) + (count - 1) * (count - 2) // 2) * 4
     rules = [scan.to_rule(item) for item in items[::37]]                  # names fit (≤ 80) and parse
     assert all(rule.core == 0 and rule.top == 20 and not uses_0050(rule.canonical()) for rule in rules)
     assert scan.to_rule({"factors": ["ml_gbm_60", "trend_200"], "universe": "large", "weighting": "equal",

@@ -49,7 +49,7 @@ SHORT = {
     "earnings_yield": "本益比低", "book_to_price": "淨值比低", "roe_ttm": "ROE", "gross_margin": "毛利率",
     "operating_margin_change": "營益率增", "eps_growth": "EPS 成長", "low_debt": "負債低", "fip_12": "趨勢連續",
     "imom_12": "日內動能", "resid_mom_12": "殘差動能", "ml_gbm": "模型A", "ml_gbm_excess": "模型B",
-    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D",
+    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "rl_tech": "技術機器人",
 }
 
 
@@ -66,12 +66,16 @@ def weekly(factors: tuple[str, ...]) -> bool:
     return any(name in MODEL_FACTORS or name in CHIP_FACTORS for name in factors)
 
 
-def candidates(names: list[str] | None = None, largest: int = 3, smallest: int = 1) -> list[dict]:
-    """Every set of ``smallest``..``largest`` signals × universe (all, large) × weighting (equal, calm)."""
+def candidates(names: list[str] | None = None, largest: int = 3, smallest: int = 1,
+               require: str | None = None) -> list[dict]:
+    """Every set of ``smallest``..``largest`` signals × universe (all, large) × weighting (equal, calm);
+    with ``require`` only the sets that contain it (a new signal against everything else)."""
     names = names or signals()
     output = []
     for size in range(smallest, largest + 1):
         for group in combinations(names, size):
+            if require and require not in group:
+                continue
             for universe in ("all", "large"):
                 for weighting in ("equal", "inverse_vol"):
                     output.append({"factors": list(group), "universe": universe, "weighting": weighting,
@@ -359,7 +363,7 @@ def earlier_finalists(research: Path) -> list[dict]:
 
 
 def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 80, largest: int = 3,
-             names: list[str] | None = None, job=None, smallest: int = 1) -> dict:
+             names: list[str] | None = None, job=None, smallest: int = 1, require: str | None = None) -> dict:
     """Both stages; returns the summary written next to the screen results."""
     from quant_platform.research import daily
     from quant_platform.research.registry import TrialRegistry
@@ -371,7 +375,7 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
     data, fp = daily.load(base)
     fingerprint = daily.fingerprint(base)
     arrays = prepare(data, fp, costs, folder / "arrays")
-    items = candidates(names, largest, smallest)
+    items = candidates(names, largest, smallest, require)
     if job:
         job.update(done=0, total=len(items) + count, current=f"第一階段：{len(items):,} 個候選（2015-06～2020-09）",
                    force=True)
@@ -397,7 +401,8 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                         "since_2020": report["since_2020"]["excess"], "drawdown": report["strategy"]["max_drawdown"],
                         "reasons": reasons, "tier": daily.tier(record.metrics)[0]})
     summary = {"version": SCAN_VERSION, "stamp": stamp, "development": [str(arrays.days[0]), str(DEV_END)],
-               "signals": arrays.names, "sizes": [smallest, largest], "earlier_finalists": len(seeds),
+               "signals": arrays.names, "sizes": [smallest, largest], "require": require,
+               "earlier_finalists": len(seeds),
                "candidates": len(items), "passed_screen": sum(passes(row) for row in rows),
                "finalists": len(chosen), "minutes": round((time.time() - started) / 60, 1), "results": results,
                "tiers": dict(Counter(item["tier"] for item in results))}

@@ -150,8 +150,56 @@
   {% else %}<p class="muted">還沒有訓練過的模型。</p>{% endif %}
 </section>
 
+{% for robot in ml.tech %}
+<section class="card">
+  <div class="card__head"><h2>技術分析 RL 機器人 <span class="badge">{{ robot.version }}</span></h2><span class="muted small">{{ robot.seeds|length }} 個種子・{{ robot.trained_at }}</span></div>
+  <p class="small" style="margin:0 0 10px">只看價格與成交量（{{ robot.features|length }} 個技術因子、大盤的技術狀態、自己的部位：持有幾天、賺賠、離高點多遠），每檔股票每天收盤後自己決定「進場／待著／出場」。進場的獎勵是那檔股票隔天贏過當天平均股票多少，進出都扣成本；不看財報、籌碼、新聞或任何訓練過的因子模型。每一年的機器人只用那一年以前的資料訓練。放進規則時，引擎只買它想要的股票（前 20 名、同產業最多 3 成），什麼時候賣完全由它決定；規則的結果在選手池（名稱以「技術分析 RL 機器人」開頭）。</p>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>交易年</th><th>訓練到</th><th class="num">訓練獎勵（前→後）</th><th class="num">樣本外：在場時每天贏平均股票</th><th class="num">在場比例</th><th class="num">平均持有</th><th class="num">進場次數</th></tr></thead>
+      <tbody>
+      {% for year, item in robot.years.items() %}
+        <tr><td data-primary><strong>{{ year }}</strong></td>
+            <td data-label="訓練到">{{ item.trained_until }}</td>
+            <td class="num" data-label="訓練獎勵">{{ item.training_reward_first }} → {{ item.training_reward_last }}</td>
+            <td class="num {{ 'up' if (item.excess_per_in_session or 0) > 0 else 'down' }}" data-label="在場時每天">{{ '{:+.3%}'.format(item.excess_per_in_session) if item.excess_per_in_session is not none else '—' }}</td>
+            <td class="num" data-label="在場比例">{{ '{:.0%}'.format(item.share_in) if item.share_in is not none else '—' }}</td>
+            <td class="num" data-label="平均持有">{{ item.average_hold if item.average_hold is not none else '—' }} 天</td>
+            <td class="num" data-label="進場">{{ '{:,}'.format(item.entries) if item.entries is not none else '—' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">樣本外：那一年所有合格股票同時交給機器人決定進出（扣進出成本），看它在場的股票平均每天贏同日平均股票多少；為正代表它挑得出會贏的股票、知道什麼時候出場。</p>
+</section>
+{% endfor %}
+
 {% for report in ml.rl %}
-{% if report.kind == 'sleeves' %}
+{% if report.kind == 'strategies' %}
+<section class="card">
+  <div class="card__head"><h2>強化學習 3.0：在 T0 候選之間分配 <span class="badge">{{ report.version }}</span></h2><span class="muted small">樣本外 {{ report.period[0] }}～{{ report.period[1] }}</span></div>
+  <p class="small" style="margin:0 0 10px">每個交易日收盤後，RL 決定帳戶在 {{ report.strategies|length }} 個 T0 候選策略（全部 100% 個股）與現金之間各放多少；從一個策略換到另一個要付 {{ '{:.1%}'.format(report.move_cost) }}。每一年只用那一年以前的資料訓練，{{ report.seeds|length }} 個種子平均。要贏過「平均分配（每月重設）」「訓練期最好的單一策略」和 0050，回撤不比 0050 深超過 5 個百分點才算通過。{% if report.acceptance %} <span class="badge {{ 'badge--ok' if report.acceptance.passed else 'badge--bad' }}">{{ '通過' if report.acceptance.passed else '未通過' }}</span>{% endif %}</p>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>做法</th><th class="num">樣本外年化（回撤）</th><th class="num">{{ report.clean_from }} 起年化（回撤）</th></tr></thead>
+      <tbody>
+      {% for key, label in (('rl', 'RL 3.0 分配'), ('equal', '平均分配（每月重設）'), ('best_in_training', '訓練期最好的單一策略'), ('0050', '全部 0050（比較基準）')) %}
+        {% set item = report.overall.get(key) %}{% set later = (report.clean or {}).get(key) %}
+        {% if item %}
+        <tr><td data-primary><strong>{{ label }}</strong></td>
+            <td class="num" data-label="樣本外">{{ '{:.1%}'.format(item.annual) }}<span class="muted small">（{{ '{:.0%}'.format(item.max_drawdown) }}）</span></td>
+            <td class="num" data-label="{{ report.clean_from }} 起">{% if later %}{{ '{:.1%}'.format(later.annual) }}<span class="muted small">（{{ '{:.0%}'.format(later.max_drawdown) }}）</span>{% else %}—{% endif %}</td></tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <details style="margin-top:10px"><summary class="small">平均分配到哪裡</summary>
+    <ul class="small">{% for name, value in report.average_shares.items() %}<li>{{ name }}：{{ '{:.0%}'.format(value) }}</li>{% endfor %}</ul>
+  </details>
+  <p class="note">策略多半是用 2015-06～2020-09 的資料挑出來的（大規模搜尋），所以 {{ report.clean_from }} 年以後才是乾淨的樣本外。用每日報酬計算（不含每月投入），只比較分配本身。</p>
+</section>
+{% elif report.kind == 'sleeves' %}
 <section class="card">
   <div class="card__head"><h2>強化學習：在策略家族間分配 <span class="badge">{{ report.version }}</span></h2><span class="muted small">樣本外 {{ report.test_from }}～{{ report.test_to }}</span></div>
   <p class="small" style="margin:0 0 10px">每個交易日收盤後，RL 從 {{ report.menu|length }} 種固定比例中挑一種，把帳戶分給「{{ report.families|join('」「') }}」；移動要付 0.5% 成本，回撤懲罰 {{ report.drawdown_penalty }}。每一年只用那一年以前的資料訓練，{{ report.seeds|length }} 個種子平均。{% if report.third == 'cash' %}這一版不放 0050：第三個位置是現金，RL 要學的是什麼時候退出個股；要贏過簡單規則「兩個家族各半、波動大時減碼到現金」才算通過。{% else %}公平的對照是「訓練期最好的固定組合」：每年用那年以前的資料事後挑出最好的一種，之後不再改。{% endif %}{% if report.acceptance %} <span class="badge {{ 'badge--ok' if report.acceptance.passed else 'badge--bad' }}">{{ '通過' if report.acceptance.passed else '未通過' }}</span>{% endif %}</p>

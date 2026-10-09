@@ -305,7 +305,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan"),
+                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -315,7 +315,8 @@ def main() -> int:
     parser.add_argument("--sleeves-version", default="rl-sleeves-2.0.0",
                         choices=("rl-sleeves-1.0.0", "rl-sleeves-1.1.0", "rl-sleeves-2.0.0"),
                         help="rl-sleeves：版本（1.1.0 隨機起點；2.0.0 第三個位置是現金、回撤懲罰加倍）")
-    parser.add_argument("--model-version", default="gbm-1.2.0", choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0"),
+    parser.add_argument("--model-version", default="gbm-1.2.0",
+                        choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
@@ -343,6 +344,7 @@ def main() -> int:
     parser.add_argument("--finalists", type=int, default=80, help="scan：第二階段用完整引擎跑幾個")
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
+    parser.add_argument("--require", help="scan：只跑含這個訊號的組（例如新模型 ml_gbm_quality）")
     parser.add_argument("--use-plan", action="store_true", help="用網站上最新版投資計畫的每月金額與薪資日")
     args = parser.parse_args()
     if args.use_plan:
@@ -581,19 +583,66 @@ def main() -> int:
     if args.command == "daily":
         return _daily(args, registry)
 
+    if args.command == "rl-strategies":
+        # 2026-10-10: RL 3.0, the account shared among the T0 candidates (research/rl_strategies.py)
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import rl_strategies
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        specs = rl_strategies.t0_candidates(RESEARCH)
+        years = list(range(rl_strategies.FIRST_YEAR, daily_research.RECENT_END.year + 1))
+        with JobLog(RESEARCH).start(f"強化學習 3.0：在 {len(specs)} 個 T0 候選之間分配（{rl_strategies.VERSION}，"
+                                    f"{years[0]} 起逐年）", command, total=len(years)) as job:
+            job.update(current="載入行情、重算每個策略的帳戶", force=True)
+            data, fp = daily_research.load(Path(args.base))
+            strategies = rl_strategies.build(data, fp, broker_costs(args.broker), specs)
+            report = rl_strategies.walk_forward(strategies, RESEARCH / "rl" / rl_strategies.VERSION, job=job)
+            overall = report["overall"]
+            job.payload["summary"] = (f"RL 年化 {overall['rl']['annual']:.1%}（回撤 {overall['rl']['max_drawdown']:.0%}）、"
+                                      f"平均分配 {overall['equal']['annual']:.1%}（{overall['equal']['max_drawdown']:.0%}）、"
+                                      f"0050 {overall['0050']['annual']:.1%}（{overall['0050']['max_drawdown']:.0%}）；"
+                                      f"{'通過' if report['acceptance']['passed'] else '未通過'}")
+        print(json.dumps({key: report[key] for key in ("overall", "clean", "acceptance", "average_shares")},
+                         ensure_ascii=False, indent=1))
+        return 0
+
+    if args.command == "tech-rl":
+        # 2026-10-10: train the technical-analysis RL robot (research/tech_rl.py), walk-forward by year
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import tech_rl
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        years = list(range(tech_rl.FIRST_YEAR, daily_research.RECENT_END.year + 1))
+        with JobLog(RESEARCH).start(f"技術分析 RL 機器人（{tech_rl.TECH_VERSION}，逐年 {years[0]}～{years[-1]}、"
+                                    f"{len(tech_rl.SEEDS)} 個種子）", command, total=len(years)) as job:
+            job.update(current="載入行情與技術因子", force=True)
+            data, fp = daily_research.load(Path(args.base))
+            meta = tech_rl.train(fp, tech_rl.tech_dir(Path(args.base)), daily_research.fingerprint(Path(args.base)),
+                                 years, job=job)
+            job.update(done=len(years), force=True)
+            job.payload["summary"] = f"{len(meta['years'])} 個年度機器人"
+        for year, item in meta["years"].items():
+            print(f"{year}：訓練到 {item['trained_until']}、訓練報酬 {item['training_reward_first']} → "
+                  f"{item['training_reward_last']}；樣本外 進場時每天超額 {item.get('excess_per_in_session')}、"
+                  f"在場比例 {item.get('share_in')}、平均持有 {item.get('average_hold')} 天、進場 {item.get('entries')} 次",
+                  flush=True)
+        return 0
+
     if args.command == "scan":
         # 2026-10-10: the broad two-stage search (research/scan.py)
         from quant_platform.research import scan
         from quant_platform.research.jobs import JobLog
 
-        count = len(scan.candidates(None, args.signals_max, args.signals_min))
+        count = len(scan.candidates(None, args.signals_max, args.signals_min, args.require))
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         with JobLog(RESEARCH).start(f"大規模策略搜尋（{args.signals_min}～{args.signals_max} 個訊號一組，{count:,} 個候選，"
                                     f"第一階段 2015-06～2020-09）",
                                     command, total=count + args.finalists) as job:
             summary = scan.run_scan(Path(args.base), RESEARCH, broker_costs(args.broker), workers=args.workers,
                                     count=args.finalists, job=job, largest=args.signals_max,
-                                    smallest=args.signals_min)
+                                    smallest=args.signals_min, require=args.require)
             job.payload["summary"] = (f"{summary['candidates']:,} 個候選、{summary['passed_screen']:,} 個過第一階段、"
                                       f"{summary['finalists']} 個完整回測：{summary['tiers']}")
         for item in summary["results"]:
