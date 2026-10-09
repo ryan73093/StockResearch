@@ -123,3 +123,35 @@ def test_a_year_added_later_keeps_the_other_years(tmp_path):
     first = (tmp_path / "2015.pkl").read_bytes()
     meta = model.train(fp, tmp_path, "data:y", [2016])
     assert set(meta["years"]) == {"2015", "2016"} and (tmp_path / "2015.pkl").read_bytes() == first
+
+
+def test_the_60_session_model_learns_a_longer_label_and_only_the_label_differs():
+    """2026-10-09: gbm-1.3.0 forecasts the next 60 sessions; every other version keeps 20."""
+    from quant_platform.research import daily
+
+    assert model.MODELS["ml_gbm_60"] == {"version": "gbm-1.3.0", "label": "excess", "horizon": 60}
+    assert all(spec.get("horizon", model.HORIZON) == 20 for name, spec in model.MODELS.items() if name != "ml_gbm_60")
+    full, half = daily.model_60_batch()
+    weekly = next(rule for rule in daily.turnover_batch() if rule.check == "weekly" and rule.core == half.core)
+    assert half.model_copy(update={"name": "x", "factors": {"ml_gbm_statements": 1.0}}).rule_hash == \
+        weekly.model_copy(update={"name": "x"}).rule_hash
+    assert full.core == 0.0 and "ml_gbm_60" in daily.MODEL_FACTORS
+
+
+def test_label_and_training_windows_follow_the_horizon():
+    days = [date(2024, 1, 1) + timedelta(days=index) for index in range(80)]
+    closes = {"1101.TW": {day: 10.0 + index for index, day in enumerate(days)},
+              "1102.TW": {day: 10.0 for day in days}, "0050.TW": {day: 100.0 for day in days}}
+    data = LegacyData(sessions=days, closes=closes, traded_value={s: {d: 5e7 for d in v} for s, v in closes.items()},
+                      factors={}, predictions={})
+    fp = FactorPanel(Panel(data))
+    eligible = np.ones((len(fp.symbols), len(days)), dtype=bool)
+    row = fp.symbols.index("1101.TW")
+    twenty = model.label_block(fp, [0], eligible, "excess", 20)[0]
+    sixty = model.label_block(fp, [0], eligible, "excess", 60)[0]
+    assert sixty[row] > twenty[row] > 0                     # the rising stock gains more over 60 sessions
+    assert np.isnan(model.label_block(fp, [30], eligible, "excess", 60)[0]).all()   # past the data: unknown
+    samples = list(range(0, 80, 5))
+    assert model.training_columns(fp, samples, 2024, 60) == []          # no label window ends before 2024
+    later = model.training_columns(fp, samples, 2025, 60)
+    assert later and max(later) + 60 < len(days)

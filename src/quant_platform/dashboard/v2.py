@@ -71,6 +71,7 @@ DOCS = {
     "history": ("開發歷程", "DEVELOPMENT_HISTORY.md"),
     "line": ("LINE 設定", "docs/line-notifications.md"),
     "research_method": ("研究方法", "docs/research_method.md"),
+    "ai_methods": ("AI 方法評估", "reports/AI 交易方法 實證與架構.md"),
 }
 JOB_LABELS = {
     "daily_market_data": "日線行情",
@@ -238,6 +239,7 @@ def ml_view(research_dir: Path) -> dict[str, object]:
             return sum(values) / len(values) if values else None
 
         models.append({"version": meta.get("version") or path.parent.name, "label": meta.get("label", "rank"),
+                       "horizon": meta.get("horizon", 20),
                        "features": len(meta.get("features") or []), "years": years, "ic": average("ic"),
                        "top20_gain": average("top20_gain"), "trained_at": (meta.get("trained_at") or "")[:16]})
     reports = []

@@ -32,7 +32,11 @@ MODEL_VERSION = "gbm-1.0.0"
 MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_gbm_excess": {"version": "gbm-1.1.0", "label": "excess"},
           # 2026-10-06: the same as 1.1.0 with the five statement factors (35 features)
-          "ml_gbm_statements": {"version": "gbm-1.2.0", "label": "excess"}}
+          "ml_gbm_statements": {"version": "gbm-1.2.0", "label": "excess"},
+          # 2026-10-09 (the AI-methods review, rank 1): the same as 1.2.0, learning the next 60 sessions' excess
+          # return. Models that forecast 3 months and longer trade less and kept more after costs (Robeco 2023);
+          # the 20-session model turns its holdings over about monthly. Registered once, no horizon search.
+          "ml_gbm_60": {"version": "gbm-1.3.0", "label": "excess", "horizon": 60}}
 VERSIONS = {spec["version"]: spec for spec in MODELS.values()}
 LATEST = "gbm-1.2.0"
 HORIZON = 20                # sessions the label looks ahead
@@ -94,11 +98,11 @@ def feature_block(fp, columns: list[int], eligible: np.ndarray, names: tuple[str
     return block
 
 
-def label_block(fp, columns: list[int], eligible: np.ndarray, kind: str = "rank") -> np.ndarray:
-    """len(columns) × symbols: the next HORIZON sessions' return (NaN past the data) as its percentile among
+def label_block(fp, columns: list[int], eligible: np.ndarray, kind: str = "rank", horizon: int = HORIZON) -> np.ndarray:
+    """len(columns) × symbols: the next ``horizon`` sessions' return (NaN past the data) as its percentile among
     the day's eligible stocks ("rank"), or above the day's median with the day's 1% tails clipped ("excess")."""
     prices = fp.panel.filled
-    later = [column + HORIZON for column in columns]
+    later = [column + horizon for column in columns]
     valid = [column < prices.shape[1] for column in later]
     output = np.full((len(columns), len(fp.symbols)), np.nan, dtype=np.float32)
     rows = [index for index, ok in enumerate(valid) if ok]
@@ -125,10 +129,10 @@ def sample_columns(sessions: int) -> list[int]:
     return list(range(WARMUP, sessions, STEP))
 
 
-def training_columns(fp, samples: list[int], year: int) -> list[int]:
+def training_columns(fp, samples: list[int], year: int, horizon: int = HORIZON) -> list[int]:
     """The samples whose label window ends before the year's first session."""
     first = next((index for index, day in enumerate(fp.sessions) if day.year >= year), len(fp.sessions))
-    return [column for column in samples if column + HORIZON < first]
+    return [column for column in samples if column + horizon < first]
 
 
 def _fit(features_: np.ndarray, labels: np.ndarray):
@@ -152,7 +156,7 @@ def _spearman(left: np.ndarray, right: np.ndarray) -> float | None:
 
 
 def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] | None = None,
-          job=None, label: str = "rank", version: str = MODEL_VERSION) -> dict[str, object]:
+          job=None, label: str = "rank", version: str = MODEL_VERSION, horizon: int = HORIZON) -> dict[str, object]:
     """Fit and save one model per year; returns the out-of-sample diagnostics. A version keeps the feature
     list it was first trained with (a later year of the same version uses the same features)."""
     out = Path(out_dir)
@@ -161,16 +165,16 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
     eligible = eligibility(fp)
     samples = sample_columns(len(fp.sessions))
     x = feature_block(fp, samples, eligible, names)
-    y = label_block(fp, samples, eligible, label)
-    ranks = y if label == "rank" else label_block(fp, samples, eligible, "rank")
-    gains = label_block(fp, samples, eligible, "excess")
+    y = label_block(fp, samples, eligible, label, horizon)
+    ranks = y if label == "rank" else label_block(fp, samples, eligible, "rank", horizon)
+    gains = label_block(fp, samples, eligible, "excess", horizon)
     last_year = fp.sessions[-1].year
     years = years or list(range(FIRST_YEAR, last_year + 1))
     diagnostics = {}
     for number, year in enumerate(years):
         if job:
             job.update(done=number, current=f"{year} 年的模型", force=True)
-        train_cols = training_columns(fp, samples, year)
+        train_cols = training_columns(fp, samples, year, horizon)
         if not train_cols:
             continue
         positions = [samples.index(column) for column in train_cols]
@@ -199,7 +203,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
                 best = np.argsort(-np.where(ranked, predicted, -np.inf))[:20]
                 top20_gains.append(float(np.nanmean(gains[index][best]) - np.nanmean(gains[index][ranked])))
         diagnostics[str(year)] = {
-            "train_rows": rows, "train_until": fp.sessions[train_cols[-1] + HORIZON].isoformat(),
+            "train_rows": rows, "train_until": fp.sessions[train_cols[-1] + horizon].isoformat(),
             "weeks": len(ics), "ic": round(float(np.mean(ics)), 4) if ics else None,
             "ic_positive": round(float(np.mean([value > 0 for value in ics])), 3) if ics else None,
             "top_fifth_rank_gap": round(float(np.mean(tops)), 4) if tops else None,
@@ -214,7 +218,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
             earlier = json.loads(meta_path.read_text(encoding="utf-8")).get("years") or {}
         except ValueError:
             earlier = {}
-    meta = {"version": version, "label": label, "params": PARAMS, "features": list(names), "horizon": HORIZON,
+    meta = {"version": version, "label": label, "params": PARAMS, "features": list(names), "horizon": horizon,
             "step": STEP, "data": data_fingerprint, "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "years": dict(sorted({**earlier, **diagnostics}.items()))}
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -242,7 +246,7 @@ def train_year(history: str | Path, version: str, year: int, job=None) -> dict[s
                      market_closes(history, panel.sessions))
     fingerprint = stock_fingerprint(history, first, year)
     return train(fp, model_dir(history, version), fingerprint, [year], job=job, label=VERSIONS[version]["label"],
-                 version=version)
+                 version=version, horizon=VERSIONS[version].get("horizon", HORIZON))
 
 
 def digest(out_dir: str | Path) -> str:

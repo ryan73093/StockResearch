@@ -84,7 +84,8 @@ FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTO
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
 MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
                  "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
-                 "ml_gbm_statements": "機器學習綜合分數（35 個因子含財報、超額報酬標籤、逐年滾動訓練）"}
+                 "ml_gbm_statements": "機器學習綜合分數（35 個因子含財報、超額報酬標籤、逐年滾動訓練）",
+                 "ml_gbm_60": "機器學習綜合分數（35 個因子含財報、之後 60 個交易日超額報酬標籤、逐年滾動訓練）"}
 RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
@@ -1039,6 +1040,14 @@ def exits_batch() -> list[DailyRule]:
     return rules
 
 
+def model_60_batch() -> list[DailyRule]:
+    """2026-10-09: the 60-session model (gbm-1.3.0), weekly, top 20, at most 3 in 10 per industry, alone and
+    half in 0050 — the same settings as the weekly 20-session model rule, so only the label differs."""
+    return [DailyRule(name=f"機器學習（含財報、預測 60 日）：前 20 名、同產業最多 3 成、每週決策{word}",
+                      factors={"ml_gbm_60": 1.0}, industry_cap=0.3, check="weekly", core=core)
+            for core, word in ((0.0, ""), (0.5, "、一半放 0050"))]
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1049,4 +1058,4 @@ def blends_batch() -> list:
 BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "combos": combo_batch,
            "tpex": tpex_batch, "overlays": overlay_batch, "holdings": holdings_batch, "model": model_batch,
            "model-excess": model_excess_batch, "statements": statement_batch, "turnover": turnover_batch,
-           "exits": exits_batch, "blends": blends_batch}
+           "exits": exits_batch, "blends": blends_batch, "model-60": model_60_batch}

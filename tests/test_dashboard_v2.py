@@ -241,3 +241,14 @@ def test_the_stylesheet_url_changes_with_its_content():
 
     sheet = Path(v2.__file__).parent / "static" / "css" / "v2.css"
     assert v2.ASSET_VERSION == hashlib.sha256(sheet.read_bytes()).hexdigest()[:10]
+
+
+def test_every_project_document_exists(client):
+    """The system page's documents, including the AI-methods review (2026-10-09), are files in the project."""
+    from pathlib import Path
+
+    from quant_platform.dashboard.v2 import DOCS
+
+    missing = [path for _label, path in DOCS.values() if not Path(path).is_file()]
+    assert missing == []
+    assert "樣本外" in client.get("/system/docs/ai_methods").get_json()["markdown"]

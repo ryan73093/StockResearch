@@ -312,7 +312,9 @@ def main() -> int:
     parser.add_argument("--family", default="etf", choices=("etf", "stocks", "daily"), help="stats：ETF、個股或每天決策規則")
     parser.add_argument("--rl-version", default="rl-overlay-1.1.0", choices=("rl-overlay-1.0.0", "rl-overlay-1.1.0"),
                         help="rl：版本（1.1.0 換部位在獎勵裡多扣 2%%）")
-    parser.add_argument("--model-version", default="gbm-1.2.0", choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0"),
+    parser.add_argument("--sleeves-version", default="rl-sleeves-1.1.0", choices=("rl-sleeves-1.0.0", "rl-sleeves-1.1.0"),
+                        help="rl-sleeves：版本（1.1.0 訓練回合從隨機組合開始）")
+    parser.add_argument("--model-version", default="gbm-1.2.0", choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
@@ -451,13 +453,13 @@ def main() -> int:
         from quant_platform.research.jobs import JobLog
 
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
-        version = rl_sleeves.RL_SLEEVES_VERSION
+        version = args.sleeves_version
         with JobLog(RESEARCH).start(f"強化學習：在策略家族間分配（{version}，2017 起逐年、5 個種子）", command,
                                     total=10) as job:
             job.update(current="載入行情並重播三個家族的帳戶", force=True)
             data, fp = daily_research.load(Path(args.base))
             families = rl_sleeves.build_families(data, fp, broker_costs(args.broker))
-            report = rl_sleeves.walk_forward(families, RESEARCH / "rl" / version, job=job)
+            report = rl_sleeves.walk_forward(families, RESEARCH / "rl" / version, job=job, version=version)
             overall = report["overall"]
             job.payload["summary"] = (
                 f"樣本外 {report['test_from']}～{report['test_to']}：RL 年化 {overall['rl']['annual']:.1%}"
@@ -514,7 +516,8 @@ def main() -> int:
             data, fp = daily_research.load(Path(args.base))
             fingerprint = daily_research.fingerprint(Path(args.base))
             meta = research_model.train(fp, research_model.model_dir(Path(args.base), version), fingerprint, years,
-                                        job=job, label=label, version=version)
+                                        job=job, label=label, version=version,
+                                        horizon=research_model.VERSIONS[version].get("horizon", research_model.HORIZON))
             job.update(done=len(years), force=True)
             ics = [item["ic"] for item in meta["years"].values() if item.get("ic") is not None]
             job.payload["summary"] = f"{len(meta['years'])} 個年度模型；樣本外 IC 平均 {np.mean(ics):+.3f}" if ics else "沒有模型"

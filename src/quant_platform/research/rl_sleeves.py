@@ -31,6 +31,11 @@ import numpy as np
 import pandas as pd
 
 RL_SLEEVES_VERSION = "rl-sleeves-1.0.0"
+# 1.1.0 (2026-10-09): 1.0.0 started every training episode at a quarter, a quarter and half in 0050 and,
+# with moves charged, learned to stay there (its average mix 28/26/47 ≈ that fixed mix, which did slightly
+# better). Each training episode now starts at a random mix of the menu, so staying put earns nothing.
+VERSIONS = {"rl-sleeves-1.0.0": {"random_start": False}, "rl-sleeves-1.1.0": {"random_start": True}}
+LATEST_SLEEVES = "rl-sleeves-1.1.0"
 FAMILIES = ("model", "trend", "0050")
 FAMILY_LABELS = {"model": "機器學習每週", "trend": "站上 200 日均線（依波動度）", "0050": "0050"}
 MENU = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (0.5, 0.5, 0.0), (0.5, 0.0, 0.5), (0.0, 0.5, 0.5),
@@ -174,7 +179,10 @@ def train_policy(families: Families, low: int, high: int, seed: int, config: dic
     menu = np.array(MENU)
     for _iteration in range(config["iterations"]):
         starts = rng.integers(low, high - length - 1, size=envs)
-        weights = np.tile(menu[-1], (envs, 1))                  # start each episode at a quarter, quarter, half
+        if config.get("random_start"):
+            weights = menu[rng.integers(0, len(MENU), size=envs)]
+        else:
+            weights = np.tile(menu[-1], (envs, 1))              # 1.0.0: a quarter, a quarter, half in 0050
         value, peak, drawdown = np.ones(envs), np.ones(envs), np.zeros(envs)
         observations, actions, logps, rewards, values = [], [], [], [], []
         for offset in range(length):
@@ -283,7 +291,8 @@ def best_fixed(families: Families, low: int, high: int) -> int:
 
 
 def walk_forward(families: Families, out_dir: str | Path | None = None, seeds: tuple[int, ...] = SEEDS,
-                 first_year: int = FIRST_TEST_YEAR, config: dict | None = None, job=None) -> dict[str, object]:
+                 first_year: int = FIRST_TEST_YEAR, config: dict | None = None, job=None,
+                 version: str = RL_SLEEVES_VERSION) -> dict[str, object]:
     """Train for each test year on the sessions before it, run it; the report (saved when ``out_dir``)."""
     menu = np.array(MENU)
     ready = int(np.argmax(np.isfinite(families.features).all(axis=1)))
@@ -295,7 +304,8 @@ def walk_forward(families: Families, out_dir: str | Path | None = None, seeds: t
         high = max(index for index, day in enumerate(families.days) if day.year == year) + 1
         if job:
             job.update(done=number, current=f"{year} 年（訓練 {families.days[ready]}～{families.days[low - 1]}）", force=True)
-        policies = [train_policy(families, ready, low, seed + year, config) for seed in seeds]
+        policies = [train_policy(families, ready, low, seed + year, {**VERSIONS[version], **(config or {})})
+                    for seed in seeds]
         mixes = run_policy(policies, families, low, high, start)
         chosen = best_fixed(families, ready, low)
         fixed = np.tile(menu[chosen], (high - low, 1))
@@ -318,7 +328,7 @@ def walk_forward(families: Families, out_dir: str | Path | None = None, seeds: t
     mixes_all, fixed_all = np.vstack(mixes_all), np.vstack(fixed_all)
     count, span = len(mixes_all), len(mixes_all) / 245
     report = {
-        "version": RL_SLEEVES_VERSION, "config": {**CONFIG, **(config or {})}, "menu": [list(mix) for mix in MENU],
+        "version": version, "config": {**CONFIG, **VERSIONS[version], **(config or {})}, "menu": [list(mix) for mix in MENU],
         "families": [FAMILY_LABELS[name] for name in FAMILIES], "move_cost": MOVE_COST, "switch_penalty": SWITCH_PENALTY,
         "drawdown_penalty": DRAWDOWN_PENALTY, "features": families.names, "seeds": list(seeds),
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),

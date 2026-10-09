@@ -70,3 +70,12 @@ def test_the_report_shows_on_the_research_page(tmp_path):
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
     body = client.get("/research?tab=ml").get_data(as_text=True)
     assert "在策略家族間分配" in body and "訓練期最好的固定組合" in body and rs.RL_SLEEVES_VERSION in body
+
+
+def test_version_1_1_starts_training_episodes_anywhere():
+    assert rs.VERSIONS[rs.LATEST_SLEEVES] == {"random_start": True}
+    assert rs.VERSIONS["rl-sleeves-1.0.0"] == {"random_start": False}
+    families = regimes(sessions=600)
+    tiny = {"iterations": 1, "envs": 8, "episode": 40, "minibatch": 128}
+    report = rs.walk_forward(families, seeds=(0,), first_year=2016, config=tiny, version="rl-sleeves-1.1.0")
+    assert report["version"] == "rl-sleeves-1.1.0" and report["config"]["random_start"] is True

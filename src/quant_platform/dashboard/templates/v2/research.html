@@ -131,22 +131,22 @@
   {% if ml.models %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>版本</th><th>標籤</th><th class="num">特徵</th><th class="num">樣本外 IC（平均）</th><th class="num">前 20 名比中位數多（20 日）</th><th>訓練</th></tr></thead>
+      <thead><tr><th>版本</th><th>標籤</th><th class="num">特徵</th><th class="num">樣本外 IC（平均）</th><th class="num">前 20 名比中位數多（預測期）</th><th>訓練</th></tr></thead>
       <tbody>
       {% for item in ml.models %}
         <tr>
           <td data-primary><strong>{{ item.version }}</strong></td>
-          <td data-label="標籤">{{ '報酬排名' if item.label == 'rank' else '超額報酬' }}</td>
+          <td data-label="標籤">{{ '報酬排名' if item.label == 'rank' else '超額報酬' }}<span class="muted small">・{{ item.horizon }} 日</span></td>
           <td class="num" data-label="特徵">{{ item.features }}</td>
           <td class="num" data-label="IC">{{ '{:+.3f}'.format(item.ic) if item.ic is not none else '—' }}</td>
-          <td class="num" data-label="前 20 名">{{ '{:+.2%}'.format(item.top20_gain) if item.top20_gain is not none else '—' }}</td>
+          <td class="num" data-label="前 20 名">{{ '{:+.2%}'.format(item.top20_gain) if item.top20_gain is not none else '—' }}<span class="muted small">（{{ item.horizon }} 日）</span></td>
           <td class="small" data-label="訓練" data-wide>{{ item.years|length }} 個年度・{{ item.trained_at }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="note">每年一個模型，只用標籤在那一年之前就結束的資料訓練；IC 是分數和之後 20 個交易日報酬排名的相關（0 代表沒有預測力）。模型分數當成因子給規則用，規則的結果在選手池。</p>
+  <p class="note">每年一個模型，只用標籤在那一年之前就結束的資料訓練；IC 是分數和之後報酬（各版本的預測期，多數是 20 個交易日、gbm-1.3.0 是 60 個）排名的相關（0 代表沒有預測力）。模型分數當成因子給規則用，規則的結果在選手池。</p>
   {% else %}<p class="muted">還沒有訓練過的模型。</p>{% endif %}
 </section>
 
