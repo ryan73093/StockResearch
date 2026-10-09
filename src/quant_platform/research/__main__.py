@@ -305,7 +305,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events"),
+                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -339,6 +339,8 @@ def main() -> int:
     parser.add_argument("--dividend-lag", type=int, default=25)
     parser.add_argument("--execution-lag", type=int, default=0, help="穩健性：晚幾個交易日成交")
     parser.add_argument("--base", default=str(DEFAULT_BASE))
+    parser.add_argument("--workers", type=int, default=6, help="scan：第一階段同時跑幾個程序")
+    parser.add_argument("--finalists", type=int, default=80, help="scan：第二階段用完整引擎跑幾個")
     parser.add_argument("--use-plan", action="store_true", help="用網站上最新版投資計畫的每月金額與薪資日")
     args = parser.parse_args()
     if args.use_plan:
@@ -576,6 +578,25 @@ def main() -> int:
 
     if args.command == "daily":
         return _daily(args, registry)
+
+    if args.command == "scan":
+        # 2026-10-10: the broad two-stage search (research/scan.py)
+        from quant_platform.research import scan
+        from quant_platform.research.jobs import JobLog
+
+        count = len(scan.candidates())
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start(f"大規模策略搜尋（{scan.SCAN_VERSION}，{count:,} 個候選，第一階段 2015-06～2020-09）",
+                                    command, total=count + args.finalists) as job:
+            summary = scan.run_scan(Path(args.base), RESEARCH, broker_costs(args.broker), workers=args.workers,
+                                    count=args.finalists, job=job)
+            job.payload["summary"] = (f"{summary['candidates']:,} 個候選、{summary['passed_screen']:,} 個過第一階段、"
+                                      f"{summary['finalists']} 個完整回測：{summary['tiers']}")
+        for item in summary["results"]:
+            print(f"#{item['trial_id']} {item['tier']} {item['name']}：2015-06 起 {item['full_excess']:+.1%}、"
+                  f"2020-10 起 {item['since_2020']:+.1%}、回撤 {item['drawdown']:.1%}", flush=True)
+        print(json.dumps({key: value for key, value in summary.items() if key != "results"}, ensure_ascii=False))
+        return 0
 
     if args.command == "forward":
         from quant_platform.research.stock_forward import StockForwardTracker, reconcile
