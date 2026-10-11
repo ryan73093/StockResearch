@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -128,6 +128,27 @@ switch ($Name) {
         # 2026-10-10: the four-signal scan's second stage again, choosing distinct finalists from its best
         # 5,000 (not 600: the top 600 were near-copies of each other), then the statistics.
         Invoke-Step "1-scan4-wide" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--finalists", "80", "--pool", "5000", "--resume", "instance/research/scans/scan-1.0.0-20261010-021730")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "consensus" {
+        # 2026-10-11: the T0 consensus list (top 20 and top 40), the crowding / size / overlap diagnostics of the
+        # T0 candidates and the list (not trials), then the statistics.
+        Invoke-Step "1-consensus" @("-m", "quant_platform.research", "daily", "--name", "consensus", "--broker", "cathay")
+        Invoke-Step "2-diagnose" @("-m", "quant_platform.research", "diagnose", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "trials" {
+        # 2026-10-11: effective trials of the earlier scans (sampled replays), then the statistics with them.
+        Invoke-Step "1-scan-trials" @("-m", "quant_platform.research", "scan-trials", "--broker", "cathay", "--workers", "6")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "leakcheck" {
+        # 2026-10-11: the truncation check — every factor recomputed from data cut at 5 random sessions.
+        Invoke-Step "1-leakcheck" @("-m", "quant_platform.research", "leakcheck")
+    }
+    "devconsensus" {
+        # 2026-10-11: the clean test of the consensus method (180 development-period finalists), then statistics.
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "devconsensus", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "news-events" {

@@ -32,7 +32,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-SCAN_VERSION = "scan-1.0.0"
+# 1.1.0 (2026-10-11, the full review's lesson 2): the development-period excess did not predict 2020-10 on
+# (rank correlation 0.23, -0.01, 0.02 over three rounds of finalists), so finalists are chosen by stability —
+# both halves of the development period beat 0050, best by the weaker half — and kept apart by the correlation
+# of their daily returns *above 0050* (at most 0.7; plain returns all share the market). Every candidate's
+# daily excess is kept for counting effective trials.
+SCAN_VERSION = "scan-1.1.0"
+EXCESS_CORRELATION_LIMIT = 0.7
 DEV_END = date(2020, 9, 30)
 TOP, KEEP, MIN_HOLD, INDUSTRY_SHARE = 20, 3, 20, 0.3
 LARGE = 100
@@ -239,17 +245,33 @@ def metrics(returns: np.ndarray, bench: np.ndarray, years: float, entries: int) 
     drawdown = float(np.min(value / np.maximum.accumulate(value) - 1))
     bench_drawdown = float(np.min(base / np.maximum.accumulate(base) - 1))
     excess = float((value[-1] / base[-1]) ** (1 / years) - 1)
-    wins = [value[start + 245] / value[start] > base[start + 245] / base[start]
-            for start in range(0, len(value) - 245, 21)]
+    relative = [value[start + 245] / value[start] - base[start + 245] / base[start]
+                for start in range(0, len(value) - 245, 21)]
+    middle = len(value) // 2
+    halves = []
+    for low, high in ((0, middle), (middle, len(value) - 1)):
+        span = max((high - low) / 245, 1e-9)
+        start_value = value[low - 1] if low else 1.0
+        start_base = base[low - 1] if low else 1.0
+        halves.append(float(((value[high] / start_value) / (base[high] / start_base)) ** (1 / span) - 1))
     return {"excess": round(excess, 5), "annual": round(float(value[-1] ** (1 / years) - 1), 5),
             "drawdown": round(drawdown, 4), "bench_drawdown": round(bench_drawdown, 4),
-            "win_1y": round(float(np.mean(wins)), 4) if wins else None,
+            "win_1y": round(float(np.mean([item > 0 for item in relative])), 4) if relative else None,
+            "worst_1y": round(float(min(relative)), 4) if relative else None,
+            "first_half": round(halves[0], 5), "second_half": round(halves[1], 5),
             "entries_per_month": round(entries / (years * 12), 2)}
 
 
-def passes(row: dict) -> bool:
-    return (row["excess"] > 0 and row["drawdown"] >= row["bench_drawdown"] - 0.05
-            and (row["win_1y"] or 0) >= 0.5)
+def passes(row: dict, stable: bool = False) -> bool:
+    ok = row["excess"] > 0 and row["drawdown"] >= row["bench_drawdown"] - 0.05 and (row["win_1y"] or 0) >= 0.5
+    if stable:                                   # 1.1.0: both halves of the development period beat 0050
+        ok = ok and (row.get("first_half") or 0) > 0 and (row.get("second_half") or 0) > 0
+    return ok
+
+
+def stability(row: dict) -> tuple[float, float]:
+    """1.1.0's order: the weaker half's excess, then the worst 1-year window."""
+    return (min(row.get("first_half") or 0, row.get("second_half") or 0), row.get("worst_1y") or -9)
 
 
 def evaluate(arrays: Arrays, candidate: dict, costs, record: bool = False):
@@ -268,26 +290,25 @@ def evaluate(arrays: Arrays, candidate: dict, costs, record: bool = False):
 
 def _work(folder: str, chunk: list[dict], out: str, costs) -> int:
     arrays = load_arrays(Path(folder))
+    excess = np.empty((len(chunk), len(arrays.days) - 1), dtype=np.float16)
     with open(out, "a", encoding="utf-8") as handle:
-        for candidate in chunk:
-            row, _outcome = evaluate(arrays, candidate, costs)
+        for index, candidate in enumerate(chunk):
+            row, outcome = evaluate(arrays, candidate, costs)
+            excess[index] = outcome[0] - arrays.bench[: len(outcome[0])]
             handle.write(json.dumps({**candidate, **row}, ensure_ascii=False) + "\n")
             handle.flush()
+    np.save(Path(out).with_suffix(".excess.npy"), excess)        # daily excess, same order as the lines
     return len(chunk)
 
 
 def screen(arrays_folder: Path, items: list[dict], costs, workers: int, out_folder: Path, progress=None) -> list[dict]:
     """Stage 1 over ``items`` in ``workers`` processes (0 = here); every result is written as it is made."""
     out_folder.mkdir(parents=True, exist_ok=True)
-    if workers <= 0:
-        output = []
-        arrays = load_arrays(arrays_folder)
-        for index, candidate in enumerate(items):
-            row, _outcome = evaluate(arrays, candidate, costs)
-            output.append({**candidate, **row})
-            if progress and index % 200 == 0:
-                progress(index)
-        return output
+    if workers <= 0:                             # here, one chunk (the same files as a worker writes)
+        path = out_folder / "screen-0.jsonl"
+        path.unlink(missing_ok=True)
+        _work(str(arrays_folder), items, str(path), costs)
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     chunks = [items[index::workers] for index in range(workers)]
     paths = [out_folder / f"screen-{index}.jsonl" for index in range(workers)]
     with ProcessPoolExecutor(max_workers=workers) as pool:
@@ -306,6 +327,72 @@ def screen(arrays_folder: Path, items: list[dict], costs, workers: int, out_fold
     return rows
 
 
+def effective_trials(folder: Path, sample: int = 10_000, seed: int = 0, pattern: str = "screen-*.excess.npy",
+                     screened: int | None = None) -> dict[str, object]:
+    """How many independent tries a scan's first stage amounts to (for the deflated Sharpe ratio): on a random
+    sample of its candidates' daily excess over 0050, the principal components that explain 95% of the
+    variance and the groups left when candidates correlated above 0.9 are merged (greedy). Both are lower
+    bounds for the whole scan (more candidates, more groups); the total screened is the upper bound."""
+    parts = [np.load(path, mmap_mode="r") for path in sorted(folder.glob(pattern))]
+    if not parts:
+        return {}
+    sizes = np.cumsum([0] + [len(part) for part in parts])
+    total = int(sizes[-1])
+    rng = np.random.default_rng(seed)
+    pick = np.sort(rng.choice(total, size=min(sample, total), replace=False))
+    block = np.stack([np.asarray(parts[int(np.searchsorted(sizes, index, side="right") - 1)]
+                                 [index - sizes[np.searchsorted(sizes, index, side="right") - 1]], dtype=np.float32)
+                      for index in pick])
+    block = block[np.std(block, axis=1) > 0]
+    standard = (block - block.mean(axis=1, keepdims=True)) / block.std(axis=1, keepdims=True)
+    singular = np.linalg.svd(standard, compute_uv=False)
+    share = np.cumsum(singular ** 2) / np.sum(singular ** 2)
+    components = int(np.searchsorted(share, 0.95) + 1)
+    heads = np.empty_like(standard)
+    groups = 0
+    for row in standard:
+        if groups == 0 or float(np.max(heads[:groups] @ row)) / len(row) <= 0.9:
+            heads[groups] = row
+            groups += 1
+    return {"screened": int(screened or total), "sample": int(len(block)), "components_95": components,
+            "groups_090": groups}
+
+
+def sample_effective(folder: Path, costs, sample: int = 10_000, workers: int = 6, seed: int = 0) -> dict[str, object]:
+    """For a scan made before 1.1.0 (no daily excess kept): replay a random sample of its first-stage
+    candidates on its own arrays, keep their daily excess, and count effective trials on them; written to
+    the folder's effective.json."""
+    rows = [json.loads(line) for path in sorted(folder.glob("screen-*.jsonl"))
+            for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rng = np.random.default_rng(seed)
+    pick = rng.choice(len(rows), size=min(sample, len(rows)), replace=False)
+    items = [{key: rows[index][key] for key in ("factors", "universe", "weighting", "check")} for index in pick]
+    out = folder / "sample"
+    out.mkdir(exist_ok=True)
+    for path in out.glob("screen-*"):
+        path.unlink()
+    screen(folder / "arrays", items, costs, workers, out)
+    found = effective_trials(out, sample=len(items), seed=seed, screened=len(rows))
+    (folder / "effective.json").write_text(json.dumps(found, ensure_ascii=False, indent=1), encoding="utf-8")
+    return found
+
+
+def all_effective(research: Path) -> dict[str, int]:
+    """Every scan's effective-trial counts added up (the lower bound groups and the upper bound screened)."""
+    groups = screened = scans = 0
+    for folder in sorted((research / "scans").glob("scan-*")) if (research / "scans").is_dir() else []:
+        found = None
+        if (folder / "effective.json").is_file():
+            found = json.loads((folder / "effective.json").read_text(encoding="utf-8"))
+        elif (folder / "summary.json").is_file():
+            found = json.loads((folder / "summary.json").read_text(encoding="utf-8")).get("effective_trials")
+        if found:
+            groups += int(found.get("groups_090") or 0)
+            screened += int(found.get("screened") or 0)
+            scans += 1
+    return {"scans": scans, "groups_090": groups, "screened": screened}
+
+
 def _count_lines(path: Path) -> int:
     try:
         with open(path, "rb") as handle:
@@ -315,18 +402,25 @@ def _count_lines(path: Path) -> int:
 
 
 def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 600,
-              seeds: list[dict] | None = None) -> list[dict]:
+              seeds: list[dict] | None = None, stable: bool = False) -> list[dict]:
     """The passing candidates, best development-period excess first, skipping any whose daily returns
     correlate above CORRELATION_LIMIT with one already taken — or with a ``seeds`` candidate (an earlier
     scan's finalists: a new scan adds strategies, not near-copies of ones already run)."""
-    ranked = sorted((row for row in rows if passes(row)), key=lambda row: -row["excess"])[:pool]
+    if stable:                                   # 1.1.0: stability first, apart by the excess correlation
+        ranked = sorted((row for row in rows if passes(row, True)), key=stability, reverse=True)[:pool]
+    else:
+        ranked = sorted((row for row in rows if passes(row)), key=lambda row: -row["excess"])[:pool]
+    limit = EXCESS_CORRELATION_LIMIT if stable else CORRELATION_LIMIT
+
+    def apart(returns: np.ndarray) -> np.ndarray:
+        return returns - arrays.bench[: len(returns)] if stable else returns
     earlier = []
     for seed in seeds or []:
         if not set(seed["factors"]) <= set(arrays.names):   # a signal this scan's arrays do not have (a newer model)
             continue
         _metrics, (returns, _entries) = evaluate(arrays, seed, costs)
         if np.std(returns) > 0:
-            earlier.append((seed, returns))
+            earlier.append((seed, apart(returns)))
     taken: list[tuple[dict, np.ndarray]] = []
     for row in ranked:
         if len(taken) >= count:
@@ -335,7 +429,8 @@ def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 6
         _metrics, (returns, _entries) = evaluate(arrays, candidate, costs)
         if np.std(returns) == 0:
             continue
-        if any(np.corrcoef(returns, other)[0, 1] > CORRELATION_LIMIT for _row, other in earlier + taken):
+        returns = apart(returns)
+        if any(np.corrcoef(returns, other)[0, 1] > limit for _row, other in earlier + taken):
             continue
         taken.append((row, returns))
     return [row for row, _returns in taken]
@@ -366,7 +461,7 @@ def earlier_finalists(research: Path) -> list[dict]:
 
 def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 80, largest: int = 3,
              names: list[str] | None = None, job=None, smallest: int = 1, require: str | None = None,
-             resume: Path | None = None, pool: int = 600) -> dict:
+             resume: Path | None = None, pool: int = 600, stable: bool = True) -> dict:
     """Both stages; returns the summary written next to the screen results. With ``resume`` (an earlier
     scan's folder whose first stage finished) only the second stage runs, on that folder's arrays and rows."""
     from quant_platform.research import daily
@@ -400,7 +495,8 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                       if job else None)
     pd.DataFrame([{**row, "factors": "+".join(row["factors"])} for row in rows]).to_parquet(folder / "screen.parquet")
     seeds = earlier_finalists(research)
-    chosen = finalists(arrays, rows, costs, count, pool=pool, seeds=seeds)
+    chosen = finalists(arrays, rows, costs, count, pool=pool, seeds=seeds, stable=stable)
+    effective = effective_trials(folder) if any(folder.glob("screen-*.excess.npy")) else None
     registry = TrialRegistry(research / "trials.jsonl")
     cache: dict = {}
     results = []
@@ -417,6 +513,7 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                         "reasons": reasons, "tier": daily.tier(record.metrics)[0]})
     summary = {"version": SCAN_VERSION, "stamp": stamp, "development": [str(arrays.days[0]), str(DEV_END)],
                "signals": arrays.names, "sizes": [smallest, largest], "require": require,
+               "selection": "stability" if stable else "excess", "effective_trials": effective,
                "earlier_finalists": len(seeds),
                "candidates": len(items), "passed_screen": sum(passes(row) for row in rows),
                "finalists": len(chosen), "minutes": round((time.time() - started) / 60, 1), "results": results,

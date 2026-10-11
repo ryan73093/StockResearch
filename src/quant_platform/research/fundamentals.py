@@ -131,8 +131,9 @@ def factor_table(frame: pd.DataFrame) -> pd.DataFrame:
 class FundamentalStore:
     """The statement factors on a factor panel's sessions × stocks (symbols × sessions)."""
 
-    def __init__(self, history: str | Path, sessions: list[date], symbols: list[str]) -> None:
+    def __init__(self, history: str | Path, sessions: list[date], symbols: list[str], until: date | None = None) -> None:
         self._path = Path(history) / FILE
+        self.until = until                      # 2026-10-11 (leakcheck): only statements usable by ``until``
         self.sessions, self.symbols = sessions, symbols
         self._codes = [symbol.split(".")[0] for symbol in symbols]
         self._factors: pd.DataFrame | None = None
@@ -147,6 +148,8 @@ class FundamentalStore:
 
     def matrix(self, factor: str) -> np.ndarray:
         table = self._table().dropna(subset=["available"])
+        if self.until is not None:
+            table = table[pd.to_datetime(table["available"]) <= pd.Timestamp(self.until)]
         frame = table.sort_values("available").pivot_table(index="available", columns="code", values=factor,
                                                            aggfunc="last")
         frame.index = pd.to_datetime(frame.index)

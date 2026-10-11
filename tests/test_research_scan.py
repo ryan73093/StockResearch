@@ -122,3 +122,39 @@ def test_seeds_with_a_newer_signal_are_skipped_and_a_finished_screen_resumes(tmp
     rows = scan.screen(tmp_path / "arrays", items, FREE, 0, tmp_path)
     newer = {"factors": ["ml_gbm_quality"], "universe": "all", "weighting": "equal", "check": "weekly"}
     assert scan.finalists(arrays, rows, FREE, 5, seeds=[newer]) == scan.finalists(arrays, rows, FREE, 5)
+
+
+def test_effective_trials_count_groups_not_copies(tmp_path):
+    rng = np.random.default_rng(0)
+    base = rng.normal(0, 0.01, (3, 300))
+    first = np.repeat(base, 4, axis=0) + rng.normal(0, 0.0005, (12, 300))     # 12 near-copies of 3 strategies
+    np.save(tmp_path / "screen-0.excess.npy", first[:7].astype(np.float16))
+    np.save(tmp_path / "screen-1.excess.npy", first[7:].astype(np.float16))
+    found = scan.effective_trials(tmp_path, sample=12)
+    assert found["screened"] == 12 and found["groups_090"] == 3 and found["components_95"] <= 3
+
+
+def test_stability_selection_needs_both_halves_and_keeps_excess_apart(tmp_path):
+    data, fp = planted()
+    arrays = scan.prepare(data, fp, FREE, tmp_path / "arrays")
+    items = scan.candidates(["momentum_6", "momentum_12_1", "trend_200", "reversal_1"], largest=1)
+    rows = scan.screen(tmp_path / "arrays", items, FREE, 0, tmp_path)
+    assert all({"first_half", "second_half", "worst_1y"} <= set(row) for row in rows)
+    chosen = scan.finalists(arrays, rows, FREE, 10, stable=True)
+    assert chosen and all(row["first_half"] > 0 and row["second_half"] > 0 for row in chosen)
+    assert [row["factors"] for row in chosen] != [["reversal_1"]]
+
+
+def test_an_old_scan_gets_its_effective_trials_from_a_sample(tmp_path):
+    import json
+
+    data, fp = planted()
+    folder = tmp_path / "scans" / "scan-1.0.0-x"
+    scan.prepare(data, fp, FREE, folder / "arrays")
+    items = scan.candidates(["momentum_6", "momentum_12_1", "trend_200", "reversal_1"], largest=2)
+    rows = scan.screen(folder / "arrays", items, FREE, 0, folder)
+    (folder / "screen-0.jsonl").write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    found = scan.sample_effective(folder, FREE, sample=20, workers=0)
+    assert found["screened"] == len(rows) and 1 <= found["groups_090"] <= found["sample"] <= 20
+    total = scan.all_effective(tmp_path)
+    assert total == {"scans": 1, "groups_090": found["groups_090"], "screened": len(rows)}

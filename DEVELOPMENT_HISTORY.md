@@ -2,6 +2,16 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-11 晚 — T0 共識清單、診斷、有效試驗數、防偷看檢查
+
+- 使用者：請繼續研究（照全面研究的「立即採用」）。
+- 共識清單：`research/consensus.py`（`member_percentiles`、`scores`、`digest`）、成員凍結 `consensus_members.MEMBERS_V1`（25 個 T0 候選）；因子 `t0_consensus`（`CONSENSUS_FACTORS`）、試驗輸入含成員與其模型的雜湊；批次 `consensus`（前 20、前 40）；分類「T0 共識清單」；AI 研究員看不到也不能用共識因子。結果（22:01～22:04）：#2272 4,040 萬、年化 44.4%、2020-10 起 989 萬對 378 萬、回撤 −30.4%、3 年視窗 100%、每月超額 +1.45%（95% 區間 +0.55%～+2.57%）；#2273 2,043 萬、回撤 −30.7%；都是 T0 候選。
+- 開發期共識：`consensus_dev_members.MEMBERS_DEV1`（180 個搜尋最後名單，只用 2015-06～2020-09 挑出）、因子 `dev_consensus`、批次 `devconsensus`，22:12 背景執行。
+- 診斷：`research/diagnostics.py`（規模、最小兩成、融資增加、台積電、排除最小兩成重跑、持股重疊）、CLI `diagnose`；結果見研究方法第 7 節。
+- 有效試驗數：搜尋 1.1.0（穩定度挑選、超額相關 ≤ 0.7 去重、每個候選的每日超額存檔）、`effective_trials`、`sample_effective`、`all_effective`、CLI `scan-trials`；`significance(scans=...)` 多列 `dsr_effective`、`dsr_screened`。結果：371,804 個、至少 13,856 組。
+- 防偷看檢查：`research/leakcheck.py`、`ChipStore(until=)`、`FundamentalStore(until=)`、CLI `leakcheck`，22:11 背景執行。
+- 測試：成員排名和自己的規則一致、一個策略一票、成員凍結且都是 100% 個股、診斷的最小兩成排除與重疊手算、有效試驗數把近似複本算成一組、穩定度挑選、舊搜尋抽樣、截斷檢查抓得到故意偷看；全部 628 通過、1 略過。
+
 ## 2026-10-10 清晨（二）— AI 與程式交易全面研究；wide4 與機器人 1.1.0 結果
 
 - 使用者：除了現有方案，去 GitHub、論壇、技術論壇、論文、金融研究機構做最完整的研究，看人家怎麼做、吸取經驗。

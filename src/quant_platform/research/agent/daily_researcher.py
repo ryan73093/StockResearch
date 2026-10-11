@@ -125,11 +125,11 @@ class DailyResearcher:
 
     def build_prompt(self) -> tuple[str, str]:
         from quant_platform.research.categories import FACTOR_FAMILY
-        from quant_platform.research.daily import RULE_FACTORS
+        from quant_platform.research.daily import CONSENSUS_FACTORS, RULE_FACTORS
         from quant_platform.research.factors import latest as latest_strength
 
         lines = [f"- {name}：{label}（{FACTOR_FAMILY.get(name, '機器學習' if name.startswith('ml_gbm') else '其他')}）"
-                 for name, label in RULE_FACTORS.items() if name != "ml_gbm"]
+                 for name, label in RULE_FACTORS.items() if name != "ml_gbm" and name not in CONSENSUS_FACTORS]
         strength = latest_strength(self._dir / "factors") or {}
         strength_lines = []
         factors = strength.get("factors") or {}
@@ -162,7 +162,7 @@ class DailyResearcher:
 
     # --- checking a proposal ---------------------------------------------------------------------------
     def validate(self, payload: dict, tried: list[dict[str, object]]) -> tuple[list[tuple[object, dict]], list[dict]]:
-        from quant_platform.research.daily import RULE_FACTORS, DailyRule
+        from quant_platform.research.daily import CONSENSUS_FACTORS, RULE_FACTORS, DailyRule
 
         seen = {row["signature"] for row in tried} | {row["spec_hash"] for row in tried}
         accepted, rejected = [], []
@@ -179,7 +179,9 @@ class DailyResearcher:
             if factors is None:
                 rejected.append({"name": name, "reason": "因子的寫法看不懂"})
                 continue
-            unknown = [factor for factor in factors if factor not in RULE_FACTORS or factor == "ml_gbm"]
+            # the consensus list is built from rules rated with 2020-10 onward results: never the researcher's
+            unknown = [factor for factor in factors
+                       if factor not in RULE_FACTORS or factor == "ml_gbm" or factor in CONSENSUS_FACTORS]
             if unknown or not 1 <= len(factors) <= 3 or any(not isinstance(w, (int, float)) or w == 0 or abs(w) > 1
                                                             for w in factors.values()):
                 rejected.append({"name": name, "reason": f"因子不合規定：{', '.join(unknown) or '數量或權重'}"})

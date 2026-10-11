@@ -305,7 +305,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies"),
+                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -347,6 +347,8 @@ def main() -> int:
     parser.add_argument("--require", help="scan：只跑含這個訊號的組（例如新模型 ml_gbm_quality）")
     parser.add_argument("--resume", help="scan：第一階段已完成的搜尋資料夾，只跑第二階段")
     parser.add_argument("--pool", type=int, default=600, help="scan：從第一階段最好的前幾名裡挑彼此不同的最後名單")
+    parser.add_argument("--by-excess", action="store_true",
+                        help="scan：照 1.0.0 依開發期超額挑最後名單（預設 1.1.0 依穩定度）")
     parser.add_argument("--tech-version", default="tech-rl-1.0.0", choices=("tech-rl-1.0.0", "tech-rl-1.1.0"),
                         help="tech-rl：機器人版本（1.1.0 每週決策）")
     parser.add_argument("--use-plan", action="store_true", help="用網站上最新版投資計畫的每月金額與薪資日")
@@ -587,6 +589,72 @@ def main() -> int:
     if args.command == "daily":
         return _daily(args, registry)
 
+    if args.command == "leakcheck":
+        # 2026-10-11: every factor recomputed from data cut at random sessions (research/leakcheck.py)
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import leakcheck
+        from quant_platform.research.jobs import JobLog
+
+        data, fp = daily_research.load(Path(args.base))
+        factors = [*daily_research.FACTOR_LABELS, *daily_research.MODEL_FACTORS, *daily_research.CONSENSUS_FACTORS]
+        days = leakcheck.sample_days(fp.sessions, 5, daily_research.RECENT_START)
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start(f"防偷看檢查：{len(days)} 個日期截斷重算 {len(factors)} 個因子", command,
+                                    total=len(days)) as job:
+            report = leakcheck.run(Path(args.base), RESEARCH, data, fp, factors, days, job=job)
+            found = report["leaks"]
+            job.payload["summary"] = "沒有發現偷看" if not found else "有差異：" + "、".join(found)
+        for day, item in report["results"].items():
+            bad = {factor: result["differ"] for factor, result in item.items() if result["differ"]}
+            print(f"{day}：比對 {sum(result['checked'] for result in item.values()):,} 個值；有差異 {bad or '無'}", flush=True)
+        return 0 if not report["leaks"] else 1
+
+    if args.command == "scan-trials":
+        # 2026-10-11: effective trials of the scans made before 1.1.0 (a replayed random sample of each)
+        from quant_platform.research import scan
+        from quant_platform.research.jobs import JobLog
+
+        folders = [folder for folder in sorted((RESEARCH / "scans").glob("scan-*"))
+                   if not any(folder.glob("screen-*.excess.npy")) and not (folder / "effective.json").is_file()]
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start(f"估算搜尋的有效試驗數（{len(folders)} 輪，每輪抽 10,000 個重算）", command,
+                                    total=len(folders)) as job:
+            for index, folder in enumerate(folders):
+                job.update(done=index, current=folder.name, force=True)
+                found = scan.sample_effective(folder, broker_costs(args.broker), workers=args.workers)
+                print(f"{folder.name}：{found}", flush=True)
+            total = scan.all_effective(RESEARCH)
+            job.payload["summary"] = (f"{total['scans']} 輪、第一階段 {total['screened']:,} 個、"
+                                      f"超額相關 0.9 以上合併後至少 {total['groups_090']:,} 組")
+        print(total)
+        return 0
+
+    if args.command == "diagnose":
+        # 2026-10-11: crowding, size and overlap of the T0 candidates and the consensus list (research/diagnostics.py)
+        from quant_platform.research import consensus, diagnostics
+        from quant_platform.research.blend import parse_spec
+        from quant_platform.research.jobs import JobLog
+
+        trials = list(consensus.members())
+        latest = {}
+        for record in registry.records():
+            if record.kind == "candidate" and record.period == "recent" and record.spec_name.startswith("T0 共識清單"):
+                latest[record.spec_hash] = record
+        for record in latest.values():
+            spec = json.loads((RESEARCH / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            trials.append((record.trial_id, record.spec_name, parse_spec(spec)))
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start(f"T0 擁擠、規模與重疊診斷（{len(trials)} 個規則，不是新試驗）", command,
+                                    total=len(trials)) as job:
+            report = diagnostics.run(Path(args.base), RESEARCH, broker_costs(args.broker), trials, job=job)
+            job.payload["summary"] = f"{len(report['rules'])} 個規則；平均持股重疊 {report['average_overlap']}"
+        for row in report["rules"]:
+            print(f"#{row['trial']} 市值百分位 {row['cap_percentile']}、最小兩成 {row['smallest_fifth_share']}、"
+                  f"融資增加百分位 {row['margin_growth_percentile']}、台積電 {row['tsmc_share']}；超額 {row['excess']:+.1%} → "
+                  f"排除最小兩成 {row['excess_without_smallest_fifth']:+.1%}（2020-10 起 "
+                  f"{row['since_2020_without_smallest_fifth']:+.1%}）", flush=True)
+        return 0
+
     if args.command == "rl-strategies":
         # 2026-10-10: RL 3.0, the account shared among the T0 candidates (research/rl_strategies.py)
         from quant_platform.research import daily as daily_research
@@ -649,7 +717,8 @@ def main() -> int:
             summary = scan.run_scan(Path(args.base), RESEARCH, broker_costs(args.broker), workers=args.workers,
                                     count=args.finalists, job=job, largest=args.signals_max,
                                     smallest=args.signals_min, require=args.require,
-                                    resume=Path(args.resume) if args.resume else None, pool=args.pool)
+                                    resume=Path(args.resume) if args.resume else None, pool=args.pool,
+                                    stable=not args.by_excess)
             job.payload["summary"] = (f"{summary['candidates']:,} 個候選、{summary['passed_screen']:,} 個過第一階段、"
                                       f"{summary['finalists']} 個完整回測：{summary['tiers']}")
         for item in summary["results"]:
@@ -674,8 +743,11 @@ def main() -> int:
     if args.command == "stats" and args.family == "daily":
         from quant_platform.research import daily as daily_research
 
+        from quant_platform.research.scan import all_effective
+
         basis = daily_research.fingerprint(Path(args.base), args.universe)
-        report = significance(registry, RESEARCH / "reports", daily_research.PERIOD, fingerprint=basis)
+        report = significance(registry, RESEARCH / "reports", daily_research.PERIOD, fingerprint=basis,
+                              scans=all_effective(RESEARCH))
         if not report["candidates"]:
             print("沒有目前資料版本的每天決策規則試驗")
             return 1

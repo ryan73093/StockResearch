@@ -37,8 +37,12 @@ def save_stats(report: dict[str, object], stats_dir: str | Path, period: str, no
 
 
 def significance(
-    registry: TrialRegistry, reports_dir: str | Path, period: str, fingerprint: str | None = None
+    registry: TrialRegistry, reports_dir: str | Path, period: str, fingerprint: str | None = None,
+    scans: dict[str, int] | None = None,
 ) -> dict[str, object]:
+    """``scans`` (2026-10-11): the large scans' first-stage counts — every candidate they screened is a try. The
+    deflated Sharpe is also given with the effective count (the registered rules plus the scans' independent
+    groups, a lower bound) and with everything screened (the upper bound)."""
     current, older = current_basis(registry.records(), period, fingerprint=fingerprint)
     attempts = distinct_rules(current + older)  # every different rule ever tried in this period
     series: dict[int, dict[str, float]] = {}
@@ -61,8 +65,11 @@ def significance(
         "current_trials": len(current),
         "older_trials": len(older),
         "basis": current[0].data_fingerprint if current else fingerprint,
+        "scans": scans or {},
         "candidates": [],
     }
+    effective = attempts + int((scans or {}).get("groups_090") or 0)
+    everything = attempts + int((scans or {}).get("screened") or 0)
     if not series:
         return output
     sharpes = [sharpe(list(values.values())) for values in series.values()]
@@ -74,6 +81,8 @@ def significance(
             "name": names[trial_id],
             "months": len(returns),
             "dsr": deflated_sharpe(returns, n_trials=attempts, sharpe_variance=variance),
+            "dsr_effective": deflated_sharpe(returns, n_trials=effective, sharpe_variance=variance) if scans else None,
+            "dsr_screened": deflated_sharpe(returns, n_trials=everything, sharpe_variance=variance) if scans else None,
             "bootstrap": block_bootstrap_mean(returns),
         })
     common = sorted(set.intersection(*(set(values) for values in series.values())))

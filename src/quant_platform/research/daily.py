@@ -102,7 +102,10 @@ TECH_FACTORS = {"rl_tech": "技術分析 RL 機器人：沒持有時想進場的
                 "rl_tech_weekly": "技術分析 RL 機器人（每週決策版）：沒持有時想進場的機率（只看價格與成交量）"}
 TECH_FACTOR_VERSION = {"rl_tech": "tech-rl-1.0.0", "rl_tech_weekly": "tech-rl-1.1.0"}
 TECH_EXITS = {"tech1": "rl_tech", "tech2": "rl_tech_weekly"}          # exit_model -> the robot's score
-RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS}
+# 2026-10-11: every T0 candidate votes (research/consensus.py; members frozen per version)
+CONSENSUS_FACTORS = {"t0_consensus": "T0 共識分數（25 個 T0 候選各自排名的百分位平均，一個策略一票）",
+                     "dev_consensus": "開發期共識分數（180 個搜尋最後名單、只用 2015-06～2020-09 挑出，百分位平均）"}
+RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
 
@@ -264,6 +267,10 @@ class FactorPanel:
         return self._cache[factor]
 
     def _compute(self, factor: str):
+        if factor in CONSENSUS_FACTORS:
+            from quant_platform.research.consensus import scores as consensus_scores
+
+            return consensus_scores(self, factor)                                      # sessions × symbols
         if factor in TECH_FACTORS:
             if self.models is None:
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
@@ -280,7 +287,8 @@ class FactorPanel:
             # the statements sit next to the chip files: the store follows the chip store's history
             if self.chips is None:
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
-            store = FundamentalStore(Path(self.chips._folder).parent, self.sessions, self.symbols)
+            store = FundamentalStore(Path(self.chips._folder).parent, self.sessions, self.symbols,
+                                     until=getattr(self.chips, "until", None))
             if not store.available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
             return store.matrix(factor).T                           # back to sessions × symbols
@@ -1034,6 +1042,12 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         from quant_platform.research.exits import exits_dir
 
         payload["exit"] = exits_digest(exits_dir(history))
+    if any(name in CONSENSUS_FACTORS for name in factor_names):  # 2026-10-11: the members and their models
+        from quant_platform.research.consensus import digest as consensus_digest
+
+        used = [name for name in factor_names if name in CONSENSUS_FACTORS]
+        payload["consensus"] = (consensus_digest(history) if used == ["t0_consensus"]     # as first registered
+                                else {name: consensus_digest(history, name) for name in used})
     if any(name in TECH_FACTORS for name in factor_names):      # 2026-10-10: the technical robot's policies
         from quant_platform.research.tech_rl import digest as tech_digest
         from quant_platform.research.tech_rl import tech_dir
@@ -1372,6 +1386,30 @@ def tech_bot_weekly_batch() -> list[DailyRule]:
     ]
 
 
+def consensus_batch() -> list[DailyRule]:
+    """2026-10-11 (全面研究「立即採用」第 1 項): the T0 consensus list, its top 20 and — registered together,
+    not chosen after — its top 40 as the structural counterpart. Weekly like most members."""
+    common = {"check": "weekly", "keep": 3, "min_hold": 20, "industry_cap": 0.3}
+    return [
+        DailyRule(name="T0 共識清單（25 個 T0 候選投票）：前 20 名、同產業最多 3 成、每週決策",
+                  factors={"t0_consensus": 1.0}, top=20, **common),
+        DailyRule(name="T0 共識清單（25 個 T0 候選投票）：前 40 名、同產業最多 3 成、每週決策",
+                  factors={"t0_consensus": 1.0}, top=40, **common),
+    ]
+
+
+def dev_consensus_batch() -> list[DailyRule]:
+    """2026-10-11: the clean test of the consensus method — the 180 development-period scan finalists voting,
+    top 20 and top 40 registered together, weekly like ``consensus_batch``."""
+    common = {"check": "weekly", "keep": 3, "min_hold": 20, "industry_cap": 0.3}
+    return [
+        DailyRule(name="開發期共識清單（180 個搜尋最後名單投票）：前 20 名、同產業最多 3 成、每週決策",
+                  factors={"dev_consensus": 1.0}, top=20, **common),
+        DailyRule(name="開發期共識清單（180 個搜尋最後名單投票）：前 40 名、同產業最多 3 成、每週決策",
+                  factors={"dev_consensus": 1.0}, top=40, **common),
+    ]
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1387,4 +1425,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "volscale": vol_scale_batch, "largecap": large_cap_batch,
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
-           "techbot2": tech_bot_weekly_batch}
+           "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
+           "devconsensus": dev_consensus_batch}

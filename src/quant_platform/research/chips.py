@@ -157,8 +157,12 @@ def build(history: str | Path, job=None) -> dict[str, int]:
 class ChipStore:
     """The chip and fundamental factors on a factor panel's sessions × stocks (symbols × sessions)."""
 
-    def __init__(self, history: str | Path, sessions: list[date], symbols: list[str], close: np.ndarray) -> None:
+    def __init__(self, history: str | Path, sessions: list[date], symbols: list[str], close: np.ndarray,
+                 until: date | None = None) -> None:
         self._folder = Path(history) / "chips"
+        # 2026-10-11 (research/leakcheck.py): only what was public by the close of ``until`` — daily tables
+        # dated before it, monthly revenue available before it; None reads everything
+        self.until = until
         self.sessions, self.symbols = sessions, symbols
         self._codes = [symbol.split(".")[0] for symbol in symbols]
         self._close = close                                     # symbols × sessions, unadjusted
@@ -173,6 +177,8 @@ class ChipStore:
         key = f"{dataset}:{field}"
         if key not in self._frames:
             table = pq.read_table(self._folder / f"{dataset}.parquet", columns=["date", "code", field]).to_pandas()
+            if self.until is not None:
+                table = table[pd.to_datetime(table["date"]) < pd.Timestamp(self.until)]
             frame = table.pivot_table(index="date", columns="code", values=field, aggfunc="last")
             frame.index = pd.to_datetime(frame.index)
             sessions = pd.to_datetime(pd.Index(self.sessions))
@@ -184,6 +190,8 @@ class ChipStore:
     def _flow(self, field: str, window: int) -> pd.DataFrame:
         table = pq.read_table(self._folder / "TaiwanStockInstitutionalInvestorsBuySell.parquet",
                               columns=["date", "code", field]).to_pandas()
+        if self.until is not None:
+            table = table[pd.to_datetime(table["date"]) < pd.Timestamp(self.until)]
         frame = table.pivot_table(index="date", columns="code", values=field, aggfunc="sum")
         frame.index = pd.to_datetime(frame.index)
         sessions = pd.to_datetime(pd.Index(self.sessions))
@@ -198,6 +206,8 @@ class ChipStore:
         ``accel`` the latest growth minus the previous three months' average, for ACCEL_SESSIONS after it
         is announced (first element)."""
         table = pq.read_table(self._folder / "TaiwanStockMonthRevenue.parquet").to_pandas()
+        if self.until is not None:
+            table = table[pd.to_datetime(table["available"]) < pd.Timestamp(self.until)]
         table = table.sort_values(["code", "date"])
         table["key"] = table["year"] * 12 + table["month"]
         by_key = table.set_index(["code", "key"])["revenue"]
