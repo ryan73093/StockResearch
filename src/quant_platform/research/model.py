@@ -39,7 +39,9 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_gbm_60": {"version": "gbm-1.3.0", "label": "excess", "horizon": 60},
           # 2026-10-10 (使用者：月營收是落後指標、新版模型): the same as 1.2.0 without the three monthly revenue
           # factors and with the three trend-quality ones (continuity, intraday momentum, industry residual)
-          "ml_gbm_quality": {"version": "gbm-1.4.0", "label": "excess", "features": "no_revenue_quality"}}
+          "ml_gbm_quality": {"version": "gbm-1.4.0", "label": "excess", "features": "no_revenue_quality"},
+          # 2026-10-12: the ensemble aimed at the top (research/model_ensemble.py), gbm-1.4.0's features
+          "ml_gbm_ens": {"version": "gbm-2.0.0", "label": "ensemble", "features": "no_revenue_quality"}}
 MONTHLY_REVENUE = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel")
 VERSIONS = {spec["version"]: spec for spec in MODELS.values()}
 LATEST = "gbm-1.2.0"
@@ -181,6 +183,8 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
     eligible = eligibility(fp)
     samples = sample_columns(len(fp.sessions))
     x = feature_block(fp, samples, eligible, names)
+    if label == "ensemble":
+        return _train_ensemble(fp, out, x, samples, eligible, names, data_fingerprint, years, job, version)
     y = label_block(fp, samples, eligible, label, horizon)
     ranks = y if label == "rank" else label_block(fp, samples, eligible, "rank", horizon)
     gains = label_block(fp, samples, eligible, "excess", horizon)
@@ -241,6 +245,70 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
     return meta
 
 
+def _top20(predicted: np.ndarray, ranks: np.ndarray, gains: np.ndarray) -> tuple[float | None, float | None]:
+    """(IC, top-20 gain) of one week's scores against its 20-session outcome."""
+    ic = _spearman(predicted, ranks)
+    ranked = np.isfinite(predicted) & np.isfinite(ranks)
+    if ranked.sum() < 50:
+        return ic, None
+    best = np.argsort(-np.where(ranked, predicted, -np.inf))[:20]
+    return ic, float(np.nanmean(gains[best]) - np.nanmean(gains[ranked]))
+
+
+def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: np.ndarray, names, data_fingerprint,
+                    years, job, version) -> dict[str, object]:
+    """gbm-2.0.0: the yearly ensembles (research/model_ensemble.py) with the ensemble's and every member
+    kind's out-of-sample IC and top-20 gain."""
+    from quant_platform.research.model_ensemble import KINDS, fit_year
+
+    y20 = label_block(fp, samples, eligible, "excess", HORIZON)
+    rank20 = label_block(fp, samples, eligible, "rank", HORIZON)
+    y60 = label_block(fp, samples, eligible, "excess", 60)
+    years = years or list(range(FIRST_YEAR, fp.sessions[-1].year + 1))
+    diagnostics = {}
+    for number, year in enumerate(years):
+        if job:
+            job.update(done=number, current=f"{year} 年的集成模型（{len(KINDS)} 類成員）", force=True)
+        cols20 = training_columns(fp, samples, year, HORIZON)
+        cols60 = training_columns(fp, samples, year, 60)
+        if not cols20 or not cols60:
+            continue
+        rows20 = [samples.index(column) for column in cols20]
+        rows60 = [samples.index(column) for column in cols60]
+        ensemble = fit_year(x, y20, rank20, y60, rows20, rows60, PARAMS)
+        (out / f"{year}.pkl").write_bytes(pickle.dumps(ensemble, protocol=5))
+        tests = [index for index, column in enumerate(samples) if fp.sessions[column].year == year]
+        found: dict[str, list] = {"ensemble": [], **{kind: [] for kind in KINDS}}
+        for index in tests:
+            if not np.isfinite(rank20[index]).any():
+                continue
+            live = np.isfinite(x[index]).any(axis=1)
+            if live.sum() < 20:
+                continue
+            kinds = ensemble.kind_scores(x[index][None], live[None])
+            with np.errstate(invalid="ignore"):
+                whole = np.nanmean(np.stack([value[0] for value in kinds.values()]), axis=0)
+            found["ensemble"].append(_top20(whole, rank20[index], y20[index]))
+            for kind, value in kinds.items():
+                found[kind].append(_top20(value[0], rank20[index], y20[index]))
+
+        def summary(pairs):
+            ics = [ic for ic, _gain in pairs if ic is not None]
+            gains = [gain for _ic, gain in pairs if gain is not None]
+            return {"ic": round(float(np.mean(ics)), 4) if ics else None,
+                    "top20_gain": round(float(np.mean(gains)), 4) if gains else None}
+
+        diagnostics[str(year)] = {"train_rows": int(np.isfinite(y20[rows20]).sum()),
+                                  "train_until": fp.sessions[cols20[-1] + HORIZON].isoformat(),
+                                  "weeks": len(found["ensemble"]), **summary(found["ensemble"]),
+                                  "kinds": {kind: summary(found[kind]) for kind in KINDS}}
+    meta = {"version": version, "label": "ensemble", "params": PARAMS, "features": list(names), "horizon": HORIZON,
+            "kinds": list(KINDS), "step": STEP, "data": data_fingerprint,
+            "trained_at": datetime.now(UTC).isoformat(timespec="seconds"), "years": diagnostics}
+    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    return meta
+
+
 def train_year(history: str | Path, version: str, year: int, job=None) -> dict[str, object]:
     """The model that scores ``year``, trained on everything up to that year's first session (the yearly
     retrain, 2026-10-06); the version's other years stay as they are."""
@@ -296,6 +364,9 @@ def scores(fp, out_dir: str | Path) -> np.ndarray:
             part = columns[start: start + 60]
             block = feature_block(fp, part, eligible, names)
             live = np.isfinite(block).any(axis=2) & eligible[:, part].T
+            if hasattr(model, "predict_days"):             # gbm-2.0.0: the day's cross-section at once
+                output[part] = model.predict_days(block, live)
+                continue
             flat = block[live]
             if len(flat):
                 predicted = np.full(live.shape, np.nan, dtype=np.float32)

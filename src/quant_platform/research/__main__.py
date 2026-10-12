@@ -316,7 +316,7 @@ def main() -> int:
                         choices=("rl-sleeves-1.0.0", "rl-sleeves-1.1.0", "rl-sleeves-2.0.0"),
                         help="rl-sleeves：版本（1.1.0 隨機起點；2.0.0 第三個位置是現金、回撤懲罰加倍）")
     parser.add_argument("--model-version", default="gbm-1.2.0",
-                        choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0"),
+                        choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0", "gbm-2.0.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
@@ -707,6 +707,13 @@ def main() -> int:
         from quant_platform.research import scan
         from quant_platform.research.jobs import JobLog
 
+        if args.require == "ml_gbm_ens":           # 2026-10-12: only after gbm-2.0.0 passed its registered gate
+            from quant_platform.research.model_ensemble import gate
+
+            check = gate(RESEARCH / "models")
+            print(f"gbm-2.0.0 門檻：{check}", flush=True)
+            if not check["passed"]:
+                return 0
         count = (sum(1 for path in Path(args.resume).glob("screen-*.jsonl") for _line in open(path, "rb"))
                  if args.resume else len(scan.candidates(None, args.signals_max, args.signals_min, args.require)))
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])

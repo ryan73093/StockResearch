@@ -96,7 +96,8 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
                  "ml_gbm_statements": "機器學習綜合分數（35 個因子含財報、超額報酬標籤、逐年滾動訓練）",
                  "ml_gbm_60": "機器學習綜合分數（35 個因子含財報、之後 60 個交易日超額報酬標籤、逐年滾動訓練）",
-                 "ml_gbm_quality": "機器學習綜合分數（36 個因子含財報與趨勢品質、不含月營收、超額報酬標籤、逐年滾動訓練）"}
+                 "ml_gbm_quality": "機器學習綜合分數（36 個因子含財報與趨勢品質、不含月營收、超額報酬標籤、逐年滾動訓練）",
+                 "ml_gbm_ens": "機器學習集成（多種子提升樹、前五分之一分類器、脊迴歸、60 日標籤，36 個因子、逐年滾動訓練）"}
 # 2026-10-10 (使用者：純技術分析的 RL 機器人): research/tech_rl.py — sees only price and volume.
 TECH_FACTORS = {"rl_tech": "技術分析 RL 機器人：沒持有時想進場的機率（只看價格與成交量）",
                 "rl_tech_weekly": "技術分析 RL 機器人（每週決策版）：沒持有時想進場的機率（只看價格與成交量）"}
@@ -165,6 +166,12 @@ class DailyRule(BaseModel):
     # idiosyncratic volatility (against TAIEX) or the top tenth by the largest one-day gain in 21
     # sessions; holdings are kept by the usual rules. Left out of the hash when "none".
     exclude: Literal["none", "v1"] = "none"
+    # 2026-10-12 (全面研究「之後再試」第 1 項): "cost1" = a holding that leaves the keep zone is replaced only when
+    # the replacement's expected next-20-session excess beats the holding's by more than a round trip (about
+    # 0.99%: fee both ways, the sell tax, slippage both ways). The expectation is the rule's own score
+    # percentile mapped to the average next-20-session excess over the eligible median, estimated on the
+    # development period only (2015-06..2020-09; ``switch_mapping``). Left out of the hash when "none".
+    switching: Literal["none", "cost1"] = "none"
 
     @field_validator("factors")
     @classmethod
@@ -202,6 +209,8 @@ class DailyRule(BaseModel):
             data.pop("large_caps", None)
         if data.get("exclude") == "none":
             data.pop("exclude", None)
+        if data.get("switching") == "none":
+            data.pop("switching", None)
         return data
 
     @property
@@ -514,6 +523,50 @@ def check_days(sessions: list[date], check: str) -> set[date]:
     return {day for day, _amount in STANDARD_PLAN.schedule(sessions, sessions[0], sessions[-1])} if sessions else set()
 
 
+ROUND_TRIP = 2 * 0.001425 + 0.003 + 2 * 0.002          # fee both ways, the sell tax, slippage both ways
+DEVELOPMENT_END = date(2020, 9, 30)
+
+
+def switch_mapping(fp: FactorPanel, rule: DailyRule):
+    """(percentiles symbols × sessions, gain(percentile) -> expected next-20-session excess) for ``cost1``: the
+    rule's score as a percentile among the stocks it ranks, and the average next-20-session return above the
+    eligible median of each tenth of that percentile, on the development period's weekly sessions only,
+    made non-decreasing (a better rank never expects less)."""
+    from quant_platform.research.consensus import member_percentiles
+
+    key = f"__switch__{rule.rule_hash}"
+    if key in fp._cache:
+        return fp._cache[key]
+    percentiles = member_percentiles(fp, rule.model_copy(update={"switching": "none"}))
+    prices = fp.panel.filled
+    sums, counts = np.zeros(10), np.zeros(10)
+    positions = [fp.index[day] for day in sorted(check_days([day for day in fp.sessions
+                                                             if RECENT_START <= day <= DEVELOPMENT_END], "weekly"))]
+    for position in positions:
+        later = position + 20
+        if later >= prices.shape[1] or fp.sessions[later] > DEVELOPMENT_END:
+            continue
+        with np.errstate(invalid="ignore", divide="ignore"):
+            returns = prices[:, later] / prices[:, position] - 1
+        column = percentiles[:, position]
+        known = np.isfinite(column) & np.isfinite(returns)
+        if known.sum() < 20:
+            continue
+        excess = returns[known] - np.median(returns[known])
+        bins = np.minimum((column[known] * 10).astype(int), 9)
+        np.add.at(sums, bins, excess)
+        np.add.at(counts, bins, 1)
+    means = np.maximum.accumulate(np.where(counts > 0, sums / np.maximum(counts, 1), 0.0))
+
+    def gain(percentile: float) -> float:
+        if not np.isfinite(percentile):
+            return float(means[0])
+        return float(means[min(int(percentile * 10), 9)])
+
+    fp._cache[key] = (percentiles, gain)
+    return fp._cache[key]
+
+
 def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> dict[date, list[str]]:
     """The holdings the rule wants on each check day: keep a holding while it ranks within top × keep
     (or until it has been held min_hold sessions while still eligible), fill up with the best others."""
@@ -526,6 +579,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
     stopped: dict[str, int] = {}          # R7: session count of the last stop-out (or learned exit)
     buy_price: dict[str, float] = {}      # C1b: adjusted close on the buying session
     exit_agent = None
+    switch = switch_mapping(fp, rule) if getattr(rule, "switching", "none") != "none" else None
     if getattr(rule, "exit_model", "none") != "none" and getattr(fp, "models", None) is not None:
         from quant_platform.research.exits import EXIT_VERSION, ExitAgent
 
@@ -569,6 +623,15 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
         eligible = set(ranked)
         kept = [symbol for symbol in current
                 if symbol in keep_zone or (symbol in eligible and count - bought[symbol] < rule.min_hold)]
+        if switch is not None:                  # cost1: keep a leaving holding unless swapping pays a round trip
+            percentiles, gain = switch
+            leaving = sorted((symbol for symbol in current if symbol not in kept and symbol in eligible),
+                             key=lambda symbol: percentiles[fp.row[symbol], position])
+            waiting = [symbol for symbol in ranked if symbol not in current][: len(leaving)]
+            for symbol, replacement in zip(leaving, waiting):
+                if (gain(percentiles[fp.row[replacement], position]) - gain(percentiles[fp.row[symbol], position])
+                        <= ROUND_TRIP):
+                    kept.append(symbol)
         held = set(kept)
         limit = rule.industry_limit
         counts: dict[str, int] = defaultdict(int)
@@ -1410,6 +1473,30 @@ def dev_consensus_batch() -> list[DailyRule]:
     ]
 
 
+def model_f_batch() -> list[DailyRule]:
+    """2026-10-12: gbm-2.0.0 as a rule — only if it passed its registered gate (research/model_ensemble.py)."""
+    from quant_platform.research.model_ensemble import gate
+
+    check = gate(Path("instance") / "research" / "models")
+    print(f"gbm-2.0.0 門檻（2016-2020 前 20 名多賺）：{check}", flush=True)
+    if not check["passed"]:
+        return []
+    return [DailyRule(name="機器學習集成（模型 F）：前 20 名、同產業最多 3 成、每週決策", factors={"ml_gbm_ens": 1.0},
+                      check="weekly", industry_cap=0.3)]
+
+
+def cost_switch_batch() -> list[DailyRule]:
+    """2026-10-12: cost-aware switching on the two consensus frames that passed — the T0 consensus top 20
+    (#2272) and the development-period consensus top 40 (#2275); each is one new trial."""
+    common = {"check": "weekly", "keep": 3, "min_hold": 20, "industry_cap": 0.3, "switching": "cost1"}
+    return [
+        DailyRule(name="T0 共識清單（25 個 T0 候選投票）：前 20 名、同產業最多 3 成、每週決策、看成本才換股",
+                  factors={"t0_consensus": 1.0}, top=20, **common),
+        DailyRule(name="開發期共識清單（180 個搜尋最後名單投票）：前 40 名、同產業最多 3 成、每週決策、看成本才換股",
+                  factors={"dev_consensus": 1.0}, top=40, **common),
+    ]
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1426,4 +1513,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch}
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch,
+           "costswitch": cost_switch_batch}

@@ -101,3 +101,40 @@ def test_the_development_consensus_members_were_chosen_before_2020_10():
     assert consensus.members_digest("dev_consensus") != consensus.members_digest()
     batch = daily.BATCHES["devconsensus"]()
     assert [rule.top for rule in batch] == [20, 40] and all(rule.factors == {"dev_consensus": 1.0} for rule in batch)
+
+
+class SwitchPanel:
+    def __init__(self, sessions, script, symbols):
+        self.sessions, self.index, self.script = sessions, {day: i for i, day in enumerate(sessions)}, script
+        self.row = {symbol: row for row, symbol in enumerate(symbols)}
+
+    def ranked(self, rule, position):
+        return list(self.script[self.sessions[position]])
+
+
+def test_cost_aware_switching_keeps_a_holding_unless_the_swap_pays_a_round_trip(monkeypatch):
+    days = [date(2024, 1, 1), date(2024, 1, 2)]
+    symbols = ["A", "B", "C", "D", "E"]
+    panel = SwitchPanel(days, {days[0]: ["A", "B", "E", "C", "D"], days[1]: ["C", "D", "E", "A", "B"]}, symbols)
+    percentiles = np.array([[0.85, 0.85], [0.3, 0.3], [0.95, 0.95], [0.9, 0.9], [0.92, 0.92]])
+
+    def gain(percentile):
+        return 0.02 if percentile >= 0.9 else (0.015 if percentile >= 0.8 else 0.0)
+
+    monkeypatch.setattr(daily, "switch_mapping", lambda fp, rule: (percentiles, gain))
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, min_hold=0, switching="cost1")
+    ranks = daily.daily_rankings(panel, rule, days[0], days[-1])
+    assert sorted(ranks[days[0]]) == ["A", "B", "E"]
+    # B (expects 0%) is swapped for C (2%): worth more than a round trip; A (1.5%) against D (2%) is not
+    assert sorted(ranks[days[1]]) == ["A", "C", "E"]
+    plain = daily.daily_rankings(panel, rule.model_copy(update={"switching": "none"}), days[0], days[-1])
+    assert sorted(plain[days[1]]) == ["C", "D", "E"]
+    assert "switching" not in rule.model_copy(update={"switching": "none"}).canonical()
+
+
+def test_the_switch_mapping_uses_the_development_period_and_never_expects_less_for_a_better_rank():
+    fp = market(stocks=30)
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0})
+    percentiles, gain = daily.switch_mapping(fp, rule)
+    values = [gain(p / 10 + 0.05) for p in range(10)]
+    assert values == sorted(values) and percentiles.shape == (len(fp.symbols), len(fp.sessions))

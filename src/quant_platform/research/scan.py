@@ -55,7 +55,7 @@ SHORT = {
     "earnings_yield": "本益比低", "book_to_price": "淨值比低", "roe_ttm": "ROE", "gross_margin": "毛利率",
     "operating_margin_change": "營益率增", "eps_growth": "EPS 成長", "low_debt": "負債低", "fip_12": "趨勢連續",
     "imom_12": "日內動能", "resid_mom_12": "殘差動能", "ml_gbm": "模型A", "ml_gbm_excess": "模型B",
-    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "rl_tech": "技術機器人", "rl_tech_weekly": "技術機器人週",
+    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "rl_tech": "技術機器人", "rl_tech_weekly": "技術機器人週",
 }
 
 

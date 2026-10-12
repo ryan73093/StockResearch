@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -149,6 +149,19 @@ switch ($Name) {
     "devconsensus" {
         # 2026-10-11: the clean test of the consensus method (180 development-period finalists), then statistics.
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "devconsensus", "--broker", "cathay")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "modelf" {
+        # 2026-10-12: gbm-2.0.0 (the ensemble), then — only if it passes its registered gate — its rule, the scan
+        # of sets containing it (scan 1.1.0: stability-chosen finalists), and the statistics.
+        Invoke-Step "1-model" @("-m", "quant_platform.research", "model", "--model-version", "gbm-2.0.0")
+        Invoke-Step "2-rule" @("-m", "quant_platform.research", "daily", "--name", "modelf", "--broker", "cathay")
+        Invoke-Step "3-scan" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "20", "--require", "ml_gbm_ens")
+        Invoke-Step "4-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "costswitch" {
+        # 2026-10-12: cost-aware switching on the two consensus frames, then the statistics.
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "costswitch", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "news-events" {
