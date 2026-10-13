@@ -374,6 +374,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "research_agent",
             "daily_researcher",
             "news_events",
+            "hypotheses",
             "weekly_research_report",
             "ex_dividend_refresh",
         }

@@ -134,6 +134,8 @@ class Settings:
     llm_monthly_budget_usd: float = 5.0
     news_events_enabled: bool = True
     news_events_monthly_budget_usd: float = 4.0
+    # 2026-10-13: the owner's hypothesis checks (research/hypothesis.py), inside the same total
+    hypothesis_monthly_budget_usd: float = 0.5
     rag_local_dimensions: int = 384
     local_embedding_backend: str = "hash"
     local_embedding_model: str = "BAAI/bge-small-zh-v1.5"
@@ -229,6 +231,7 @@ class Settings:
             llm_monthly_budget_usd=max(0.0, float(os.getenv("LLM_MONTHLY_BUDGET_USD", "5"))),
             news_events_enabled=os.getenv("NEWS_EVENTS_ENABLED", "true").lower() in {"1", "true", "yes"},
             news_events_monthly_budget_usd=max(0.0, float(os.getenv("NEWS_EVENTS_MONTHLY_BUDGET_USD", "4"))),
+            hypothesis_monthly_budget_usd=max(0.0, float(os.getenv("HYPOTHESIS_MONTHLY_BUDGET_USD", "0.5"))),
             research_agent_rounds_per_night=max(0, min(10, int(os.getenv("RESEARCH_AGENT_ROUNDS_PER_NIGHT", "3")))),
             research_agent_specs_per_round=max(1, min(10, int(os.getenv("RESEARCH_AGENT_SPECS_PER_ROUND", "4")))),
             research_agent_trials_per_night=max(0, min(50, int(os.getenv("RESEARCH_AGENT_TRIALS_PER_NIGHT", "12")))),

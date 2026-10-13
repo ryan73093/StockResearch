@@ -343,6 +343,13 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
             written = written + stocks
         except Exception:
             logger.exception("Stock-rule forward simulation failed")
+        try:                                       # 2026-10-13: the common-start board (research/forward_board.py)
+            from quant_platform.research.forward_board import build as build_board
+
+            board = build_board(research, research / "history", local_now.date())
+            logger.info("Forward board: %s", (board or {}).get("counts"))
+        except Exception:
+            logger.exception("Forward board failed")
     return len(written)
 
 
@@ -598,6 +605,35 @@ def start_daily_researcher(container: "Container", now: datetime | None = None, 
     return True
 
 
+def start_hypotheses(container: "Container", now: datetime | None = None, launch=None) -> object | None:
+    """2026-10-13: every few minutes, when an owner's hypothesis is waiting and none is being checked, the
+    check in the background (scripts/start-research.ps1 -Name hypotheses); not while the market closes or
+    the research data and forward record update (13:25-14:45, 15:10-15:55)."""
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import hypothesis
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    minute = local_now.hour * 60 + local_now.minute
+    if local_now.weekday() < 5 and (13 * 60 + 25 <= minute <= 14 * 60 + 45 or 15 * 60 + 10 <= minute <= 15 * 60 + 55):
+        return None
+    research = _instance_dir(container.settings.database_url) / "research"
+    waiting = hypothesis.pending(research)
+    if not waiting or any(item.get("status") == "running" for item in hypothesis.items(research, 50)):
+        return None
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch()
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                        "-Name", "hypotheses"], check=False, timeout=120)
+    logger.info("Hypothesis check started for %s", len(waiting))
+    return len(waiting)
+
+
 def save_weekly_research_report(container: "Container", now: datetime | None = None) -> object | None:
     """S6-W04: keep a copy of the finished week's research report (Sunday 23:30)."""
     from quant_platform.container import _instance_dir
@@ -778,6 +814,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        start_hypotheses,
+        args=[container],
+        trigger=IntervalTrigger(minutes=5, timezone=timezone),
+        id="hypotheses",
+        name="假設檢驗（有等待中的假設時，每 5 分鐘啟動一次背景檢驗）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
     )
     scheduler.add_job(
         start_daily_researcher,

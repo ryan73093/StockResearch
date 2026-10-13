@@ -41,6 +41,9 @@ from quant_platform.research.factors import table as factor_table
 from quant_platform.research.jobs import JobLog
 from quant_platform.research.pool import _svg as value_chart
 from quant_platform.research.pool import basis_counts, pool_view, rule_detail, yearly_matrix
+from quant_platform.research.forward_board import load as forward_board_load
+from quant_platform.research.hypothesis import items as hypothesis_items
+from quant_platform.research.hypothesis import submit as hypothesis_submit
 from quant_platform.research.stock_forward import StockForwardTracker
 from quant_platform.research.promotion import PromotionPipeline, promotion_limits
 from quant_platform.research.weekly import weekly_report
@@ -198,7 +201,7 @@ def _taipei_text(value: datetime | None, pattern: str = "%m/%d %H:%M") -> str:
 
 
 # 2026-10-07: the old design's tabs (ranking, promotion, AI researcher, legacy model) became one "舊設計紀錄".
-RESEARCH_TABS = ("overview", "factors", "ml", "news", "forward", "jobs", "legacy")
+RESEARCH_TABS = ("overview", "factors", "ml", "news", "forward", "hypothesis", "jobs", "legacy")
 OLD_RESEARCH_TABS = {"rules": "ranking", "promotion": "promotion", "agent": "agent"}
 BEST_TIERS = ("T0", "T0 候選", "T1")
 CONCLUSIONS_HEADING = "目前結論（網站"
@@ -896,6 +899,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
             stock_forward=StockForwardTracker(research_dir).summary(),
+            forward_board=forward_board_load(research_dir) if tab == "forward" else None,
+            hypotheses=hypothesis_items(research_dir) if tab == "hypothesis" else None,
             research_tab=tab, jobs=jobs, factor_report=latest_factor_strength(research_dir / "factors"),
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
             ml=ml_view(research_dir) if tab == "ml" else None,
@@ -1025,6 +1030,19 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     @blueprint.get("/research/jobs.json")
     def research_jobs_json():
         return jsonify(JobLog(_instance_dir(dependencies.settings.database_url) / "research").jobs())
+
+    @blueprint.post("/research/hypotheses")
+    def research_hypothesis():
+        """2026-10-13: the owner's idea, queued for the background check (research/hypothesis.py)."""
+        target = url_for("v2.research", tab="hypothesis")
+        try:
+            item = hypothesis_submit(_instance_dir(dependencies.settings.database_url) / "research",
+                                     str(request.form.get("text", "")))
+        except ValueError as exc:
+            flash(str(exc), "error")
+        else:
+            flash(f"已收到假設，幾分鐘內在背景檢驗（編號 {item['id']}）。", "success")
+        return redirect(target)
 
     @blueprint.post("/research/promotions/<spec_hash>/<action>")
     def research_promotion(spec_hash: str, action: str):

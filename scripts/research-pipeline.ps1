@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -177,6 +177,10 @@ switch ($Name) {
         Invoke-Step "1-model" @("-m", "quant_platform.research", "model", "--model-version", "gbm-2.1.0")
         Invoke-Step "2-rule" @("-m", "quant_platform.research", "daily", "--name", "techmodel", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "hypotheses" {
+        # 2026-10-13: the owner's waiting hypothesis checks (started by the worker when one is waiting).
+        Invoke-Step "1-check" @("-m", "quant_platform.research", "hypotheses", "--broker", "cathay")
     }
     "news-events" {
         # R15 D (2026-10-09): score the collected headlines not scored yet (also every trading day 21:45).

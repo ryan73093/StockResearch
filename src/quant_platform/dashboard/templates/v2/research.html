@@ -337,6 +337,53 @@
 {% endif %}
 {% endif %}
 
+{% if research_tab == 'hypothesis' %}
+<section class="card" id="hypothesis">
+  <div class="card__head"><h2>AI 假設檢驗</h2><span class="muted small">寫下一個選股想法，平台把它翻成規則、找出已經試過的類似策略、用正式引擎跑一次，判斷好壞</span></div>
+  <form method="post" action="/research/hypotheses" class="stack" style="gap:8px">
+    <label for="hypothesis-text" class="small">你的假設（一句話，例如「外資連續買超、又站上季線的股票，接下來一個月會贏大盤」）</label>
+    <textarea id="hypothesis-text" name="text" rows="3" maxlength="300" required style="width:100%"></textarea>
+    <div><button type="submit" class="button">送出檢驗</button></div>
+  </form>
+  <p class="note">判定只看數字（和選手池同一套門檻）：好＝兩段期間都贏同樣的錢買 0050、回撤與視窗勝率在門檻內；部分好＝贏但太顛簸；不穩定；不好＝輸 0050。語言模型只負責把句子翻成平台的因子、用給它的數字寫說明，不決定好壞。每次檢驗都登錄成一個試驗（選手池名稱以「使用者假設」開頭）。回測不代表未來。</p>
+</section>
+{% for item in hypotheses or [] %}
+<section class="card">
+  <div class="card__head">
+    <h2 style="font-size:1rem">{{ item.text }}</h2>
+    <span class="muted small">{{ item.submitted_at[:16].replace('T', ' ') }}・{{ {'queued': '等待中', 'running': '檢驗中', 'done': '完成', 'failed': '失敗'}.get(item.status, item.status) }}</span>
+  </div>
+  {% if item.verdict %}
+  <p><span class="badge {{ 'badge--ok' if item.verdict == '好' else ('badge--warn' if item.verdict in ('部分好', '不穩定') else 'badge--bad') }}">{{ item.verdict }}</span> {{ item.reason }}</p>
+  {% elif item.reason %}<p class="small">{{ item.reason }}</p>{% endif %}
+  {% if item.parsed %}
+  <p class="small">平台的理解：{{ item.parsed.restatement }}（因子：{% for name, weight in item.parsed.factors.items() %}{{ name }}{{ '（反向）' if weight < 0 else '' }}{% if not loop.last %}、{% endif %}{% endfor %}；{{ '市值前 100 大' if item.parsed.universe == 'large' else '全部上市股' }}、{{ '每週' if item.parsed.check == 'weekly' else '每天' }}決策）{% if item.parsed.missing %}<br>平台缺少的資料：{{ item.parsed.missing|join('、') }}{% endif %}</p>
+  {% endif %}
+  {% if item.result %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>回測（2015-06～2026-09，30 萬＋每月 1 萬）</th><th class="num">期末</th><th class="num">比 0050（2015-06 起／2020-10 起）</th><th class="num">最大回撤</th><th class="num">1 年／3 年視窗勝率</th><th class="num">每月委託</th></tr></thead>
+      <tbody><tr>
+        <td data-primary><a href="/research/rules/{{ item.result.spec_hash }}">試驗 #{{ item.result.trial }}</a> <span class="badge">{{ item.result.tier }}</span></td>
+        <td class="num" data-label="期末">{{ '{:,.0f}'.format(item.result.final_value) }}<span class="muted small">（0050 {{ '{:,.0f}'.format(item.result.benchmark_value) }}）</span></td>
+        <td class="num" data-label="比 0050">{{ '{:+.0%}'.format(item.result.excess) }}／{{ '{:+.0%}'.format(item.result.since_2020) }}</td>
+        <td class="num" data-label="回撤">{{ '{:.0%}'.format(item.result.drawdown) }}<span class="muted small">（0050 {{ '{:.0%}'.format(item.result.benchmark_drawdown) }}）</span></td>
+        <td class="num" data-label="視窗">{{ '{:.0%}'.format(item.result.win_1y or 0) }}／{{ '{:.0%}'.format(item.result.win_3y or 0) }}</td>
+        <td class="num" data-label="委託">{{ item.result.orders_per_month }}</td>
+      </tr></tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if item.explanation %}<p class="small">{{ item.explanation }}</p>{% endif %}
+  {% if item.similar %}
+  <details><summary class="small">平台試過的類似策略（{{ item.similar|length }} 個）</summary>
+    <ul class="small">{% for peer in item.similar %}<li><a href="/research/rules/{{ peer.spec_hash }}">{{ peer.name }}</a> <span class="badge">{{ peer.tier }}</span>{% if peer.excess is not none %} 比 0050 {{ '{:+.0%}'.format(peer.excess) }}{% endif %}{% if peer.drawdown is not none %}、回撤 {{ '{:.0%}'.format(peer.drawdown) }}{% endif %}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+</section>
+{% endfor %}
+{% endif %}
+
 {% if research_tab == 'jobs' %}
 <section class="card" id="jobs">
   <div class="card__head"><h2>執行中的程式</h2><span class="muted small">{{ '有程式在跑，頁面每分鐘自動更新' if running_count else '目前沒有程式在跑' }}</span></div>
@@ -597,6 +644,36 @@
   </ul>
   {% endif %}
   <p class="note">門檻：滾動 3／5 年勝率 ≥ {{ '{:.0%}'.format(promotion.gates.win) }} 且中位超額 > 0、回撤不比定期定額深超過 {{ '%.0f' % (promotion.gates.drawdown * 100) }} 個百分點（一般賽道；更深的走進攻型賽道，回撤上限是你計畫的可承受回撤{% if promotion.gates.aggressive_drawdown is not none %} {{ '{:.0%}'.format(promotion.gates.aggressive_drawdown) }}{% else %}——<a href="/plan">尚未建立投資計畫，進攻型賽道未啟用</a>{% endif %}，其餘門檻相同）、DSR ≥ {{ promotion.gates.dsr }}、PBO ≤ {{ '{:.0%}'.format(promotion.gates.pbo) }}；驗證期另需成本加倍與晚一天執行仍有 ≥ {{ '{:.0%}'.format(promotion.gates.robust) }} 勝率；最終驗證期只評估一次；前向模擬至少 {{ promotion.gates.forward }} 個交易日。核准後才會出現在計畫頁。</p>
+</section>
+{% endif %}
+
+{% if research_tab == 'forward' and forward_board %}
+<section class="card" id="forward-board">
+  <div class="card__head">
+    <h2>共同起跑線 <span class="badge">{{ forward_board.common_start }} 起</span></h2>
+    <span class="muted small">每個策略都從研究期結束後的第一天起跑（之後的資料沒有被拿來挑任何策略），30 萬＋每月 1 萬，對同樣的錢買 0050；{{ forward_board.date }} 為止 {{ forward_board.sessions }} 個交易日。和各自回測的月超額比：預期範圍是 90% 區間，時間越短範圍越寬</span>
+  </div>
+  <p class="small" style="margin:0 0 10px">{% for label, count in forward_board.counts.items() if count %}<span class="badge {{ 'badge--bad' if label == '警示' else ('badge--ok' if label == '強於預期' else '') }}">{{ label }} {{ count }}</span> {% endfor %}</p>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th class="num">名次</th><th>策略</th><th class="num">報酬</th><th class="num">比 0050</th><th class="num">回測預期範圍</th><th>狀態</th><th class="num">回撤</th><th class="num">買／賣</th></tr></thead>
+      <tbody>
+      {% for row in forward_board.rows|selectattr('rank')|sort(attribute='rank') %}
+        <tr>
+          <td class="num" data-label="名次">{{ row.rank }}{% if row.rank_change %}<span class="small {{ 'up' if row.rank_change > 0 else 'down' }}">（{{ '{:+d}'.format(row.rank_change) }}）</span>{% endif %}</td>
+          <td data-primary><a href="/research/rules/{{ row.rule_hash }}">{{ row.name }}</a></td>
+          <td class="num {{ 'up' if row['return'] > 0 else 'down' }}" data-label="報酬">{{ '{:+.2%}'.format(row['return']) }}</td>
+          <td class="num {{ 'up' if row.excess > 0 else 'down' }}" data-label="比 0050">{{ '{:+.2%}'.format(row.excess) }}</td>
+          <td class="num small" data-label="預期範圍">{% if row.band_low is not none %}{{ '{:+.1%}'.format(row.band_low) }}～{{ '{:+.1%}'.format(row.band_high) }}{% else %}—{% endif %}</td>
+          <td data-label="狀態"><span class="badge {{ 'badge--bad' if row.state == '警示' else ('badge--ok' if row.state == '強於預期' else '') }}" title="{{ row.advice }}">{{ row.state }}</span></td>
+          <td class="num" data-label="回撤">{{ '{:.1%}'.format(row.max_drawdown) }}</td>
+          <td class="num" data-label="買／賣">{{ row.buys }}／{{ row.sells }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="note">名次後的括號是和 5 個交易日前比的變化（正數是往前）。滑過狀態看建議：警示＝落在回測幾乎不會出現的範圍，先查原因，一個月後仍在警示線下就停止追蹤；強於或弱於預期都不要因短期表現改規則。賣出要等持股滿 20 個交易日或跌出保留區，前幾週多半只有買進。</p>
 </section>
 {% endif %}
 

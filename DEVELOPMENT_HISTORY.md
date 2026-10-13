@@ -2,6 +2,15 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-13 上午（二）— 共同起跑線排行榜、AI 假設檢驗；技術模型結果
+
+- 使用者：前向是否更新、會不會賣；能否分時段評估；前向起跑基準；監控轉強與調整建議；串 AI 判斷假設好壞；再跑更多策略；資料缺口。
+- 前向現況（查證）：每個交易日 15:30 記錄 62 個規則，10/12 對帳正常；到目前 1,600 筆全是買進——持股要滿 20 個交易日或跌出保留區才賣，第一批賣出約 11 月上旬。
+- 共同起跑線：`research/forward_board.py`（`build`、`state`、`expectation`、`ADVICE`）、worker 15:30 前向紀錄後自動重算、CLI `forward-board`、研究頁前向分頁最上方的表。10/13 第一次：10/01～10/12 共 7 個交易日、59 個符合預期。
+- AI 假設檢驗：`research/hypothesis.py`（`submit`、`parse`、`similar`、`strengths`、`run_one`、`run_pending`）、設定 `hypothesis_monthly_budget_usd` 0.5、POST `/research/hypotheses`、研究頁分頁「AI 假設檢驗」、worker 每 5 分鐘（避開收盤與資料更新時段）啟動 `scripts\start-research.ps1 -Name hypotheses`、CLI `hypotheses`。
+- 技術模型 gbm-2.1.0：IC +0.041，規則 #2279 T1（1,470 萬、回撤 −50%），輸 #2090（1,612 萬、−30.7%），RL 微調不做。新穎性閘門收 3 個新因子、擋 2 個。
+- 測試：排行榜狀態手算、回測期望讀取、前向分頁顯示排行榜；假設的翻譯只留已知因子、完整檢驗成為登錄試驗並有判定、無法測試時列出缺的資料、網頁送出與 worker 避開收盤時段；全部 642 通過、1 略過。
+
 ## 2026-10-13 上午 — 模型 F 與看成本才換股結果；新價量因子與技術模型（背景）
 
 - 使用者：繼續。

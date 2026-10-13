@@ -1,0 +1,50 @@
+"""2026-10-13: the common-start forward board (research/forward_board.py)."""
+
+import json
+
+import pytest
+
+from quant_platform.research import forward_board
+
+
+def test_the_state_against_the_backtest_band_by_hand():
+    expected = {"trial": 1, "mean": 0.01, "sd": 0.04}            # +1% a month, 4% monthly spread
+    # two months: centre +2%, 90% band ±1.645 × 4% × √2 = ±9.3%, alert line 2% − 2.326 × 5.66% = −11.2%
+    label, centre, low, high = forward_board.state(0.05, 2, expected)
+    assert label == "符合預期" and centre == pytest.approx(0.02) and low == pytest.approx(-0.0731, abs=1e-4)
+    assert forward_board.state(0.12, 2, expected)[0] == "強於預期"
+    assert forward_board.state(-0.10, 2, expected)[0] == "弱於預期"
+    assert forward_board.state(-0.13, 2, expected)[0] == "警示"
+    assert forward_board.state(0.0, 2, None)[0] == "沒有回測可比"
+
+
+def test_the_expectation_reads_the_rule_s_backtest(tmp_path):
+    from quant_platform.research.registry import TrialRegistry
+
+    research = tmp_path / "research"
+    (research / "reports").mkdir(parents=True)
+    months = {f"2020-{month:02d}": value for month, value in zip(range(1, 13), [0.02, -0.01] * 6)}
+    (research / "reports" / "r.json").write_text(json.dumps({"monthly_active_returns": months}), encoding="utf-8")
+    TrialRegistry(research / "trials.jsonl").register(kind="candidate", period="recent", spec_hash="abc", spec_name="x",
+                                                      input_hash="i", data_fingerprint="d", metrics={}, report_file="r.json")
+    found = forward_board.expectation(research, "abc")
+    assert found["mean"] == pytest.approx(0.005) and found["sd"] > 0
+
+
+def test_the_forward_tab_shows_the_board(tmp_path):
+    from quant_platform.config.settings import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+
+    folder = tmp_path / "research" / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    board = {"common_start": "2026-10-01", "date": "2026-10-12", "sessions": 8, "months": 0.38,
+             "counts": {"警示": 0, "弱於預期": 0, "符合預期": 1, "強於預期": 0, "沒有回測可比": 0},
+             "rows": [{"rule_hash": "h", "name": "T0 共識清單測試", "trial": 1, "since": "2026-10-12", "rank": 1,
+                       "rank_change": None, "return": 0.03, "excess": 0.01, "band_low": -0.05, "band_high": 0.07,
+                       "state": "符合預期", "advice": "照規則繼續。", "max_drawdown": -0.02, "buys": 20, "sells": 0}]}
+    (folder / "board.json").write_text(json.dumps(board, ensure_ascii=False), encoding="utf-8")
+    client = create_app(build_container(
+        Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
+    body = client.get("/research?tab=forward").get_data(as_text=True)
+    assert "共同起跑線" in body and "T0 共識清單測試" in body and "符合預期" in body and "/research/rules/h" in body

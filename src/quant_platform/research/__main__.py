@@ -305,7 +305,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="研究回測（相同現金流對照定期定額）")
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
-                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck"),
+                            "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
+                            "forward-board", "hypotheses"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -591,6 +592,38 @@ def main() -> int:
 
     if args.command == "daily":
         return _daily(args, registry)
+
+    if args.command == "hypotheses":
+        # 2026-10-13: the owner's waiting hypothesis checks (research/hypothesis.py)
+        from quant_platform.config.settings import Settings
+        from quant_platform.research import hypothesis
+        from quant_platform.research.jobs import JobLog
+
+        waiting = hypothesis.pending(RESEARCH)
+        if not waiting:
+            print("沒有等待中的假設")
+            return 0
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start(f"假設檢驗（{len(waiting)} 個）", command, total=len(waiting)) as job:
+            done = hypothesis.run_pending(RESEARCH, Path(args.base), Settings.from_env(), broker_costs(args.broker), job=job)
+            job.payload["summary"] = "；".join(f"{item['text'][:20]}→{item.get('verdict', item['status'])}" for item in done)
+        for item in done:
+            print(f"{item['text']}：{item.get('verdict', item['status'])}；{item.get('reason', '')}", flush=True)
+        return 0
+
+    if args.command == "forward-board":
+        # 2026-10-13: the common-start board (research/forward_board.py; also built after the 15:30 forward record)
+        from quant_platform.research.forward_board import build as build_board
+
+        day = date.fromisoformat(args.date) if args.date else datetime.now(TAIPEI).date()
+        board = build_board(RESEARCH, Path(args.base), day, broker_costs(args.broker))
+        if not board:
+            print("沒有可以計算的前向策略")
+            return 1
+        print(f"{board['common_start']} 起到 {board['date']}（{board['sessions']} 個交易日）：{board['counts']}")
+        for row in sorted((row for row in board["rows"] if "rank" in row), key=lambda row: row["rank"])[:15]:
+            print(f"{row['rank']:>2}. {row['name'][:40]}：報酬 {row['return']:+.2%}、比 0050 {row['excess']:+.2%}、{row['state']}")
+        return 0
 
     if args.command == "leakcheck":
         # 2026-10-11: every factor recomputed from data cut at random sessions (research/leakcheck.py)
