@@ -180,6 +180,8 @@ h1, h2, h3, p, li, dd { overflow-wrap: anywhere; }
 .sidenav a[aria-current="page"] { background: var(--accent-bg); color: var(--accent); }
 /* 2026-10-07: 市場與個股 under the five main pages, set apart by a rule */
 .sidenav--sub { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+/* 2026-10-14: the sub-pages of 研究 (and of 系統 while on it) as a sidebar group on wide screens */
+.sidegroup { display: none; }
 .icon-btn[aria-current="page"], .sidesearch-link[aria-current="page"] { background: var(--accent-bg); color: var(--accent); }
 
 .theme-toggle {
@@ -228,6 +230,11 @@ a.theme-toggle[aria-current="page"] { color: var(--accent); border-color: var(--
     font-size: 13px; text-align: left; line-height: 1.4;
   }
   .sidebar .session__dot { margin-top: 5px; }
+  .sidegroup { display: grid; gap: 1px; margin: 0 0 6px 22px; padding-left: 10px; border-left: 1px solid var(--border); }
+  .sidegroup a { display: block; padding: 5px 10px; border-radius: 8px; font-size: 13.5px; color: var(--text-2); }
+  .sidegroup a:hover { text-decoration: none; background: var(--surface-2); color: var(--text); }
+  .sidegroup a[aria-current="true"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  .subtabs.subtabs--grouped { display: none; }      /* the sidebar group lists them */
   .sidebar .session__short { display: none; }
   .sidebar .session__text { display: block; }
   .theme-toggle { justify-content: flex-start; padding: 8px 12px; }

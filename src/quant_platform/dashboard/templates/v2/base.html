@@ -1,4 +1,5 @@
 {% from "v2/_icons.html" import icon, brand_mark %}
+{% from "v2/_nav.html" import research_pages, system_pages %}
 <!doctype html>
 <html lang="zh-Hant" data-theme="{{ theme }}">
 <head>
@@ -21,9 +22,21 @@
   <div class="app">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="交易研究分析平台首頁">{{ brand_mark() }}<span class="brand__text"><strong>交易研究分析平台</strong><small>台股</small></span></a>
+      {% set running_jobs = (jobs or [])|selectattr('status', 'equalto', 'running')|list|length %}
       <nav class="sidenav" aria-label="主要功能">
         {% for key, href, label in nav_items %}
           <a href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span></a>
+          {% if key == 'research' %}
+          <div class="sidegroup" role="group" aria-label="研究">
+            {% for sub, text, link in research_pages %}
+            <a href="{{ link }}"{% if active_nav == 'research' and research_tab == sub %} aria-current="true"{% endif %}>{{ text }}{% if sub == 'jobs' and running_jobs %} <span class="badge badge--warn">{{ running_jobs }}</span>{% endif %}</a>
+            {% endfor %}
+          </div>
+          {% elif key == 'system' and active_nav == 'system' %}
+          <div class="sidegroup" role="group" aria-label="系統">
+            {% for sub, text, link in system_pages %}<a href="{{ link }}">{{ text }}</a>{% endfor %}
+          </div>
+          {% endif %}
         {% endfor %}
       </nav>
       <nav class="sidenav sidenav--sub" aria-label="市場與個股">

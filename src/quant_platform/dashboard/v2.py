@@ -203,7 +203,7 @@ def _taipei_text(value: datetime | None, pattern: str = "%m/%d %H:%M") -> str:
 
 
 # 2026-10-07: the old design's tabs (ranking, promotion, AI researcher, legacy model) became one "舊設計紀錄".
-RESEARCH_TABS = ("overview", "factors", "ml", "news", "forward", "hypothesis", "jobs", "legacy")
+RESEARCH_TABS = ("overview", "orders", "factors", "ml", "news", "forward", "hypothesis", "jobs", "legacy")
 OLD_RESEARCH_TABS = {"rules": "ranking", "promotion": "promotion", "agent": "agent"}
 BEST_TIERS = ("T0", "T0 候選", "T1")
 CONCLUSIONS_HEADING = "目前結論（網站"
@@ -902,7 +902,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             forward_start=FORWARD_START,
             stock_forward=StockForwardTracker(research_dir).summary(),
             forward_board=forward_board_load(research_dir) if tab == "forward" else None,
-            after_close=after_close_load(research_dir, datetime.now(TAIPEI).date()) if tab == "forward" else None,
+            after_close=after_close_load(research_dir, datetime.now(TAIPEI).date()) if tab == "orders" else None,
             hypotheses=hypothesis_items(research_dir) if tab == "hypothesis" else None,
             research_tab=tab, jobs=jobs, factor_report=latest_factor_strength(research_dir / "factors"),
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],

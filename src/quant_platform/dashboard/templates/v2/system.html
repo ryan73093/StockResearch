@@ -10,7 +10,11 @@
 </header>
 {% endblock %}
 {% block content %}
-<section class="tiles" aria-label="運作狀態">
+{% from "v2/_nav.html" import system_pages %}
+<nav class="subtabs subtabs--grouped" aria-label="系統分頁">
+  {% for key, label, href in system_pages %}<a href="{{ href }}">{{ label }}</a>{% endfor %}
+</nav>
+<section class="tiles" aria-label="運作狀態" id="runs">
   {% for item in health_items %}
     <div class="tile tile--{{ item.tone }}">
       <div class="tile__label">{{ item.label }}</div>
@@ -94,7 +98,7 @@
 </section>
 {% endif %}
 
-<section class="card">
+<section class="card" id="timing">
   <div class="card__head"><h2>收盤資料時效</h2><span class="muted small">首次看到當日資料的時間（13:30 後幾分）</span></div>
   {% if close_rows %}
   <div class="table-wrap table-wrap--stack">
