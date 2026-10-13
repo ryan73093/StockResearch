@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -217,6 +217,21 @@ switch ($Name) {
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "4-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
         Invoke-Step "5-audit" @("-m", "quant_platform.research", "trade-audit", "--broker", "cathay")
+    }
+    "t0scan5" {
+        # 2026-10-14 (使用者：繼續尋找 T0；制度要修正到所有策略，包含機器學習與 RL): scan 1.2.0 — every set of 1–3 of
+        # the 47 signals, both universes and weightings, holding by the trend (69,372 candidates) — screened on
+        # 2015-06..2020-09 now (the screen needs no dividends); the full-engine stage, the model, robot and blend
+        # rules on engine 1.4.0, the statistics and the board wait for engine140 (dividends, the 211 rules).
+        Invoke-Step "1-screen" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "0")
+        while (Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*research-pipeline.ps1*-Name engine140*" }) {
+            Start-Sleep -Seconds 300
+        }
+        $scanFolder = (Get-ChildItem (Join-Path $root "instance\research\scans") -Directory -Filter "scan-1.2.0-*" | Sort-Object Name | Select-Object -Last 1).FullName
+        Invoke-Step "2-finalists" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--finalists", "80", "--pool", "5000", "--resume", $scanFolder)
+        Invoke-Step "3-models" @("-m", "quant_platform.research", "daily", "--name", "rerun_models", "--broker", "cathay")
+        Invoke-Step "4-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "5-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "engine131" {
         # 2026-10-13 evening: engine 1.3.1 (an unsold delisted holding is worthless) — the same 64 rules

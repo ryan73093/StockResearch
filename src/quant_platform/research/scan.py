@@ -37,7 +37,11 @@ import pandas as pd
 # both halves of the development period beat 0050, best by the weaker half — and kept apart by the correlation
 # of their daily returns *above 0050* (at most 0.7; plain returns all share the market). Every candidate's
 # daily excess is kept for counting effective trials.
-SCAN_VERSION = "scan-1.1.0"
+# 1.2.0 (2026-10-14; 使用者：超過 20 天才賣是策略不是限制，還在漲就留著): every new candidate holds by the trend —
+# a holding out of the top 60 stays while its adjusted close is above its 20-session average and goes once it is
+# not (DailyRule hold "trend"); the screen's account does the same with ``Arrays.rising``. Older scans' rows carry
+# no "hold" and keep the fixed 20 sessions.
+SCAN_VERSION = "scan-1.2.0"
 EXCESS_CORRELATION_LIMIT = 0.7
 DEV_END = date(2020, 9, 30)
 TOP, KEEP, MIN_HOLD, INDUSTRY_SHARE = 20, 3, 20, 0.3
@@ -75,7 +79,7 @@ def weekly(factors: tuple[str, ...]) -> bool:
 
 
 def candidates(names: list[str] | None = None, largest: int = 3, smallest: int = 1,
-               require: str | list[str] | None = None) -> list[dict]:
+               require: str | list[str] | None = None, hold: str = "trend") -> list[dict]:
     """Every set of ``smallest``..``largest`` signals × universe (all, large) × weighting (equal, calm);
     with ``require`` only the sets that contain it — or, given a list, at least one of them (new signals
     against everything else)."""
@@ -89,7 +93,7 @@ def candidates(names: list[str] | None = None, largest: int = 3, smallest: int =
             for universe in ("all", "large"):
                 for weighting in ("equal", "inverse_vol"):
                     output.append({"factors": list(group), "universe": universe, "weighting": weighting,
-                                   "check": "weekly" if weekly(group) else "daily"})
+                                   "check": "weekly" if weekly(group) else "daily", "hold": hold})
     return output
 
 
@@ -103,9 +107,13 @@ def to_rule(candidate: dict):
         parts.append("依波動度配置")
     if candidate["check"] == "weekly":
         parts.append("每週決策")
-    return DailyRule(name="、".join(parts), factors={name: 1.0 for name in candidate["factors"]}, top=TOP,
+    hold = candidate.get("hold", "days")
+    if hold == "trend":
+        parts.append("月線上續抱")
+    return DailyRule(name="、".join(parts)[:80], factors={name: 1.0 for name in candidate["factors"]}, top=TOP,
                      check=candidate["check"], keep=KEEP, min_hold=MIN_HOLD, industry_cap=INDUSTRY_SHARE,
-                     weighting=candidate["weighting"], large_caps=LARGE if candidate["universe"] == "large" else 0)
+                     weighting=candidate["weighting"], large_caps=LARGE if candidate["universe"] == "large" else 0,
+                     hold=hold)
 
 
 # --- stage 1 arrays ------------------------------------------------------------------------------
@@ -119,6 +127,7 @@ class Arrays:
     weekly_days: np.ndarray     # session: a weekly check day
     bench: np.ndarray           # session: 0050's return from this close to the next
     days: list[date]
+    rising: np.ndarray | None = None   # symbol × session: above its 20-session average (1.2.0; None in older scans)
 
 
 def prepare(data, fp, costs, folder: Path) -> Arrays:
@@ -165,6 +174,7 @@ def prepare(data, fp, costs, folder: Path) -> Arrays:
     np.save(folder / "industry.npy", industry)
     np.save(folder / "weekly_days.npy", weekly_days)
     np.save(folder / "bench.npy", np.nan_to_num(bench))
+    np.save(folder / "rising.npy", fp.rising()[:, first:last + 1].astype(np.uint8))
     (folder / "meta.json").write_text(json.dumps({"names": names, "days": [day.isoformat() for day in days]},
                                                  ensure_ascii=False), encoding="utf-8")
     return load_arrays(folder)
@@ -175,7 +185,8 @@ def load_arrays(folder: Path) -> Arrays:
     return Arrays(names=meta["names"], percentiles=np.load(folder / "percentiles.npy", mmap_mode="r"),
                   next_returns=np.load(folder / "next_returns.npy"), calm=np.load(folder / "calm.npy"),
                   industry=np.load(folder / "industry.npy"), weekly_days=np.load(folder / "weekly_days.npy"),
-                  bench=np.load(folder / "bench.npy"), days=[date.fromisoformat(day) for day in meta["days"]])
+                  bench=np.load(folder / "bench.npy"), days=[date.fromisoformat(day) for day in meta["days"]],
+                  rising=np.load(folder / "rising.npy") if (folder / "rising.npy").is_file() else None)
 
 
 # --- stage 1 account -----------------------------------------------------------------------------
@@ -189,9 +200,11 @@ def score_of(arrays: Arrays, candidate: dict) -> np.ndarray:
 
 
 def account(score: np.ndarray, checks: np.ndarray, industry: np.ndarray, next_returns: np.ndarray,
-            calm: np.ndarray | None, cost_in: float, cost_out: float, record: bool = False):
+            calm: np.ndarray | None, cost_in: float, cost_out: float, record: bool = False,
+            rising: np.ndarray | None = None):
     """Daily returns after costs of the top-20 rule on ``score`` (symbols × sessions, NaN = not ranked),
-    deciding on ``checks``; with ``record`` also the holdings after each session."""
+    deciding on ``checks``; with ``record`` also the holdings after each session. With ``rising`` (hold
+    "trend") a holding out of the zone stays while it is rising, instead of for its first MIN_HOLD sessions."""
     sessions = score.shape[1]
     limit = max(1, int(INDUSTRY_SHARE * TOP))
     held: list[int] = []
@@ -209,8 +222,11 @@ def account(score: np.ndarray, checks: np.ndarray, industry: np.ndarray, next_re
             else:
                 order = valid[np.argsort(-column[valid], kind="stable")].tolist()
                 zone = set(order[: TOP * KEEP])
-                kept = [row for row in held
-                        if row in zone or (not np.isnan(column[row]) and t - bought[row] < MIN_HOLD)]
+                if rising is not None:
+                    kept = [row for row in held if row in zone or (not np.isnan(column[row]) and rising[row, t])]
+                else:
+                    kept = [row for row in held
+                            if row in zone or (not np.isnan(column[row]) and t - bought[row] < MIN_HOLD)]
                 taken = set(kept)
                 counts = Counter(int(industry[row]) for row in kept)
                 for row in order:
@@ -286,8 +302,11 @@ def evaluate(arrays: Arrays, candidate: dict, costs, record: bool = False):
     tax = dict(costs.tax_rates).get("stock", 0.003)
     checks = arrays.weekly_days if candidate["check"] == "weekly" else np.ones(len(arrays.days), dtype=bool)
     calm = arrays.calm if candidate["weighting"] == "inverse_vol" else None
+    trend = candidate.get("hold") == "trend"
+    if trend and arrays.rising is None:
+        raise ValueError("這次掃描的陣列沒有月線資料（scan 1.2.0 以前），不能評估月線上續抱")
     outcome = account(score_of(arrays, candidate), checks, arrays.industry, arrays.next_returns, calm,
-                      fee + slippage, fee + tax + slippage, record)
+                      fee + slippage, fee + tax + slippage, record, arrays.rising if trend else None)
     years = (arrays.days[-1] - arrays.days[0]).days / 365.25
     return metrics(outcome[0], arrays.bench, years, outcome[1]), outcome
 

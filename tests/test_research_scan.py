@@ -59,6 +59,27 @@ def test_the_fast_account_picks_what_the_engine_picks():
         assert sorted(fp.symbols[row] for row in history[index]) == sorted(engine[day])
 
 
+def test_the_fast_account_holds_by_the_trend_as_the_engine_does():
+    """scan 1.2.0: hold "trend" — out of the top 60, kept while above the 20-session average."""
+    data, fp = planted()
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=scan.TOP, keep=scan.KEEP,
+                     industry_cap=scan.INDUSTRY_SHARE, hold="trend")
+    days = [day for day in fp.sessions if date(2016, 1, 4) <= day <= date(2016, 12, 30)]
+    first, last = fp.index[days[0]], fp.index[days[-1]]
+    engine = daily_rankings(fp, rule, days[0], days[-1])
+    values = fp.matrix("momentum_3")[:, first:last + 1]
+    eligible = np.column_stack([fp.eligible(rule, position) for position in range(first, last + 1)])
+    score = np.where(eligible, values, np.nan).astype(np.float32)
+    groups = sorted({fp.industry(symbol) for symbol in fp.symbols})
+    industry = np.array([groups.index(fp.industry(symbol)) for symbol in fp.symbols])
+    _returns, _entries, history = scan.account(score, np.ones(len(days), dtype=bool), industry, np.zeros_like(score),
+                                              None, 0.0, 0.0, record=True, rising=fp.rising()[:, first:last + 1])
+    for index, day in enumerate(days[:-1]):
+        assert sorted(fp.symbols[row] for row in history[index]) == sorted(engine[day])
+    item = scan.candidates(["momentum_3"], largest=1)[0]
+    assert item["hold"] == "trend" and scan.to_rule(item).hold == "trend" and scan.to_rule(item).min_hold == 0
+
+
 def test_costs_and_returns_by_hand():
     score = np.array([[3.0, 3.0, 3.0], [2.0, np.nan, 2.0]] + [[np.nan] * 3] * 2, dtype=np.float32)
     moves = np.array([[0.10, 0.0, 0.0], [0.02, 0.0, 0.0], [0, 0, 0], [0, 0, 0]], dtype=np.float32)

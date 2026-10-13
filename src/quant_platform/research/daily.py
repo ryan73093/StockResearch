@@ -2008,6 +2008,44 @@ def rerun131_batch() -> list:
     return list(unique.values())
 
 
+def rerun_models_batch() -> list:
+    """2026-10-14 (使用者：上面的制度有沒有修正到所有策略，包含機器學習、RL): every rule with a trained model's score,
+    the technical robot, the learned exit, or a blend of rules (the RL allocations among them) not already in
+    ``rerun131_batch``, run again on engine 1.4.0 — whole shares, dividends as paid, the turnover cap."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry
+
+    research = _Path("instance") / "research"
+    known = {rule.rule_hash for rule in rerun131_batch()}
+    latest = {}
+    for record in TrialRegistry(research / "trials.jsonl").records():
+        if record.kind == "candidate" and record.period == "recent":
+            latest[record.spec_hash] = record
+    learned = set(MODEL_FACTORS) | set(TECH_FACTORS)
+    rules = []
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        if record.spec_hash in known:
+            continue
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        except (OSError, ValueError, KeyError):
+            continue
+        if uses_0050(spec):
+            continue
+        blend = spec.get("kind") == "blend" or "sleeves" in spec
+        if not (blend or spec.get("exit_model", "none") != "none" or set(spec.get("factors") or {}) & learned):
+            continue
+        rule = parse_spec(spec)
+        if blend and len(rule.sleeves) > 4:
+            continue
+        rules.append(rule)
+    return rules
+
+
 def rerun140_batch() -> list:
     """2026-10-13 night: the same 211 rules on engine 1.4.0 (whole shares, dividends as paid, the turnover cap),
     filled the same day in the after-hours sessions. Not the next session (使用者 2026-10-14：要在 14:30 前算出
@@ -2034,4 +2072,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
-           "rerun140": rerun140_batch}
+           "rerun140": rerun140_batch, "rerun_models": rerun_models_batch}
