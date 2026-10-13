@@ -667,7 +667,7 @@
           <td class="num small" data-label="預期範圍">{% if row.band_low is not none %}{{ '{:+.1%}'.format(row.band_low) }}～{{ '{:+.1%}'.format(row.band_high) }}{% else %}—{% endif %}</td>
           <td data-label="狀態"><span class="badge {{ 'badge--bad' if row.state == '警示' else ('badge--ok' if row.state == '強於預期' else '') }}" title="{{ row.advice }}">{{ row.state }}</span></td>
           <td class="num" data-label="回撤">{{ '{:.1%}'.format(row.max_drawdown) }}</td>
-          <td class="num" data-label="買／賣">{{ row.buys }}／{{ row.sells }}</td>
+          <td class="num" data-label="買／賣">{{ row.buys }}／{{ row.sells }}{% if row.recent %}<br><a class="small" href="/research/recent/{{ row.rule_hash }}">近 3 個月 {{ '{:+.0%}'.format(row.recent.excess) }}</a>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

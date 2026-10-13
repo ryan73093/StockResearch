@@ -42,6 +42,7 @@ from quant_platform.research.jobs import JobLog
 from quant_platform.research.pool import _svg as value_chart
 from quant_platform.research.pool import basis_counts, pool_view, rule_detail, yearly_matrix
 from quant_platform.research.forward_board import load as forward_board_load
+from quant_platform.research.forward_board import load_recent as forward_recent_load
 from quant_platform.research.hypothesis import items as hypothesis_items
 from quant_platform.research.hypothesis import submit as hypothesis_submit
 from quant_platform.research.stock_forward import StockForwardTracker
@@ -961,6 +962,23 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         chart = value_chart({row["date"]: [row["value"], row["benchmark"], row["contributed"]] for row in detail["series"]})
         return render_template("v2/research_forward.html", active_nav="research", forward=detail, chart=chart,
                                research_tab="forward", jobs=JobLog(research_dir).jobs())
+
+    @blueprint.get("/research/recent/<rule_hash>")
+    def research_recent(rule_hash: str):
+        """2026-10-13: the last three months of one strategy — every order, its holdings, value against 0050."""
+        if not re.fullmatch(r"[0-9a-zA-Z_-]{8,80}", rule_hash):
+            abort(404)
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        replay = forward_recent_load(research_dir, rule_hash)
+        if replay is None or "curve" not in replay:
+            abort(404)
+        chart = value_chart({row["date"]: [row["value"], row["benchmark"], row["contributed"]] for row in replay["curve"]})
+        by_day: dict[str, list] = {}
+        for trade in replay["trades"]:
+            by_day.setdefault(trade["date"], []).append(trade)
+        return render_template("v2/research_recent.html", active_nav="research", recent=replay, chart=chart,
+                               trade_days=sorted(by_day.items(), reverse=True), research_tab="forward",
+                               jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/rules/<spec_hash>.json")
     def research_rule_json(spec_hash: str):

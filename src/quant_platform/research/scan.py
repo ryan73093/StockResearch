@@ -461,7 +461,11 @@ def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 6
         if np.std(returns) == 0:
             continue
         returns = apart(returns)
-        if any(np.corrcoef(returns, other)[0, 1] > limit for _row, other in earlier + taken):
+        # 1.1.0, 2026-10-13: against earlier scans only a near copy is skipped (0.9 — with 200 earlier finalists
+        # every new set sits within 0.7 of one of them); among this scan's own finalists the 0.7 limit holds
+        if any(np.corrcoef(returns, other)[0, 1] > max(limit, CORRELATION_LIMIT) for _row, other in earlier):
+            continue
+        if any(np.corrcoef(returns, other)[0, 1] > limit for _row, other in taken):
             continue
         taken.append((row, returns))
     return [row for row, _returns in taken]

@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -186,6 +186,15 @@ switch ($Name) {
         # 2026-10-13: the four best rules without the 20-session minimum holding, then the statistics.
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "minhold", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "engine13" {
+        # 2026-10-13 (使用者：請符合市場交易規則；被擋下隔天重新評估): engine 1.3.0 — the new-factor scan's second
+        # stage again, every T0 candidate and T1 run again, the statistics, then the common-start board and the
+        # three-month replays.
+        Invoke-Step "1-rawv2-stage2" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--finalists", "80", "--pool", "5000", "--resume", "instance/research/scans/scan-1.1.0-20261013-092329")
+        Invoke-Step "2-rerun" @("-m", "quant_platform.research", "daily", "--name", "rerun13", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "4-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "news-events" {
         # R15 D (2026-10-09): score the collected headlines not scored yet (also every trading day 21:45).

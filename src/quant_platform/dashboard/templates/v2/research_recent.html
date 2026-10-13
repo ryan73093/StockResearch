@@ -1,0 +1,85 @@
+{% extends "v2/base.html" %}
+{% block title %}{{ recent.name }} · 近 3 個月模擬操作{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>{{ recent.name }}</h1>
+    <p class="page-head__sub">近 3 個月模擬操作：{{ recent.start }}～{{ recent.end }}，30 萬起跑、每月 5 日投入 1 萬，照規則每天收盤後決定（漲停買不到、跌停賣不掉，被擋下隔天重新評估）</p>
+  </div>
+  <div class="page-head__meta"><a href="/research?tab=forward">回前向觀察</a>・<a href="/research/rules/{{ recent.rule_hash }}">回測紀錄</a></div>
+</header>
+{% endblock %}
+{% block content %}
+{% include "v2/_research_tabs.html" %}
+{% set all = recent.periods.all or {} %}
+<div class="kpis kpis--page kpis--four">
+  <div class="kpi"><div class="kpi__label">這 3 個月報酬</div><div class="kpi__value {{ 'up' if (all['return'] or 0) > 0 else 'down' }}">{{ '{:+.2%}'.format(all['return'] or 0) }}</div></div>
+  <div class="kpi"><div class="kpi__label">同樣的錢買 0050</div><div class="kpi__value">{{ '{:+.2%}'.format(all.benchmark_return or 0) }}</div></div>
+  <div class="kpi"><div class="kpi__label">比 0050</div><div class="kpi__value {{ 'up' if (all.excess or 0) > 0 else 'down' }}">{{ '{:+.2%}'.format(all.excess or 0) }}</div></div>
+  <div class="kpi"><div class="kpi__label">買・賣・被擋下</div><div class="kpi__value">{{ recent.counts.buys }}・{{ recent.counts.sells }}・{{ recent.counts.refused }}<small> 筆</small></div></div>
+</div>
+
+<section class="card">
+  <div class="card__head"><h2>兩段分開看</h2></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>期間</th><th class="num">報酬</th><th class="num">0050</th><th class="num">比 0050</th><th class="num">最大回撤</th></tr></thead>
+      <tbody>
+      {% for key, label in (('research', '研究期間內（' ~ recent.start ~ '～' ~ recent.research_end ~ '；規則是用這段以前的資料挑的）'), ('unseen', recent.research_end ~ ' 以後（沒有任何資料挑過規則）')) %}
+        {% set item = recent.periods.get(key) %}
+        {% if item %}
+        <tr><td data-primary>{{ label }}</td>
+            <td class="num" data-label="報酬">{{ '{:+.2%}'.format(item['return']) }}</td>
+            <td class="num" data-label="0050">{{ '{:+.2%}'.format(item.benchmark_return) }}</td>
+            <td class="num {{ 'up' if item.excess > 0 else 'down' }}" data-label="比 0050">{{ '{:+.2%}'.format(item.excess) }}</td>
+            <td class="num" data-label="回撤">{{ '{:.1%}'.format(item.max_drawdown) }}</td></tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <svg class="rule-chart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" preserveAspectRatio="none" role="img" aria-label="近 3 個月資產走勢" style="margin-top:12px">
+    <polyline class="line-put" points="{{ chart.put_in }}"/>
+    <polyline class="line-bench" points="{{ chart.benchmark }}"/>
+    <polyline class="line-rule" points="{{ chart.rule }}"/>
+  </svg>
+  <div class="legend"><span><i style="background:var(--accent)"></i>這個策略</span><span><i style="background:var(--warn)"></i>同樣的錢買 0050</span><span><i style="background:var(--muted)"></i>累計投入</span><span>{{ chart.first }}～{{ chart.last }}</span></div>
+  <p class="note">研究期間內的部分，規則是看過那段資料才被挑出來的，只能看它「會怎麼操作」；{{ recent.research_end }} 以後才是沒看過的資料。費稅合計 {{ '{:,}'.format(recent.costs) }} 元。</p>
+</section>
+
+<section class="card">
+  <div class="card__head"><h2>期末持股</h2><span class="muted small">{{ recent.end }}；現金 {{ '{:,.0f}'.format(recent.cash) }} 元</span></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>股票</th><th class="num">市值（元）</th></tr></thead>
+      <tbody>{% for row in recent.holdings %}<tr><td data-primary><a href="/stock/{{ row.code }}">{{ row.code }} {{ row.name }}</a></td><td class="num" data-label="市值">{{ '{:,.0f}'.format(row.value) }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card__head"><h2>每一筆操作</h2><span class="muted small">新的在上面；被擋下的單也列出來</span></div>
+  {% for day, trades in trade_days %}
+  <details{% if loop.index <= 3 %} open{% endif %}>
+    <summary><strong>{{ day }}</strong> <span class="muted small">買 {{ trades|selectattr('side', 'equalto', 'BUY')|rejectattr('refused')|list|length }}・賣 {{ trades|selectattr('side', 'equalto', 'SELL')|rejectattr('refused')|list|length }}{% set refused = trades|selectattr('refused')|list %}{% if refused %}・被擋下 {{ refused|length }}{% endif %}</span></summary>
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>股票</th><th>動作</th><th class="num">股數</th><th class="num">價格</th><th class="num">金額</th><th class="num">費稅</th></tr></thead>
+        <tbody>
+        {% for trade in trades %}
+          <tr>
+            <td data-primary><a href="/stock/{{ trade.code }}">{{ trade.code }} {{ trade.name }}</a></td>
+            <td data-label="動作">{% if trade.refused %}<span class="badge badge--warn">{{ trade.refused }}</span>{% else %}<span class="badge {{ 'badge--ok' if trade.side == 'BUY' else 'badge--bad' }}">{{ '買進' if trade.side == 'BUY' else '賣出' }}</span>{% endif %}</td>
+            <td class="num" data-label="股數">{{ '{:,.0f}'.format(trade.shares) if trade.shares is defined else '—' }}</td>
+            <td class="num" data-label="價格">{{ trade.price if trade.price is defined else '—' }}</td>
+            <td class="num" data-label="金額">{{ '{:,.0f}'.format(trade.amount) if trade.amount is defined else '—' }}</td>
+            <td class="num" data-label="費稅">{{ (trade.fee + trade.tax) if trade.fee is defined else '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% else %}<p class="muted">這段期間沒有操作。</p>{% endfor %}
+</section>
+{% endblock %}

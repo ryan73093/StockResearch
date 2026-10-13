@@ -64,7 +64,14 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 # 1.1.0 (2026-10-05): trailing stop and market filter (R7); the data version covers the chip data and
 # only what the period covers (0050 and this year's ex-rights file are rewritten nightly).
 # 1.2.0 (2026-10-06): inverse-volatility weights and the account's own trend filter (R7b).
-ENGINE_VERSION = "daily-1.2.0"
+# 1.3.0 (2026-10-13, 使用者：請符合市場交易規則): a stock closing at its limit-up price cannot be bought and one
+# closing at its limit-down price cannot be sold (the queue on the locked side does not clear in the after-hours
+# odd-lot auction); the limits are the exchange's — the reference price (the previous close, less the
+# ex-rights adjustment) ± 10% (± 7% before 2015-06-01) rounded to the tick inward. When the market refuses an
+# order (a locked limit or a session without a trade) the rule decides again at the next session — it ranks
+# anew, as on a check day (使用者：被擋下隔天就要重新評估；漲停跌停買不到也賣不掉).
+ENGINE_VERSION = "daily-1.3.0"
+PRICE_LIMIT_WIDENED = date(2015, 6, 1)
 SHADOW_WARMUP = 252         # sessions before the shadow account starts (the factors need a year)
 STOP_COOLDOWN = 20          # sessions a stopped-out stock may not be bought again
 PERIOD = "recent"
@@ -503,6 +510,38 @@ class FactorPanel:
         threshold = np.partition(values[known], -count)[-count]
         return known & (values >= threshold)
 
+    def market_locks(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """symbols × sessions: traded (a close that day), closed locked at limit-up, closed locked at
+        limit-down — the exchange's limits on the reference price (the previous traded close over the day's
+        ex-rights unit factor) ± 10% (± 7% before 2015-06-01), rounded inward to the tick (engine 1.3.0)."""
+        if "__locks__" in self._cache:
+            return self._cache["__locks__"]
+        close = self.panel.close
+        traded = np.isfinite(close)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            growth = self.panel.adjusted / close
+        previous_close = pd.DataFrame(close.T).ffill().shift(1).to_numpy().T
+        previous_growth = pd.DataFrame(growth.T).ffill().shift(1).to_numpy().T
+        with np.errstate(divide="ignore", invalid="ignore"):
+            reference = previous_close / (growth / previous_growth)
+        widened = np.array([day >= PRICE_LIMIT_WIDENED for day in self.sessions])[None, :]
+        rate = np.where(widened, 0.10, 0.07)
+        etf = np.array([symbol.split(".")[0].startswith("00") for symbol in self.symbols])[:, None]
+
+        def tick(price: np.ndarray) -> np.ndarray:
+            stock = np.select([price < 10, price < 50, price < 100, price < 500, price < 1_000],
+                              [0.01, 0.05, 0.1, 0.5, 1.0], 5.0)
+            return np.where(etf, np.where(price < 50, 0.01, 0.05), stock)
+
+        up_raw, down_raw = reference * (1 + rate), reference * (1 - rate)
+        with np.errstate(invalid="ignore"):
+            up = np.floor(up_raw / tick(np.nan_to_num(up_raw)) + 1e-9) * tick(np.nan_to_num(up_raw))
+            down = np.ceil(down_raw / tick(np.nan_to_num(down_raw)) - 1e-9) * tick(np.nan_to_num(down_raw))
+            locked_up = traded & np.isfinite(up) & (close >= up - 1e-6)
+            locked_down = traded & np.isfinite(down) & (close <= down + 1e-6)
+        self._cache["__locks__"] = (traded, locked_up, locked_down)
+        return self._cache["__locks__"]
+
     def smoothed(self, factor: str, sessions: int) -> np.ndarray:
         """The factor averaged over the last ``sessions`` sessions (symbols × sessions; days with no value
         are skipped, so a stock with fewer days averages what it has)."""
@@ -631,10 +670,13 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
 
             factor = TECH_EXITS[rule.exit_model]
             exit_agent = TechAgent(fp, Path(fp.models) / TECH_FACTOR_VERSION[factor], factor)
+    locks = fp.market_locks() if hasattr(fp, "market_locks") else None
+    again: set[int] = set()               # 1.3.0: sessions to decide again (the market refused an order)
     for count, day in enumerate(sessions):
-        if day not in checks:
+        if day not in checks and count not in again:
             continue
         position = fp.index[day]
+        holding = list(current)
         if rule.market_filter != "none" and not fp.risk_on(position):
             current, bought, peak = [], {}, {}
             output[day] = []
@@ -698,6 +740,23 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
                 counts[group] += 1
             chosen.append(symbol)
         current = kept + chosen
+        if locks is not None:                 # 1.3.0: what the market lets the rule do at this close
+            traded, locked_up, locked_down = locks
+            refused, final = False, []
+            for symbol in current:
+                row = fp.row.get(symbol)
+                if symbol not in holding and row is not None and (not traded[row, position] or locked_up[row, position]):
+                    refused = True             # not bought: limit-up or no trade today
+                    continue
+                final.append(symbol)
+            for symbol in holding:
+                row = fp.row.get(symbol)
+                if symbol not in current and row is not None and (not traded[row, position] or locked_down[row, position]):
+                    refused = True             # not sold: limit-down or no trade today
+                    final.append(symbol)
+            current = final
+            if refused:
+                again.add(count + 1)
         bought = {symbol: bought.get(symbol, count) for symbol in current}
         if rule.stop_loss or exit_agent is not None:
             peak = {symbol: peak[symbol] if symbol in peak else fp.price(symbol, position) for symbol in current}
@@ -733,10 +792,30 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         series = data.closes.get(symbol, {})
         return series[day] if day in series else (data.last_close(symbol, day) or 0.0)
 
+    blocked = False                              # an order the market refused today: try again tomorrow
+
+    def refused(symbol: str, day: date, side: str) -> bool:
+        """The market's rule: no trade on a session without a close, no buy at a locked limit-up close, no
+        sell at a locked limit-down close."""
+        nonlocal blocked
+        close = data.closes.get(symbol, {}).get(day)
+        locked = False
+        if close is not None:
+            low, high = price_limits(data, symbol, day)
+            locked = (high is not None and side == "BUY" and close >= high - 1e-6) or \
+                     (low is not None and side == "SELL" and close <= low + 1e-6)
+        if close is None or locked:
+            blocked = True
+            if ledger is not None and close is not None:
+                ledger.append({"day": day, "symbol": symbol, "side": "BLOCKED", "order": side,
+                               "reason": "漲停買不到" if side == "BUY" else "跌停賣不掉"})
+            return True
+        return False
+
     def buy(symbol: str, budget: float, day: date) -> None:
         nonlocal cash
         close = data.closes.get(symbol, {}).get(day)
-        if close is None or budget <= 0:
+        if budget <= 0 or refused(symbol, day, "BUY"):
             return
         fill = fill_price(close, "BUY", costs.slippage_bps, _tick(symbol))
         shares = affordable_shares(min(budget, cash), fill, costs)
@@ -755,7 +834,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         """Sell the whole holding, or whole shares worth about ``amount``."""
         nonlocal cash
         close = data.closes.get(symbol, {}).get(day)
-        if close is None or units[symbol] <= 0:
+        if units[symbol] <= 0 or refused(symbol, day, "SELL"):
             return
         shares, fill = units[symbol], fill_price(close, "SELL", costs.slippage_bps, _tick(symbol))
         if amount is not None:
@@ -777,6 +856,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                            "fee": fee, "tax": tax})
 
     for day in sessions:
+        retry, blocked = blocked, False
         for symbol in [held for held, count in units.items() if count > 0]:
             factor = data.factors.get(symbol, {}).get(day, 1.0)
             if factor != 1.0:
@@ -791,11 +871,14 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         else:
             park = parked is not None and day in parked
             today = [] if park else (ranks.get(day) if ranks else None)
+            again = today is None and retry and not park       # yesterday's refused orders, same picks
+            if again:
+                today = list(picks)
             if today is not None:
                 for symbol in [held for held, count in units.items() if count > 0 and held != BENCHMARK and held not in today]:
                     sell_all(symbol, day)
                 picks = today
-                if not park:
+                if not park and not again:
                     shares_of = (weights or {}).get(day) or {}
             if was_parked and not park:            # back from 0050: keep only the core in it
                 total = cash + sum(count * price(symbol, day) for symbol, count in units.items() if count > 0)
@@ -843,6 +926,29 @@ VOL_WINDOW = 21          # sessions of the rule's own returns for its current vo
 VOL_BASELINE = 750       # sessions whose median volatility is its usual level (about three years)
 VOL_STEP = 0.25          # the invested share moves in quarters: fewer trades
 VOL_BAND = 1.25          # fully invested until the volatility runs 25% above its usual level
+
+
+def price_limits(data: LegacyData, symbol: str, day: date) -> tuple[float | None, float | None]:
+    """(limit-down, limit-up) of ``symbol`` on ``day``: the reference price — the previous session's close
+    divided by the day's ex-rights unit factor — ± 10% (± 7% before 2015-06-01), rounded inward to the tick;
+    (None, None) without a previous close."""
+    import bisect
+
+    from quant_platform.research.costs import _to_tick
+
+    series = data.closes.get(symbol, {})
+    cache = data.__dict__.setdefault("_limit_days", {})          # sorted session dates per symbol
+    days = cache.get(symbol)
+    if days is None or len(days) != len(series):
+        days = cache[symbol] = sorted(series)
+    place = bisect.bisect_left(days, day)
+    if place == 0:
+        return None, None
+    previous = series[days[place - 1]]
+    reference = previous / data.factors.get(symbol, {}).get(day, 1.0)
+    rate = 0.10 if day >= PRICE_LIMIT_WIDENED else 0.07
+    tick = _tick(symbol)
+    return _to_tick(reference * (1 - rate), True, tick), _to_tick(reference * (1 + rate), False, tick)
 
 
 def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel) -> dict[date, float] | None:
@@ -1558,6 +1664,38 @@ def min_hold_batch() -> list[DailyRule]:
     return [rule.model_copy(update={"min_hold": 0, "name": (rule.name + "、不設最短持有")[:80]}) for rule in rules]
 
 
+def rerun_batch() -> list:
+    """2026-10-13: every 100%-stock rule rated T0 候選 or T1 today, run again by engine 1.3.0 (the market's price
+    limits, a refused order decided again the next session) — the same rules, new trials of their input."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry
+
+    research = _Path("instance") / "research"
+    latest = {}
+    for record in TrialRegistry(research / "trials.jsonl").records():
+        if record.kind == "candidate" and record.period == "recent":
+            latest[record.spec_hash] = record
+    rules = []
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        if tier(record.metrics)[0] not in ("T0 候選", "T1"):
+            continue
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        except (OSError, ValueError, KeyError):
+            continue
+        if uses_0050(spec):
+            continue
+        rule = parse_spec(spec)
+        if getattr(rule, "kind", None) == "blend" and len(rule.sleeves) > 4:
+            continue                           # the 17-way equal blend: 437 orders a month, not a strategy
+        rules.append(rule)
+    return rules
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1576,4 +1714,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
-           "minhold": min_hold_batch}
+           "minhold": min_hold_batch, "rerun13": rerun_batch}

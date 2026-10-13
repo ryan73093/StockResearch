@@ -22,8 +22,10 @@ from pathlib import Path
 import numpy as np
 
 COMMON_START = date(2026, 10, 1)
+RESEARCH_END = date(2026, 9, 30)          # the rules were chosen with data up to here
 BAND, ALERT = 1.645, 2.326
 SESSIONS_PER_MONTH = 21
+RECENT_SESSIONS = 63                      # 2026-10-13 (使用者：近三個月它會做什麼買賣、成效如何): about three months
 
 
 def expectation(research: Path, rule_hash: str) -> dict[str, float] | None:
@@ -144,6 +146,23 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
             "band_high": high, "advice": ADVICE[label],
             "buys": sum(1 for entry in ledger if entry["side"] == "BUY"),
             "sells": sum(1 for entry in ledger if entry["side"] == "SELL")})
+    # 2026-10-13: the last three months of every strategy, every order (research/forward_board.py ``recent``)
+    from quant_platform.research.stock_forward import _names
+
+    names = _names(history, last.year)
+    window = [day for day in data.sessions if day <= last][-RECENT_SESSIONS:]
+    target = research / "forward" / "stocks" / "recent"
+    target.mkdir(parents=True, exist_ok=True)
+    for item in items:
+        try:
+            replay = recent(research, history, item, data, fp, costs, window, names)
+        except Exception as error:
+            replay = {"rule_hash": item["rule_hash"], "name": item["name"], "error": str(error)[:200]}
+        if replay:
+            (target / f"{item['rule_hash']}.json").write_text(json.dumps(replay, ensure_ascii=False), encoding="utf-8")
+            row = next((row for row in rows if row["rule_hash"] == item["rule_hash"]), None)
+            if row is not None and "periods" in replay:
+                row["recent"] = replay["periods"].get("all")
     ranked = sorted((row for row in rows if "excess" in row), key=lambda row: -row["excess"])
     for place, row in enumerate(ranked, start=1):
         row["rank"] = place
@@ -166,6 +185,93 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
                                  "excess": {row["rule_hash"]: row["excess"] for row in ranked}}]:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
     return board
+
+
+def _period(values: list[float], flows: list[float], bench_values: list[float], bench_flows: list[float]) -> dict:
+    from quant_platform.research.metrics import max_drawdown, unit_values
+
+    if len(values) < 2:
+        return {}
+    units, base = unit_values(values, flows), unit_values(bench_values, bench_flows)
+    drawdown, _peak, _trough = max_drawdown(units)
+    return {"return": round(units[-1] / units[0] - 1, 4), "benchmark_return": round(base[-1] / base[0] - 1, 4),
+            "excess": round((units[-1] / units[0]) / (base[-1] / base[0]) - 1, 4), "max_drawdown": round(drawdown, 4)}
+
+
+def recent(research: Path, history: Path, item: dict, data, fp, costs, days: list, names: dict) -> dict | None:
+    """The last RECENT_SESSIONS sessions of one strategy on the owner's account (NT$300,000 at the start,
+    NT$10,000 on the 5th), every order it would have placed — the ones the market refused too — its holdings
+    and its value against the same money in 0050; split at RESEARCH_END (before it the rule was chosen with
+    that data, after it nothing chose it)."""
+    from quant_platform.research.blend import BlendAccount, BlendRule
+    from quant_platform.research.daily import (
+        DailyRule,
+        account_parking,
+        daily_rankings,
+        daily_weights,
+        exposure_schedule,
+        simulate_daily,
+    )
+    from quant_platform.research.stock_rules import SeedPlan
+
+    if len(days) < 2:
+        return None
+    start, last = days[0], days[-1]
+    plan, ledger, snapshots = SeedPlan(), [], {}
+    if item.get("kind") == "blend":
+        rule = BlendRule.model_validate(item["rule"])
+        run = BlendAccount(data, fp, rule, costs, start, last).run(start, last, plan, ledger=ledger, snapshots=snapshots)
+    else:
+        rule = DailyRule.model_validate(item["rule"])
+        ranks = daily_rankings(fp, rule, start, last)
+        run = simulate_daily(data, rule, costs, start, last, ranks, plan, ledger=ledger, snapshots=snapshots,
+                             weights=daily_weights(fp, rule, ranks), parked=account_parking(data, fp, rule, costs),
+                             exposure=exposure_schedule(data, fp, rule, costs))
+    bench = simulate_daily(data, None, costs, start, last, plan=plan)
+    contributed = 0.0
+    curve = []
+    for day, value, flow, base in zip(run.days, run.values, run.flows, bench.values):
+        contributed += flow
+        curve.append({"date": day.isoformat(), "value": round(value, 2), "benchmark": round(base, 2),
+                      "contributed": round(contributed, 2)})
+    trades = []
+    for entry in ledger:
+        if entry["side"] not in ("BUY", "SELL", "BLOCKED"):
+            continue
+        code = str(entry["symbol"]).split(".")[0]
+        row = {"date": entry["day"].isoformat(), "code": code, "name": names.get(code, ""),
+               "side": entry.get("order", entry["side"]) if entry["side"] == "BLOCKED" else entry["side"]}
+        if entry["side"] == "BLOCKED":
+            row["refused"] = entry["reason"]
+        else:
+            row.update(shares=round(float(entry["shares"]), 4), price=entry["price"], fee=entry["fee"], tax=entry["tax"],
+                       amount=round(float(entry["shares"]) * float(entry["price"]), 0))
+        trades.append(row)
+    cash, units = snapshots[last]
+    holdings = sorted(({"code": symbol.split(".")[0], "name": names.get(symbol.split(".")[0], ""),
+                        "value": round(count * (data.last_close(symbol, last) or 0.0), 0)}
+                       for symbol, count in units.items()), key=lambda row: -row["value"])
+    split = next((index for index, day in enumerate(run.days) if day > RESEARCH_END), None)
+    periods = {"all": _period(run.values, run.flows, bench.values, bench.flows)}
+    if split:
+        periods["research"] = _period(run.values[:split], run.flows[:split], bench.values[:split], bench.flows[:split])
+        periods["unseen"] = _period(run.values[split - 1:], [0.0] + run.flows[split:], bench.values[split - 1:],
+                                    [0.0] + bench.flows[split:])
+    return {"rule_hash": item["rule_hash"], "name": item["name"], "start": start.isoformat(), "end": last.isoformat(),
+            "research_end": RESEARCH_END.isoformat(), "periods": periods, "curve": curve, "trades": trades,
+            "holdings": holdings, "cash": round(cash, 0),
+            "counts": {"buys": sum(1 for row in trades if row["side"] == "BUY" and "refused" not in row),
+                       "sells": sum(1 for row in trades if row["side"] == "SELL" and "refused" not in row),
+                       "refused": sum(1 for row in trades if "refused" in row)},
+            "costs": int(run.fees + run.taxes), "built_at": datetime.now().isoformat(timespec="seconds")}
+
+
+def load_recent(research: Path, rule_hash: str) -> dict | None:
+    path = research / "forward" / "stocks" / "recent" / f"{rule_hash}.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    except ValueError:
+        return None
 
 
 def load(research: Path) -> dict[str, object] | None:

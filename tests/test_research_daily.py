@@ -400,3 +400,76 @@ def test_the_second_large_cap_batch_tests_new_hypotheses_not_tweaks():
     assert len({tuple(sorted(rule.factors)) + (rule.weighting,) for rule in rules}) == 3
     calm = classify(rules[0].canonical())["traits"]                      # weighted by calmness: not equal amounts
     assert "只挑市值前 100 大" in calm and "依波動度配置" in calm and not any("等額" in trait for trait in calm)
+
+
+def test_market_rules_no_buy_at_limit_up_no_sell_at_limit_down_and_retry_next_session():
+    """1.3.0: a locked limit-up close cannot be bought, a locked limit-down close cannot be sold; the refused
+    order is tried again at the next close."""
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 10))                   # 8 sessions
+    up = [10.0, 11.0, 11.5, 11.5, 11.5, 11.5, 11.5, 11.5]                     # +10% on the 2nd session: locked
+    down = [20.0, 20.0, 20.0, 18.0, 17.0, 17.0, 17.0, 17.0]                   # −10% on the 4th: locked
+    data = market(days, {"1101.TW": dict(zip(days, up)), "1102.TW": dict(zip(days, down))})
+    assert daily.price_limits(data, "1101.TW", days[1]) == (9.0, 11.0)
+    script = {days[0]: ["1102.TW"], days[1]: ["1101.TW"], days[3]: ["1101.TW"]}
+    ledger = []
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, min_hold=0)
+    simulate_daily(data, rule, FREE, days[0], days[-1], script, SeedPlan(100_000, 0), ledger=ledger)
+    trades = [(row["day"], row["symbol"], row["side"]) for row in ledger if row["side"] in ("BUY", "SELL", "BLOCKED")]
+    assert (days[0], "1102.TW", "BUY") in trades
+    assert (days[1], "1102.TW", "SELL") in trades                           # an ordinary sell
+    assert (days[1], "1101.TW", "BLOCKED") in trades                        # limit-up close: not bought ...
+    assert (days[2], "1101.TW", "BUY") in trades                            # ... bought at the next close
+    blocked = [row for row in ledger if row["side"] == "BLOCKED"]
+    assert blocked[0]["reason"] == "漲停買不到"
+
+
+def test_a_locked_limit_down_holding_is_sold_the_next_session():
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 10))
+    falling = [20.0, 20.0, 18.0, 17.5, 17.5, 17.5, 17.5, 17.5]               # −10% locked on the 3rd session
+    other = [30.0] * 8
+    data = market(days, {"1101.TW": dict(zip(days, falling)), "1102.TW": dict(zip(days, other))})
+    script = {days[0]: ["1101.TW"], days[2]: ["1102.TW"]}                   # dropped on the limit-down day
+    ledger = []
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, min_hold=0, check="weekly")
+    simulate_daily(data, rule, FREE, days[0], days[-1], script, SeedPlan(100_000, 0), ledger=ledger)
+    sells = [row["day"] for row in ledger if row["side"] == "SELL" and row["symbol"] == "1101.TW"]
+    assert sells == [days[3]]                                                # not on the locked day, the next one
+    assert any(row["side"] == "BLOCKED" and row["reason"] == "跌停賣不掉" for row in ledger)
+
+
+def test_the_limit_reference_follows_the_ex_rights_adjustment():
+    days = weekdays(date(2024, 7, 1), date(2024, 7, 3))
+    data = market(days, {"1101.TW": dict(zip(days, [100.0, 98.0, 98.0]))})
+    data.factors["1101.TW"] = {days[1]: 1.02}                                # ex-rights: reference 100 / 1.02
+    low, high = daily.price_limits(data, "1101.TW", days[1])
+    assert high == pytest.approx(107.5) and low == pytest.approx(88.3)        # 98.04 × 1.1 = 107.84 → 107.5 tick
+    assert daily.price_limits(data, "1101.TW", date(2015, 5, 4)) == (None, None)
+
+
+def test_the_rule_decides_again_the_next_session_when_the_market_refuses():
+    """1.3.0 (使用者：被擋下隔天就要重新評估): a weekly rule whose best pick closes locked limit-up on the check
+    day does not hold it that day and ranks again at the next session."""
+    days = weekdays(date(2023, 1, 2), date(2024, 1, 31))
+    rng = np.random.default_rng(2)
+    closes = {f"{1101 + n}.TW": [20.0] for n in range(6)}
+    for index in range(1, len(days)):
+        for n in range(6):
+            closes[f"{1101 + n}.TW"].append(closes[f"{1101 + n}.TW"][-1] * (1 + 0.0004 * n + rng.normal(0, 0.005)))
+    check = next(index for index, day in enumerate(days) if day.year == 2024 and day.weekday() == 0)
+    leader = closes["1105.TW"]
+    leader[check] = round(leader[check - 1] * 1.1 - 0.04, 2)                     # a big up day ...
+    data = market(days, {symbol: dict(zip(days, series)) for symbol, series in closes.items()})
+    fp = FactorPanel(Panel(data))
+    _traded, locked_up, _down = fp.market_locks()
+    row = fp.symbols.index("1105.TW")
+    low, high = daily.price_limits(data, "1105.TW", days[check])
+    assert bool(locked_up[row, check]) == (leader[check] >= high - 1e-6)          # same limits as the engine's
+    leader[check] = high                                                          # ... closing locked at the limit
+    data = market(days, {symbol: dict(zip(days, series)) for symbol, series in closes.items()})
+    fp = FactorPanel(Panel(data))
+    assert fp.market_locks()[1][row, check]
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, min_hold=0, check="weekly")
+    ranks = daily_rankings(fp, rule, days[check], days[check + 3])              # nothing held before
+    assert "1105.TW" not in ranks[days[check]]                                    # not bought at limit-up
+    assert days[check + 1] in ranks                                               # decided again the next session
+    assert days[check + 2] not in ranks                                           # then back to weekly

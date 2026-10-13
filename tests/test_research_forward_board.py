@@ -48,3 +48,30 @@ def test_the_forward_tab_shows_the_board(tmp_path):
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
     body = client.get("/research?tab=forward").get_data(as_text=True)
     assert "共同起跑線" in body and "T0 共識清單測試" in body and "符合預期" in body and "/research/rules/h" in body
+
+
+def test_the_recent_page_lists_every_order_and_both_periods(tmp_path):
+    from quant_platform.config.settings import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+
+    folder = tmp_path / "research" / "forward" / "stocks" / "recent"
+    folder.mkdir(parents=True)
+    replay = {"rule_hash": "abcdef12", "name": "T0 共識清單測試", "start": "2026-07-13", "end": "2026-10-12",
+              "research_end": "2026-09-30", "cash": 1200, "costs": 3456,
+              "periods": {"all": {"return": 0.08, "benchmark_return": 0.05, "excess": 0.028, "max_drawdown": -0.06},
+                          "research": {"return": 0.05, "benchmark_return": 0.03, "excess": 0.019, "max_drawdown": -0.06},
+                          "unseen": {"return": 0.03, "benchmark_return": 0.02, "excess": 0.009, "max_drawdown": -0.02}},
+              "curve": [{"date": "2026-07-13", "value": 300000, "benchmark": 300000, "contributed": 300000},
+                        {"date": "2026-10-12", "value": 334000, "benchmark": 325000, "contributed": 330000}],
+              "trades": [{"date": "2026-10-12", "code": "2330", "name": "台積電", "side": "BUY", "refused": "漲停買不到"},
+                         {"date": "2026-10-12", "code": "2317", "name": "鴻海", "side": "SELL", "shares": 100, "price": 200.0,
+                          "fee": 28, "tax": 60, "amount": 20000}],
+              "holdings": [{"code": "2454", "name": "聯發科", "value": 15000}],
+              "counts": {"buys": 0, "sells": 1, "refused": 1}}
+    (folder / "abcdef12.json").write_text(json.dumps(replay, ensure_ascii=False), encoding="utf-8")
+    client = create_app(build_container(
+        Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
+    body = client.get("/research/recent/abcdef12").get_data(as_text=True)
+    assert "近 3 個月模擬操作" in body and "漲停買不到" in body and "鴻海" in body and "沒有任何資料挑過規則" in body
+    assert client.get("/research/recent/zzzzzzzz").status_code == 404

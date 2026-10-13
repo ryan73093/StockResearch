@@ -390,6 +390,7 @@ class StockForwardTracker:
             "trades_total": len(trades), "fees_total": sum(int(entry["fee"]) for entry in trades),
             "taxes_total": sum(int(entry["tax"]) for entry in trades),
             "replay_check": replayed, "costs": BROKER, "data_fingerprint": fingerprint, "engine": ENGINE_VERSION,
+            "daily_engine": _daily_engine(),
             "recorded_at": moment.isoformat(timespec="seconds"), "late": moment.date() != day,
         }
 
@@ -597,9 +598,20 @@ def _names(history: Path, year: int) -> dict[str, str]:
     return names
 
 
+def _daily_engine() -> str:
+    from quant_platform.research.daily import ENGINE_VERSION as DAILY_ENGINE
+
+    return DAILY_ENGINE
+
+
 def _replay_check(earlier: list[dict[str, object]], rule_hash: str, replayed: dict[date, float]) -> dict[str, object]:
-    """Days written before whose value the replay no longer reproduces (a data revision)."""
-    mine = [record for record in earlier if record["rule_hash"] == rule_hash]
+    """Days written before whose value the replay no longer reproduces (a data revision). Only records of the
+    same engine version count: a new engine (1.3.0, 2026-10-13: the market's price limits) changes the replay
+    by design, and those days keep what was recorded then."""
+    from quant_platform.research.daily import ENGINE_VERSION as DAILY_ENGINE
+
+    mine = [record for record in earlier if record["rule_hash"] == rule_hash
+            and record.get("daily_engine", "daily-1.2.0") == DAILY_ENGINE]
     mismatches = []
     for record in mine:
         value = replayed.get(date.fromisoformat(record["date"]))

@@ -72,7 +72,11 @@ def _sources(research_dir: Path) -> dict[str, str]:
 
     origin: dict[str, str] = {}
     for name, batch in DAILY_BATCHES.items():
-        for rule in batch():
+        try:                                   # a batch built from the registry (t0equal) may not rebuild today
+            rules = batch()
+        except Exception:
+            continue
+        for rule in rules:
             origin.setdefault(rule.rule_hash, f"每天決策批次 {name}")
     for name, batch in STOCK_BATCHES.items():
         for rule in batch():
