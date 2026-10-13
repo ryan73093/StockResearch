@@ -12,15 +12,16 @@ from __future__ import annotations
 
 FAMILY_FACTORS = {
     "趨勢動能": ("trend_200", "momentum_12_1", "momentum_6", "momentum_3", "high_52w", "breakout_55",
-                 "ma_cross_20_60", "macd_hist", "rsi_14", "kd_k", "bollinger_b", "fip_12", "imom_12", "resid_mom_12"),
-    "反轉": ("reversal_1", "reversal_5d"),
-    "低波動": ("low_volatility_60", "low_volatility_250", "low_max_return"),
+                 "ma_cross_20_60", "macd_hist", "rsi_14", "kd_k", "bollinger_b", "fip_12", "imom_12", "resid_mom_12",
+                 "high_52w_count_60", "range_position_60"),
+    "反轉": ("reversal_1", "reversal_5d", "overnight_reversal_12"),
+    "低波動": ("low_volatility_60", "low_volatility_250", "low_max_return", "low_ivol_60"),
     "價值殖利率": ("dividend_yield", "earnings_yield", "book_to_price"),
     "籌碼": ("foreign_holding", "foreign_holding_change", "foreign_buy_20", "trust_buy_20", "margin_growth_20",
              "short_margin_ratio"),
     "營收財報": ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "roe_ttm", "gross_margin", "operating_margin_change", "eps_growth",
                  "low_debt"),
-    "成交量規模": ("liquidity", "volume_surge", "market_cap"),
+    "成交量規模": ("liquidity", "volume_surge", "market_cap", "low_pv_corr_20"),
 }
 FACTOR_FAMILY = {factor: family for family, factors in FAMILY_FACTORS.items() for factor in factors}
 OPPOSITE = {"趨勢動能": "反轉", "反轉": "趨勢動能"}

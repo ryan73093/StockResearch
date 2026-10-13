@@ -62,3 +62,13 @@ def test_the_gate_compares_the_development_years(tmp_path):
     write_lower = tmp_path / "gbm-2.0.0" / "meta.json"
     write_lower.write_text(json.dumps({"years": {str(y): {"top20_gain": 0.001} for y in range(2016, 2021)}}), encoding="utf-8")
     assert not model_ensemble.gate(tmp_path)["passed"]
+
+
+def test_the_technical_model_reads_only_the_robot_s_price_and_volume_factors():
+    from quant_platform.research import daily
+    from quant_platform.research.tech_rl import TECH_FEATURES
+
+    names = model.version_features("gbm-2.1.0")
+    assert names == tuple(TECH_FEATURES) and model.VERSIONS["gbm-2.1.0"]["label"] == "ensemble"
+    rules = daily.BATCHES["techmodel"]()
+    assert len(rules) == 1 and rules[0].factors == {"ml_tech_ens": 1.0}

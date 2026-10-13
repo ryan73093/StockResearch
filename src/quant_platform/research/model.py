@@ -41,7 +41,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # factors and with the three trend-quality ones (continuity, intraday momentum, industry residual)
           "ml_gbm_quality": {"version": "gbm-1.4.0", "label": "excess", "features": "no_revenue_quality"},
           # 2026-10-12: the ensemble aimed at the top (research/model_ensemble.py), gbm-1.4.0's features
-          "ml_gbm_ens": {"version": "gbm-2.0.0", "label": "ensemble", "features": "no_revenue_quality"}}
+          "ml_gbm_ens": {"version": "gbm-2.0.0", "label": "ensemble", "features": "no_revenue_quality"},
+          # 2026-10-13 (the technical robot, second version, step 1): the same ensemble on the robot's 20 price
+          # and volume factors only — a supervised technical ranker the RL robot must at least match
+          "ml_tech_ens": {"version": "gbm-2.1.0", "label": "ensemble", "features": "technical"}}
 MONTHLY_REVENUE = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel")
 VERSIONS = {spec["version"]: spec for spec in MODELS.values()}
 LATEST = "gbm-1.2.0"
@@ -56,9 +59,9 @@ PARAMS = {"max_iter": 300, "learning_rate": 0.05, "max_leaf_nodes": 31, "min_sam
 def features() -> tuple[str, ...]:
     """The model's inputs: every rule factor except the 2026-10-10 trend-quality ones, which a later model
     version would add on purpose (a saved version keeps its own list, ``trained_features``)."""
-    from quant_platform.research.daily import FACTOR_LABELS, TREND_QUALITY
+    from quant_platform.research.daily import FACTOR_LABELS, RAW_V2, TREND_QUALITY
 
-    return tuple(name for name in FACTOR_LABELS if name not in TREND_QUALITY)
+    return tuple(name for name in FACTOR_LABELS if name not in TREND_QUALITY and name not in RAW_V2)
 
 
 def models_root(history: str | Path) -> Path:
@@ -87,10 +90,14 @@ def _rank(values: np.ndarray) -> np.ndarray:
 def version_features(version: str | None) -> tuple[str, ...]:
     """The features a new version starts with: the shared list, or its own (gbm-1.4.0: every rule factor
     except monthly revenue, the trend-quality ones included)."""
-    from quant_platform.research.daily import FACTOR_LABELS
+    from quant_platform.research.daily import FACTOR_LABELS, RAW_V2
 
+    if version and VERSIONS.get(version, {}).get("features") == "technical":
+        from quant_platform.research.tech_rl import TECH_FEATURES
+
+        return tuple(TECH_FEATURES)
     if version and VERSIONS.get(version, {}).get("features") == "no_revenue_quality":
-        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE)
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in RAW_V2)
     return features()
 
 

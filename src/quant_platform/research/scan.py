@@ -55,7 +55,9 @@ SHORT = {
     "earnings_yield": "本益比低", "book_to_price": "淨值比低", "roe_ttm": "ROE", "gross_margin": "毛利率",
     "operating_margin_change": "營益率增", "eps_growth": "EPS 成長", "low_debt": "負債低", "fip_12": "趨勢連續",
     "imom_12": "日內動能", "resid_mom_12": "殘差動能", "ml_gbm": "模型A", "ml_gbm_excess": "模型B",
-    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "rl_tech": "技術機器人", "rl_tech_weekly": "技術機器人週",
+    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "rl_tech": "技術機器人",
+    "high_52w_count_60": "新高次數", "range_position_60": "區間位置", "low_ivol_60": "特質低波",
+    "low_pv_corr_20": "量價背離", "overnight_reversal_12": "隔夜反轉", "rl_tech_weekly": "技術機器人週",
 }
 
 
@@ -73,14 +75,16 @@ def weekly(factors: tuple[str, ...]) -> bool:
 
 
 def candidates(names: list[str] | None = None, largest: int = 3, smallest: int = 1,
-               require: str | None = None) -> list[dict]:
+               require: str | list[str] | None = None) -> list[dict]:
     """Every set of ``smallest``..``largest`` signals × universe (all, large) × weighting (equal, calm);
-    with ``require`` only the sets that contain it (a new signal against everything else)."""
+    with ``require`` only the sets that contain it — or, given a list, at least one of them (new signals
+    against everything else)."""
     names = names or signals()
+    wanted = set([require] if isinstance(require, str) else (require or []))
     output = []
     for size in range(smallest, largest + 1):
         for group in combinations(names, size):
-            if require and require not in group:
+            if wanted and not wanted & set(group):
                 continue
             for universe in ("all", "large"):
                 for weighting in ("equal", "inverse_vol"):
@@ -325,6 +329,33 @@ def screen(arrays_folder: Path, items: list[dict], costs, workers: int, out_fold
     for path in paths:
         rows.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
     return rows
+
+
+def novelty(fp, new: list[str], limit: float = 0.7) -> dict[str, dict]:
+    """The registered novelty gate (no returns looked at): each new signal's average weekly rank correlation
+    with every existing signal over the development period; kept only if none reaches ``limit``."""
+    from quant_platform.research.daily import RECENT_START, DailyRule, check_days
+
+    base = DailyRule(name="資格", factors={"trend_200": 1.0})
+    weeks = [fp.index[day] for day in sorted(check_days([day for day in fp.sessions
+                                                         if RECENT_START <= day <= DEV_END], "weekly"))]
+    existing = [name for name in signals() if name not in new]
+    output = {}
+    for name in new:
+        values = fp.matrix(name)
+        worst, against = 0.0, None
+        for other in existing:
+            others = fp.matrix(other)
+            correlations = []
+            for position in weeks[::4]:
+                mask = fp.eligible(base, position) & np.isfinite(values[:, position]) & np.isfinite(others[:, position])
+                if mask.sum() < 30:
+                    continue
+                correlations.append(pd.Series(values[mask, position]).rank().corr(pd.Series(others[mask, position]).rank()))
+            if correlations and abs(float(np.mean(correlations))) > abs(worst):
+                worst, against = float(np.mean(correlations)), other
+        output[name] = {"max_correlation": round(worst, 3), "with": against, "kept": abs(worst) < limit}
+    return output
 
 
 def effective_trials(folder: Path, sample: int = 10_000, seed: int = 0, pattern: str = "screen-*.excess.npy",

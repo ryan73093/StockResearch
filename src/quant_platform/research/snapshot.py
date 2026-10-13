@@ -26,9 +26,11 @@ SNAPSHOT_FILE = Path("snapshots") / "stocks-latest.json"
 # What the page groups together (every factor of research/daily.py exactly once).
 GROUPS = (
     ("趨勢與動能", ("trend_200", "high_52w", "momentum_12_1", "momentum_6", "momentum_3", "ma_cross_20_60",
-                   "breakout_55", "fip_12", "imom_12", "resid_mom_12")),
-    ("短線與技術指標", ("rsi_14", "kd_k", "macd_hist", "bollinger_b", "reversal_1", "reversal_5d", "low_max_return")),
-    ("波動、成交與股利", ("low_volatility_60", "low_volatility_250", "liquidity", "volume_surge", "dividend_yield")),
+                   "breakout_55", "fip_12", "imom_12", "resid_mom_12", "high_52w_count_60", "range_position_60")),
+    ("短線與技術指標", ("rsi_14", "kd_k", "macd_hist", "bollinger_b", "reversal_1", "reversal_5d", "low_max_return",
+                     "overnight_reversal_12")),
+    ("波動、成交與股利", ("low_volatility_60", "low_volatility_250", "low_ivol_60", "liquidity", "volume_surge",
+                     "low_pv_corr_20", "dividend_yield")),
     ("籌碼", ("foreign_holding", "foreign_holding_change", "foreign_buy_20", "trust_buy_20", "margin_growth_20",
              "short_margin_ratio")),
     ("基本面", ("earnings_yield", "book_to_price", "revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "roe_ttm",

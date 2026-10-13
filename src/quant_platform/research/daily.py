@@ -90,14 +90,28 @@ TREND_QUALITY = {
     "resid_mom_12": "產業殘差動能（12 個月扣最近 1 個月：扣掉同產業平均後的累積報酬÷其標準差）",
 }
 QUALITY_WINDOW, QUALITY_SKIP = 231, 21
-FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS, **EVENT_FACTORS, **TREND_QUALITY}
+# 2026-10-13 (全面研究「之後再試」第 3 項): five new price-and-volume factors from the review — how often the
+# stock set a 52-week high lately, where the close sits in its 60-session range, calmness after the market's
+# share (idiosyncratic), price-volume correlation (low is better in A-share research) and the overnight part
+# of the last year's move reversed (Taiwan: overnight momentum reverses). Not model features (a later model
+# version would add them on purpose).
+RAW_V2 = {
+    "high_52w_count_60": "近 60 日創 52 週新高的次數",
+    "range_position_60": "收盤在 60 日高低區間的位置",
+    "low_ivol_60": "特質波動低（60 日，扣掉大盤）",
+    "low_pv_corr_20": "量價相關低（20 日報酬與成交值變化的相關，反向）",
+    "overnight_reversal_12": "隔夜反轉（12 個月扣最近 1 個月：開盤跳空的累積報酬，反向）",
+}
+FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS, **EVENT_FACTORS, **TREND_QUALITY,
+                 **RAW_V2}
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
 MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
                  "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
                  "ml_gbm_statements": "機器學習綜合分數（35 個因子含財報、超額報酬標籤、逐年滾動訓練）",
                  "ml_gbm_60": "機器學習綜合分數（35 個因子含財報、之後 60 個交易日超額報酬標籤、逐年滾動訓練）",
                  "ml_gbm_quality": "機器學習綜合分數（36 個因子含財報與趨勢品質、不含月營收、超額報酬標籤、逐年滾動訓練）",
-                 "ml_gbm_ens": "機器學習集成（多種子提升樹、前五分之一分類器、脊迴歸、60 日標籤，36 個因子、逐年滾動訓練）"}
+                 "ml_gbm_ens": "機器學習集成（多種子提升樹、前五分之一分類器、脊迴歸、60 日標籤，36 個因子、逐年滾動訓練）",
+                 "ml_tech_ens": "技術模型（同樣的集成，只用 20 個價量技術因子、逐年滾動訓練）"}
 # 2026-10-10 (使用者：純技術分析的 RL 機器人): research/tech_rl.py — sees only price and volume.
 TECH_FACTORS = {"rl_tech": "技術分析 RL 機器人：沒持有時想進場的機率（只看價格與成交量）",
                 "rl_tech_weekly": "技術分析 RL 機器人（每週決策版）：沒持有時想進場的機率（只看價格與成交量）"}
@@ -356,7 +370,35 @@ class FactorPanel:
             return (p / p.rolling(55).max()).to_numpy()
         if factor in TREND_QUALITY:
             return self._trend_quality(factor)
+        if factor in RAW_V2:
+            return self._raw_v2(factor)
         raise ValueError(factor)
+
+    def _raw_v2(self, factor: str) -> np.ndarray:
+        """sessions × symbols; RAW_V2, each from data up to the session."""
+        p = self._prices
+        if factor == "high_52w_count_60":
+            at_high = (p >= p.rolling(252, min_periods=200).max()).astype(float).where(p.notna())
+            return at_high.rolling(60, min_periods=40).sum().to_numpy()
+        if factor == "range_position_60":
+            low, high = p.rolling(60, min_periods=40).min(), p.rolling(60, min_periods=40).max()
+            return ((p - low) / (high - low).where(high > low)).to_numpy()
+        returns = p.pct_change(fill_method=None)
+        if factor == "low_ivol_60":
+            self.excluded(0)                                         # fills the idiosyncratic volatility cache
+            return -self._cache["__ivol__"].T.astype(np.float64)
+        if factor == "low_pv_corr_20":
+            flow = pd.DataFrame(np.log(np.maximum(self.panel.turnover.T, 1.0))).diff()
+            return (-returns.rolling(20, min_periods=15).corr(flow)).to_numpy()
+        # overnight_reversal_12: minus the sum of ln(open / previous close) over sessions -251..-21, both
+        # dividend-adjusted (an ex-rights open is not a gap)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            adjusted_open = self.panel.open * (self.panel.adjusted / self.panel.close)
+            previous = np.roll(self.panel.filled, 1, axis=1)
+            previous[:, 0] = np.nan
+            gaps = pd.DataFrame(np.log(adjusted_open / previous).T)
+        moved = gaps.rolling(QUALITY_WINDOW, min_periods=QUALITY_WINDOW // 2).sum().shift(QUALITY_SKIP)
+        return (-moved).to_numpy()
 
     def _trend_quality(self, factor: str) -> np.ndarray:
         """sessions × symbols; every value uses sessions -251..-21 only (TREND_QUALITY)."""
@@ -1497,6 +1539,13 @@ def cost_switch_batch() -> list[DailyRule]:
     ]
 
 
+def tech_model_batch() -> list[DailyRule]:
+    """2026-10-13 (技術分析機器人第二版，第一步): the technical ensemble's top 20, weekly — passes only if it
+    also beats #2090 (52-week high + RSI + MACD, the best purely technical T0 candidate) on the same account."""
+    return [DailyRule(name="技術模型（只用價量技術因子的集成）：前 20 名、同產業最多 3 成、每週決策",
+                      factors={"ml_tech_ens": 1.0}, check="weekly", industry_cap=0.3)]
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1514,4 +1563,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch,
-           "costswitch": cost_switch_batch}
+           "costswitch": cost_switch_batch, "techmodel": tech_model_batch}

@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -163,6 +163,20 @@ switch ($Name) {
         # 2026-10-12: cost-aware switching on the two consensus frames, then the statistics.
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "costswitch", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "rawv2" {
+        # 2026-10-13: five new price-and-volume factors — their strength (description), then the scan of every
+        # 1-4 signal set holding at least one of those that pass the novelty gate (scan 1.1.0), the statistics.
+        Invoke-Step "1-factors" @("-m", "quant_platform.research", "factors", "--recent")
+        Invoke-Step "2-scan" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "80", "--signals-min", "1", "--signals-max", "4", "--require-new")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "techmodel" {
+        # 2026-10-13: the technical robot's second version, step 1 — the ensemble on the 20 technical factors
+        # (gbm-2.1.0) and its weekly top-20 rule (judged against #2090), then the statistics.
+        Invoke-Step "1-model" @("-m", "quant_platform.research", "model", "--model-version", "gbm-2.1.0")
+        Invoke-Step "2-rule" @("-m", "quant_platform.research", "daily", "--name", "techmodel", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "news-events" {
         # R15 D (2026-10-09): score the collected headlines not scored yet (also every trading day 21:45).

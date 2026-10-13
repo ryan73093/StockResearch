@@ -316,7 +316,8 @@ def main() -> int:
                         choices=("rl-sleeves-1.0.0", "rl-sleeves-1.1.0", "rl-sleeves-2.0.0"),
                         help="rl-sleeves：版本（1.1.0 隨機起點；2.0.0 第三個位置是現金、回撤懲罰加倍）")
     parser.add_argument("--model-version", default="gbm-1.2.0",
-                        choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0", "gbm-2.0.0"),
+                        choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0", "gbm-2.0.0",
+                                 "gbm-2.1.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
@@ -345,6 +346,8 @@ def main() -> int:
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
     parser.add_argument("--require", help="scan：只跑含這個訊號的組（例如新模型 ml_gbm_quality）")
+    parser.add_argument("--require-new", action="store_true",
+                        help="scan：只跑至少含一個 2026-10-13 新價量因子的組（先過新穎性閘門）")
     parser.add_argument("--resume", help="scan：第一階段已完成的搜尋資料夾，只跑第二階段")
     parser.add_argument("--pool", type=int, default=600, help="scan：從第一階段最好的前幾名裡挑彼此不同的最後名單")
     parser.add_argument("--by-excess", action="store_true",
@@ -714,8 +717,22 @@ def main() -> int:
             print(f"gbm-2.0.0 門檻：{check}", flush=True)
             if not check["passed"]:
                 return 0
+        require = args.require
+        if args.require_new:                     # 2026-10-13: the new raw factors, after the novelty gate
+            from quant_platform.research import daily as daily_research
+
+            _data, novelty_fp = daily_research.load(Path(args.base))
+            gate = scan.novelty(novelty_fp, list(daily_research.RAW_V2))
+            print(f"新穎性閘門：{gate}", flush=True)
+            (RESEARCH / "scans").mkdir(parents=True, exist_ok=True)
+            (RESEARCH / "scans" / "novelty-raw-v2.json").write_text(json.dumps(gate, ensure_ascii=False, indent=1),
+                                                                    encoding="utf-8")
+            require = [name for name, item in gate.items() if item["kept"]]
+            del novelty_fp, _data
+            if not require:
+                return 0
         count = (sum(1 for path in Path(args.resume).glob("screen-*.jsonl") for _line in open(path, "rb"))
-                 if args.resume else len(scan.candidates(None, args.signals_max, args.signals_min, args.require)))
+                 if args.resume else len(scan.candidates(None, args.signals_max, args.signals_min, require)))
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         title = (f"大規模策略搜尋：接著跑第二階段（第一階段 {count:,} 個已完成）" if args.resume else
                  f"大規模策略搜尋（{args.signals_min}～{args.signals_max} 個訊號一組，{count:,} 個候選，第一階段 2015-06～2020-09）")
@@ -723,7 +740,7 @@ def main() -> int:
                                     command, total=count + args.finalists) as job:
             summary = scan.run_scan(Path(args.base), RESEARCH, broker_costs(args.broker), workers=args.workers,
                                     count=args.finalists, job=job, largest=args.signals_max,
-                                    smallest=args.signals_min, require=args.require,
+                                    smallest=args.signals_min, require=require,
                                     resume=Path(args.resume) if args.resume else None, pool=args.pool,
                                     stable=not args.by_excess)
             job.payload["summary"] = (f"{summary['candidates']:,} 個候選、{summary['passed_screen']:,} 個過第一階段、"

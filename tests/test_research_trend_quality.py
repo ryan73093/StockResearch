@@ -124,3 +124,35 @@ def test_the_evidence_batch_is_six_new_all_stock_rules():
     traits = [trait for rule in rules for trait in classify(rule.canonical())["traits"]]
     assert "營收公布後每月決策" in traits and "不買樂透型股票" in traits
     assert {classify(rules[index].canonical())["family"] for index in (2, 3)} == {"趨勢動能"}
+
+
+def test_the_raw_v2_factors_by_hand():
+    days = weekdays(date(2023, 1, 2), date(2024, 6, 28))
+    steady = [20 * 1.001 ** n for n in range(len(days))]                          # a new high every day
+    flat = [20.0 + (n % 2) for n in range(len(days))]                              # 20, 21, 20, 21 ...
+    opens = {"1101.TW": {day: price / 1.002 for day, price in zip(days, steady)},   # a gap up of 0 (open below close)
+             "1102.TW": {day: price for day, price in zip(days, flat)}}
+    fp = FactorPanel(Panel(market(days, {"1101.TW": dict(zip(days, steady)), "1102.TW": dict(zip(days, flat))}, opens)))
+    first, second, last = fp.symbols.index("1101.TW"), fp.symbols.index("1102.TW"), len(days) - 1
+    assert fp.matrix("high_52w_count_60")[first, last] == 60
+    assert fp.matrix("range_position_60")[first, last] == pytest.approx(1.0)
+    assert fp.matrix("range_position_60")[second, last] in (0.0, 1.0)
+    # 1101 opens 0.2% below the close and the previous close is 0.1% lower: the gap is ln(1.001/1.002) < 0,
+    # reversed and summed over 231 sessions
+    assert fp.matrix("overnight_reversal_12")[first, last] == pytest.approx(-231 * np.log(1.001 / 1.002), rel=1e-3)
+    assert np.isfinite(fp.matrix("low_ivol_60")[first, last])
+    assert np.isnan(fp.matrix("low_pv_corr_20")[second, last])          # the traded value never changes: undefined
+
+
+def test_the_novelty_gate_drops_a_copy_of_an_existing_signal(monkeypatch):
+    from quant_platform.research import scan
+
+    rng = np.random.default_rng(3)
+    days = weekdays(date(2014, 1, 1), date(2020, 9, 30))
+    closes = {f"{1101 + n}.TW": dict(zip(days, np.maximum(20 * np.cumprod(1 + rng.normal(0.0003, 0.015, len(days))), 10.5)))
+              for n in range(40)}
+    fp = FactorPanel(Panel(market(days, closes)))
+    monkeypatch.setattr(scan, "signals", lambda: ["momentum_3", "trend_200", "range_position_60", "high_52w"])
+    gate = scan.novelty(fp, ["range_position_60", "high_52w"])
+    assert gate["high_52w"]["with"] is not None and set(gate) == {"range_position_60", "high_52w"}
+    assert all(isinstance(item["kept"], bool) for item in gate.values())
