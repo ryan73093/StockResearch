@@ -208,6 +208,10 @@ switch ($Name) {
         # ex-dates moved off typhoon closures, the exchange's limits on ex-rights days, fees per order part with
         # the period's minimum, at most 1% of a stock's turnover per order — the statistics, the board, and the
         # trade audit of every tracked rule.
+        # a dividends download already running (pipeline "dividends") is waited for, not started twice
+        while (Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*finmind*TaiwanStockDividend*" }) {
+            Start-Sleep -Seconds 300
+        }
         Invoke-Step "1-dividends" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanStockDividend")
         Invoke-Step "2-rerun" @("-m", "quant_platform.research", "daily", "--name", "rerun140", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
