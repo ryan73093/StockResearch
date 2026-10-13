@@ -1,208 +1,251 @@
-"""Engine 1.4.0 (2026-10-13; 使用者：所有交易都要照台股的交易規則和機制): corporate actions as a holder lives
-them, fees per order part, and the turnover cap."""
-import gzip
-import json
-from datetime import date, timedelta
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from quant_platform.research import actions, daily
-from quant_platform.research.actions import Action, build_actions, health_premium, whole_shares
-from quant_platform.research.costs import CostModel
-from quant_platform.research.daily import DailyRule, simulate_daily
-from quant_platform.research.legacy_challenger import LegacyData
-from quant_platform.research.stock_rules import SeedPlan
+from quant_platform.research.history.actions import (
+    CorporateAction,
+    actions_from_ex_rights,
+    build_actions,
+    nice_ratio,
+    reference_mismatches,
+    splits_from_markers,
+    total_return,
+)
+from quant_platform.research.history.catalog import HistorySeries
+from quant_platform.research.history.crosscheck import compare_total_return
+from quant_platform.research.history.dataset import read_series, write_parquet
+from quant_platform.research.history.official import (
+    DailyRow,
+    ExRightsLayoutError,
+    OfficialHistoryClient,
+    parse_tpex_ex_rights,
+    parse_twse_ex_rights,
+    roc_long_date,
+)
 
-FREE = CostModel(fee_rate=0.0, minimum_fee=0, slippage_bps=0.0)
-
-
-def weekdays(start, end):
-    days, day = [], start
-    while day <= end:
-        if day.weekday() < 5:
-            days.append(day)
-        day += timedelta(days=1)
-    return days
-
-
-def market(days, closes, turnover=5_000_000_000.0):       # deep enough for the cap
-    closes = {**closes, "0050.TW": {day: 100.0 for day in days}}
-    return LegacyData(sessions=days, closes=closes,
-                      traded_value={symbol: {day: turnover for day in series} for symbol, series in closes.items()},
-                      factors={}, predictions={})
-
-
-def hold(data, days, ledger, budget=100_000):
-    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, min_hold=0, check="weekly")
-    return simulate_daily(data, rule, FREE, days[0], days[-1], {days[0]: ["1101.TW"]}, SeedPlan(budget, 0),
-                          ledger=ledger)
+TAIPEI = ZoneInfo("Asia/Taipei")
+EX_RIGHTS_ROW = [
+    "94年05月19日", "0050", "元大台灣50", "46.69", "44.84", "0.0", "1.85", "1.850000", "息",
+    "47.97", "41.71", "44.84", "44.84", "0050,20050519", "", "111.66", "N/A",
+]
 
 
-def test_a_cash_dividend_is_cash_on_its_payment_date_and_the_shares_stay_whole():
-    days = weekdays(date(2024, 7, 1), date(2024, 8, 30))
-    prices = {day: (50.0 if n < 10 else 48.0) for n, day in enumerate(days)}       # NT$2 ex-dividend on the 11th
-    data = market(days, {"1101.TW": prices})
-    data.actions["1101.TW"] = {days[10]: Action(2.0, 0.0, days[25], "finmind")}
-    ledger = []
-    run = hold(data, days, ledger)
-    assert all(float(row["shares"]).is_integer() for row in ledger if row["side"] in ("BUY", "SELL"))
-    dividend = next(row for row in ledger if row["side"] == "DIVIDEND")
-    assert dividend["cash"] == pytest.approx(2_000 * 2.0) and dividend["premium"] == 0      # 2,000 shares
-    paid = next(row for row in ledger if row["side"] == "PAID")
-    assert paid["day"] == days[25] and paid["amount"] == pytest.approx(4_000)
-    assert run.values[10] == pytest.approx(100_000)          # the dividend is owned from the ex-date
-    assert run.values[-1] == pytest.approx(2_000 * 48.0 + 4_000)
+def test_odd_lot_rows_and_premium_summary():
+    from quant_platform.research.history.odd_lot import parse_odd_lot, summarize
+
+    rows = parse_odd_lot({"stat": "OK", "data": [
+        ["0050", "台灣50", "5,854", "48", "331,026", "56.55", "56.55", "5,912", "56.60", "2,468"],
+        ["0056", "元大高股息", "0", "0", "0", "--", "20.00", "10", "20.05", "5"],
+    ]}, {"0050", "0056"})
+    assert rows["0050"]["price"] == 56.55 and rows["0050"]["shares"] == 5_854
+    assert rows["0056"]["price"] is None
+
+    report = summarize([0.0, 0.001, -0.002, 0.0005], sampled=5)
+    assert report["traded_sessions"] == 4 and report["median_bps"] == 2.5
+    assert report["at_or_below_close"] == 0.5 and report["within_10bps"] == 0.75
 
 
-def test_the_health_insurance_premium_by_period():
-    assert health_premium(19_999, date(2024, 1, 2)) == 0
-    assert health_premium(20_000, date(2024, 1, 2)) == 422             # 2.11%
-    assert health_premium(20_000, date(2018, 1, 2)) == 382             # 1.91%
-    assert health_premium(5_000, date(2015, 1, 2)) == 100              # 2% from NT$5,000
+def test_ex_rights_rows_become_cash_dividends():
+    events = parse_twse_ex_rights({"stat": "OK", "data": [EX_RIGHTS_ROW]}, {"0050"})
+
+    assert roc_long_date("94年05月19日") == date(2005, 5, 19)
+    assert events[0].day == date(2005, 5, 19) and events[0].cash == 1.85 and events[0].kind == "息"
+    assert parse_twse_ex_rights({"stat": "OK", "data": [EX_RIGHTS_ROW]}, {"0056"}) == []
 
 
-def test_a_stock_dividend_gives_whole_shares_and_the_fraction_is_lost():
-    whole, fraction = whole_shares(1_234, 0.05)
-    assert whole == 61 and fraction == pytest.approx(0.7)
-    days = weekdays(date(2024, 7, 1), date(2024, 8, 30))
-    data = market(days, {"1101.TW": {day: (33.0 if n < 10 else 30.0) for n, day in enumerate(days)}})
-    data.actions["1101.TW"] = {days[10]: Action(0.0, 0.1, days[20], "finmind")}            # NT$1 stock dividend
-    ledger = []
-    run = hold(data, days, ledger, budget=100_000)
-    bought = next(row["shares"] for row in ledger if row["side"] == "BUY")                  # 3,030 shares
-    adjust = next(row for row in ledger if row["side"] == "ADJUST")
-    assert adjust["shares"] == bought // 10                                                  # 303 new shares
-    assert run.values[-1] == pytest.approx((bought + bought // 10) * 30.0 + 100_000 - bought * 33.0)
+# TWT49U from 2009 on: 權值 and 息值 are gone, only 權值+息值 and the 權/息 flag remain.
+SHORT_FIELDS = [
+    "資料日期", "股票代號", "股票名稱", "除權息前收盤價", "除權息參考價", "權值+息值", "權/息", "漲停價格",
+    "跌停價格", "開盤競價基準", "減除股利參考價", "詳細資料", "最近一次申報資料 季別/日期",
+    "最近一次申報每股 (單位)淨值", "最近一次申報每股 (單位)盈餘",
+]
+SHORT_ROW = [
+    "99年10月25日", "0050", "元大台灣50", "57.10", "54.90", "2.200000", "息", "58.70", "51.10",
+    "54.90", "54.90", "0050,20101025", "", "", "",
+]
 
 
-def test_a_cash_capital_increase_is_not_subscribed():
-    days = weekdays(date(2024, 7, 1), date(2024, 7, 31))
-    data = market(days, {"1101.TW": {day: (50.0 if n < 10 else 48.0) for n, day in enumerate(days)}})
-    data.actions["1101.TW"] = {days[10]: Action(0.0, 0.0, None, "rights")}
-    ledger = []
-    run = hold(data, days, ledger)
-    assert not [row for row in ledger if row["side"] in ("ADJUST", "DIVIDEND")]
-    assert run.values[-1] == pytest.approx(2_000 * 48.0)                                    # the right's value is lost
+def test_short_twt49u_layout_is_read_by_header():
+    """The 2010 0050 dividend of 2.20 is cash, not a 4% stock dividend (the bug before this fix)."""
+    events = parse_twse_ex_rights({"stat": "OK", "fields": SHORT_FIELDS, "data": [SHORT_ROW]}, {"0050"})
+
+    assert len(events) == 1
+    event = events[0]
+    assert (event.day, event.cash, event.rights_value) == (date(2010, 10, 25), 2.2, 0.0)
+    actions = actions_from_ex_rights(events)
+    assert [(item.kind, item.cash) for item in actions] == [("cash_dividend", 2.2)]
+    assert reference_mismatches(actions) == []
+    # A cached payload without "fields" is recognised by its row length.
+    assert parse_twse_ex_rights({"stat": "OK", "data": [SHORT_ROW]}, {"0050"})[0].cash == 2.2
 
 
-def test_a_split_outside_the_tables_gives_whole_shares_and_the_fraction_is_lost():
-    days = weekdays(date(2024, 7, 1), date(2024, 7, 31))
-    data = market(days, {"1101.TW": {day: (50.0 if n < 10 else 71.4) for n, day in enumerate(days)}})
-    data.factors["1101.TW"] = {days[10]: 0.7}                                                # a capital reduction
-    ledger = []
-    run = hold(data, days, ledger, budget=100_050)
-    adjust = next(row for row in ledger if row["side"] == "ADJUST")
-    assert adjust["factor"] == pytest.approx(1_400 / 2_001)                                  # 2,001 → 1,400 shares
-    assert run.values[10] == pytest.approx(1_400 * 71.4)                                     # 0.7 share lost
+def test_short_layout_stock_only_and_combined_rows():
+    stock_row = [*SHORT_ROW[:5], "1.000000", "權", *SHORT_ROW[7:]]
+    events = parse_twse_ex_rights({"stat": "OK", "fields": SHORT_FIELDS, "data": [stock_row]}, {"0050"})
+    assert (events[0].rights_value, events[0].cash) == (1.0, 0.0)
+
+    combined = [*SHORT_ROW[:5], "3.200000", "權息", *SHORT_ROW[7:]]
+    with pytest.raises(ExRightsLayoutError, match="同時除權與除息"):
+        parse_twse_ex_rights({"stat": "OK", "fields": SHORT_FIELDS, "data": [combined]}, {"0050"})
+    with pytest.raises(ExRightsLayoutError, match="表頭"):
+        parse_twse_ex_rights({"stat": "OK", "fields": ["日期", "代號"], "data": [SHORT_ROW]}, {"0050"})
 
 
-def test_the_fee_is_charged_per_order_part_with_the_period_minimum():
-    days = weekdays(date(2019, 7, 1), date(2019, 7, 5)) + weekdays(date(2021, 7, 1), date(2021, 7, 5))
-    data = market(days, {"1101.TW": {day: 10.0 for day in days}})
-    costs = CostModel(fee_rate=0.001425, minimum_fee=1, slippage_bps=0.0)
-    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, min_hold=0, check="weekly", min_trade=0)
-    for first in (days[0], days[5]):
-        ledger = []
-        simulate_daily(data, rule, costs, first, days[-1], {first: ["1101.TW"]}, SeedPlan(12_400, 0), ledger=ledger)
-        buy = next(row for row in ledger if row["side"] == "BUY")
-        odd = int(buy["shares"]) - 1_000
-        odd_fee = int(odd * 10.0 * 0.001425)                                                 # NT$3 for 237 shares
-        expected = 20 + (max(20, odd_fee) if first.year == 2019 else max(1, odd_fee))        # 1 lot + the odd lot
-        assert 1_000 < buy["shares"] < 1_240 and buy["fee"] == expected
+def test_tpex_rounding_residue_in_rights_column_is_ignored():
+    fields = ["除權息日期", "代號", "名稱", "除權息前收盤價", "除權息參考價", "權值", "息值", "權值+息值", "權/息",
+              "漲停價", "跌停價", "開始交易基準價", "減除股利參考價", "現金股利"]
+    row = ["107/11/22", "00679B", "元大美債20年", "36.70", "36.46", "-0.01", "0.24500000", "0.24", "除息",
+           "9999.95", "0.01", "36.46", "36.46", "0.24500000"]
+
+    events = parse_tpex_ex_rights({"stat": "ok", "tables": [{"fields": fields, "data": [row]}]}, {"00679B"})
+
+    assert (events[0].day, events[0].cash, events[0].rights_value) == (date(2018, 11, 22), 0.245, 0.0)
+    assert [item.kind for item in actions_from_ex_rights(events)] == ["cash_dividend"]
 
 
-def test_an_order_is_at_most_its_share_of_the_days_turnover_and_the_rest_follows():
-    days = weekdays(date(2024, 7, 1), date(2024, 7, 12))
-    data = market(days, {"1101.TW": {day: 10.0 for day in days}}, turnover=50_000_000.0)      # 0.1% = NT$50,000
-    ledger = []
-    hold(data, days, ledger, budget=120_000)
-    buys = [(row["day"], row["shares"]) for row in ledger if row["side"] == "BUY"]
-    assert buys == [(days[0], 5_000), (days[1], 5_000), (days[2], 2_000)]
-    assert any(row["side"] == "BLOCKED" and "成交值" in row["reason"] for row in ledger)
+def test_reference_mismatch_flags_a_misread_column():
+    good = CorporateAction(date(2010, 10, 25), "0050", "cash_dividend", cash=2.2, pre_close=57.10, reference=54.90)
+    wrong = CorporateAction(date(2011, 7, 26), "0050", "cash_dividend", cash=0.0, pre_close=59.0, reference=57.05)
+
+    assert [item["date"] for item in reference_mismatches([good, wrong])] == ["2011-07-26"]
 
 
-def write_policy(base, code, rows):
-    path = base / "raw" / "finmind" / "TaiwanStockDividend" / f"{code}.json.gz"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(gzip.compress(json.dumps({"data": rows}).encode("utf-8")))
-
-
-def test_build_actions_reads_the_policy_then_the_tables(tmp_path):
-    day = date(2024, 7, 10)
-    write_policy(tmp_path, "1101", [{"CashEarningsDistribution": 1.5, "CashStatutorySurplus": 0.5,
-                                     "CashExDividendTradingDate": "2024-07-10", "CashDividendPaymentDate": "2024-08-09",
-                                     "StockEarningsDistribution": 0.5, "StockStatutorySurplus": 0,
-                                     "StockExDividendTradingDate": "2024-07-10"}])
-    write_policy(tmp_path, "1102", [{"CashEarningsDistribution": 1.0, "CashExDividendTradingDate": "2023-07-10"}])
-    events = {
-        "1101.TW": {day: {"market": "twse", "kind": "權息", "before": 50.0, "reference": 46.0, "value": 4.0}},
-        "1102.TW": {day: {"market": "twse", "kind": "權", "before": 50.0, "reference": 49.0, "value": 1.0}},
-        "1103.TW": {day: {"market": "twse", "kind": "息", "before": 50.0, "reference": 48.5, "value": 1.5}},
-        "1104.TW": {day: {"market": "twse", "kind": "權息", "before": 50.0, "reference": 47.0, "value": 3.0}},
-        "6101.TWO": {day: {"market": "tpex", "kind": "除權息", "before": 30.0, "reference": 27.0, "value": 3.0,
-                           "cash": 1.0, "stock": 0.07, "rights": 0.0}},
-    }
-    built = build_actions(tmp_path, events)
-    assert built["1101.TW"][day] == Action(2.0, 0.05, date(2024, 8, 9), "finmind")
-    assert built["1102.TW"][day] == Action(0.0, 0.0, None, "rights")       # policies known, none that day
-    assert built["1103.TW"][day] == Action(1.5, 0.0, None, "twse-cash")
-    assert built["1104.TW"][day] == Action(3.0, 0.0, None, "estimate")     # no policies at all
-    assert built["6101.TWO"][day] == Action(1.0, 0.07, None, "tpex")
-    assert actions.PAR == 10.0 and daily.ODD_LOT_FEE_FROM == date(2020, 10, 26)
-
-
-def test_the_trade_audit_flags_each_broken_rule():
-    from quant_platform.research.trade_audit import audit
-
-    days = weekdays(date(2024, 7, 1), date(2024, 7, 5))
-    data = market(days, {"1101.TW": {days[0]: 10.0, days[1]: 11.0, days[2]: 10.0},
-                         "9101.TW": {day: 10.0 for day in days}}, turnover=1_000_000.0)
-    costs = CostModel(fee_rate=0.001425, minimum_fee=1, slippage_bps=0.0)
-    ledger = [
-        {"day": days[1], "symbol": "1101.TW", "side": "BUY", "shares": 100, "price": 11.0, "fee": 1, "tax": 0},    # locked limit-up
-        {"day": days[3], "symbol": "1101.TW", "side": "SELL", "shares": 100, "price": 10.0, "fee": 1, "tax": 3},   # no trade that day
-        {"day": days[2], "symbol": "1101.TW", "side": "BUY", "shares": 10.5, "price": 10.02, "fee": 0, "tax": 0},  # fraction, tick, fee
-        {"day": days[2], "symbol": "9101.TW", "side": "BUY", "shares": 2_000, "price": 10.0, "fee": 28, "tax": 0}, # 2% of turnover, TDR
+def test_total_return_reinvests_cash_and_multiplies_units_on_splits():
+    rows = [
+        {"date": date(2025, 6, 10), "close": 100.0},
+        {"date": date(2025, 6, 11), "close": 98.0},
+        {"date": date(2025, 6, 18), "close": 25.0},
     ]
-    found = audit(data, ledger, costs)
-    assert set(found) >= {"limit_up_buy", "traded", "whole", "tick", "fee", "turnover", "instrument"}
-    assert "limit_down_sell" not in found and "inside_limits" not in found
+    actions = [
+        CorporateAction(date(2025, 6, 11), "0050", "cash_dividend", cash=3.0),
+        CorporateAction(date(2025, 6, 18), "0050", "split", ratio=4.0),
+    ]
+
+    series = total_return(rows, actions)
+
+    assert series[0]["total_return_index"] == 100.0
+    assert series[1]["total_return_index"] == pytest.approx(101.0)  # (98 + 3) / 100
+    assert series[2]["total_return_index"] == pytest.approx(101.0 * 25 * 4 / 98)
+    assert series[2]["unit_ratio"] == 4.0
 
 
-def test_an_ex_date_on_a_closed_day_counts_on_the_next_session():
-    """2015-07-10, 2016-07-08, 2023-08-03, 2024-07-24/25: typhoons closed the market on scheduled ex-dates."""
-    from quant_platform.research.actions import move_to_open_days
+def test_split_markers_give_whole_ratios():
+    rows = [
+        {"date": date(2025, 6, 10), "close": 188.65, "open": 188.0, "note": ""},
+        {"date": date(2025, 6, 18), "close": 47.6, "open": 47.3, "note": "**"},
+        {"date": date(2025, 6, 19), "close": 47.9, "open": 47.6, "note": ""},
+    ]
 
-    sessions = [date(2024, 7, 23), date(2024, 7, 26), date(2024, 7, 29)]
-    events = {"1519.TW": {date(2024, 7, 25): "ex"}, "2330.TW": {date(2024, 7, 23): "same"}}
-    moved, count = move_to_open_days(events, sessions)
-    assert moved == {"1519.TW": {date(2024, 7, 26): "ex"}, "2330.TW": {date(2024, 7, 23): "same"}} and count == 1
+    actions = splits_from_markers("0050", rows)
 
-
-def test_the_exchanges_limits_on_ex_days_and_none_when_it_traded_beyond_them():
-    days = weekdays(date(2024, 7, 1), date(2024, 7, 5))
-    data = market(days, {"1101.TW": dict(zip(days, [100.0, 100.0, 95.0, 120.0, 120.0]))})
-    data.notes["limits"] = {"1101.TW": {days[2]: (85.5, 104.5)}}
-    assert daily.price_limits(data, "1101.TW", days[2]) == (85.5, 104.5)        # the table's, not 90～110
-    assert daily.price_limits(data, "1101.TW", days[3]) == (None, None)         # +26%: no limit that day
-    assert daily.price_limits(data, "1101.TW", days[4]) == (108.0, 132.0)
+    assert [(item.day, item.ratio) for item in actions] == [(date(2025, 6, 18), 4.0)]
+    assert nice_ratio(0.49) == 0.5 and nice_ratio(3.97) == 4.0
 
 
-def test_next_session_execution_fills_the_day_after_the_decision():
-    """1.4.0 "next": decided on a close, filled in the next session's closing auction (the platform's numbers
-    come after 15:14); a locked limit-up on the filling day refuses the buy and the rule decides again."""
-    from quant_platform.research.daily import FactorPanel, daily_rankings
-    from quant_platform.research.stock_rules import Panel
+def test_total_return_matches_an_adjusted_close_with_a_flat_ratio():
+    days = [date(2020, 1, day) for day in (2, 3, 6)]
+    tr = dict(zip(days, (100.0, 101.0, 103.02)))
+    adjusted = dict(zip(days, (50.0, 50.5, 51.51)))
 
-    days = weekdays(date(2023, 1, 2), date(2024, 1, 31))
-    closes = {f"{1101 + n}.TW": {day: 20.0 * (1 + 0.0005 * (n + 1)) ** i for i, day in enumerate(days)} for n in range(4)}
-    data = market(days, closes)
-    fp = FactorPanel(Panel(data))
-    same = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, min_hold=0, check="weekly")
-    following = same.model_copy(update={"execution": "next"})
-    assert "execution" not in same.canonical() and following.canonical()["execution"] == "next"
-    start = days[-30]
-    plain, later = daily_rankings(fp, same, start, days[-1]), daily_rankings(fp, following, start, days[-1])
-    first = min(plain)
-    assert days[days.index(first) + 1] in later and later[days[days.index(first) + 1]] == plain[first]
-    assert daily.participation(following) == daily.NEXT_DAY_PARTICIPATION
+    report = compare_total_return(tr, adjusted)
+
+    assert report["common_days"] == 3
+    assert report["end_drift"] == 0 and report["max_abs_deviation"] == 0
+
+
+def test_build_actions_writes_total_return_files(tmp_path):
+    catalog = (
+        HistorySeries("0050", "元大台灣50", "twse_etf", date(2005, 5, 1), "0050.TW"),
+        HistorySeries("00679B", "元大美債20年", "tpex_etf", date(2005, 5, 1), "00679B.TWO"),
+    )
+    for key in ("0050", "00679B"):
+        write_parquet(
+            [
+                DailyRow(date(2005, 5, 18), 46.5, 46.8, 46.4, 46.69, source="test"),
+                DailyRow(date(2005, 5, 19), 44.9, 45.1, 44.7, 45.00, source="test"),
+            ],
+            tmp_path / "daily" / f"{key}.parquet",
+        )
+
+    tpex_row = ["94/05/19", "00679B", "元大美債20年", "46.69", "46.19", "0.000000", "0.500000",
+                "0.500000", "除息", "", "", "", "", "0.5", "0", "0", "0", "0", "0", "0", "0"]
+
+    def exchange(url, data=None):
+        if "TWT49U" in url:
+            return {"stat": "OK", "data": [EX_RIGHTS_ROW] if "2005" in url else []}
+        assert url.endswith("/bulletin/exDailyQ") and b"startDate=2005" in data or b"2006" in data
+        return {"stat": "ok", "tables": [{"data": [tpex_row] if b"2005" in data else []}]}
+
+    def yahoo(url):
+        stamp = int(datetime(2005, 5, 19, 9, 0, tzinfo=TAIPEI).timestamp())
+        return {"chart": {"result": [{"events": {"dividends": {str(stamp): {"date": stamp, "amount": 0.5}}}}]}}
+
+    client = OfficialHistoryClient(
+        tmp_path / "raw", fetch_json=exchange, min_interval=0, today=lambda: date(2006, 1, 10),
+        sleep=lambda _seconds: None,
+    )
+    report = build_actions(tmp_path, client, catalog, yahoo_fetch=yahoo, today=lambda: date(2006, 1, 10))
+
+    assert report["series"]["0050"]["cash_dividends"] == 1
+    assert report["series"]["0050"]["sources"] == ["twse_ex_rights"]
+    assert report["series"]["00679B"]["sources"] == ["tpex_ex_rights"]
+    assert report["series"]["00679B"]["yahoo_dividend_check"]["amount_mismatches"] == []
+    assert report["series"]["0050"]["yahoo_dividend_check"]["amount_mismatches"] == ["2005-05-19"]
+    tr = read_series(tmp_path / "total_return" / "0050.parquet")
+    assert tr[1]["total_return_index"] == pytest.approx(100 * (45.00 + 1.85) / 46.69)
+    assert (tmp_path / "actions.json").is_file()
+
+
+def test_yahoo_dividend_check_divides_pre_split_dividends_by_the_split(tmp_path):
+    """Yahoo shows 0050's 2025-01-17 dividend of 2.70 as 0.675 after the 1→4 split."""
+    catalog = (HistorySeries("0050", "元大台灣50", "twse_etf", date(2025, 1, 1), "0050.TW"),)
+    write_parquet(
+        [
+            DailyRow(date(2025, 1, 16), 200.0, 200.0, 199.0, 199.4, source="test"),
+            DailyRow(date(2025, 1, 17), 197.0, 198.0, 196.0, 197.0, source="test"),
+            DailyRow(date(2025, 6, 10), 188.0, 189.0, 187.0, 188.0, source="test"),
+            DailyRow(date(2025, 6, 18), 47.0, 47.8, 46.9, 47.6, note="**", source="test"),
+        ],
+        tmp_path / "daily" / "0050.parquet",
+    )
+    row = [*SHORT_ROW[:5], "2.700000", "息", *SHORT_ROW[7:]]
+    row[0], row[3], row[4] = "114年01月17日", "199.40", "196.70"
+
+    def exchange(url, data=None):
+        return {"stat": "OK", "fields": SHORT_FIELDS, "data": [row] if "2025" in url else []}
+
+    def yahoo(url):
+        stamp = int(datetime(2025, 1, 17, 9, 0, tzinfo=TAIPEI).timestamp())
+        return {"chart": {"result": [{"events": {"dividends": {str(stamp): {"date": stamp, "amount": 0.675}}}}]}}
+
+    client = OfficialHistoryClient(
+        tmp_path / "raw", fetch_json=exchange, min_interval=0, today=lambda: date(2025, 12, 31),
+        sleep=lambda _seconds: None,
+    )
+    report = build_actions(tmp_path, client, catalog, yahoo_fetch=yahoo, today=lambda: date(2025, 12, 31))
+
+    entry = report["series"]["0050"]
+    assert entry["splits"] == [{"date": "2025-06-18", "ratio": 4.0}]
+    assert entry["yahoo_dividend_check"]["amount_mismatches"] == []
+    assert entry["reference_mismatches"] == []
+
+
+def test_declared_splits_come_from_the_catalog_and_must_match_the_closes():
+    from datetime import date
+
+    import pytest
+
+    from quant_platform.research.history.actions import declared_splits
+    from quant_platform.research.history.catalog import HistorySeries
+
+    rows = [{"date": date(2026, 3, 24), "close": 443.15}, {"date": date(2026, 3, 31), "close": 19.26}]
+    item = HistorySeries("00631L", "x", "twse_etf", date(2014, 10, 1), declared_splits=((date(2026, 3, 31), 22.0),))
+    (action,) = declared_splits(item, rows)
+    assert (action.day, action.kind, action.ratio, action.pre_close, action.source) == (
+        date(2026, 3, 31), "split", 22.0, 443.15, "catalog")
+
+    wrong = HistorySeries("00631L", "x", "twse_etf", date(2014, 10, 1), declared_splits=((date(2026, 3, 31), 4.0),))
+    with pytest.raises(ValueError, match="與收盤不符"):
+        declared_splits(wrong, rows)
+    assert declared_splits(HistorySeries("0050", "x", "twse_etf", date(2003, 6, 1)), rows) == []
