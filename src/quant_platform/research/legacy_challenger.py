@@ -121,6 +121,9 @@ class LegacyData:
     # 2026-10-10: raw opening prices (same-day close / open is the intraday return, daily.py ``imom_12``);
     # empty where the source has none.
     opens: dict[str, dict[date, float]] = field(default_factory=dict)
+    # 2026-10-13 (engine 1.4.0, research/actions.py): symbol -> ex-date -> what a holder gets (cash on the
+    # payment date, whole new shares); empty: the engine applies ``factors`` as before.
+    actions: dict[str, dict] = field(default_factory=dict)
 
     def last_close(self, symbol: str, day: date) -> float | None:
         series = self.closes.get(symbol, {})

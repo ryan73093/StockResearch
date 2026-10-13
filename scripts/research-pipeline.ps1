@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -195,6 +195,24 @@ switch ($Name) {
         Invoke-Step "2-rerun" @("-m", "quant_platform.research", "daily", "--name", "rerun13", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "4-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "dividends" {
+        # 2026-10-13 (使用者：所有交易都要照台股的規則和機制): each stock's dividend policy — cash per share and
+        # its payment date, stock dividends, cash capital increases — so the engine pays cash dividends as
+        # cash on the payment date and stock dividends as whole shares (FinMind TaiwanStockDividend).
+        Invoke-Step "1-dividends" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanStockDividend")
+    }
+    "engine140" {
+        # 2026-10-13 (使用者：確實檢查所有交易都照台股的交易規則和機制): the dividend policies (resumes where the
+        # download stopped), then the same 211 rules on engine 1.4.0 — whole shares, cash dividends paid as cash,
+        # ex-dates moved off typhoon closures, the exchange's limits on ex-rights days, fees per order part with
+        # the period's minimum, at most 1% of a stock's turnover per order — the statistics, the board, and the
+        # trade audit of every tracked rule.
+        Invoke-Step "1-dividends" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanStockDividend")
+        Invoke-Step "2-rerun" @("-m", "quant_platform.research", "daily", "--name", "rerun140", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "4-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+        Invoke-Step "5-audit" @("-m", "quant_platform.research", "trade-audit", "--broker", "cathay")
     }
     "engine131" {
         # 2026-10-13 evening: engine 1.3.1 (an unsold delisted holding is worthless) — the same 64 rules

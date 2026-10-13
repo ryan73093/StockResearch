@@ -31,7 +31,7 @@ def weekdays(start, end):
 def market(days, closes):
     closes = {**closes, "0050.TW": closes.get("0050.TW", {day: 100.0 for day in days})}
     return LegacyData(sessions=days, closes=closes,
-                      traded_value={symbol: {day: 50_000_000.0 for day in series} for symbol, series in closes.items()},
+                      traded_value={symbol: {day: 5_000_000_000.0 for day in series} for symbol, series in closes.items()},
                       factors={}, predictions={})
 
 

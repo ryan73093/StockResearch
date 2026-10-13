@@ -183,12 +183,29 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
         for day, event in events.get(f"{code}.TWO", {}).items():
             if day < listed:
                 merged.setdefault(day, event)
+    from quant_platform.research.actions import build_actions, move_to_open_days, official_events
+
+    # 2026-10-13 (engine 1.4.0): an ex-date on a day the market or the stock did not trade (typhoon closures)
+    # counts on the stock's next traded day — before, those 184 events since 2015 were dropped
+    events, _moved = move_to_open_days(events, {symbol: sorted(series) for symbol, series in closes.items()})
     factors = {symbol: unit_factors_all(series, events.get(symbol, {})) for symbol, series in closes.items()}
     sessions = sorted(row["date"] for row in read_series(base / "daily" / "TAIEX.parquet")
                       if first_year <= row["date"].year <= last_year)
+
+    official = official_events(base / "raw", first_year)     # engine 1.4.0: what a holder actually gets
+    for code, listed in moved.items():
+        merged = official.setdefault(f"{code}.TW", {})
+        for day, event in official.get(f"{code}.TWO", {}).items():
+            if day < listed:
+                merged.setdefault(day, event)
+    official = {symbol: days for symbol, days in official.items() if symbol in closes}
+    official, moved_actions = move_to_open_days(official, sessions)          # the holder's day: the next session
+    limits = {symbol: {day: (event["low"], event["high"]) for day, event in days.items()
+                       if event.get("low") and event.get("high")} for symbol, days in official.items()}
     return LegacyData(sessions=sessions, closes=closes, traded_value=traded, factors=factors, predictions={},
-                      notes={"symbols": len(closes) - 1, "years": [first_year, last_year], "universe": universe},
-                      opens=opens)
+                      notes={"symbols": len(closes) - 1, "years": [first_year, last_year], "universe": universe,
+                             "limits": limits, "moved_events": moved_actions},
+                      opens=opens, actions=build_actions(base, official))
 
 
 def _year_digest(path: Path, until: date | None) -> str:

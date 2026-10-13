@@ -69,7 +69,7 @@
         {% for trade in trades %}
           <tr>
             <td data-primary><a href="/stock/{{ trade.code }}">{{ trade.code }} {{ trade.name }}</a></td>
-            <td data-label="動作">{% if trade.refused %}<span class="badge badge--warn">{{ trade.refused }}</span>{% elif trade.note %}<span class="badge badge--bad">{{ trade.note }}</span>{% else %}<span class="badge {{ 'badge--ok' if trade.side == 'BUY' else 'badge--bad' }}">{{ '買進' if trade.side == 'BUY' else '賣出' }}</span>{% endif %}</td>
+            <td data-label="動作">{% if trade.refused %}<span class="badge badge--warn">{{ trade.refused }}</span>{% elif trade.income %}<span class="badge badge--ok">{{ trade.income }}</span>{% elif trade.note %}<span class="badge badge--bad">{{ trade.note }}</span>{% else %}<span class="badge {{ 'badge--ok' if trade.side == 'BUY' else 'badge--bad' }}">{{ '買進' if trade.side == 'BUY' else '賣出' }}</span>{% endif %}</td>
             <td class="num" data-label="股數">{{ '{:,.0f}'.format(trade.shares) if trade.shares is defined else '—' }}</td>
             <td class="num" data-label="價格">{{ trade.price if trade.price is defined else '—' }}</td>
             <td class="num" data-label="金額">{{ '{:,.0f}'.format(trade.amount) if trade.amount is defined else '—' }}</td>

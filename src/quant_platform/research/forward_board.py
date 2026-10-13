@@ -236,9 +236,18 @@ def recent(research: Path, history: Path, item: dict, data, fp, costs, days: lis
                       "contributed": round(contributed, 2)})
     trades = []
     for entry in ledger:
+        code = str(entry["symbol"]).split(".")[0]
+        if entry["side"] == "DIVIDEND" or (entry["side"] == "ADJUST" and entry.get("shares")):
+            # engine 1.4.0: cash dividends (paid later, less the health-insurance premium) and stock dividends
+            note = (f"現金股利（{entry['paid'].isoformat() if entry.get('paid') and entry['paid'] != date.max else '日後'}入帳"
+                    f"{'，扣補充保費 ' + format(entry['premium'], ',') + ' 元' if entry.get('premium') else ''}）"
+                    if entry["side"] == "DIVIDEND" else f"配股 {int(entry['shares']):,} 股")
+            trades.append({"date": entry["day"].isoformat(), "code": code, "name": names.get(code, ""),
+                           "side": entry["side"], "income": note,
+                           "amount": round(float(entry.get("net", entry.get("cash", 0.0)) or 0.0), 0)})
+            continue
         if entry["side"] not in ("BUY", "SELL", "BLOCKED"):
             continue
-        code = str(entry["symbol"]).split(".")[0]
         row = {"date": entry["day"].isoformat(), "code": code, "name": names.get(code, ""),
                "side": entry.get("order", entry["side"]) if entry["side"] == "BLOCKED" else entry["side"]}
         if entry["side"] == "BLOCKED":

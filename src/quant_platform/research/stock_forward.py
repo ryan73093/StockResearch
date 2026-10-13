@@ -387,6 +387,10 @@ class StockForwardTracker:
             "trades_today": [_trade(entry, names) for entry in trades if entry["day"] == day],
             "adjustments_today": [{"code": str(entry["symbol"]).split(".")[0], "factor": entry["factor"]}
                                   for entry in ledger if entry["day"] == day and entry["side"] == "ADJUST"],
+            # daily engine 1.4.0: dividends net of the health-insurance premium, owned from the ex-date — the
+            # cash shown includes what is declared and not yet paid
+            "income_today": round(sum(float(entry.get("net") or 0.0) for entry in ledger
+                                      if entry["day"] == day and entry["side"] == "DIVIDEND"), 2),
             "trades_total": len(trades), "fees_total": sum(int(entry["fee"]) for entry in trades),
             "taxes_total": sum(int(entry["tax"]) for entry in trades),
             "replay_check": replayed, "costs": BROKER, "data_fingerprint": fingerprint, "engine": ENGINE_VERSION,
@@ -639,7 +643,7 @@ def reconcile(records: list[dict[str, object]]) -> dict[str, list[str]]:
         for item in record.get("adjustments_today") or []:
             if item["code"] in units:
                 units[item["code"]] *= item["factor"]
-        cash = before["cash"] + record["contributed"] - before["contributed"]
+        cash = before["cash"] + record["contributed"] - before["contributed"] + float(record.get("income_today") or 0.0)
         for trade in record["trades_today"]:
             amount = trade["shares"] * trade["price"]
             if trade["side"] == "BUY":

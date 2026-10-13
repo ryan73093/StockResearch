@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "hypotheses"),
+                            "forward-board", "hypotheses", "trade-audit"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -624,6 +624,22 @@ def main() -> int:
         for row in sorted((row for row in board["rows"] if "rank" in row), key=lambda row: row["rank"])[:15]:
             print(f"{row['rank']:>2}. {row['name'][:40]}：報酬 {row['return']:+.2%}、比 0050 {row['excess']:+.2%}、{row['state']}")
         return 0
+
+    if args.command == "trade-audit":
+        # 2026-10-13 (使用者：確實檢查所有交易都照台股的交易規則和機制): every order of the tracked rules checked
+        from quant_platform.research import trade_audit
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("交易規則稽核：前向追蹤的每個規則逐筆檢查", command) as job:
+            report = trade_audit.run(Path(args.base), RESEARCH, broker_costs(args.broker), job=job)
+            counts = report["violation_counts"]
+            job.payload["summary"] = (f"{report['orders']:,} 筆買賣，沒有違規" if not counts else
+                                      f"{report['orders']:,} 筆買賣；違規：" + "、".join(
+                                          f"{trade_audit.CHECKS[key]} {value}" for key, value in counts.items()))
+        print(job.payload["summary"])
+        print(report["path"])
+        return 0 if not report["violation_counts"] else 1
 
     if args.command == "leakcheck":
         # 2026-10-11: every factor recomputed from data cut at random sessions (research/leakcheck.py)
