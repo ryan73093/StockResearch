@@ -261,3 +261,26 @@ def test_news_tab_categories_and_the_ai_researcher_card(client):
     assert "新聞事件" in news and "本月 LLM 總花費" in news and "新聞否決實驗" in news and "上限 5" in news
     pool = client.get("/research/pool").get_data(as_text=True)
     assert "AI 研究員（整體）" in pool and "每季第一個交易日" in pool
+
+
+def test_the_forward_tab_shows_todays_after_close_orders(tmp_path):
+    """2026-10-14 (使用者：要在 14:30 前算出建議): today's orders from research/forward/stocks/orders/<today>.json."""
+    import json
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}", scheduler_in_web=False)
+    client = create_app(build_container(settings)).test_client()
+    assert "今天的單還沒算出來" in client.get("/research?tab=forward").get_data(as_text=True)
+    today = datetime.now(TAIPEI).date().isoformat()
+    folder = tmp_path / "research" / "forward" / "stocks" / "orders"
+    folder.mkdir(parents=True)
+    order = {"code": "2330", "name": "台積電", "close": 1000.0, "side": "BUY", "shares": 1234,
+             "parts": [{"session": "盤後定價（14:00–14:30，以收盤價成交，整張）", "shares": 1000, "price": 1000.0},
+                       {"session": "盤後零股（13:40–14:30 委託，14:30 撮合）", "shares": 234, "limit": 1010.0}]}
+    (folder / f"{today}.json").write_text(json.dumps({
+        "date": today, "common_start": "2026-10-01", "table_rows": 1081, "taiex": 48341.31,
+        "started_at": f"{today}T13:52:00+08:00", "finished_at": None, "done": 1, "total": 2,
+        "rules": [{"rule_hash": "x", "name": "測試策略", "rank": 1, "orders": [order], "holdings": [], "cash": 0}]},
+        ensure_ascii=False), encoding="utf-8")
+    body = client.get("/research?tab=forward").get_data(as_text=True)
+    assert "今天的盤後單" in body and "測試策略" in body and "2330 台積電" in body
+    assert "限價 1010.0" in body and "計算中（1／2" in body

@@ -143,7 +143,8 @@ def unit_factors_all(closes: dict[date, float], events: dict[date, tuple[str, fl
 UNIVERSES = {"twse": ("twse",), "all": ("twse", "tpex")}
 
 
-def load_stock_data(base: str | Path, first_year: int, last_year: int, universe: str = "twse") -> LegacyData:
+def load_stock_data(base: str | Path, first_year: int, last_year: int, universe: str = "twse",
+                    extra: tuple | None = None) -> LegacyData:
     """Every listed TWSE stock's closes and turnover for the years (with ``universe="all"`` the TPEx
     stocks too, R6 2026-10-05), 0050 as the benchmark, and the unit factors from the official
     ex-rights tables. TWSE stocks are ``code.TW``, TPEx stocks ``code.TWO``; a stock that moved from
@@ -173,8 +174,22 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
                 traded.setdefault(symbol, {})[day] = float(row["turnover"] or 0)
                 if row.get("open"):
                     opens.setdefault(symbol, {})[day] = float(row["open"])
+    if extra is not None:
+        # 2026-10-14 (research/after_close.py): today's TWSE table, out 20–30 minutes after the close, as one more
+        # session before the stock files and the index series are written (after 15:14)
+        extra_day, extra_rows, _extra_benchmark = extra
+        for row in extra_rows:
+            symbol = f"{row['code']}.TW"
+            if extra_day in closes.get(symbol, {}):
+                continue
+            closes.setdefault(symbol, {})[extra_day] = float(row["close"])
+            traded.setdefault(symbol, {})[extra_day] = float(row["turnover"] or 0)
+            if row.get("open"):
+                opens.setdefault(symbol, {})[extra_day] = float(row["open"])
     benchmark = {row["date"]: float(row["close"]) for row in read_series(base / "daily" / "0050.parquet")
                  if row["close"] and first_year <= row["date"].year <= last_year}
+    if extra is not None and extra[2]:
+        benchmark.setdefault(extra[0], float(extra[2]))
     closes[BENCHMARK] = benchmark
     traded[BENCHMARK] = {day: 1e12 for day in benchmark}
     events = exchange_events(base / "raw", first_year)
@@ -183,7 +198,7 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
         for day, event in events.get(f"{code}.TWO", {}).items():
             if day < listed:
                 merged.setdefault(day, event)
-    from quant_platform.research.actions import build_actions, move_to_open_days, official_events
+    from quant_platform.research.actions import build_actions, delisting_dates, move_to_open_days, official_events
 
     # 2026-10-13 (engine 1.4.0): an ex-date on a day the market or the stock did not trade (typhoon closures)
     # counts on the stock's next traded day — before, those 184 events since 2015 were dropped
@@ -191,6 +206,8 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
     factors = {symbol: unit_factors_all(series, events.get(symbol, {})) for symbol, series in closes.items()}
     sessions = sorted(row["date"] for row in read_series(base / "daily" / "TAIEX.parquet")
                       if first_year <= row["date"].year <= last_year)
+    if extra is not None and extra[0] not in sessions:
+        sessions = sorted([*sessions, extra[0]])
 
     official = official_events(base / "raw", first_year)     # engine 1.4.0: what a holder actually gets
     for code, listed in moved.items():
@@ -204,7 +221,8 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
                        if event.get("low") and event.get("high")} for symbol, days in official.items()}
     return LegacyData(sessions=sessions, closes=closes, traded_value=traded, factors=factors, predictions={},
                       notes={"symbols": len(closes) - 1, "years": [first_year, last_year], "universe": universe,
-                             "limits": limits, "moved_events": moved_actions},
+                             "limits": limits, "moved_events": moved_actions,
+                             "delisted": delisting_dates(base)},       # 1.3.1: an unsold delisted holding is worthless
                       opens=opens, actions=build_actions(base, official))
 
 
@@ -265,6 +283,7 @@ class Panel:
     """Adjusted closes and turnover of every stock aligned to the sessions (NaN where not traded)."""
 
     def __init__(self, data: LegacyData) -> None:
+        self.notes = data.notes or {}      # engine 1.4.0: the delisting list and the exchange's ex-day limits
         self.sessions = data.sessions
         self.index = {day: position for position, day in enumerate(self.sessions)}
         symbols = sorted(symbol for symbol in data.closes if symbol != BENCHMARK)

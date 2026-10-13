@@ -310,6 +310,9 @@ class FactorPanel:
     def __init__(self, panel: Panel, industries: dict[str, str] | None = None, chips: ChipStore | None = None,
                  market: np.ndarray | None = None, models: Path | None = None) -> None:
         self.panel = panel
+        notes = getattr(panel, "notes", None) or {}
+        self.delisted = notes.get("delisted") or {}           # 1.3.1: an unsold delisted holding is worthless
+        self.official_limits = notes.get("limits") or {}      # 1.4.0: the exchange's limits on ex-rights days
         self.models = models                                  # R15-B: the yearly model files (ml_gbm)
         self.industries = industries or {}
         self.chips = chips
@@ -1171,16 +1174,10 @@ def actions_digest(data: LegacyData) -> str:
 
 
 def delisting_dates(history: str | Path) -> dict[str, list[date]]:
-    """code -> its delisting dates (FinMind TaiwanStockDelisting; a code can be reused)."""
-    from quant_platform.research.history.finmind import read_rows
+    """code -> its delisting dates (``actions.delisting_dates``; ``load_stock_data`` puts them in the notes)."""
+    from quant_platform.research.actions import delisting_dates as dates
 
-    output: dict[str, list[date]] = defaultdict(list)
-    for row in read_rows(Path(history), "TaiwanStockDelisting", "all"):
-        try:
-            output[str(row["stock_id"])].append(date.fromisoformat(str(row["date"])[:10]))
-        except (KeyError, ValueError):
-            continue
-    return dict(output)
+    return dates(Path(history))
 
 
 def price_limits(data: LegacyData, symbol: str, day: date) -> tuple[float | None, float | None]:
@@ -1457,15 +1454,12 @@ def market_closes(history: str | Path, sessions: list[date]) -> np.ndarray:
 
 def load(history: str | Path, universe: str = "twse") -> tuple[LegacyData, FactorPanel]:
     data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year, universe=universe)
-    data.notes["delisted"] = delisting_dates(history)        # 1.3.1: an unsold delisted holding is worthless
     panel = Panel(data)
     from quant_platform.research.model import models_root
 
     fp = FactorPanel(panel, Industries(load_industries(history)),
                      ChipStore(history, panel.sessions, panel.symbols, panel.close),
                      market_closes(history, panel.sessions), models_root(history))
-    fp.delisted = data.notes["delisted"]
-    fp.official_limits = data.notes.get("limits") or {}     # 1.4.0: the exchange's limits on ex-rights days
     return data, fp
 
 
@@ -2016,13 +2010,9 @@ def rerun131_batch() -> list:
 
 def rerun140_batch() -> list:
     """2026-10-13 night: the same 211 rules on engine 1.4.0 (whole shares, dividends as paid, the turnover cap),
-    each filled in the same day's after-hours sessions and in the next session's closing auction."""
-    output = []
-    for rule in rerun131_batch():
-        output.append(rule)
-        if getattr(rule, "kind", None) != "blend":
-            output.append(rule.model_copy(update={"execution": "next", "name": (rule.name + "、隔天成交")[:80]}))
-    return output
+    filled the same day in the after-hours sessions. Not the next session (使用者 2026-10-14：要在 14:30 前算出
+    建議，隔天成交是另一種價格、另一種策略，不是限制): the platform decides right after the close instead."""
+    return rerun131_batch()
 
 
 def blends_batch() -> list:

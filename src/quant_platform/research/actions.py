@@ -40,6 +40,19 @@ class Action:
     source: str               # "finmind", "tpex", "twse-cash", "rights", "estimate"
 
 
+def delisting_dates(base: Path) -> dict[str, list[date]]:
+    """code -> its delisting dates (FinMind TaiwanStockDelisting; a code can be reused)."""
+    from quant_platform.research.history.finmind import read_rows
+
+    output: dict[str, list[date]] = defaultdict(list)
+    for row in read_rows(Path(base), "TaiwanStockDelisting", "all"):
+        try:
+            output[str(row["stock_id"])].append(date.fromisoformat(str(row["date"])[:10]))
+        except (KeyError, ValueError):
+            continue
+    return dict(output)
+
+
 def health_premium(amount: float, day: date) -> int:
     """二代健保補充保費 on one dividend payment: 2% at or above NT$5,000 (2013–2015), 1.91% at or above NT$20,000
     (2016–2020), 2.11% at or above NT$20,000 (2021 on)."""

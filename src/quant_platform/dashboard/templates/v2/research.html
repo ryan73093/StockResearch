@@ -647,6 +647,47 @@
 </section>
 {% endif %}
 
+{% if research_tab == 'forward' %}
+<section class="card" id="after-close-orders">
+  <div class="card__head">
+    <h2>今天的盤後單 <span class="badge">14:30 前下單</span></h2>
+    <span class="muted small">收盤後證交所全市場行情一到（約 13:50～14:01）就算：每個策略從 {{ after_close.common_start if after_close else '10/01' }} 起跑到今天，照回測同一套規則決定今天要買賣什麼。整張走盤後定價（14:00–14:30，以收盤價成交），零股走盤後零股（14:30 撮合，附限價）。只含上市股的策略（上櫃的收盤表 14:30 前還沒出來）。</span>
+  </div>
+  {% if not after_close %}
+  <p class="muted">今天的單還沒算出來：交易日 13:50 起，證交所收盤表到手後約 2 分鐘出現在這裡。</p>
+  {% else %}
+  <p class="small muted" style="margin:0 0 10px">{{ after_close.date }}：收盤表 {{ after_close.table_rows }} 檔、加權指數 {{ '{:,.2f}'.format(after_close.taiex) }}；{{ after_close.started_at[11:16] }} 開始、{% if after_close.finished_at %}{{ after_close.finished_at[11:16] }} 算完{% else %}計算中（{{ after_close.done }}／{{ after_close.total }}，依排行榜名次，重新整理看最新）{% endif %}。</p>
+  {% for rule in after_close.rules %}
+  <details{% if loop.index <= 3 %} open{% endif %}>
+    <summary>{% if rule.rank %}<span class="badge">第 {{ rule.rank }} 名</span> {% endif %}<strong>{{ rule.name }}</strong> <span class="muted small">{% if rule.error %}無法計算：{{ rule.error }}{% else %}{{ rule.orders|length }} 筆{% if not rule.orders %}（今天不用下單）{% endif %}{% endif %}</span></summary>
+    {% if rule.orders %}
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>股票</th><th>動作</th><th>怎麼下</th><th class="num">股數</th><th class="num">價格</th></tr></thead>
+        <tbody>
+        {% for order in rule.orders %}
+          {% if order.refused %}
+          <tr><td data-primary>{{ order.code }} {{ order.name }}</td><td data-label="動作"><span class="badge badge--warn">{{ order.refused }}</span></td><td data-label="怎麼下">不下單</td><td class="num" data-label="股數">—</td><td class="num" data-label="價格">{{ order.close }}</td></tr>
+          {% else %}
+          {% for part in order.parts %}
+          <tr><td data-primary>{{ order.code }} {{ order.name }}</td>
+              <td data-label="動作"><span class="badge {{ 'badge--ok' if order.side == 'BUY' else 'badge--bad' }}">{{ '買進' if order.side == 'BUY' else '賣出' }}</span></td>
+              <td data-label="怎麼下">{{ part.session }}</td>
+              <td class="num" data-label="股數">{{ '{:,}'.format(part.shares) }}</td>
+              <td class="num" data-label="價格">{% if part.limit is defined %}限價 {{ part.limit }}{% else %}{{ part.price }}{% endif %}</td></tr>
+          {% endfor %}
+          {% endif %}
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </details>
+  {% endfor %}
+  {% endif %}
+</section>
+{% endif %}
+
 {% if research_tab == 'forward' and forward_board %}
 <section class="card" id="forward-board">
   <div class="card__head">

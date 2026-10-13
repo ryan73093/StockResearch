@@ -41,6 +41,7 @@ from quant_platform.research.factors import table as factor_table
 from quant_platform.research.jobs import JobLog
 from quant_platform.research.pool import _svg as value_chart
 from quant_platform.research.pool import basis_counts, pool_view, rule_detail, yearly_matrix
+from quant_platform.research.after_close import load as after_close_load
 from quant_platform.research.forward_board import load as forward_board_load
 from quant_platform.research.forward_board import load_recent as forward_recent_load
 from quant_platform.research.hypothesis import items as hypothesis_items
@@ -901,6 +902,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             forward_start=FORWARD_START,
             stock_forward=StockForwardTracker(research_dir).summary(),
             forward_board=forward_board_load(research_dir) if tab == "forward" else None,
+            after_close=after_close_load(research_dir, datetime.now(TAIPEI).date()) if tab == "forward" else None,
             hypotheses=hypothesis_items(research_dir) if tab == "hypothesis" else None,
             research_tab=tab, jobs=jobs, factor_report=latest_factor_strength(research_dir / "factors"),
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
