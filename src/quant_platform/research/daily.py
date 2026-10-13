@@ -1546,6 +1546,18 @@ def tech_model_batch() -> list[DailyRule]:
                       factors={"ml_tech_ens": 1.0}, check="weekly", industry_cap=0.3)]
 
 
+def min_hold_batch() -> list[DailyRule]:
+    """2026-10-13 (使用者：為什麼限制 20 個交易日才賣？要執行賣出策略怎麼辦): the four best rules with no
+    minimum holding — a holding is sold as soon as it leaves the keep zone (top 3 × N), as it already is the
+    moment it stops being eligible. The 20 sessions were the new design's default, never compared."""
+    from quant_platform.research.consensus_members import MEMBERS_V1
+
+    specs = {trial: spec for trial, _name, spec in MEMBERS_V1}
+    rules = [consensus_batch()[0], dev_consensus_batch()[1], DailyRule.model_validate(specs[2107]),
+             DailyRule.model_validate(specs[2168])]
+    return [rule.model_copy(update={"min_hold": 0, "name": (rule.name + "、不設最短持有")[:80]}) for rule in rules]
+
+
 def blends_batch() -> list:
     """2026-10-09: accounts split across strategy families (research/blend.py)."""
     from quant_platform.research.blend import blend_batch
@@ -1563,4 +1575,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch,
-           "costswitch": cost_switch_batch, "techmodel": tech_model_batch}
+           "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
+           "minhold": min_hold_batch}

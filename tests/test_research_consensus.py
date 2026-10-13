@@ -138,3 +138,10 @@ def test_the_switch_mapping_uses_the_development_period_and_never_expects_less_f
     percentiles, gain = daily.switch_mapping(fp, rule)
     values = [gain(p / 10 + 0.05) for p in range(10)]
     assert values == sorted(values) and percentiles.shape == (len(fp.symbols), len(fp.sessions))
+
+
+def test_the_minimum_holding_comparison_changes_only_the_holding():
+    rules = daily.BATCHES["minhold"]()
+    assert len(rules) == 4 and all(rule.min_hold == 0 and rule.name.endswith("不設最短持有") for rule in rules)
+    original = daily.BATCHES["consensus"]()[0]
+    assert rules[0].model_copy(update={"min_hold": 20, "name": original.name}).rule_hash == original.rule_hash
