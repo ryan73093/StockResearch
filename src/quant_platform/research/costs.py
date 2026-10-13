@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass
+from datetime import date
 
 TAX_RATES = {"stock": 0.003, "stock_etf": 0.001, "bond_etf": 0.0}
 DEFAULT_SLIPPAGE_BPS = 20.0
@@ -96,6 +97,28 @@ BROKERS: dict[str, BrokerProfile] = {
         confirmed=True,
     ),
 }
+
+
+# 2026-10-13 (交易規則稽核): brokers' NT$1 odd-lot minimum (Cathay, Taishin and others) began with intraday odd
+# lots; before it an odd-lot order paid the usual minimum, as round lots still do.
+ODD_LOT_FEE_FROM = date(2020, 10, 26)
+ROUND_LOT_MINIMUM_FEE = 20
+
+
+def order_fee(costs: CostModel, shares: float, price: float, day: date) -> int:
+    """The fee of one order on ``day``: the round lots and the odd lot are two orders, each floored and each
+    with its minimum — NT$20 for round lots, the broker's odd-lot minimum from ODD_LOT_FEE_FROM, NT$20
+    before it. A cost-free model charges nothing."""
+    if costs.fee_rate <= 0:
+        return 0
+    lots, odd = divmod(int(round(shares)), 1000)
+    round_minimum = max(costs.minimum_fee, ROUND_LOT_MINIMUM_FEE)
+    odd_minimum = costs.minimum_fee if day >= ODD_LOT_FEE_FROM else round_minimum
+    fee = 0
+    for part, least in ((lots * 1000, round_minimum), (odd, odd_minimum)):
+        if part:
+            fee += max(least, math.floor(part * price * costs.fee_rate * costs.fee_discount))
+    return fee
 
 
 def broker_costs(key: str | None) -> CostModel:

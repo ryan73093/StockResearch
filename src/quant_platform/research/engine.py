@@ -27,7 +27,7 @@ from datetime import date, timedelta
 
 from quant_platform.research.allocation import target_weights
 from quant_platform.research.cashflow import ContributionPlan
-from quant_platform.research.costs import CostModel, affordable_shares, fill_price
+from quant_platform.research.costs import CostModel, affordable_shares, fill_price, order_fee
 from quant_platform.research.market import MarketData
 from quant_platform.research.metrics import annualized, max_drawdown, unit_values, xirr
 from quant_platform.research.spec import StrategySpec
@@ -38,7 +38,9 @@ from quant_platform.research.spec import StrategySpec
 # allocation.defensive / allocation.rotation. A run is affected only when a signal instrument has a unit
 # ratio up to its end, and exactly those runs get "signals": "split-adjusted" in their input hash, so
 # every earlier run (the whole development period) keeps its hash and its recorded result.
-ENGINE_VERSION = "1.2.0"
+# 1.3.0 (2026-10-14, 交易規則稽核): the fee per order part with the period's minimum (costs.order_fee) — an
+# odd-lot order paid NT$20 at least before 2020-10-26, not the broker's NT$1 of today
+ENGINE_VERSION = "1.3.0"
 DRAWDOWN_LOOKBACK = 252
 
 
@@ -242,7 +244,7 @@ def simulate(
 
     def execute(day: date, asset: str, side: str, shares: int, price: float) -> None:
         amount = shares * price
-        fee = costs.fee(amount)
+        fee = order_fee(costs, shares, price, day)
         tax = costs.tax(amount, market.tax_kind.get(asset, "stock_etf"), side)
         if side == "BUY":
             account.cash -= amount + fee
@@ -371,5 +373,7 @@ def _invest(spec, market, costs, account, day, new_money, execute, signal_day) -
         allowance = min(allowances[asset], account.cash)
         price = fill_price(prices[asset], "BUY", costs.slippage_bps)
         shares = affordable_shares(allowance, price, costs)
+        while shares > 0 and shares * price + order_fee(costs, shares, price, day) > allowance + 1e-9:
+            shares -= 1
         if shares > 0:
             execute(day, asset, "BUY", shares, price)

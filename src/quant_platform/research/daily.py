@@ -34,7 +34,10 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from quant_platform.research.actions import PAR, PAY_LAG, health_premium, whole_shares
-from quant_platform.research.costs import CostModel, affordable_shares, fill_price
+from quant_platform.research.costs import (  # noqa: F401 - ODD_LOT_FEE_FROM is read through this module too
+    ODD_LOT_FEE_FROM, ROUND_LOT_MINIMUM_FEE, CostModel, affordable_shares, fill_price,
+)
+from quant_platform.research.costs import order_fee as _order_fee
 from quant_platform.research.history.dataset import read_series
 from quant_platform.research.metrics import unit_values
 from quant_platform.research.legacy_challenger import (
@@ -93,8 +96,6 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 # next session's closing auction (4–9% of the day's value), at most NEXT_DAY_PARTICIPATION. The rest is ordered
 # again at the session after.
 ENGINE_VERSION = "daily-1.4.0"
-ODD_LOT_FEE_FROM = date(2020, 10, 26)      # the odd-lot NT$1 minimum fee (Cathay and others from 2020-10)
-ROUND_LOT_MINIMUM_FEE = 20
 SAME_DAY_PARTICIPATION = 0.001              # an order's share of the stock's turnover that session, at most
 NEXT_DAY_PARTICIPATION = 0.005
 PRICE_LIMIT_WIDENED = date(2015, 6, 1)
@@ -930,15 +931,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
 
     def order_fee(shares: float, fill: float, day: date) -> int:
         """The fee per order part: the round lots and the odd lot are two orders, each with its minimum."""
-        if costs.fee_rate <= 0:
-            return 0                              # a cost-free model (tests, the gross view)
-        lots, odd = divmod(int(round(shares)), 1000)
-        odd_minimum = costs.minimum_fee if day >= ODD_LOT_FEE_FROM else max(costs.minimum_fee, ROUND_LOT_MINIMUM_FEE)
-        fee = 0
-        for part, least in ((lots * 1000, max(costs.minimum_fee, ROUND_LOT_MINIMUM_FEE)), (odd, odd_minimum)):
-            if part:
-                fee += max(least, math.floor(part * fill * costs.fee_rate * costs.fee_discount))
-        return fee
+        return _order_fee(costs, shares, fill, day)
 
     most = participation(rule)
 
