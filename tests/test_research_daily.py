@@ -473,3 +473,115 @@ def test_the_rule_decides_again_the_next_session_when_the_market_refuses():
     assert "1105.TW" not in ranks[days[check]]                                    # not bought at limit-up
     assert days[check + 1] in ranks                                               # decided again the next session
     assert days[check + 2] not in ranks                                           # then back to weekly
+
+
+def test_an_unsold_delisted_holding_is_worthless_on_its_delisting_date():
+    """1.3.1 (使用者：沒賣掉的股票下市就是馬桶紙): no trade after the 3rd session, delisted on the 6th; the rule
+    wants it sold from the 4th but there is no trade — on the delisting date the holding is written off."""
+    days = weekdays(date(2024, 1, 1), date(2024, 2, 9))                    # 30 sessions
+    data = market(days, {"1101.TW": {day: 20.0 for day in days[:3]}, "1102.TW": {day: 30.0 for day in days}})
+    data.notes["delisted"] = {"1101": [days[5]]}
+    script = {days[0]: ["1101.TW"], days[3]: ["1102.TW"]}
+    ledger = []
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, min_hold=0, check="weekly")
+    run = simulate_daily(data, rule, FREE, days[0], days[-1], script, SeedPlan(100_000, 10_000), ledger=ledger)
+    rows = [row for row in ledger if row["symbol"] == "1101.TW" and row["side"] in ("SELL", "BLOCKED")]
+    assert [(row["day"], row["side"]) for row in rows] == [(days[3], "BLOCKED"), (days[4], "BLOCKED"), (days[5], "SELL")]
+    assert rows[0]["reason"] == "沒有成交" and rows[-1]["price"] == 0.0 and rows[-1]["reason"] == "下市，持股歸零"
+    assert run.values[4] == pytest.approx(110_000) and run.values[5] == pytest.approx(10_000)  # the 5th's 10,000 stays
+    assert any(row["side"] == "BUY" and row["symbol"] == "1102.TW" for row in ledger)    # the next contribution buys the new pick
+
+
+def test_a_suspension_that_ends_is_sold_when_the_stock_trades_again():
+    days = weekdays(date(2024, 1, 1), date(2024, 2, 9))
+    halted = {day: 20.0 for n, day in enumerate(days) if not 3 <= n < 8}     # no trade on sessions 3..7
+    data = market(days, {"1101.TW": halted, "1102.TW": {day: 30.0 for day in days}})
+    script = {days[0]: ["1101.TW"], days[3]: ["1102.TW"]}
+    ledger = []
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, min_hold=0, check="weekly")
+    simulate_daily(data, rule, FREE, days[0], days[-1], script, SeedPlan(100_000, 0), ledger=ledger)
+    sold = [row for row in ledger if row["side"] == "SELL" and row["symbol"] == "1101.TW"]
+    assert [row["day"] for row in sold] == [days[8]] and sold[0]["price"] == 20.0
+    assert sum(row["side"] == "BLOCKED" and row["symbol"] == "1101.TW" for row in ledger) == 5
+
+
+def test_a_stock_that_never_trades_again_and_is_not_listed_is_written_off_after_the_idle_limit():
+    days = weekdays(date(2024, 1, 1), date(2024, 2, 9))
+    data = market(days, {"1101.TW": {day: 20.0 for day in days[:3]}, "1102.TW": {day: 30.0 for day in days}})
+    assert daily.write_off_days(data) == {"1101.TW": days[2 + daily.IDLE_LIMIT]}
+    short = market(days[:10], {"1101.TW": {day: 20.0 for day in days[:3]}})
+    assert daily.write_off_days(short) == {}                                  # the data ends too soon to tell
+
+
+class MarketPanel(ScriptedPanel):
+    """A scripted panel with the market's view: who traded, the limits, the 20-session trend."""
+
+    def __init__(self, sessions, script, symbols, untraded=(), rising=(), written_off=()):
+        super().__init__(sessions, script)
+        self.written_off = written_off
+        self.symbols, self.row = list(symbols), {symbol: n for n, symbol in enumerate(symbols)}
+        shape = (len(symbols), len(sessions))
+        self.traded = np.ones(shape, dtype=bool)
+        for symbol, first in untraded:
+            self.traded[self.row[symbol], first:] = False
+        self.up = np.zeros(shape, dtype=bool)
+        self._rising = np.zeros(shape, dtype=bool)
+        for symbol in rising:
+            self._rising[self.row[symbol], :] = True
+
+    def market_locks(self):
+        return self.traded, self.up, self.up
+
+    def gone(self):
+        return dict(self.written_off)
+
+    def rising(self):
+        return self._rising
+
+
+def test_the_ranking_keeps_an_unsellable_holding_and_drops_it_when_written_off():
+    days = weekdays(date(2024, 1, 1), date(2024, 2, 9))
+    script = {day: ["B", "C", "D"] for day in days}
+    script[days[0]] = ["A", "B", "C"]
+    panel = MarketPanel(days, script, "ABCD", untraded=[("A", 1)], written_off=[("A", 12)])
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, min_hold=0, check="weekly")
+    ranks = daily_rankings(panel, rule, days[0], days[-1])
+    assert days[1] not in ranks and "A" in ranks[days[5]]                       # next Monday: cannot be sold
+    assert all("A" in ranks[days[n]] for n in range(6, 12))                     # decided again every session
+    assert ranks[days[12]] == ["B", "C", "D"]                                   # delisted: worthless, off the list
+    assert days[13] not in ranks                                                # then back to weekly
+
+
+def test_hold_trend_keeps_what_still_rises_and_sells_what_does_not():
+    """2026-10-13 (使用者：還在漲就留著): out of the keep zone, a holding above its 20-session average stays,
+    one below it is sold at once — no fixed minimum."""
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 5))
+    script = {days[0]: ["A", "B", "C"], days[1]: ["D", "E", "F", "A", "B", "C"]}
+    panel = MarketPanel(days, script, "ABCDEF", rising="A")
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, min_hold=20, hold="trend")
+    assert rule.min_hold == 0
+    ranks = daily_rankings(panel, rule, days[0], days[1])
+    assert ranks[days[1]] == ["A", "D", "E"]
+    plain = DailyRule(name="x", factors={"momentum_3": 1.0})
+    assert "hold" not in plain.canonical() and "hold" in rule.canonical()        # old rules keep their hash
+
+
+def test_rising_is_the_adjusted_close_above_its_20_session_average():
+    days = weekdays(date(2024, 1, 1), date(2024, 3, 29))
+    up = [10 * 1.01 ** n for n in range(len(days))]
+    down = [10 * 0.99 ** n for n in range(len(days))]
+    fp = FactorPanel(Panel(market(days, {"1101.TW": dict(zip(days, up)), "1102.TW": dict(zip(days, down))})))
+    rising = fp.rising()
+    assert rising[fp.row["1101.TW"], -1] and not rising[fp.row["1102.TW"], -1]
+    assert not rising[fp.row["1101.TW"], 10]                                    # no 20-session average yet
+
+
+def test_a_flat_price_does_not_draw_the_inverse_volatility_weight():
+    days = weekdays(date(2023, 1, 2), date(2024, 3, 29))
+    swing = {"1101.TW": 0.01, "1102.TW": 0.02, "1103.TW": 0.04}
+    closes = {symbol: {day: 100 * (1 + size) ** (n % 2) for n, day in enumerate(days)} for symbol, size in swing.items()}
+    closes["1104.TW"] = {day: 50.0 for day in days}                            # a price that never moves
+    fp = FactorPanel(Panel(market(days, closes)))
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=4, weighting="inverse_vol")
+    weights = daily.daily_weights(fp, rule, {days[-1]: [*swing, "1104.TW"]})[days[-1]]
+    assert weights["1104.TW"] == pytest.approx(weights["1102.TW"])             # the median, not everything

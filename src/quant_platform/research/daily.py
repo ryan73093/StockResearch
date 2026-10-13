@@ -10,7 +10,8 @@ The account is the owner's: NT$300,000 to start, NT$10,000 on the 5th of every m
 tradable. Every trading day after the close the rule ranks the eligible listed stocks by its factors
 (price, trading and technical factors; one or several, percentile ranks added with weights, a negative
 weight reverses a factor), sells a holding that fell out of its keep zone (top × keep) once it has
-been held ``min_hold`` sessions, and buys the names that entered, at the close (the after-hours odd-lot
+been held ``min_hold`` sessions (``hold="trend"``: at once unless it still closes above its 20-session
+average), and buys the names that entered, at the close (the after-hours odd-lot
 fill model, broker fees, 0.3% tax on stock sales). Existing positions are topped up only on
 contribution days, and no order is smaller than ``min_trade``. ``core`` keeps that share of the
 account in 0050. The benchmark is the same cash flow into 0050.
@@ -30,7 +31,7 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from quant_platform.research.costs import CostModel, affordable_shares, fill_price
 from quant_platform.research.history.dataset import read_series
@@ -70,8 +71,19 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 # ex-rights adjustment) ± 10% (± 7% before 2015-06-01) rounded to the tick inward. When the market refuses an
 # order (a locked limit or a session without a trade) the rule decides again at the next session — it ranks
 # anew, as on a check day (使用者：被擋下隔天就要重新評估；漲停跌停買不到也賣不掉).
-ENGINE_VERSION = "daily-1.3.0"
+# 1.3.1 (2026-10-13; 使用者：沒賣掉的股票下市就是馬桶紙): a holding not sold before its stock is delisted is
+# worth nothing — on the delisting date of the exchange's list (FinMind TaiwanStockDelisting) when the stock
+# has not traded since, or IDLE_LIMIT sessions after its last trade when it never trades again and is not on
+# the list; it leaves the list that day. A suspension that ends stays held and unsellable until the stock
+# trades again. 1.3.0 kept a delisted stock forever as "cannot be sold", and with inverse-volatility weights
+# its flat price (a volatility of about 0) drew almost the whole account onto an order that could never fill,
+# so a few rules sat in cash for years: a volatility below VOL_FLOOR is now unknown (the median of the
+# others). A refused order on a session without a trade is in the ledger.
+ENGINE_VERSION = "daily-1.3.1"
 PRICE_LIMIT_WIDENED = date(2015, 6, 1)
+IDLE_LIMIT = 20             # sessions after the last trade: a stock that never trades again and is not listed
+VOL_FLOOR = 1e-4            # a daily standard deviation below this is a price that did not move: unknown
+TREND_WINDOW = 20           # hold "trend": a holding outside the keep zone stays while above this average
 SHADOW_WARMUP = 252         # sessions before the shadow account starts (the factors need a year)
 STOP_COOLDOWN = 20          # sessions a stopped-out stock may not be bought again
 PERIOD = "recent"
@@ -193,6 +205,18 @@ class DailyRule(BaseModel):
     # percentile mapped to the average next-20-session excess over the eligible median, estimated on the
     # development period only (2015-06..2020-09; ``switch_mapping``). Left out of the hash when "none".
     switching: Literal["none", "cost1"] = "none"
+    # 2026-10-13 (使用者：超過 20 天才賣是策略，不是限制；要看它在漲還是在跌，還在漲就留著): "trend" = a holding
+    # that leaves the keep zone is kept while its adjusted close is above its 20-session average (月線) and it
+    # is still eligible, and sold at that close once it is not — no fixed minimum holding (min_hold is 0).
+    # Left out of the hash when "days" (the fixed min_hold).
+    hold: Literal["days", "trend"] = "days"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _trend_has_no_minimum(cls, data):
+        if isinstance(data, dict) and data.get("hold") == "trend":
+            data = {**data, "min_hold": 0}
+        return data
 
     @field_validator("factors")
     @classmethod
@@ -232,6 +256,8 @@ class DailyRule(BaseModel):
             data.pop("exclude", None)
         if data.get("switching") == "none":
             data.pop("switching", None)
+        if data.get("hold") == "days":
+            data.pop("hold", None)
         return data
 
     @property
@@ -510,6 +536,31 @@ class FactorPanel:
         threshold = np.partition(values[known], -count)[-count]
         return known & (values >= threshold)
 
+    def rising(self) -> np.ndarray:
+        """symbols × sessions: the adjusted close above its TREND_WINDOW-session average (hold "trend")."""
+        if "__rising__" not in self._cache:
+            average = self._prices.rolling(TREND_WINDOW, min_periods=TREND_WINDOW).mean()
+            self._cache["__rising__"] = np.ascontiguousarray((self._prices > average).to_numpy().T)
+        return self._cache["__rising__"]
+
+    def gone(self) -> dict[str, int]:
+        """symbol -> the session (position) on which an unsold holding of it becomes worthless (engine 1.3.1,
+        ``write_off_position``); ``delisted`` (code -> delisting dates) is set by ``load``."""
+        if "__gone__" not in self._cache:
+            traded = np.isfinite(self.panel.close)
+            steps = np.arange(traded.shape[1])
+            delisted = getattr(self, "delisted", None) or {}
+            output: dict[str, int] = {}
+            for row, symbol in enumerate(self.symbols):
+                days = steps[traded[row]]
+                if not len(days):
+                    continue
+                at = write_off_position(self.sessions, int(days[-1]), delisted.get(symbol.split(".")[0], ()))
+                if at is not None:
+                    output[symbol] = at
+            self._cache["__gone__"] = output
+        return self._cache["__gone__"]
+
     def market_locks(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """symbols × sessions: traded (a close that day), closed locked at limit-up, closed locked at
         limit-down — the exchange's limits on the reference price (the previous traded close over the day's
@@ -671,11 +722,15 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
             factor = TECH_EXITS[rule.exit_model]
             exit_agent = TechAgent(fp, Path(fp.models) / TECH_FACTOR_VERSION[factor], factor)
     locks = fp.market_locks() if hasattr(fp, "market_locks") else None
+    gone = fp.gone() if hasattr(fp, "gone") else {}
     again: set[int] = set()               # 1.3.0: sessions to decide again (the market refused an order)
     for count, day in enumerate(sessions):
-        if day not in checks and count not in again:
-            continue
         position = fp.index[day]
+        lost = [symbol for symbol in current if gone.get(symbol, len(fp.sessions)) <= position]
+        if day not in checks and count not in again and not lost:
+            continue
+        if lost:                              # 1.3.1: delisted before it was sold — worthless, off the list
+            current = [symbol for symbol in current if symbol not in lost]
         holding = list(current)
         if rule.market_filter != "none" and not fp.risk_on(position):
             current, bought, peak = [], {}, {}
@@ -705,8 +760,13 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
             ranked = [symbol for symbol in ranked if symbol not in barred]
         keep_zone = set(ranked[: rule.top * rule.keep])
         eligible = set(ranked)
-        kept = [symbol for symbol in current
-                if symbol in keep_zone or (symbol in eligible and count - bought[symbol] < rule.min_hold)]
+        if getattr(rule, "hold", "days") == "trend":     # keep what is still rising, sell what is not
+            rising = fp.rising()[:, position]
+            kept = [symbol for symbol in current
+                    if symbol in keep_zone or (symbol in eligible and rising[fp.row[symbol]])]
+        else:
+            kept = [symbol for symbol in current
+                    if symbol in keep_zone or (symbol in eligible and count - bought[symbol] < rule.min_hold)]
         if switch is not None:                  # cost1: keep a leaving holding unless swapping pays a round trip
             percentiles, gain = switch
             leaving = sorted((symbol for symbol in current if symbol not in kept and symbol in eligible),
@@ -752,7 +812,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
             for symbol in holding:
                 row = fp.row.get(symbol)
                 if symbol not in current and row is not None and (not traded[row, position] or locked_down[row, position]):
-                    refused = True             # not sold: limit-down or no trade today
+                    refused = True             # not sold: limit-down or no trade today (a suspension too)
                     final.append(symbol)
             current = final
             if refused:
@@ -806,11 +866,13 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                      (low is not None and side == "SELL" and close <= low + 1e-6)
         if close is None or locked:
             blocked = True
-            if ledger is not None and close is not None:
-                ledger.append({"day": day, "symbol": symbol, "side": "BLOCKED", "order": side,
-                               "reason": "漲停買不到" if side == "BUY" else "跌停賣不掉"})
+            if ledger is not None:
+                reason = "沒有成交" if close is None else ("漲停買不到" if side == "BUY" else "跌停賣不掉")
+                ledger.append({"day": day, "symbol": symbol, "side": "BLOCKED", "order": side, "reason": reason})
             return True
         return False
+
+    gone = write_off_days(data)
 
     def buy(symbol: str, budget: float, day: date) -> None:
         nonlocal cash
@@ -863,6 +925,11 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                 units[symbol] *= factor
                 if ledger is not None:
                     ledger.append({"day": day, "symbol": symbol, "side": "ADJUST", "factor": factor})
+            if symbol in gone and gone[symbol] <= day:     # 1.3.1: delisted before it was sold: worthless
+                if ledger is not None:
+                    ledger.append({"day": day, "symbol": symbol, "side": "SELL", "shares": units[symbol],
+                                   "price": 0.0, "fee": 0.0, "tax": 0.0, "reason": "下市，持股歸零"})
+                units[symbol] = 0.0
         contribution = by_day.get(day, 0.0)
         cash += contribution
         if rule is None:
@@ -928,6 +995,53 @@ VOL_STEP = 0.25          # the invested share moves in quarters: fewer trades
 VOL_BAND = 1.25          # fully invested until the volatility runs 25% above its usual level
 
 
+def write_off_position(sessions: list[date], last: int, delisted) -> int | None:
+    """Engine 1.3.1: the session (index into ``sessions``) on which an unsold holding becomes worthless for a
+    stock whose last trade is ``sessions[last]`` — the first session on or after a delisting date (the
+    exchange's list) later than that trade; else, when it never trades again, IDLE_LIMIT sessions after it;
+    None while the data ends too soon to tell (it stays held at its last close, unsellable)."""
+    import bisect
+
+    after = [day for day in delisted if day > sessions[last]]
+    if after:
+        place = bisect.bisect_left(sessions, min(after))
+        return place if place < len(sessions) else None
+    return last + IDLE_LIMIT if last + IDLE_LIMIT < len(sessions) else None
+
+
+def write_off_days(data: LegacyData) -> dict[str, date]:
+    """symbol -> the session on which an unsold holding of it becomes worthless (``write_off_position`` on
+    ``data``; the delisting dates in ``data.notes["delisted"]``)."""
+    cached = data.__dict__.get("_write_off")
+    if cached is not None:
+        return cached
+    index = {session: number for number, session in enumerate(data.sessions)}
+    delisted = data.notes.get("delisted") or {}
+    output: dict[str, date] = {}
+    for symbol, series in data.closes.items():
+        traded = [index[day] for day in series if day in index]
+        if not traded:
+            continue
+        at = write_off_position(data.sessions, max(traded), delisted.get(symbol.split(".")[0], ()))
+        if at is not None:
+            output[symbol] = data.sessions[at]
+    data.__dict__["_write_off"] = output
+    return output
+
+
+def delisting_dates(history: str | Path) -> dict[str, list[date]]:
+    """code -> its delisting dates (FinMind TaiwanStockDelisting; a code can be reused)."""
+    from quant_platform.research.history.finmind import read_rows
+
+    output: dict[str, list[date]] = defaultdict(list)
+    for row in read_rows(Path(history), "TaiwanStockDelisting", "all"):
+        try:
+            output[str(row["stock_id"])].append(date.fromisoformat(str(row["date"])[:10]))
+        except (KeyError, ValueError):
+            continue
+    return dict(output)
+
+
 def price_limits(data: LegacyData, symbol: str, day: date) -> tuple[float | None, float | None]:
     """(limit-down, limit-up) of ``symbol`` on ``day``: the reference price — the previous session's close
     divided by the day's ex-rights unit factor — ± 10% (± 7% before 2015-06-01), rounded inward to the tick;
@@ -988,7 +1102,7 @@ def daily_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]
             continue
         position = fp.index[day]
         sigmas = np.array([volatility[fp.row[symbol], position] for symbol in names], dtype=float)
-        valid = np.isfinite(sigmas) & (sigmas > 0)
+        valid = np.isfinite(sigmas) & (sigmas > VOL_FLOOR)    # 1.3.1: a flat price is not a calm stock
         sigmas = np.where(valid, sigmas, np.median(sigmas[valid]) if valid.any() else 1.0)
         inverse = 1 / sigmas
         output[day] = {symbol: float(share) for symbol, share in zip(names, inverse / inverse.sum(), strict=True)}
@@ -1185,12 +1299,15 @@ def market_closes(history: str | Path, sessions: list[date]) -> np.ndarray:
 
 def load(history: str | Path, universe: str = "twse") -> tuple[LegacyData, FactorPanel]:
     data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year, universe=universe)
+    data.notes["delisted"] = delisting_dates(history)        # 1.3.1: an unsold delisted holding is worthless
     panel = Panel(data)
     from quant_platform.research.model import models_root
 
-    return data, FactorPanel(panel, Industries(load_industries(history)),
-                             ChipStore(history, panel.sessions, panel.symbols, panel.close),
-                             market_closes(history, panel.sessions), models_root(history))
+    fp = FactorPanel(panel, Industries(load_industries(history)),
+                     ChipStore(history, panel.sessions, panel.symbols, panel.close),
+                     market_closes(history, panel.sessions), models_root(history))
+    fp.delisted = data.notes["delisted"]
+    return data, fp
 
 
 def chips_digest(history: str | Path, until: date, universe: str = "twse") -> str:
@@ -1231,6 +1348,9 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
     payload = {"rule": rule.canonical(), "period": PERIOD, "costs": costs.as_dict(), "data": data_fingerprint,
                "engine": ENGINE_VERSION, "plan": SEED_PLAN}
     payload.update(input_digests(history, list(rule.factors), rule.exit_model != "none"))
+    delisted = sorted((code, day.isoformat()) for code, days in (data.notes.get("delisted") or {}).items()
+                      for day in days if day <= RECENT_END)
+    payload["delisted"] = hashlib.sha256(json.dumps(delisted).encode()).hexdigest()   # 1.3.1: the list it read
     return record_trial(registry, reports_dir, rule.rule_hash, rule.name, payload,
                         lambda: evaluate(data, fp, rule, costs, benchmark_cache), data_fingerprint, "daily", ENGINE_VERSION,
                         stamp)
@@ -1677,8 +1797,8 @@ def rerun_batch() -> list:
     research = _Path("instance") / "research"
     latest = {}
     for record in TrialRegistry(research / "trials.jsonl").records():
-        if record.kind == "candidate" and record.period == "recent":
-            latest[record.spec_hash] = record
+        if record.kind == "candidate" and record.period == "recent" and                 not str(record.metrics.get("engine", "")).startswith("daily-1.3"):
+            latest[record.spec_hash] = record          # the tiers as rated before the market's rules: a fixed set
     rules = []
     for record in sorted(latest.values(), key=lambda record: record.trial_id):
         if tier(record.metrics)[0] not in ("T0 候選", "T1"):
@@ -1694,6 +1814,44 @@ def rerun_batch() -> list:
             continue                           # the 17-way equal blend: 437 orders a month, not a strategy
         rules.append(rule)
     return rules
+
+
+def rerun131_batch() -> list:
+    """2026-10-13 evening: the same 64 rules on engine 1.3.1 (an unsold delisted holding is worthless), each
+    three ways (使用者：超過 20 天才賣是策略，不是限制；還在漲就留著): the fixed 20-session
+    minimum as chosen, no minimum, and hold "trend" (kept while above its 20-session average, sold once below)."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry
+
+    base = rerun_batch()
+    known = {rule.rule_hash for rule in base}
+    research = _Path("instance") / "research"
+    scanned = {}                              # the new-factor scan's finalists, first run on 1.3.0 only
+    for record in TrialRegistry(research / "trials.jsonl").records():
+        if record.kind == "candidate" and record.period == "recent" and record.metrics.get("engine") == "daily-1.3.0"                 and record.spec_hash not in known and record.spec_hash not in scanned:
+            try:
+                spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            except (OSError, ValueError, KeyError):
+                continue
+            if not uses_0050(spec):
+                scanned[record.spec_hash] = parse_spec(spec)
+    output = []
+    for rule in base + list(scanned.values()):
+        output.append(rule)
+        if getattr(rule, "kind", None) == "blend":
+            continue
+        if rule.min_hold and rule.rule_hash in known:
+            output.append(rule.model_copy(update={"min_hold": 0, "name": (rule.name + "、不設最短持有")[:80]}))
+        output.append(DailyRule.model_validate({**rule.model_dump(), "hold": "trend",
+                                                "name": (rule.name + "、月線上續抱")[:80]}))
+    unique: dict[str, object] = {}
+    for rule in output:                      # a rule already without a minimum is in the set once
+        unique.setdefault(rule.rule_hash, rule)
+    return list(unique.values())
 
 
 def blends_batch() -> list:
@@ -1714,4 +1872,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
-           "minhold": min_hold_batch, "rerun13": rerun_batch}
+           "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch}

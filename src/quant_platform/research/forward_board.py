@@ -243,6 +243,8 @@ def recent(research: Path, history: Path, item: dict, data, fp, costs, days: lis
                "side": entry.get("order", entry["side"]) if entry["side"] == "BLOCKED" else entry["side"]}
         if entry["side"] == "BLOCKED":
             row["refused"] = entry["reason"]
+        elif entry.get("reason"):
+            row["note"] = entry["reason"]                 # 1.3.1: 下市，持股歸零
         else:
             row.update(shares=round(float(entry["shares"]), 4), price=entry["price"], fee=entry["fee"], tax=entry["tax"],
                        amount=round(float(entry["shares"]) * float(entry["price"]), 0))
