@@ -651,8 +651,8 @@
 <section class="card" id="after-close-orders">
   <div class="card__head">
     <h2>今天的盤後單 <span class="badge">14:30 前下單</span></h2>
-    <span class="muted small">收盤後證交所全市場行情一到（約 13:50～14:01）就算：每個策略從 {{ after_close.common_start if after_close else '10/01' }} 起跑到今天，照回測同一套規則決定今天要買賣什麼。整張走盤後定價（14:00–14:30，以收盤價成交），零股走盤後零股（14:30 撮合，附限價）。只含上市股的策略（上櫃的收盤表 14:30 前還沒出來）。</span>
   </div>
+  <p class="muted small" style="margin:0 0 10px">收盤後證交所全市場行情一到（約 13:50～14:01）就算：每個策略從 {{ after_close.common_start if after_close else '10/01' }} 起跑到今天，照回測同一套規則決定今天要買賣什麼。整張走盤後定價（14:00–14:30，以收盤價成交），零股走盤後零股（14:30 撮合，附限價）。只含上市股的策略（上櫃的收盤表 14:30 前還沒出來）。</p>
   {% if not after_close %}
   <p class="muted">今天的單還沒算出來：交易日 13:50 起，證交所收盤表到手後約 2 分鐘出現在這裡。</p>
   {% else %}
