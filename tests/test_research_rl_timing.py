@@ -100,3 +100,14 @@ def test_the_scores_use_the_latest_decision_only(tmp_path):
     momentum = fp.matrix("momentum_3")[:, 330]
     row = int(np.nanargmax(momentum))
     assert scores[330, row] == pytest.approx(np.nanmax(scores[330]))
+
+
+def test_the_robot_21_sees_every_full_history_factor_and_the_model_scores():
+    from quant_platform.research import daily
+
+    names = rl_timing.factor_names(rl_timing.ALL_VERSION)
+    assert set(daily.MODEL_FACTORS) <= set(names) and set(rl_timing.factor_names()) <= set(names)
+    assert not {"revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap"} & set(names)
+    assert not (set(daily.TIME_FACTORS) | set(daily.SHORT_FACTORS) | set(daily.ALERT_FACTORS)) & set(names)
+    rules = daily.robot21_batch()
+    assert [rule.factors for rule in rules] == [{"rl_all": 1.0}, {"all_equal": 1.0}]

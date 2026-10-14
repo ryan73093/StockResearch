@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "hypotheses", "trade-audit", "tech-rl2"),
+                            "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -641,6 +641,27 @@ def main() -> int:
             data, fp = daily_research.load(Path(args.base))
             meta = rl_timing.walk_forward(fp, rl_timing.benchmark_units(data, fp.sessions),
                                           models_root(Path(args.base)) / rl_timing.VERSION, job=job)
+            robot = sum(item["robot_excess"] for item in meta["yearly"].values())
+            alike = sum(item["equal_excess"] for item in meta["yearly"].values())
+            job.payload["summary"] = f"{len(meta['yearly'])} 年樣本外：機器人比 0050 {robot:+.3f}、平均權重 {alike:+.3f}（對數報酬加總）"
+        print(job.payload["summary"])
+        for year, item in meta["yearly"].items():
+            print(year, item)
+        return 0
+
+    if args.command == "factor-rl21":
+        # 2026-10-14: the robot 2.1 — the robot 2.0 over every factor and model score (research/rl_timing.py)
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import rl_timing
+        from quant_platform.research.jobs import JobLog
+        from quant_platform.research.model import models_root
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("RL 機器人 2.1：逐年滾動訓練（全部因子與模型分數的權重，永遠滿倉）", command) as job:
+            data, fp = daily_research.load(Path(args.base))
+            meta = rl_timing.walk_forward(fp, rl_timing.benchmark_units(data, fp.sessions),
+                                          models_root(Path(args.base)) / rl_timing.ALL_VERSION, job=job,
+                                          version=rl_timing.ALL_VERSION)
             robot = sum(item["robot_excess"] for item in meta["yearly"].values())
             alike = sum(item["equal_excess"] for item in meta["yearly"].values())
             job.payload["summary"] = f"{len(meta['yearly'])} 年樣本外：機器人比 0050 {robot:+.3f}、平均權重 {alike:+.3f}（對數報酬加總）"

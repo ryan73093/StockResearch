@@ -32,6 +32,12 @@ import numpy as np
 import pandas as pd
 
 VERSION = "tech-rl-2.0.0"
+# 2.1.0 (2026-10-14): the same robot over every factor with a full history — price, technical, chip, statement and
+# trend-quality factors and the trained models' walk-forward scores (2.0.0 beat its two technical yardsticks under
+# the engine from 2018, 547 against 482 and 464 (NT$10k), but not 0050's 654: price and volume alone were not enough).
+# Left out: monthly revenue (lagging, the owner), market value, the families of 2026-10-14 (time: weak; lending,
+# day trading, alerts: their data was still coming) and the meta factors.
+ALL_VERSION = "factor-rl-2.1.0"
 STEP = 20                    # sessions between decisions, and the reward's horizon
 TOP = 20
 COST_SWAP = 0.0035 + 0.0065  # one stock out and one in: fees, slippage, the sell tax (as tech_rl)
@@ -42,20 +48,27 @@ SEEDS = (0, 1, 2)
 FIRST_TEST_YEAR = 2018
 
 
-def factor_names() -> list[str]:
+def factor_names(version: str = VERSION) -> list[str]:
     from quant_platform.research.tech_rl import TECH_FEATURES
 
+    if version == ALL_VERSION:
+        from quant_platform.research.chips import ALERT_FACTORS, SHORT_FACTORS
+        from quant_platform.research.daily import FACTOR_LABELS, MODEL_FACTORS, TIME_FACTORS
+
+        left_out = {"revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap",
+                    *TIME_FACTORS, *SHORT_FACTORS, *ALERT_FACTORS}
+        return [name for name in (*FACTOR_LABELS, *MODEL_FACTORS) if name not in left_out]
     return list(TECH_FEATURES)
 
 
 class Timeline:
     """The decisions: their positions, states, factor percentiles, forward returns and 0050's."""
 
-    def __init__(self, fp, benchmark: np.ndarray) -> None:
+    def __init__(self, fp, benchmark: np.ndarray, version: str = VERSION) -> None:
         from quant_platform.research.factor_timing import records
         from quant_platform.research.model import eligibility
 
-        names = factor_names()
+        names = factor_names(version)
         realised, ranks = records(fp, names)
         eligible = eligibility(fp)
         sessions = len(fp.sessions)
@@ -147,9 +160,9 @@ def train(timeline: Timeline, decisions: list[int], seed: int) -> tuple[np.ndarr
     return weight.detach().numpy(), bias.detach().numpy(), history
 
 
-def walk_forward(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> dict[str, object]:
+def walk_forward(fp, benchmark: np.ndarray, out_dir: Path, job=None, version: str = VERSION) -> dict[str, object]:
     """Train per test year, write the weights of every test decision and the yearly comparison."""
-    timeline = Timeline(fp, benchmark)
+    timeline = Timeline(fp, benchmark, version)
     years = sorted({day.year for day in timeline.days if day.year >= FIRST_TEST_YEAR})
     weights: dict[str, list[float]] = {}
     yearly = {}
@@ -180,7 +193,7 @@ def walk_forward(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> dict[str
                                           sorted(zip(timeline.names, chosen.mean(axis=0)), key=lambda item: -item[1])[:3]]}
         if job:
             job.update(done=number + 1, current=f"{year}：機器人 {robot.sum():+.3f}、平均權重 {alike.sum():+.3f}")
-    meta = {"version": VERSION, "factors": timeline.names, "weights": weights, "yearly": yearly,
+    meta = {"version": version, "factors": timeline.names, "weights": weights, "yearly": yearly,
             "config": {"step": STEP, "top": TOP, "cost_swap": COST_SWAP, "sigma": SIGMA, "penalty": PENALTY,
                        "epochs": EPOCHS, "rollouts": ROLLOUTS, "learning_rate": LEARNING_RATE, "seeds": list(SEEDS)},
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
@@ -189,12 +202,12 @@ def walk_forward(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> dict[str
     return meta
 
 
-def scores(fp, folder: str | Path, kind: str = "robot") -> np.ndarray:
+def scores(fp, folder: str | Path, kind: str = "robot", version: str = VERSION) -> np.ndarray:
     """sessions × symbols. ``robot``: each session's percentiles weighted by the latest decision's weights (NaN
-    before the first test decision or without a trained robot); ``equal``: every technical factor alike."""
+    before the first test decision or without a trained robot); ``equal``: the version's factors alike."""
     from quant_platform.research.model import _rank, eligibility
 
-    names = factor_names()
+    names = factor_names(version)
     eligible = eligibility(fp)
     percentiles = np.stack([_rank(np.where(eligible, fp.matrix(name), np.nan).T)
                             for name in names])                                 # factor × session × symbol
