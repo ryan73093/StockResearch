@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -232,6 +232,19 @@ switch ($Name) {
         Invoke-Step "3-models" @("-m", "quant_platform.research", "daily", "--name", "rerun_models", "--broker", "cathay")
         Invoke-Step "4-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "5-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "timefactors" {
+        # 2026-10-14 (使用者：因子裡面有考慮到時間的部分嗎？): the calendar and event-time family — its strength
+        # first, then every 1-4 signal set with at least one time factor that passes the novelty gate (scan 1.2.0,
+        # holding by the trend), the statistics and the board. Waits for t0scan5 (and so for engine140).
+        while (Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*research-pipeline.ps1*-Name t0scan5*" -or $_.CommandLine -like "*research-pipeline.ps1*-Name engine140*" }) {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-factors" @("-m", "quant_platform.research", "factors", "--recent")
+        Invoke-Step "2-scan" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "80", "--pool", "5000", "--signals-min", "1", "--signals-max", "4", "--require-time")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "4-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+        Invoke-Step "5-leakcheck" @("-m", "quant_platform.research", "leakcheck")
     }
     "engine131" {
         # 2026-10-13 evening: engine 1.3.1 (an unsold delisted holding is worthless) — the same 64 rules

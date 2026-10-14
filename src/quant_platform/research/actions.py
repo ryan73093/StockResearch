@@ -53,6 +53,24 @@ def delisting_dates(base: Path) -> dict[str, list[date]]:
     return dict(output)
 
 
+def dividend_plans(base: Path, codes) -> dict[str, list[tuple[date, date, float]]]:
+    """code -> [(announced, cash ex-date, NT$ per share)] from FinMind's policies that carry all three — what the
+    market knew from the announcement on (time factor ``dividend_ahead``)."""
+    from quant_platform.research.history.finmind import read_rows
+
+    output: dict[str, list[tuple[date, date, float]]] = {}
+    for code in codes:
+        items = []
+        for row in read_rows(Path(base), "TaiwanStockDividend", code):
+            announced, ex_day = _iso(row.get("AnnouncementDate")), _iso(row.get("CashExDividendTradingDate"))
+            cash = _number(row.get("CashEarningsDistribution")) + _number(row.get("CashStatutorySurplus"))
+            if announced and ex_day and cash > 0 and announced <= ex_day:
+                items.append((announced, ex_day, cash))
+        if items:
+            output[code] = items
+    return output
+
+
 def health_premium(amount: float, day: date) -> int:
     """二代健保補充保費 on one dividend payment: 2% at or above NT$5,000 (2013–2015), 1.91% at or above NT$20,000
     (2016–2020), 2.11% at or above NT$20,000 (2021 on)."""

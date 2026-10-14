@@ -139,8 +139,36 @@ RAW_V2 = {
     "low_pv_corr_20": "量價相關低（20 日報酬與成交值變化的相關，反向）",
     "overnight_reversal_12": "隔夜反轉（12 個月扣最近 1 個月：開盤跳空的累積報酬，反向）",
 }
+# 2026-10-14 (使用者：因子裡面有考慮到時間的部分嗎？): the calendar and event-time family, never tested before —
+# a stock's own same-calendar-month seasonality (Heston & Sadka 2008), the run-up to an announced ex-dividend date,
+# and the investment trusts' quarter-end window dressing. Each uses only what was known at the session: earlier
+# years, announcements made before it (the next session, as most come after the close), yesterday's chip data and
+# the exchange's published calendar. Not model features.
+TIME_FACTORS = {
+    "season_month": "同月份季節性（這檔股票以前每年同一個月的平均報酬，至少 2 年）",
+    "dividend_ahead": "即將除息（已公告、20 個交易日內除息的現金股利殖利率）",
+    "trust_quarter_end": "投信季底作帳（季底前 20 個交易日的投信買超；季初 10 個交易日反向）",
+}
+DIVIDEND_AHEAD = 20                         # sessions before an announced ex-dividend date
+QUARTER_RUN_UP, QUARTER_AFTER = 28, 14      # calendar days: about 20 sessions before a quarter's end, 10 after
+
+
+def quarter_weights(sessions) -> np.ndarray:
+    """trust_quarter_end's sign per session, from the calendar alone: +1 in the last QUARTER_RUN_UP days of March,
+    June, September and December, -1 in the first QUARTER_AFTER days of the next month, 0 otherwise."""
+    import calendar
+
+    weights = np.zeros(len(sessions))
+    for index, day in enumerate(sessions):
+        if day.month in (3, 6, 9, 12):
+            last = date(day.year, day.month, calendar.monthrange(day.year, day.month)[1])
+            if (last - day).days < QUARTER_RUN_UP:
+                weights[index] = 1.0
+        elif day.month in (1, 4, 7, 10) and day.day <= QUARTER_AFTER:
+            weights[index] = -1.0
+    return weights
 FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS, **EVENT_FACTORS, **TREND_QUALITY,
-                 **RAW_V2}
+                 **RAW_V2, **TIME_FACTORS}
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
 MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
                  "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
@@ -379,6 +407,8 @@ class FactorPanel:
             if self.chips is None or not self.chips.available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
             return self.chips.matrix(factor).T                      # back to sessions × symbols
+        if factor in TIME_FACTORS:
+            return self._time_factor(factor)
         p = self._prices
         if factor in ("low_volatility_60", "low_volatility_250", "low_max_return"):
             returns = p.pct_change(fill_method=None)
@@ -433,6 +463,43 @@ class FactorPanel:
         if factor in RAW_V2:
             return self._raw_v2(factor)
         raise ValueError(factor)
+
+    def _time_factor(self, factor: str) -> np.ndarray:
+        """sessions × symbols; TIME_FACTORS, each from what was known at the session."""
+        import bisect
+
+        sessions = list(self.sessions)
+        traded = np.isfinite(self.panel.close.T)                       # sessions × symbols
+        if factor == "season_month":
+            months = pd.PeriodIndex(sessions, freq="M")
+            ends = self._prices.groupby(np.asarray(months)).last()      # month × symbols, adjusted
+            monthly = ends.pct_change(fill_method=None)
+            calendar = np.array([period.month for period in ends.index])
+            seasonal = pd.DataFrame(np.nan, index=monthly.index, columns=monthly.columns)
+            for month in range(1, 13):
+                rows = monthly[calendar == month]
+                seasonal.loc[rows.index] = rows.expanding(min_periods=2).mean().shift(1).to_numpy()   # earlier years
+            return seasonal.reindex(np.asarray(months)).to_numpy()
+        if factor == "dividend_ahead":
+            values = np.where(traded, 0.0, np.nan)
+            plans = (getattr(self.panel, "notes", None) or {}).get("dividend_plans") or {}
+            for symbol, items in plans.items():
+                row = self.row.get(symbol)
+                if row is None:
+                    continue
+                for announced, ex_day, cash in items:
+                    known = bisect.bisect_right(sessions, announced)    # the session after the announcement
+                    ex_at = bisect.bisect_left(sessions, ex_day)
+                    for position in range(max(known, ex_at - DIVIDEND_AHEAD), min(ex_at, len(sessions))):
+                        close = self.panel.close[row, position]
+                        if np.isfinite(close) and close > 0:
+                            values[position, row] = cash / close
+            return values
+        # trust_quarter_end: yesterday's 20-session trust buying, + before a quarter's last session, - just after
+        if self.chips is None or not self.chips.available():
+            return np.full((len(sessions), len(self.symbols)), np.nan)
+        trust = self.chips.matrix("trust_buy_20").T
+        return trust * quarter_weights(sessions)[:, None]
 
     def _raw_v2(self, factor: str) -> np.ndarray:
         """sessions × symbols; RAW_V2, each from data up to the session."""

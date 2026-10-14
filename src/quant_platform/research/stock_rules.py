@@ -198,7 +198,9 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
         for day, event in events.get(f"{code}.TWO", {}).items():
             if day < listed:
                 merged.setdefault(day, event)
-    from quant_platform.research.actions import build_actions, delisting_dates, move_to_open_days, official_events
+    from quant_platform.research.actions import (
+        build_actions, delisting_dates, dividend_plans, move_to_open_days, official_events,
+    )
 
     # 2026-10-13 (engine 1.4.0): an ex-date on a day the market or the stock did not trade (typhoon closures)
     # counts on the stock's next traded day — before, those 184 events since 2015 were dropped
@@ -222,7 +224,11 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
     return LegacyData(sessions=sessions, closes=closes, traded_value=traded, factors=factors, predictions={},
                       notes={"symbols": len(closes) - 1, "years": [first_year, last_year], "universe": universe,
                              "limits": limits, "moved_events": moved_actions,
-                             "delisted": delisting_dates(base)},       # 1.3.1: an unsold delisted holding is worthless
+                             "delisted": delisting_dates(base),       # 1.3.1: an unsold delisted holding is worthless
+                             # 2026-10-14: announced cash dividends, by symbol (time factor dividend_ahead)
+                             "dividend_plans": {symbol: plans for code, plans in
+                                                dividend_plans(base, {s.split(".")[0] for s in closes}).items()
+                                                for symbol in (f"{code}.TW", f"{code}.TWO") if symbol in closes}},
                       opens=opens, actions=build_actions(base, official))
 
 
