@@ -146,10 +146,11 @@ RAW_V2 = {
 # the exchange's published calendar. Not model features.
 TIME_FACTORS = {
     "season_month": "同月份季節性（這檔股票以前每年同一個月的平均報酬，至少 2 年）",
-    "dividend_ahead": "即將除息（已公告、20 個交易日內除息的現金股利殖利率）",
+    "dividend_ahead": "即將除息（已公告、28 天內除息的現金股利殖利率）",
     "trust_quarter_end": "投信季底作帳（季底前 20 個交易日的投信買超；季初 10 個交易日反向）",
 }
-DIVIDEND_AHEAD = 20                         # sessions before an announced ex-dividend date
+DIVIDEND_AHEAD = 28                         # calendar days before an announced ex-dividend date (about 20 sessions):
+                                            # dates only, so the value does not depend on sessions after the day
 QUARTER_RUN_UP, QUARTER_AFTER = 28, 14      # calendar days: about 20 sessions before a quarter's end, 10 after
 
 
@@ -508,8 +509,9 @@ class FactorPanel:
                     continue
                 for announced, ex_day, cash in items:
                     known = bisect.bisect_right(sessions, announced)    # the session after the announcement
-                    ex_at = bisect.bisect_left(sessions, ex_day)
-                    for position in range(max(known, ex_at - DIVIDEND_AHEAD), min(ex_at, len(sessions))):
+                    opens = bisect.bisect_left(sessions, ex_day - timedelta(days=DIVIDEND_AHEAD))
+                    ex_at = bisect.bisect_left(sessions, ex_day)        # sessions before the ex-date only
+                    for position in range(max(known, opens), ex_at):
                         close = self.panel.close[row, position]
                         if np.isfinite(close) and close > 0:
                             values[position, row] = cash / close

@@ -25,11 +25,16 @@ def truncated_data(data, until: date):
     def cut(series: dict) -> dict:
         return {day: value for day, value in series.items() if day <= until}
 
+    notes = dict(data.notes or {})
+    if notes.get("dividend_plans"):              # 2026-10-14: only the dividends announced by ``until``
+        notes["dividend_plans"] = {symbol: [plan for plan in plans if plan[0] <= until]
+                                   for symbol, plans in notes["dividend_plans"].items()}
     return LegacyData(sessions=[day for day in data.sessions if day <= until],
                       closes={symbol: cut(series) for symbol, series in data.closes.items() if cut(series)},
                       traded_value={symbol: cut(series) for symbol, series in data.traded_value.items()},
                       factors={symbol: cut(series) for symbol, series in data.factors.items()}, predictions={},
-                      opens={symbol: cut(series) for symbol, series in (getattr(data, "opens", None) or {}).items()})
+                      opens={symbol: cut(series) for symbol, series in (getattr(data, "opens", None) or {}).items()},
+                      notes=notes)
 
 
 def truncated_panel(history: Path, data, until: date):

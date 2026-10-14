@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -295,6 +295,12 @@ switch ($Name) {
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "robot2", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "4-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "shortdata" {
+        # 2026-10-14 (資料缺口：借券賣出餘額、當沖比例): FinMind's daily short-sale balances (margin and securities
+        # lending) and day trading, every listed and TPEx code; the download pauses 13:30–15:30 by itself.
+        Invoke-Step "1-short" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanDailyShortSaleBalances")
+        Invoke-Step "2-daytrade" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanStockDayTrading")
     }
     "engine131" {
         # 2026-10-13 evening: engine 1.3.1 (an unsold delisted holding is worthless) — the same 64 rules
