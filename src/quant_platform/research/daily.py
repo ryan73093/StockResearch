@@ -185,7 +185,10 @@ TECH_EXITS = {"tech1": "rl_tech", "tech2": "rl_tech_weekly"}          # exit_mod
 # 2026-10-11: every T0 candidate votes (research/consensus.py; members frozen per version)
 CONSENSUS_FACTORS = {"t0_consensus": "T0 共識分數（25 個 T0 候選各自排名的百分位平均，一個策略一票）",
                      "dev_consensus": "開發期共識分數（180 個搜尋最後名單、只用 2015-06～2020-09 挑出，百分位平均）"}
-RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FACTORS}
+# 2026-10-14 (使用者：因子裡面有考慮到時間的部分嗎？): which factors to use, decided by their realised record over the
+# last year (research/factor_timing.py) — factor momentum. Built from the rule factors; not itself a model feature.
+META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現最好的 5 個因子的平均百分位，每天重選）"}
+RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FACTORS, **META_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
 
@@ -378,6 +381,10 @@ class FactorPanel:
         return self._cache[factor]
 
     def _compute(self, factor: str):
+        if factor in META_FACTORS:
+            from quant_platform.research.factor_timing import scores as timing_scores
+
+            return timing_scores(self)                                                 # sessions × symbols
         if factor in CONSENSUS_FACTORS:
             from quant_platform.research.consensus import scores as consensus_scores
 
@@ -2106,6 +2113,14 @@ def rerun_models_batch() -> list:
     return rules
 
 
+def factor_momentum_batch() -> list:
+    """2026-10-14: one rule on factor momentum — the five factors with the best realised record of the last year,
+    the top 20, at most 3 in 10 from one industry, decided weekly, holding by the trend. Nothing is tuned: the
+    record's window, horizon and the five come from the literature (research/factor_timing.py)."""
+    return [DailyRule(name="因子動能：最近一年最強的 5 個因子、前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"factor_momentum": 1.0}, top=20, check="weekly", industry_cap=0.3, hold="trend")]
+
+
 def rerun140_batch() -> list:
     """2026-10-13 night: the same 211 rules on engine 1.4.0 (whole shares, dividends as paid, the turnover cap),
     filled the same day in the after-hours sessions. Not the next session (使用者 2026-10-14：要在 14:30 前算出
@@ -2132,4 +2147,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
-           "rerun140": rerun140_batch, "rerun_models": rerun_models_batch}
+           "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch}
