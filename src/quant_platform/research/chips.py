@@ -53,6 +53,12 @@ SHORT_FACTORS = {
     "sbl_cover_20": "借券賣出回補（20 日餘額減少，佔發行股數）",
     "low_day_trade_20": "當沖比例低（20 日當沖買進金額佔成交值，反向）",
 }
+# 2026-10-14 (資料缺口：處置／注意股; research/history/alerts.py): how often the exchange flagged the stock lately — an
+# attention notice is published after the close (used from the next session), a disposition on its announcement.
+ALERT_FACTORS = {
+    "low_attention_20": "不過熱（20 日內被列注意股的次數，反向）",
+    "low_disposition_60": "未被處置（60 日內被公告處置的次數，反向）",
+}
 FIELDS = {
     "TaiwanStockShareholding": ("ForeignInvestmentSharesRatio", "NumberOfSharesIssued"),
     "TaiwanStockPER": ("PER", "PBR"),
@@ -185,6 +191,26 @@ class ChipStore:
 
     def available(self) -> bool:
         return (self._folder / "TaiwanStockShareholding.parquet").is_file()
+
+    def alerts_available(self) -> bool:
+        return all((self._folder / name).is_file() for name in ("AlertNotice.parquet", "AlertDisposition.parquet"))
+
+    def alert_matrix(self, factor: str) -> np.ndarray:
+        """symbols × sessions, ALERT_FACTORS: minus the count of notices (20 sessions) or dispositions announced
+        (60 sessions) dated before the session."""
+        name, window = (("AlertNotice.parquet", 20) if factor == "low_attention_20" else ("AlertDisposition.parquet", 60))
+        table = pq.read_table(self._folder / name, columns=["date", "code"]).to_pandas()
+        if self.until is not None:
+            table = table[pd.to_datetime(table["date"]) < pd.Timestamp(self.until)]
+        table["count"] = 1.0
+        frame = table.pivot_table(index="date", columns="code", values="count", aggfunc="sum")
+        frame.index = pd.to_datetime(frame.index)
+        sessions = pd.to_datetime(pd.Index(self.sessions))
+        # an announcement on a closed day counts on the next session
+        frame = frame.groupby(sessions[sessions.searchsorted(frame.index).clip(max=len(sessions) - 1)]).sum()
+        frame = frame.reindex(sessions, fill_value=0.0).reindex(columns=self._codes, fill_value=0.0).fillna(0.0)
+        counts = frame.shift(1, fill_value=0.0).rolling(window, min_periods=1).sum()   # dated before the session
+        return np.ascontiguousarray((-counts).to_numpy(dtype=np.float32).T)
 
     def short_available(self) -> bool:
         return all((self._folder / f"{dataset}.parquet").is_file() for dataset in SHORT_FIELDS)

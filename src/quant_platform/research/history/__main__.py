@@ -52,7 +52,7 @@ def _summary(manifest: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
-                                            "chips", "tpex", "fundamentals"))
+                                            "chips", "tpex", "fundamentals", "alerts"))
     parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報")
     parser.add_argument("--refresh-quarter", help="finmind：季更新，due＝法定期限已過的最新一季；只重抓近期有交易、"
                                                   "還沒有這一季的檔（2026-10-07）")
@@ -191,6 +191,22 @@ def main() -> int:
         result = build_tpex_from_finmind(base)
         save_summary(base)
         print(json.dumps(result, ensure_ascii=False), flush=True)
+        return 0
+
+    if args.command == "alerts":             # 2026-10-14: TWSE's attention and disposition announcements
+        from datetime import date as _date
+
+        from quant_platform.research.history.alerts import build as build_alerts
+        from quant_platform.research.history.alerts import fetch as fetch_alerts
+        from quant_platform.research.history.official import OfficialHistoryClient
+        from quant_platform.research.jobs import JobLog
+
+        with JobLog(base.parent).start("下載注意股與處置股公告（證交所，2014 起）",
+                                       "python -m quant_platform.research.history alerts") as job:
+            requested = fetch_alerts(OfficialHistoryClient(base / "raw"), _date.today())
+            written = build_alerts(base)
+            job.payload["summary"] = f"注意 {written['notice']:,} 筆、處置 {written['disposition']:,} 筆"
+        print(json.dumps({"requested": requested, **written}, ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "chips":

@@ -352,7 +352,7 @@ def main() -> int:
     parser.add_argument("--require-time", action="store_true",
                         help="scan：只跑至少含一個 2026-10-14 時間因子的組（先過新穎性閘門）")
     parser.add_argument("--require-short", action="store_true",
-                        help="scan：只跑至少含一個借券或當沖因子的組（先過新穎性閘門）")
+                        help="scan：只跑至少含一個借券、當沖、注意或處置因子的組（先過新穎性閘門）")
     parser.add_argument("--resume", help="scan：第一階段已完成的搜尋資料夾，只跑第二階段")
     parser.add_argument("--pool", type=int, default=600, help="scan：從第一階段最好的前幾名裡挑彼此不同的最後名單")
     parser.add_argument("--by-excess", action="store_true",
@@ -795,7 +795,8 @@ def main() -> int:
             from quant_platform.research import daily as daily_research
 
             family = (daily_research.TIME_FACTORS if args.require_time else
-                      daily_research.SHORT_FACTORS if args.require_short else daily_research.RAW_V2)
+                      {**daily_research.SHORT_FACTORS, **daily_research.ALERT_FACTORS} if args.require_short
+                      else daily_research.RAW_V2)
             _data, novelty_fp = daily_research.load(Path(args.base))
             gate = scan.novelty(novelty_fp, list(family))
             print(f"新穎性閘門：{gate}", flush=True)

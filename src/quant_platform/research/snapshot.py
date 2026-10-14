@@ -32,7 +32,8 @@ GROUPS = (
     ("波動、成交與股利", ("low_volatility_60", "low_volatility_250", "low_ivol_60", "liquidity", "volume_surge",
                      "low_pv_corr_20", "dividend_yield")),
     ("籌碼", ("foreign_holding", "foreign_holding_change", "foreign_buy_20", "trust_buy_20", "margin_growth_20",
-             "short_margin_ratio", "low_sbl_short", "sbl_cover_20", "low_day_trade_20")),
+             "short_margin_ratio", "low_sbl_short", "sbl_cover_20", "low_day_trade_20", "low_attention_20",
+             "low_disposition_60")),
     ("基本面", ("earnings_yield", "book_to_price", "revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "roe_ttm",
              "gross_margin", "operating_margin_change", "eps_growth", "low_debt")),
     ("時間與事件", ("season_month", "dividend_ahead", "trust_quarter_end")),       # 2026-10-14

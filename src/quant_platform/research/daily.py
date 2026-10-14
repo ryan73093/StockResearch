@@ -113,7 +113,7 @@ TECHNICAL = {
     "bollinger_b": "布林通道位置 %B（20 日）",
     "breakout_55": "接近 55 日高點（突破）",
 }
-from quant_platform.research.chips import CHIP_FACTORS, EVENT_FACTORS, SHORT_FACTORS, ChipStore
+from quant_platform.research.chips import ALERT_FACTORS, CHIP_FACTORS, EVENT_FACTORS, SHORT_FACTORS, ChipStore
 from quant_platform.research.fundamentals import STATEMENT_FACTORS, FundamentalStore
 
 # 2026-10-06: five quarterly statement factors (research/fundamentals.py), dated by the filing deadline
@@ -169,7 +169,7 @@ def quarter_weights(sessions) -> np.ndarray:
             weights[index] = -1.0
     return weights
 FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS, **EVENT_FACTORS, **TREND_QUALITY,
-                 **RAW_V2, **TIME_FACTORS, **SHORT_FACTORS}
+                 **RAW_V2, **TIME_FACTORS, **SHORT_FACTORS, **ALERT_FACTORS}
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
 MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
                  "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
@@ -429,6 +429,10 @@ class FactorPanel:
             return self.chips.matrix(factor).T                      # back to sessions × symbols
         if factor in TIME_FACTORS:
             return self._time_factor(factor)
+        if factor in ALERT_FACTORS:
+            if self.chips is None or not self.chips.alerts_available():
+                return np.full((len(self.sessions), len(self.symbols)), np.nan)
+            return self.chips.alert_matrix(factor).T                               # back to sessions × symbols
         if factor in SHORT_FACTORS:
             if self.chips is None or not self.chips.available() or not self.chips.short_available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)

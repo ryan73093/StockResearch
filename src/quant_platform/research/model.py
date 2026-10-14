@@ -59,10 +59,12 @@ PARAMS = {"max_iter": 300, "learning_rate": 0.05, "max_leaf_nodes": 31, "min_sam
 def features() -> tuple[str, ...]:
     """The model's inputs: every rule factor except the 2026-10-10 trend-quality ones, which a later model
     version would add on purpose (a saved version keeps its own list, ``trained_features``)."""
-    from quant_platform.research.daily import FACTOR_LABELS, RAW_V2, SHORT_FACTORS, TIME_FACTORS, TREND_QUALITY
+    from quant_platform.research.daily import (
+        ALERT_FACTORS, FACTOR_LABELS, RAW_V2, SHORT_FACTORS, TIME_FACTORS, TREND_QUALITY,
+    )
 
     return tuple(name for name in FACTOR_LABELS if name not in TREND_QUALITY and name not in RAW_V2
-                 and name not in TIME_FACTORS and name not in SHORT_FACTORS)
+                 and name not in TIME_FACTORS and name not in SHORT_FACTORS and name not in ALERT_FACTORS)
 
 
 def models_root(history: str | Path) -> Path:
@@ -91,7 +93,7 @@ def _rank(values: np.ndarray) -> np.ndarray:
 def version_features(version: str | None) -> tuple[str, ...]:
     """The features a new version starts with: the shared list, or its own (gbm-1.4.0: every rule factor
     except monthly revenue, the trend-quality ones included)."""
-    from quant_platform.research.daily import FACTOR_LABELS, RAW_V2, SHORT_FACTORS, TIME_FACTORS
+    from quant_platform.research.daily import ALERT_FACTORS, FACTOR_LABELS, RAW_V2, SHORT_FACTORS, TIME_FACTORS
 
     if version and VERSIONS.get(version, {}).get("features") == "technical":
         from quant_platform.research.tech_rl import TECH_FEATURES
@@ -99,7 +101,7 @@ def version_features(version: str | None) -> tuple[str, ...]:
         return tuple(TECH_FEATURES)
     if version and VERSIONS.get(version, {}).get("features") == "no_revenue_quality":
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in RAW_V2
-                     and name not in TIME_FACTORS and name not in SHORT_FACTORS)
+                     and name not in TIME_FACTORS and name not in SHORT_FACTORS and name not in ALERT_FACTORS)
     return features()
 
 
