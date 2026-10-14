@@ -168,5 +168,5 @@ def test_rule_page_jobs_and_factor_tabs(tmp_path):
     factors = client.get("/research?tab=factors").get_data(as_text=True)
     assert "接近 52 週高點" in factors and "+0.050" in factors
     pool = client.get("/research/pool?basis=dca").get_data(as_text=True)
-    assert 'href="/research/rules/stock-both"' in pool and 'id="rule-search"' in pool and "選手池・全部規則" in pool
+    assert 'href="/research/rules/stock-both"' in pool and 'id="rule-search"' in pool and ">選手池<" in pool and "舊設計紀錄（2005 起、每月）" in pool
     job.finish("done", "完成了")

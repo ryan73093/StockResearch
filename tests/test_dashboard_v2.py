@@ -284,3 +284,13 @@ def test_the_forward_tab_shows_todays_after_close_orders(tmp_path):
     body = client.get("/research?tab=orders").get_data(as_text=True)
     assert "今天的盤後單" in body and "測試策略" in body and "2330 台積電" in body
     assert "限價 1010.0" in body and "計算中（1／2" in body
+
+
+def test_every_page_turns_its_cards_into_tabs(client):
+    """2026-10-14 (使用者：不同區塊用 tab 分隔，不要一頁式長頁面): the content sits in one tab set; the script builds the
+    bar from the top-level cards, and a table's header row stays in view."""
+    for path in ("/", "/holdings", "/plan", "/research", "/research/pool", "/system"):
+        body = client.get(path).get_data(as_text=True)
+        assert 'class="tabset" data-tabset' in body and "tabset__bar" in body
+    system = client.get("/system").get_data(as_text=True)
+    assert 'data-tab="排程與執行" id="runs"' in system

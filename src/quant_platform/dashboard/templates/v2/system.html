@@ -10,11 +10,8 @@
 </header>
 {% endblock %}
 {% block content %}
-{% from "v2/_nav.html" import system_pages %}
-<nav class="subtabs subtabs--grouped" aria-label="系統分頁">
-  {% for key, label, href in system_pages %}<a href="{{ href }}">{{ label }}</a>{% endfor %}
-</nav>
-<section class="tiles" aria-label="運作狀態" id="runs">
+<div data-tab="排程與執行" id="runs">
+<section class="tiles" aria-label="運作狀態">
   {% for item in health_items %}
     <div class="tile tile--{{ item.tone }}">
       <div class="tile__label">{{ item.label }}</div>
@@ -65,6 +62,7 @@
       <span class="muted small">{{ '投入日收盤後自動傳送委託建議；流程或備份失敗也會通知' if line_enabled else 'LINE 尚未設定（.env 的 LINE_* 三項）' }}</span>
     </form>
   </section>
+</div>
 </div>
 
 {% if quality %}

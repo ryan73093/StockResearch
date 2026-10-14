@@ -30,7 +30,7 @@
       <tbody>
       {% for run in rule.runs %}
         <tr>
-          <td data-primary><strong style="white-space:nowrap">{{ run.period_label }}</strong> <span class="small" style="white-space:nowrap">{{ run.plan }}</span><span class="muted small"> {{ (run.start or '')[:7] }}～{{ (run.end or '')[:7] }}・試驗 #{{ run.trial_id }}・{{ run.created_at }}</span></td>
+          <td data-primary><strong>{{ run.period_label }}</strong> <span class="small">{{ run.plan }}</span><span class="muted small"> {{ (run.start or '')[:7] }}～{{ (run.end or '')[:7] }}・試驗 #{{ run.trial_id }}・{{ run.created_at }}</span></td>
           <td class="num" data-label="期末">{% if run.final_value %}{{ '{:,.0f}'.format(run.final_value) }}{% if run.benchmark_final_value %}<span class="muted small">（{{ '{:,.0f}'.format(run.benchmark_final_value) }}）</span>{% endif %}{% else %}—{% endif %}</td>
           <td class="num {{ 'up' if (run.excess or 0) > 0 else ('down' if (run.excess or 0) < 0 else '') }}" data-label="比 0050">{{ '{:+.0%}'.format(run.excess) if run.excess is not none else '—' }}</td>
           <td class="num" data-label="年化">{{ '{:.1%}'.format(run.xirr) if run.xirr is not none else '—' }}<span class="muted small">（{{ '{:.1%}'.format(run.benchmark_xirr) if run.benchmark_xirr is not none else '—' }}）</span></td>
@@ -46,6 +46,7 @@
   <p class="note">比 0050 ＝（規則期末 − 同樣現金流全部買 0050 的期末）÷ 投入的錢。成本用國泰手續費（研究另有註記者除外）、個股賣出證交稅 0.3%、收盤價附近成交。同一期間有多筆時，較早的是舊版引擎或舊成本的紀錄，留著備查。</p>
 </section>
 
+<div data-tab="走勢與逐年報酬" id="charts">
 {% for run in rule.runs if run.chart or run.yearly %}
 <details class="card"{% if loop.first %} open{% endif %}>
   <summary><h2>{{ run.period_label }}・{{ run.plan }} <span class="badge">試驗 #{{ run.trial_id }}</span></h2></summary>
@@ -82,4 +83,5 @@
   {% endif %}
 </details>
 {% endfor %}
+</div>
 {% endblock %}

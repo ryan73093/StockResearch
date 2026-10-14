@@ -33,6 +33,7 @@
       </tbody>
     </table>
   </div>
+  <p class="col-help"><b>欄位說明</b>　<b>分類</b>：依規則用到的因子分（點分類名稱只看那一類）。<b>規則數</b>：這一類試過的不同規則。<b>T0／T0 候選</b>、<b>T1</b>、<b>T2</b>、<b>T3</b>：各等級的規則數（等級說明見「全部規則」分頁）。<b>這一類最好的規則</b>：等級最高、再比 2015-06 起比 0050 的那一個。</p>
   <p class="note"><strong>只算 100% 個股的規則</strong>：0050 是你自己另外持有的部位，含 0050 的 {{ pool.excluded_0050 }} 個規則（一半放 0050、組合帳戶的 0050 份、跌破均線換 0050）只留紀錄、不採用、不進前向觀察。</p>
   <p class="note">分類看規則押注的是哪一類因子；同時用兩類以上的叫多因子，用到機器學習分數的歸機器學習，帳戶分成幾份的歸組合帳戶。每個規則的特性（是否放 0050、每天或每週決策、依波動度配置、停損等）列在下表的分類欄。</p>
 </section>
@@ -47,7 +48,7 @@
     <a href="/research/forward/{{ ai.meta_hash }}">看持股與交易</a>{% if ai.forward and ai.forward.sessions %}（{{ ai.forward.sessions }} 天、相對 0050 {{ '{:+.2%}'.format(ai.forward.excess) if ai.forward.excess is not none else '—' }}）{% endif %}。
   </div>
 </section>
-<section class="card" id="daily">
+<section class="card" id="daily" data-tab="全部規則（新設計，每天決策）">
   <div class="card__head"><h2>新設計：2015-06 起、每天決策 <span class="badge">{{ pool.daily|length }} 個規則</span></h2></div>
   <div class="kpis kpis--four" style="margin-bottom:12px">
     {% for grade in ('T0', 'T0 候選', 'T1', 'T2', 'T3') %}<div class="kpi"><div class="kpi__label">{{ grade }}</div><div class="kpi__value">{{ pool.daily_tiers[grade] }}</div></div>{% endfor %}
@@ -82,12 +83,14 @@
       </tbody>
     </table>
   </div>
+  <p class="col-help"><b>欄位說明</b>　<b>等級</b>：T0 候選＝全部門檻都過；T1＝兩段都贏、視窗勝率夠，但回撤比 0050 深超過 5 個百分點；T2＝2015-06 起贏但有一段輸或勝率不夠；T3＝2015-06 起就輸 0050。<b>期末</b>：2015-06 起 30 萬＋每月 1 萬的期末金額（括號是同樣的錢買 0050）。<b>比 0050</b>：（期末 − 0050 期末）÷ 投入的錢。<b>2020-10 起比 0050</b>：同樣算法，只看 2020-10 以後。<b>視窗勝率</b>：每個月開始的 1 年／3 年帳戶，贏 0050 的比例。<b>最大回撤</b>：期間內從高點的最大跌幅（括號是 0050）。<b>費稅佔投入・每月下單</b>：手續費加交易稅佔投入金額的比例、平均每月下單筆數。</p>
   {% else %}
   <p class="muted" style="margin:0">還沒有結果；回測在跑時看<a href="/research?tab=jobs">執行中的程式</a>。</p>
   {% endif %}
 </section>
 
-<h2 style="margin:24px 0 12px">舊設計（2005 起、每月檢查）<span class="muted small" style="font-weight:normal">：留著備查，不再用來挑規則</span></h2>
+<div data-tab="舊設計紀錄（2005 起、每月）" id="old-design">
+<h2 style="margin:8px 0 12px">舊設計（2005 起、每月檢查）<span class="muted small" style="font-weight:normal">：留著備查，不再用來挑規則</span></h2>
 <section class="card">
   <div class="card__head"><h2>現況</h2></div>
   <div class="basis-switch">
@@ -185,6 +188,7 @@
   </div>
   {{ rule_table(pool.rules) }}
 </section>
+</div>
 <script>
 (function () {
   var search = document.getElementById('daily-search');

@@ -282,6 +282,11 @@ a.theme-toggle[aria-current="page"] { color: var(--accent); border-color: var(--
   margin-bottom: 12px;
 }
 .card__head h2, details.card > summary h2 { font-size: 16px; display: flex; align-items: center; gap: 8px; }
+/* 2026-10-14: a heading never gives up its width to the note beside it (共同起跑線 came out one character a line);
+   the note wraps under it when they do not fit on one line */
+.card__head { flex-wrap: wrap; }
+.card__head > h2 { flex: 0 0 auto; white-space: nowrap; }
+.card__head > h2 + .muted, .card__head > h2 + span { flex: 1 1 320px; min-width: 0; }
 .card__foot { margin-top: 12px; }
 .card--quiet { box-shadow: none; background: color-mix(in srgb, var(--surface) 60%, var(--bg)); }
 .card--highlight { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: linear-gradient(135deg, var(--accent-bg), transparent 70%), var(--surface); }
@@ -354,8 +359,34 @@ details.card[open] > summary { margin-bottom: 12px; }
 .badge--buy { background: var(--up-bg); color: var(--up); }
 .badge--sell { background: var(--down-bg); color: var(--down); }
 
+/* ---------- tabs inside a page (2026-10-14, 使用者：不同區塊用 tab 分隔，不要一頁式) ---------- */
+.tabset { display: contents; }
+.tabset__bar {
+  display: flex; gap: 6px; overflow-x: auto; padding: 8px 0 6px; scrollbar-width: thin;
+  position: sticky; top: 0; z-index: 6; background: var(--bg);
+}
+.tabset__bar button {
+  flex: 0 0 auto; padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; background: none;
+  color: var(--text-2); font: inherit; font-size: 14px; cursor: pointer;
+}
+.tabset__bar button:hover { border-color: var(--border-strong); color: var(--text); }
+.tabset__bar button[aria-selected="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.tabset > [hidden] { display: none !important; }
+@media (max-width: 767px) { .tabset__bar { top: var(--appbar-height, 56px); } }
+
 /* ---------- tables ---------- */
 .table-wrap { overflow-x: auto; margin: 0 -18px; -webkit-overflow-scrolling: touch; }
+/* 2026-10-14 (使用者：表格被截斷要拉到最下面拉橫軸，回到上面又看不到是哪個欄位): on tablets and computers a table
+   scrolls inside its card, at most 72% of the screen high, its header row fixed at the top and its horizontal
+   scroll bar in view; a long name wraps instead of pushing the numbers off the side. */
+@media (min-width: 768px) {
+  .table-wrap { max-height: 72vh; overflow: auto; }
+  .table-wrap thead th { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+  .table-wrap td[data-primary], .table-wrap td.name { white-space: normal; min-width: 200px; max-width: 460px; }
+  .table-wrap td:not(.num) { white-space: normal; overflow-wrap: anywhere; }      /* words wrap, numbers stay whole */
+}
+.col-help { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.col-help b { color: var(--text-2); font-weight: 600; }
 /* 2026-10-09: rules × years; the rule column stays in view while the years scroll */
 .table--years { font-size: 13px; }
 .table--years th.num, .table--years td.num { white-space: nowrap; }
@@ -387,6 +418,7 @@ td.wrap { white-space: normal; min-width: 180px; }
   /* A long note beside a card title goes under it instead of squeezing the title to one character
      per line (10/02: 舊版挑戰者評估 and AI 研究員 at 375 px). */
   .card__head { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .card__head > h2 + .muted, .card__head > h2 + span { flex: none; }      /* stacked: no basis as height */
   .table-wrap--stack { overflow: visible; margin: 0; }
   .table--stack thead { display: none; }
   .table--stack, .table--stack tbody { display: block; }

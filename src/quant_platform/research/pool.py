@@ -439,7 +439,8 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
     runs.sort(key=lambda run: (PERIOD_ORDER.index(run["period"]) if run["period"] in PERIOD_ORDER else 9, run["created_at"]))
     forward = next((row for row in StockForwardTracker(base).summary() if row["rule_hash"] == spec_hash), None)
     return {"spec_hash": spec_hash, "name": records[-1].spec_name, "spec": spec, "description": describe_rule(spec),
-            "family": "個股規則" if records[-1].data_fingerprint.startswith("stocks:") else "ETF 規則",
+            # 2026-10-14: the daily-decision rules ("daily:" data) are stock rules too (the page said ETF 規則)
+            "family": "個股規則" if records[-1].data_fingerprint.startswith(("stocks:", "daily:")) else "ETF 規則",
             "source": _sources(base).get(spec_hash, "其他"), "runs": runs, "forward": forward,
             "final": final_validation(base).get(spec_hash)}
 

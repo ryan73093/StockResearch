@@ -82,7 +82,8 @@
             <div class="card flash"><span class="badge {{ 'badge--bad' if category == 'error' else 'badge--ok' }}">{{ '錯誤' if category == 'error' else '完成' }}</span>{{ message }}</div>
           {% endfor %}
         {% endwith %}
-        {% block content %}{% endblock %}
+        {# 2026-10-14 (使用者：不同區塊用 tab 分隔，不要一頁式長頁面): every page's top-level cards become tabs #}
+        <div class="tabset" data-tabset>{% block content %}{% endblock %}</div>
       </main>
     </div>
 
@@ -105,6 +106,51 @@
         if (meta) meta.content = next === 'light' ? '#f3f5f8' : '#0d1015';
         window.dispatchEvent(new CustomEvent('themechange', { detail: next }));
       });
+    });
+  })();
+  </script>
+  <script>
+  // 2026-10-14 (使用者：不同區塊用 tab 分隔，不要一頁式長頁面，不要再讓我講): the top-level cards of a page — and any
+  // element marked data-tab — become tabs; one shows at a time. A label is data-tab or the card's heading. A link
+  // to #id (a card or something inside one) opens its tab. data-notab keeps an element out (it always shows).
+  (() => {
+    document.querySelectorAll('[data-tabset]').forEach((set, index) => {
+      const panels = [...set.children].filter((el) => !el.hasAttribute('data-notab')
+        && (el.hasAttribute('data-tab') || el.matches('section.card, details.card')));
+      if (panels.length < 2) return;
+      const label = (el) => {
+        if (el.dataset.tab) return el.dataset.tab;
+        const heading = el.querySelector('h2');
+        const text = heading ? [...heading.childNodes].filter((node) => node.nodeType === 3).map((node) => node.textContent).join('').trim() : '';
+        return text || (heading ? heading.textContent.trim() : '') || `區塊 ${panels.indexOf(el) + 1}`;
+      };
+      const bar = document.createElement('div');
+      bar.className = 'tabset__bar';
+      bar.setAttribute('role', 'tablist');
+      panels.forEach((panel, i) => {
+        if (!panel.id) panel.id = `tab-${index}-${i}`;
+        if (panel.tagName === 'DETAILS') panel.open = true;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.setAttribute('role', 'tab');
+        button.textContent = label(panel);
+        button.dataset.target = panel.id;
+        button.addEventListener('click', () => { show(panel.id); history.replaceState(null, '', `#${panel.id}`); });
+        bar.appendChild(button);
+      });
+      set.insertBefore(bar, panels[0]);
+      const show = (id) => {
+        panels.forEach((panel) => { panel.hidden = panel.id !== id; });
+        bar.querySelectorAll('button').forEach((button) => button.setAttribute('aria-selected', String(button.dataset.target === id)));
+      };
+      const wanted = () => {
+        const hash = decodeURIComponent(location.hash.slice(1));
+        if (!hash) return null;
+        const hit = panels.find((panel) => panel.id === hash || panel.querySelector(`#${CSS.escape(hash)}`));
+        return hit ? hit.id : null;
+      };
+      show(wanted() || panels[0].id);
+      window.addEventListener('hashchange', () => { const id = wanted(); if (id) show(id); });
     });
   })();
   </script>
