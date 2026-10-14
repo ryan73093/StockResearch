@@ -11,6 +11,18 @@ $python = Join-Path $root ".venv\Scripts\python.exe"
 $logs = Join-Path $root "instance\research\logs"
 New-Item -ItemType Directory -Force $logs | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+# 2026-10-14: a record of this run (running, then done) so a reboot's casualty is started again when the services
+# start (scripts/resume-research.ps1)
+$records = Join-Path $root "instance\research\pipelines"
+New-Item -ItemType Directory -Force $records | Out-Null
+$recordPath = Join-Path $records "$Name.json"
+$pipelineStarted = (Get-Date).ToString("s")
+function Write-PipelineRecord([string]$Status) {
+    $record = [ordered]@{ name = $Name; pid = $PID; started_at = $pipelineStarted; status = $Status }
+    if ($Status -ne "running") { $record.finished_at = (Get-Date).ToString("s") }
+    [System.IO.File]::WriteAllText($recordPath, ($record | ConvertTo-Json -Compress), (New-Object System.Text.UTF8Encoding($false)))
+}
+Write-PipelineRecord "running"
 
 function Invoke-Step([string]$Label, [string[]]$Arguments) {
     $out = Join-Path $logs "$Name-$stamp-$Label.log"
@@ -321,3 +333,4 @@ switch ($Name) {
     "factors" { Invoke-Step "factors" @("-m", "quant_platform.research", "factors") }
     "finmind" { Invoke-Step "finmind" @("-m", "quant_platform.research.history", "finmind") }
 }
+Write-PipelineRecord "done"

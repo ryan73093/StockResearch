@@ -88,6 +88,12 @@ Remove-Item -LiteralPath $stopFlagPath -Force -ErrorAction SilentlyContinue
 Set-Content -LiteralPath $supervisorPidPath -Value $PID -Encoding ascii
 $tunnelState = if ($serviceDefinitions.Name -contains 'tunnel') { 'with tunnel' } else { 'without tunnel (Access not enforced or credential missing)' }
 Write-SupervisorLog "Supervisor started $tunnelState."
+# 2026-10-14: research pipelines a reboot cut short start again (Windows Update restarted the computer at 04:29)
+try {
+    & (Join-Path $PSScriptRoot "resume-research.ps1") | ForEach-Object { Write-SupervisorLog "Research: $_" }
+} catch {
+    Write-SupervisorLog "Research resume failed: $_"
+}
 
 # Child Python processes write UTF-8 logs instead of the console code page.
 $env:PYTHONIOENCODING = 'utf-8'
