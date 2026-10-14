@@ -223,7 +223,11 @@ switch ($Name) {
         # the 47 signals, both universes and weightings, holding by the trend (69,372 candidates) — screened on
         # 2015-06..2020-09 now (the screen needs no dividends); the full-engine stage, the model, robot and blend
         # rules on engine 1.4.0, the statistics and the board wait for engine140 (dividends, the 211 rules).
-        Invoke-Step "1-screen" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "0")
+        $screened = Get-ChildItem (Join-Path $root "instanceesearch\scans") -Directory -Filter "scan-1.2.0-*" |
+            Where-Object { Test-Path (Join-Path $_.FullName "summary.json") }
+        if (-not $screened) {                     # a restart after a reboot does not screen again
+            Invoke-Step "1-screen" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "0")
+        }
         while (Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*research-pipeline.ps1*-Name engine140*" }) {
             Start-Sleep -Seconds 300
         }
@@ -238,6 +242,10 @@ switch ($Name) {
         # first, then every 1-4 signal set with at least one time factor that passes the novelty gate (scan 1.2.0,
         # holding by the trend), the statistics and the board. Waits for t0scan5 (and so for engine140).
         while (Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*research-pipeline.ps1*-Name t0scan5*" -or $_.CommandLine -like "*research-pipeline.ps1*-Name engine140*" }) {
+            Start-Sleep -Seconds 300
+        }
+        # the big screen keeps out of 12:00–14:45: the 13:50 after-close orders need the machine
+        while ((Get-Date).TimeOfDay -ge [TimeSpan]"12:00" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:45") {
             Start-Sleep -Seconds 300
         }
         Invoke-Step "1-factors" @("-m", "quant_platform.research", "factors", "--recent")
