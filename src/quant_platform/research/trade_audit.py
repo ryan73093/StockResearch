@@ -120,8 +120,10 @@ def run(history: Path, research_dir: Path, costs: CostModel, job=None) -> dict[s
     from quant_platform.research.stock_forward import qualifying_daily
     from quant_platform.research.stock_rules import SeedPlan
 
+    from quant_platform.research.blend import BlendAccount
+
     data, fp = daily.load(history)
-    rules = [rule for rule, _reason in qualifying_daily(research_dir) if hasattr(rule, "factors")]
+    rules = [rule for rule, _reason in qualifying_daily(research_dir)]          # daily rules and blends of them
     report: dict[str, object] = {"engine": daily.ENGINE_VERSION, "start": daily.RECENT_START.isoformat(),
                                  "end": daily.RECENT_END.isoformat(), "checks": CHECKS, "rules": []}
     totals: dict[str, int] = defaultdict(int)
@@ -134,13 +136,17 @@ def run(history: Path, research_dir: Path, costs: CostModel, job=None) -> dict[s
         if rule is None:
             run_ = daily.simulate_daily(data, None, costs, daily.RECENT_START, daily.RECENT_END, plan=SeedPlan(),
                                         ledger=ledger)
+        elif not isinstance(rule, daily.DailyRule):          # a blend: every sleeve's orders are in the ledger
+            run_ = BlendAccount(data, fp, rule, costs, daily.RECENT_START, daily.RECENT_END).run(
+                daily.RECENT_START, daily.RECENT_END, SeedPlan(), ledger=ledger)
         else:
             ranks = daily.daily_rankings(fp, rule, daily.RECENT_START, daily.RECENT_END)
             run_ = daily.simulate_daily(data, rule, costs, daily.RECENT_START, daily.RECENT_END, ranks, plan=SeedPlan(),
                                         ledger=ledger, weights=daily.daily_weights(fp, rule, ranks),
                                         parked=daily.account_parking(data, fp, rule, costs),
                                         exposure=daily.exposure_schedule(data, fp, rule, costs))
-        found = audit(data, ledger, costs, daily.participation(rule))
+        found = audit(data, ledger, costs, daily.participation(rule) if isinstance(rule, daily.DailyRule)
+                      else daily.SAME_DAY_PARTICIPATION)
         trades = [entry for entry in ledger if entry["side"] in ("BUY", "SELL")]
         orders += len(trades)
         for check, items in found.items():
