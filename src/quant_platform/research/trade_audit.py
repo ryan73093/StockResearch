@@ -63,7 +63,7 @@ def audit(data, ledger: list[dict], costs: CostModel, limit: float | None = None
     for entry in ledger:
         side, symbol, day = entry["side"], entry["symbol"], entry["day"]
         if side == "ADJUST":
-            if entry.get("shares") is not None:
+            if entry.get("shares") is not None:            # the change in shares (a blend's sleeves each log theirs)
                 held[symbol] += entry["shares"]
             else:
                 held[symbol] = round(held[symbol] * entry["factor"])

@@ -206,3 +206,23 @@ def test_next_session_execution_fills_the_day_after_the_decision():
     first = min(plain)
     assert days[days.index(first) + 1] in later and later[days[days.index(first) + 1]] == plain[first]
     assert daily.participation(following) == daily.NEXT_DAY_PARTICIPATION
+
+
+def test_a_blends_ledgers_add_up_through_a_capital_reduction():
+    """Two accounts holding the same stock through a 0.7 capital reduction: each logs its change in shares, so the
+    audit of the joint ledger never sees a negative holding."""
+    from quant_platform.research.trade_audit import audit
+
+    days = weekdays(date(2024, 7, 1), date(2024, 7, 31))
+    data = market(days, {"1101.TW": {day: (50.0 if n < 10 else 71.4) for n, day in enumerate(days)}})
+    data.factors["1101.TW"] = {days[10]: 0.7}
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, min_hold=0, check="weekly")
+    joint = []
+    for budget in (100_050, 70_000):
+        ledger = []
+        simulate_daily(data, rule, FREE, days[0], days[-1], {days[0]: ["1101.TW"], days[15]: []},
+                       SeedPlan(budget, 0), ledger=ledger)
+        joint += ledger
+    adjust = [row for row in joint if row["side"] == "ADJUST"]
+    assert {row["kind"] for row in adjust} == {"split"} and all(row["shares"] < 0 for row in adjust)
+    assert "negative" not in audit(data, sorted(joint, key=lambda row: row["day"]), FREE)

@@ -1121,15 +1121,16 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                     whole, _fraction = whole_shares(count, action.shares)   # the fraction: lost (the transfer fee)
                     units[symbol] = count + whole
                     if ledger is not None and whole:
-                        ledger.append({"day": day, "symbol": symbol, "side": "ADJUST",
+                        ledger.append({"day": day, "symbol": symbol, "side": "ADJUST", "kind": "stock_dividend",
                                        "factor": (count + whole) / count, "shares": whole})
             else:
                 factor = data.factors.get(symbol, {}).get(day, 1.0)
                 if factor != 1.0:                  # a split or capital change: whole shares, the fraction lost
                     units[symbol] = float(math.floor(count * factor + 1e-9))
-                    if ledger is not None:
-                        ledger.append({"day": day, "symbol": symbol, "side": "ADJUST",
-                                       "factor": units[symbol] / count if count else factor})
+                    if ledger is not None:                 # "shares": the change, so ledgers of many accounts add up
+                        ledger.append({"day": day, "symbol": symbol, "side": "ADJUST", "kind": "split",
+                                       "factor": units[symbol] / count if count else factor,
+                                       "shares": units[symbol] - count})
             if symbol in gone and gone[symbol] <= day:     # 1.3.1: delisted before it was sold: worthless
                 if ledger is not None:
                     ledger.append({"day": day, "symbol": symbol, "side": "SELL", "shares": units[symbol],
