@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -301,6 +301,23 @@ switch ($Name) {
         # lending) and day trading, every listed and TPEx code; the download pauses 13:30–15:30 by itself.
         Invoke-Step "1-short" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanDailyShortSaleBalances")
         Invoke-Step "2-daytrade" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanStockDayTrading")
+    }
+    "shortfactors" {
+        # 2026-10-14: once shortdata is in — the chip tables rebuilt with the lending and day-trading data, the
+        # factors' strength, every 1-4 signal set with a short factor that passes the novelty gate (holding by the
+        # trend), the statistics, the board and the leak check. Keeps out of 12:00–14:45.
+        while (Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*research-pipeline.ps1*-Name shortdata*" -or $_.CommandLine -like "*research-pipeline.ps1*-Name robot2*" -or $_.CommandLine -like "*research-pipeline.ps1*-Name factormom*" }) {
+            Start-Sleep -Seconds 300
+        }
+        while ((Get-Date).TimeOfDay -ge [TimeSpan]"12:00" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:45") {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-chips" @("-m", "quant_platform.research.history", "chips")
+        Invoke-Step "2-factors" @("-m", "quant_platform.research", "factors", "--recent")
+        Invoke-Step "3-scan" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "80", "--pool", "5000", "--signals-min", "1", "--signals-max", "4", "--require-short")
+        Invoke-Step "4-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "5-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+        Invoke-Step "6-leakcheck" @("-m", "quant_platform.research", "leakcheck")
     }
     "engine131" {
         # 2026-10-13 evening: engine 1.3.1 (an unsold delisted holding is worthless) — the same 64 rules

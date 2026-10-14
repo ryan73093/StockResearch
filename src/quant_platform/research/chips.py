@@ -45,10 +45,22 @@ CHIP_FACTORS = {
 # the 20 sessions after a monthly revenue is announced. Kept apart so the 2026-10-04 chip batch stays as run.
 EVENT_FACTORS = {"revenue_accel": "月營收加速（公布後 20 個交易日內：最新年增率減前 3 個月平均）"}
 ACCEL_SESSIONS = 20
+# 2026-10-14 (資料缺口：借券賣出餘額、當沖比例): short selling through securities lending, and day trading, from
+# FinMind's daily tables (published after the close: used from the next session). Kept apart from the 2026-10-04
+# chip batch. Higher = what the factor favours: little lent-and-sold stock, shorts covering, little day trading.
+SHORT_FACTORS = {
+    "low_sbl_short": "借券賣出餘額低（佔發行股數，反向）",
+    "sbl_cover_20": "借券賣出回補（20 日餘額減少，佔發行股數）",
+    "low_day_trade_20": "當沖比例低（20 日當沖買進金額佔成交值，反向）",
+}
 FIELDS = {
     "TaiwanStockShareholding": ("ForeignInvestmentSharesRatio", "NumberOfSharesIssued"),
     "TaiwanStockPER": ("PER", "PBR"),
     "TaiwanStockMarginPurchaseShortSale": ("MarginPurchaseTodayBalance", "ShortSaleTodayBalance"),
+}
+SHORT_FIELDS = {
+    "TaiwanDailyShortSaleBalances": ("SBLShortSalesCurrentDayBalance", "MarginShortSalesCurrentDayBalance"),
+    "TaiwanStockDayTrading": ("BuyAmount", "Volume"),
 }
 
 
@@ -92,20 +104,22 @@ def build(history: str | Path, job=None) -> dict[str, int]:
     out.mkdir(parents=True, exist_ok=True)
     written: dict[str, int] = {}
     steps = list(FIELDS) + ["TaiwanStockInstitutionalInvestorsBuySell", "TaiwanStockMonthRevenue"]
+    steps += [dataset for dataset in SHORT_FIELDS if (raw / dataset).is_dir()]      # once downloaded
     if job:
         job.update(total=len(steps), done=0, force=True)
     for index, dataset in enumerate(steps):
         if job:
             job.update(done=index, current=dataset)
         columns: dict[str, list] = {"date": [], "code": []}
-        if dataset in FIELDS:
-            for name in FIELDS[dataset]:
+        fields = FIELDS.get(dataset) or SHORT_FIELDS.get(dataset)
+        if fields:
+            for name in fields:
                 columns[name] = []
             for code, rows in _rows(raw, dataset):
                 for row in rows:
                     columns["date"].append(date.fromisoformat(row["date"]))
                     columns["code"].append(code)
-                    for name in FIELDS[dataset]:
+                    for name in fields:
                         value = row.get(name)
                         columns[name].append(float(value) if isinstance(value, (int, float)) else None)
         elif dataset == "TaiwanStockInstitutionalInvestorsBuySell":
@@ -144,7 +158,8 @@ def build(history: str | Path, job=None) -> dict[str, int]:
                     columns["revenue"].append(float(row["revenue"]))
                     columns["year"].append(year)
                     columns["month"].append(month)
-        _add_official(base, dataset, columns)
+        if dataset not in SHORT_FIELDS:
+            _add_official(base, dataset, columns)
         table = pa.table(columns)
         pq.write_table(table, out / f"{dataset}.parquet", compression="zstd")
         written[dataset] = table.num_rows
@@ -170,6 +185,24 @@ class ChipStore:
 
     def available(self) -> bool:
         return (self._folder / "TaiwanStockShareholding.parquet").is_file()
+
+    def short_available(self) -> bool:
+        return all((self._folder / f"{dataset}.parquet").is_file() for dataset in SHORT_FIELDS)
+
+    def short_matrix(self, factor: str, turnover: np.ndarray) -> np.ndarray:
+        """symbols × sessions, SHORT_FACTORS; ``turnover`` (symbols × sessions, NT$) for the day-trading share."""
+        if factor in ("low_sbl_short", "sbl_cover_20"):
+            shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued")
+            balance = self._daily("TaiwanDailyShortSaleBalances", "SBLShortSalesCurrentDayBalance")
+            ratio = balance / shares.where(shares > 0)
+            frame = -ratio if factor == "low_sbl_short" else -(ratio - ratio.shift(20))
+        elif factor == "low_day_trade_20":
+            bought = self._daily("TaiwanStockDayTrading", "BuyAmount")             # dated the day before
+            value = pd.DataFrame(turnover.T, index=bought.index, columns=bought.columns).shift(1)
+            frame = -(bought.rolling(20, min_periods=10).sum() / value.rolling(20, min_periods=10).sum().where(lambda v: v > 0))
+        else:
+            raise ValueError(factor)
+        return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
 
     def _daily(self, dataset: str, field: str) -> pd.DataFrame:
         """sessions × codes, the value known on each session (dated the day before), carried forward

@@ -63,6 +63,7 @@ SHORT = {
     "high_52w_count_60": "新高次數", "range_position_60": "區間位置", "low_ivol_60": "特質低波",
     "low_pv_corr_20": "量價背離", "overnight_reversal_12": "隔夜反轉", "rl_tech_weekly": "技術機器人週",
     "season_month": "同月季節性", "dividend_ahead": "即將除息", "trust_quarter_end": "投信季底作帳",
+    "low_sbl_short": "借券賣出低", "sbl_cover_20": "借券回補", "low_day_trade_20": "當沖比例低",
 }
 
 

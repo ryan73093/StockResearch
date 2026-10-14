@@ -351,6 +351,8 @@ def main() -> int:
                         help="scan：只跑至少含一個 2026-10-13 新價量因子的組（先過新穎性閘門）")
     parser.add_argument("--require-time", action="store_true",
                         help="scan：只跑至少含一個 2026-10-14 時間因子的組（先過新穎性閘門）")
+    parser.add_argument("--require-short", action="store_true",
+                        help="scan：只跑至少含一個借券或當沖因子的組（先過新穎性閘門）")
     parser.add_argument("--resume", help="scan：第一階段已完成的搜尋資料夾，只跑第二階段")
     parser.add_argument("--pool", type=int, default=600, help="scan：從第一階段最好的前幾名裡挑彼此不同的最後名單")
     parser.add_argument("--by-excess", action="store_true",
@@ -789,15 +791,17 @@ def main() -> int:
             if not check["passed"]:
                 return 0
         require = args.require
-        if args.require_new or args.require_time:  # 2026-10-13/14: a new family, after the novelty gate
+        if args.require_new or args.require_time or args.require_short:  # a new family, after the novelty gate
             from quant_platform.research import daily as daily_research
 
-            family = daily_research.TIME_FACTORS if args.require_time else daily_research.RAW_V2
+            family = (daily_research.TIME_FACTORS if args.require_time else
+                      daily_research.SHORT_FACTORS if args.require_short else daily_research.RAW_V2)
             _data, novelty_fp = daily_research.load(Path(args.base))
             gate = scan.novelty(novelty_fp, list(family))
             print(f"新穎性閘門：{gate}", flush=True)
             (RESEARCH / "scans").mkdir(parents=True, exist_ok=True)
-            (RESEARCH / "scans" / ("novelty-time.json" if args.require_time else "novelty-raw-v2.json")).write_text(
+            (RESEARCH / "scans" / ("novelty-time.json" if args.require_time else
+                                   "novelty-short.json" if args.require_short else "novelty-raw-v2.json")).write_text(
                 json.dumps(gate, ensure_ascii=False, indent=1), encoding="utf-8")
             require = [name for name, item in gate.items() if item["kept"]]
             del novelty_fp, _data
