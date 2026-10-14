@@ -223,7 +223,7 @@ switch ($Name) {
         # the 47 signals, both universes and weightings, holding by the trend (69,372 candidates) — screened on
         # 2015-06..2020-09 now (the screen needs no dividends); the full-engine stage, the model, robot and blend
         # rules on engine 1.4.0, the statistics and the board wait for engine140 (dividends, the 211 rules).
-        $screened = Get-ChildItem (Join-Path $root "instanceesearch\scans") -Directory -Filter "scan-1.2.0-*" |
+        $screened = Get-ChildItem (Join-Path $root "instance\research\scans") -Directory -Filter "scan-1.2.0-*" |
             Where-Object { Test-Path (Join-Path $_.FullName "summary.json") }
         if (-not $screened) {                     # a restart after a reboot does not screen again
             Invoke-Step "1-screen" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "0")
