@@ -52,6 +52,10 @@ VALUE_TOLERANCE = 1.0        # NT$: rounding in the log
 UNITS_TOLERANCE = 1e-3
 
 
+FIXED_HOLD = ("使用者 2026-10-14：固定持有 20 個交易日是限制不是策略，買進後幾週都不能賣；"
+              "改追蹤同一規則的「月線上續抱」版本（紀錄保留）")
+
+
 def plan_of(item: dict[str, object]):
     """A tracked rule's cash flow: one lump sum (the owner's NT$300,000 account, the default since
     2026-10-04) or the monthly plan (items written before that carry no ``plan``)."""
@@ -261,6 +265,37 @@ class StockForwardTracker:
         if not self.log_path.is_file():
             return []
         return [json.loads(line) for line in self.log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def switch_to_trend(self, today: date, start: date) -> list[dict[str, object]]:
+        """2026-10-14 (使用者：前向觀察從 10/1 只有買入，哪來的賣出): a tracked daily rule that holds every stock a fixed
+        number of sessions cannot sell in its first weeks, a restriction the owner rejected on 10-13. It stops (its
+        records stay) and its trend version — kept while above its 20-session average, sold once below — is tracked
+        from ``start`` instead; the days from ``start`` are recorded as late on the next record."""
+        from quant_platform.research.daily import DailyRule
+
+        items = self.tracked()
+        known = {item["rule_hash"] for item in items}
+        moment = datetime.now(TAIPEI).isoformat(timespec="seconds")
+        added = []
+        for item in items:
+            if item.get("stopped") or item.get("kind") != "daily":
+                continue
+            rule = DailyRule.model_validate(item["rule"])
+            if rule.hold == "trend" or not rule.min_hold:
+                continue
+            trend = DailyRule.model_validate({**rule.model_dump(), "hold": "trend",
+                                              "name": (rule.name + "、月線上續抱")[:80]})
+            item.update(stopped=today.isoformat(), stop_reason=FIXED_HOLD)
+            if trend.rule_hash in known:
+                continue
+            added.append({**{key: item[key] for key in ("kind", "plan", "initial", "monthly") if key in item},
+                          "rule_hash": trend.rule_hash, "name": trend.name, "rule": trend.canonical(),
+                          "since": start.isoformat(), "added_at": moment,
+                          "reason": f"取代固定持有 {rule.min_hold} 個交易日的版本（{item['name'][:40]}）"})
+            known.add(trend.rule_hash)
+        self._folder.mkdir(parents=True, exist_ok=True)
+        self.tracked_path.write_text(json.dumps(items + added, ensure_ascii=False, indent=1), encoding="utf-8")
+        return added
 
     def record(self, today: date, now: datetime | None = None) -> list[dict[str, object]]:
         """Append the state of every tracked rule for today and for any earlier session since its

@@ -95,7 +95,11 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 # — what the platform can do, its numbers coming after 15:14 — decides on the day's close and fills in the
 # next session's closing auction (4–9% of the day's value), at most NEXT_DAY_PARTICIPATION. The rest is ordered
 # again at the session after.
-ENGINE_VERSION = "daily-1.4.0"
+# 1.4.1 (2026-10-14 夜；使用者：到底還有哪些東西是用舊的方式？數值到底對不對？): the same rules as 1.4.0; every trained
+# model retrained on the corrected data (the ex-dates on typhoon closures, 184 events, had been dropped — fake
+# overnight falls in the adjusted prices the models learned from), dividend_ahead by the calendar, and every rule
+# in the registry run again so no result on an older engine or an older model is left as the latest.
+ENGINE_VERSION = "daily-1.4.1"
 SAME_DAY_PARTICIPATION = 0.001              # an order's share of the stock's turnover that session, at most
 NEXT_DAY_PARTICIPATION = 0.005
 PRICE_LIMIT_WIDENED = date(2015, 6, 1)
@@ -2189,6 +2193,40 @@ def robot21_batch() -> list:
                       factors={"all_equal": 1.0}, **common)]
 
 
+def rerun_all_batch() -> list:
+    """2026-10-14 夜: every 100%-stock daily rule and blend whose latest result is in the registry, run again on engine
+    1.4.1 (the retrained models) — none left on an older engine. Rules holding 0050 (NO_0050) and the 17-way blend
+    are left out."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry
+
+    research = _Path("instance") / "research"
+    latest = {}
+    for record in TrialRegistry(research / "trials.jsonl").records():
+        if record.kind == "candidate" and record.period == "recent":
+            latest[record.spec_hash] = record
+    rules = []
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        except (OSError, ValueError, KeyError):
+            continue
+        if uses_0050(spec):
+            continue
+        try:
+            rule = parse_spec(spec)
+        except ValueError:
+            continue
+        if getattr(rule, "kind", None) == "blend" and len(rule.sleeves) > 4:
+            continue
+        rules.append(rule)
+    return rules
+
+
 def rerun140_batch() -> list:
     """2026-10-13 night: the same 211 rules on engine 1.4.0 (whole shares, dividends as paid, the turnover cap),
     filled the same day in the after-hours sessions. Not the next session (使用者 2026-10-14：要在 14:30 前算出
@@ -2216,4 +2254,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch}
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch}

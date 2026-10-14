@@ -309,6 +309,7 @@ def main() -> int:
                             "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
+    parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
     parser.add_argument("--family", default="etf", choices=("etf", "stocks", "daily"), help="stats：ETF、個股或每天決策規則")
     parser.add_argument("--rl-version", default="rl-overlay-1.1.0", choices=("rl-overlay-1.0.0", "rl-overlay-1.1.0"),
@@ -854,6 +855,9 @@ def main() -> int:
 
         day = date.fromisoformat(args.date) if args.date else datetime.now(TAIPEI).date()
         tracker = StockForwardTracker(RESEARCH)
+        if args.trend_from:                     # 2026-10-14: fixed-holding rules give way to their trend versions
+            switched = tracker.switch_to_trend(day, date.fromisoformat(args.trend_from))
+            print(f"改追蹤月線上續抱版本：{len(switched)} 個（{args.trend_from} 起）", flush=True)
         written = tracker.record(day)
         print(f"{day}：寫入 {len(written)} 筆個股規則前向紀錄", flush=True)
         for row in tracker.summary():

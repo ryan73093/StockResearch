@@ -208,3 +208,22 @@ def test_accounts_that_hold_0050_stop_and_new_ones_are_not_tracked(tmp_path):
     assert old["stopped"] == "2026-10-09" and "0050" in old["stop_reason"]
     written = tracker.record(date(2026, 10, 9), now=at(date(2026, 10, 9)))
     assert {record["rule_hash"] for record in written} == {pure.rule_hash}
+
+
+def test_fixed_holding_rules_give_way_to_their_trend_versions(tmp_path):
+    """2026-10-14 (使用者：前向從 10/1 只有買入，哪來的賣出): a fixed 20-session holding cannot sell for weeks."""
+    from quant_platform.research.daily import DailyRule
+
+    fixed = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3)
+    free = DailyRule(name="每天 6 個月動能：前 3 名", factors={"momentum_6": 1.0}, top=3, min_hold=0)
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    (folder / "tracked.json").write_text(json.dumps([
+        {"rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.canonical(), "kind": "daily", "plan": "seed",
+         "since": "2026-10-04"} for rule in (fixed, free)], ensure_ascii=False), encoding="utf-8")
+    tracker = StockForwardTracker(tmp_path, experiments=False)
+    added = tracker.switch_to_trend(date(2026, 10, 14), date(2026, 10, 1))
+    assert len(added) == 1 and added[0]["since"] == "2026-10-01" and added[0]["rule"]["hold"] == "trend"
+    items = {item["rule_hash"]: item for item in tracker.tracked()}
+    assert items[fixed.rule_hash]["stopped"] == "2026-10-14" and not items[free.rule_hash].get("stopped")
+    assert tracker.switch_to_trend(date(2026, 10, 15), date(2026, 10, 1)) == []          # done once

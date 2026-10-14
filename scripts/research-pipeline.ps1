@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -374,6 +374,23 @@ switch ($Name) {
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "audit" { Invoke-Step "audit" @("-m", "quant_platform.research", "trade-audit", "--broker", "cathay") }
+    "rebuild141" {
+        # 2026-10-14 夜（使用者：到底還有哪些東西是用舊的方式？）: every trained model again on the corrected data —
+        # the seven score models, the learned exit, the technical robots 1.0 and 1.1 and the robot 2.1 — then every rule
+        # in the registry on engine 1.4.1, the statistics, the board, the trade audit and the leak check.
+        foreach ($version in @("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0", "gbm-2.0.0", "gbm-2.1.0")) {
+            Invoke-Step "1-model-$version" @("-m", "quant_platform.research", "model", "--model-version", $version)
+        }
+        Invoke-Step "2-exits" @("-m", "quant_platform.research", "exits")
+        Invoke-Step "3-tech-rl-10" @("-m", "quant_platform.research", "tech-rl", "--tech-version", "tech-rl-1.0.0")
+        Invoke-Step "4-tech-rl-11" @("-m", "quant_platform.research", "tech-rl", "--tech-version", "tech-rl-1.1.0")
+        Invoke-Step "5-robot21" @("-m", "quant_platform.research", "factor-rl21")
+        Invoke-Step "6-rerun-all" @("-m", "quant_platform.research", "daily", "--name", "rerun_all", "--broker", "cathay")
+        Invoke-Step "7-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "8-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+        Invoke-Step "9-audit" @("-m", "quant_platform.research", "trade-audit", "--broker", "cathay")
+        Invoke-Step "10-leakcheck" @("-m", "quant_platform.research", "leakcheck")
+    }
     "robot21" {
         # 2026-10-14: the robot 2.1 over every factor and model score, its rule and yardstick, the statistics.
         Invoke-Step "1-train" @("-m", "quant_platform.research", "factor-rl21")
