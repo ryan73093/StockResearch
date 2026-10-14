@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot2", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -278,6 +278,22 @@ switch ($Name) {
         Invoke-Step "1-rule" @("-m", "quant_platform.research", "daily", "--name", "factormom", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "robot2" {
+        # 2026-10-14 (使用者：RL 為什麼學到不交易？目標設計有問題？): the technical robot 2.0 — always invested, it
+        # chooses the 20 technical factors' weights every 20 sessions, rewarded by the account against 0050 over those
+        # sessions (research/rl_timing.py); trained walk-forward, then its rule against "every factor alike" and
+        # technical factor momentum, the statistics and the board. Waits for factormom; keeps out of 12:00–14:45.
+        while (Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*research-pipeline.ps1*-Name factormom*" -or $_.CommandLine -like "*research-pipeline.ps1*-Name timefactors*" }) {
+            Start-Sleep -Seconds 300
+        }
+        while ((Get-Date).TimeOfDay -ge [TimeSpan]"12:00" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:45") {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-train" @("-m", "quant_platform.research", "tech-rl2")
+        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "robot2", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "4-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "engine131" {
         # 2026-10-13 evening: engine 1.3.1 (an unsold delisted holding is worthless) — the same 64 rules

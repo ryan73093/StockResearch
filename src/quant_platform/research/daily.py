@@ -187,7 +187,11 @@ CONSENSUS_FACTORS = {"t0_consensus": "T0 共識分數（25 個 T0 候選各自�
                      "dev_consensus": "開發期共識分數（180 個搜尋最後名單、只用 2015-06～2020-09 挑出，百分位平均）"}
 # 2026-10-14 (使用者：因子裡面有考慮到時間的部分嗎？): which factors to use, decided by their realised record over the
 # last year (research/factor_timing.py) — factor momentum. Built from the rule factors; not itself a model feature.
-META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現最好的 5 個因子的平均百分位，每天重選）"}
+META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現最好的 5 個因子的平均百分位，每天重選）",
+                # the technical robot's second design (research/rl_timing.py) and its two yardsticks
+                "rl_timing": "技術 RL 機器人 2.0（每 20 個交易日決定 20 個技術因子的權重，永遠滿倉）",
+                "tech_equal": "20 個技術因子平均（機器人 2.0 的對照）",
+                "tech_momentum": "技術因子動能（20 個技術因子中最近一年最強的 5 個；機器人 2.0 的對照）"}
 RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FACTORS, **META_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
@@ -383,8 +387,16 @@ class FactorPanel:
     def _compute(self, factor: str):
         if factor in META_FACTORS:
             from quant_platform.research.factor_timing import scores as timing_scores
+            from quant_platform.research.rl_timing import VERSION as ROBOT_VERSION
+            from quant_platform.research.rl_timing import factor_names
+            from quant_platform.research.rl_timing import scores as robot_scores
 
-            return timing_scores(self)                                                 # sessions × symbols
+            if factor == "factor_momentum":
+                return timing_scores(self)                                             # sessions × symbols
+            if factor == "tech_momentum":
+                return timing_scores(self, factor_names())
+            folder = Path(self.models) / ROBOT_VERSION if self.models is not None else Path("missing")
+            return robot_scores(self, folder, "equal" if factor == "tech_equal" else "robot")
         if factor in CONSENSUS_FACTORS:
             from quant_platform.research.consensus import scores as consensus_scores
 
@@ -1600,6 +1612,16 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         used = [name for name in factor_names if name in CONSENSUS_FACTORS]
         payload["consensus"] = (consensus_digest(history) if used == ["t0_consensus"]     # as first registered
                                 else {name: consensus_digest(history, name) for name in used})
+    if "factor_momentum" in factor_names and "statements" not in payload:   # its base factors read the statements
+        from quant_platform.research.fundamentals import digest as statements_digest
+
+        payload["statements"] = statements_digest(history, RECENT_END)
+    if "rl_timing" in factor_names:                             # 2026-10-14: the robot 2.0's trained weights
+        from quant_platform.research.model import models_root
+        from quant_platform.research.rl_timing import VERSION as ROBOT_VERSION
+        from quant_platform.research.rl_timing import digest as robot_digest
+
+        payload["robot"] = robot_digest(models_root(history) / ROBOT_VERSION)
     if any(name in TECH_FACTORS for name in factor_names):      # 2026-10-10: the technical robot's policies
         from quant_platform.research.tech_rl import digest as tech_digest
         from quant_platform.research.tech_rl import tech_dir
@@ -2121,6 +2143,18 @@ def factor_momentum_batch() -> list:
                       factors={"factor_momentum": 1.0}, top=20, check="weekly", industry_cap=0.3, hold="trend")]
 
 
+def robot2_batch() -> list:
+    """2026-10-14: the technical robot 2.0 and its two yardsticks, one rule each, otherwise the same: the top 20,
+    at most 3 in 10 from one industry, decided weekly, holding by the trend."""
+    common = {"top": 20, "check": "weekly", "industry_cap": 0.3, "hold": "trend"}
+    return [DailyRule(name="技術 RL 機器人 2.0：20 個技術因子的權重由機器人決定、前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"rl_timing": 1.0}, **common),
+            DailyRule(name="20 個技術因子平均：前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"tech_equal": 1.0}, **common),
+            DailyRule(name="技術因子動能：最近一年最強的 5 個技術因子、前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"tech_momentum": 1.0}, **common)]
+
+
 def rerun140_batch() -> list:
     """2026-10-13 night: the same 211 rules on engine 1.4.0 (whole shares, dividends as paid, the turnover cap),
     filled the same day in the after-hours sessions. Not the next session (使用者 2026-10-14：要在 14:30 前算出
@@ -2147,4 +2181,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
-           "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch}
+           "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
+           "robot2": robot2_batch}
