@@ -435,7 +435,7 @@
         <span class="timeline__text">
           {% if entry.status == 'ok' %}
             <strong>{{ entry.hypothesis or '（無假設）' }}</strong>
-            <span>{% for item in entry.accepted %}{{ item.name }}：3 年勝率 {{ '{:.0%}'.format(item.win_3y) if item.win_3y is not none else '—' }}、中位 {{ '{:+.2%}'.format(item.median_3y) if item.median_3y is not none else '—' }}{% if item.passes_gate %}（過開發期門檻）{% endif %}{% if not loop.last %}；{% endif %}{% else %}沒有可回測的設定{% endfor %}{% if entry.rejected %}；拒絕 {{ entry.rejected|length }} 個{% endif %}</span>
+            <span>{% for item in entry.accepted %}{{ item.name }}：3 年勝率 {{ '{:.0%}'.format(item.win_3y) if item.win_3y is number else '—' }}、中位 {{ '{:+.2%}'.format(item.median_3y) if item.median_3y is number else '—' }}{% if item.passes_gate %}（過開發期門檻）{% endif %}{% if not loop.last %}；{% endif %}{% else %}沒有可回測的設定{% endfor %}{% if entry.rejected %}；拒絕 {{ entry.rejected|length }} 個{% endif %}</span>
           {% else %}
             <strong>{{ {'budget_exceeded': '預算用完，停止', 'llm_error': '模型呼叫失敗', 'disabled': '未啟用'}.get(entry.status, entry.status) }}</strong>
             <span>{{ entry.error }}</span>
@@ -465,7 +465,7 @@
   </div>
   <p style="margin:0 0 10px"><strong>{{ weekly.verdict }}</strong></p>
   <ul class="reasons">
-    {% if weekly.best_new %}<li>本週最好的新設定：{{ weekly.best_new.name }}（3 年勝率 {{ '{:.0%}'.format(weekly.best_new.win_3y) if weekly.best_new.win_3y is not none else '—' }}、中位超額 {{ '{:+.2%}'.format(weekly.best_new.median_3y) if weekly.best_new.median_3y is not none else '—' }}）</li>{% endif %}
+    {% if weekly.best_new %}<li>本週最好的新設定：{{ weekly.best_new.name }}（3 年勝率 {{ '{:.0%}'.format(weekly.best_new.win_3y) if weekly.best_new.win_3y is number else '—' }}、中位超額 {{ '{:+.2%}'.format(weekly.best_new.median_3y) if weekly.best_new.median_3y is number else '—' }}）</li>{% endif %}
     {% for hypothesis in weekly.hypotheses %}<li>假設：{{ hypothesis }}</li>{% endfor %}
     {% if weekly.top_rejections %}<li>拒絕原因：{% for reason, count in weekly.top_rejections %}{{ reason }}（{{ count }}）{% if not loop.last %}、{% endif %}{% endfor %}</li>{% endif %}
     {% for event in weekly.promotions %}<li>晉級：{{ event.name }} {{ event.stage }} {{ event.outcome }}</li>{% endfor %}
@@ -562,7 +562,7 @@
           <td class="num" data-label="期末">{{ '{:,.0f}'.format(row.final) }}</td>
           <td class="num" data-label="XIRR">{{ '{:.1%}'.format(row.xirr) if row.xirr is not none else '—' }}</td>
           <td class="num {{ excess_class }}" data-label="比 0050">{{ '{:+.0%}'.format(row.excess) if row.excess is not none else '—' }}</td>
-          <td class="num" data-label="3 年勝率">{{ '{:.0%}'.format(row.win_3y) if row.win_3y is not none else '—' }}</td>
+          <td class="num" data-label="3 年勝率">{{ '{:.0%}'.format(row.win_3y) if row.win_3y is number else '—' }}</td>
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.drawdown) }}</td>
           <td class="num" data-label="隨機選股">{{ '{:+.0%}'.format(row.random) if row.random is not none else '—' }}</td>
           <td class="num" data-label="選預測最差">{{ '{:+.0%}'.format(row.worst) if row.worst is not none else '—' }}</td>

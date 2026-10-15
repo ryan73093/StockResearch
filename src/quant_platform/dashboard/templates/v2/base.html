@@ -124,6 +124,20 @@
         const text = heading ? [...heading.childNodes].filter((node) => node.nodeType === 3).map((node) => node.textContent).join('').trim() : '';
         return text || (heading ? heading.textContent.trim() : '') || `區塊 ${panels.indexOf(el) + 1}`;
       };
+      // two cards with the same heading (e.g. one per version) are told apart by the heading's badge, then a number
+      const names = panels.map((panel) => {
+        const name = label(panel);
+        const same = panels.filter((other) => label(other) === name).length > 1;
+        const badge = panel.querySelector('h2 .badge');
+        return same && badge && badge.textContent.trim() ? `${name}（${badge.textContent.trim()}）` : name;
+      });
+      const counts = names.reduce((map, name) => map.set(name, (map.get(name) || 0) + 1), new Map());
+      const nth = new Map();
+      names.forEach((name, i) => {
+        if (counts.get(name) < 2) return;
+        nth.set(name, (nth.get(name) || 0) + 1);
+        names[i] = `${name} ${nth.get(name)}`;
+      });
       const bar = document.createElement('div');
       bar.className = 'tabset__bar';
       bar.setAttribute('role', 'tablist');
@@ -133,7 +147,7 @@
         const button = document.createElement('button');
         button.type = 'button';
         button.setAttribute('role', 'tab');
-        button.textContent = label(panel);
+        button.textContent = names[i];
         button.dataset.target = panel.id;
         button.addEventListener('click', () => { show(panel.id); history.replaceState(null, '', `#${panel.id}`); });
         bar.appendChild(button);
@@ -149,7 +163,7 @@
         const hit = panels.find((panel) => panel.id === hash || panel.querySelector(`#${CSS.escape(hash)}`));
         return hit ? hit.id : null;
       };
-      show(wanted() || panels[0].id);
+      show(wanted() || (panels.find((panel) => panel.hasAttribute('data-tab-default')) || panels[0]).id);
       window.addEventListener('hashchange', () => { const id = wanted(); if (id) show(id); });
     });
   })();

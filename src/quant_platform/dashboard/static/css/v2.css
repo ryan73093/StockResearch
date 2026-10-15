@@ -285,7 +285,9 @@ a.theme-toggle[aria-current="page"] { color: var(--accent); border-color: var(--
 /* 2026-10-14: a heading never gives up its width to the note beside it (共同起跑線 came out one character a line);
    the note wraps under it when they do not fit on one line */
 .card__head { flex-wrap: wrap; }
-.card__head > h2 { flex: 0 0 auto; white-space: nowrap; }
+/* 2026-10-15: a heading keeps at least 14 characters' width (never one character per line) but wraps, badge and all,
+   when it is longer than the card (強化學習 3.0 and 個股規則 ran past the edge at 375 px). */
+.card__head > h2 { flex: 0 1 auto; min-width: min(100%, 14em); flex-wrap: wrap; white-space: normal; }
 .card__head > h2 + .muted, .card__head > h2 + span { flex: 1 1 320px; min-width: 0; }
 .card__foot { margin-top: 12px; }
 .card--quiet { box-shadow: none; background: color-mix(in srgb, var(--surface) 60%, var(--bg)); }

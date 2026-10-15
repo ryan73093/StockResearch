@@ -71,20 +71,26 @@
 
 {% if page.holders %}
 <section class="card">
-  <div class="card__head"><h2>前向觀察中持有它的規則</h2></div>
-  <ul class="reasons">
-    {% for holder in page.holders %}
-      <li><a href="/research/rules/{{ holder.rule_hash }}">{{ holder.name }}</a>：佔帳戶 {{ '{:.1%}'.format(holder.share) }}（{{ holder.date }}，{{ holder.since }} 起觀察）</li>
-    {% endfor %}
-  </ul>
+  <div class="card__head"><h2>前向觀察中持有它的規則 <span class="badge">{{ page.holders|length }} 個</span></h2></div>
+  {# 2026-10-15 (繼續優化): a table that scrolls inside the card with its header in view, not a 1,700 px list #}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th class="num">佔帳戶</th><th class="num">持有日</th><th class="num">開始觀察</th></tr></thead>
+      <tbody>
+      {% for holder in page.holders|sort(attribute='share', reverse=true) %}
+        <tr><td class="name" data-primary><a href="/research/rules/{{ holder.rule_hash }}">{{ holder.name }}</a></td>
+          <td class="num" data-label="佔帳戶">{{ '{:.1%}'.format(holder.share) }}</td><td class="num" data-label="持有日">{{ holder.date }}</td><td class="num" data-label="開始觀察">{{ holder.since }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>佔帳戶</b>：這檔股票市值占該規則前向帳戶的比例（依大到小排）。<b>持有日</b>：最近一次前向紀錄的日期。<b>開始觀察</b>：這個規則前向觀察的起始日。</p>
 </section>
 {% endif %}
 
 {% if item %}
-<p class="note" style="margin:0">排名：{{ page.snapshot_date }} 收盤後，和當天有成交、有這個因子數值的全部上市＋上櫃股票比；「前 5%」表示這個因子上比 95% 的股票強（低波動、不追飆股是越平穩排越前）。籌碼與基本面用 {{ page.snapshot_date }} 收盤前已公布的資料{% if page.chips_as_of %}，目前下載到 {{ page.chips_as_of }}{% endif %}；上櫃股的籌碼還在下載。「因子強弱」是研究頁因子分析的結論（2015-06 起每週排名、看之後 20 個交易日），不是對這檔股票的預測。</p>
-<div class="grid factor-grid">
-  {% for group in page.groups %}
-  <section class="card">
+{% for group in page.groups %}
+  <section class="card" data-tab="因子・{{ group.title }}">
     <div class="card__head"><h2>{{ group.title }}</h2></div>
     <div class="table-wrap">
       <table class="factor-table">
@@ -100,9 +106,9 @@
         </tbody>
       </table>
     </div>
+    <p class="col-help">排名：{{ page.snapshot_date }} 收盤後，和當天有成交、有這個因子數值的全部上市＋上櫃股票比；「前 5%」表示這個因子上比 95% 的股票強（低波動、不追飆股是越平穩排越前）。籌碼與基本面用 {{ page.snapshot_date }} 收盤前已公布的資料{% if page.chips_as_of %}，目前下載到 {{ page.chips_as_of }}{% endif %}；上櫃股的籌碼還在下載。「因子強弱」是研究頁因子分析的結論（2015-06 起每週排名、看之後 20 個交易日），不是對這檔股票的預測。</p>
   </section>
-  {% endfor %}
-</div>
+{% endfor %}
 {% else %}
 <section class="card"><p class="muted">今天的因子快照沒有這檔（可能當天沒有成交，或快照還沒建立）。</p></section>
 {% endif %}

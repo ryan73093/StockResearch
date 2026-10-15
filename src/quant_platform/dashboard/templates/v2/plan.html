@@ -12,8 +12,6 @@
 {% endblock %}
 {% block content %}
 {% if error %}<p class="form-error" role="alert"><strong>沒有儲存：</strong>{{ error }}</p>{% endif %}
-<div class="grid grid--main-side">
-  <div class="stack">
     {% if preview %}
     <section class="card card--highlight order-1" id="plan-preview">
       <div class="card__head"><h2>確認變更 <span class="badge badge--accent">將存成第 {{ preview.version }} 版</span></h2></div>
@@ -61,7 +59,7 @@
     </section>
     {% endif %}
 
-    <section class="card order-2" id="plan-form">
+    <section class="card order-2" id="plan-form"{% if error or not current %} data-tab-default{% endif %}>
       <div class="card__head"><h2>{{ '修改計畫（存成新版本）' if current else '填寫計畫' }}</h2></div>
       <form method="post" class="form">
         <div class="form__row">
@@ -108,9 +106,7 @@
         </div>
       </form>
     </section>
-  </div>
 
-  <aside class="stack">
     <section class="card order-3">
       <div class="card__head"><h2>版本紀錄</h2></div>
       {% if history %}
@@ -136,6 +132,4 @@
         <li>回測數字來自研究頁的歷史模擬，只作參考。</li>
       </ul>
     </section>
-  </aside>
-</div>
 {% endblock %}

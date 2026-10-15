@@ -294,3 +294,28 @@ def test_every_page_turns_its_cards_into_tabs(client):
         assert 'class="tabset" data-tabset' in body and "tabset__bar" in body
     system = client.get("/system").get_data(as_text=True)
     assert 'data-tab="排程與執行" id="runs"' in system
+
+
+def test_old_researcher_rounds_without_numbers_still_render(client, tmp_path):
+    """2026-10-15: an old AI-researcher round whose accepted spec has no win_3y/median_3y (a missing key, not None)
+    made the whole 舊設計紀錄 tab fail with 500."""
+    import json
+
+    research = tmp_path / "research"
+    research.mkdir(parents=True, exist_ok=True)
+    (research / "journal.jsonl").write_text(json.dumps(
+        {"round_id": "20261008T2300", "status": "ok", "hypothesis": "測試假設", "accepted": [{"name": "沒有數值的設定"}], "rejected": []},
+        ensure_ascii=False) + "\n", encoding="utf-8")
+    response = client.get("/research?tab=legacy")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "沒有數值的設定：3 年勝率 —、中位 —" in body
+
+
+def test_plan_market_and_stock_sections_are_tabs(client):
+    """2026-10-15 (繼續優化): the plan's two columns, the market's side-by-side grids and the stock's factor groups were
+    outside the tab set (always shown, so the page stayed long)."""
+    plan = client.get("/plan").get_data(as_text=True)
+    assert "grid--main-side" not in plan and 'id="plan-form" data-tab-default' in plan
+    market = client.get("/market").get_data(as_text=True)
+    assert market.count("data-tab=") in (0, 2)          # the grids are tabs whenever the snapshot exists

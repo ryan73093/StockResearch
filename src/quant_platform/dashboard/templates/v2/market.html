@@ -21,7 +21,7 @@
   <div class="kpi"><div class="kpi__label">上漲／下跌家數</div><div class="kpi__value"><span class="up">{{ market.advance }}</span><small>／</small><span class="down">{{ market.decline }}</span></div></div>
 </div>
 
-<div class="grid grid--half">
+<div class="grid grid--half" data-tab="指數與市場寬度" id="breadth">
   <section class="card">
     <div class="card__head"><h2>加權指數與 200 日均線（近一年）</h2></div>
     {% if market.chart %}
@@ -67,7 +67,7 @@
   <p class="note">產業別是 FinMind 的現行分類；只列 5 檔以上的產業。近 3 個月用還原權息後的價格；今天的漲跌是實際收盤價，除權息日會顯示成下跌。</p>
 </section>
 
-<div class="grid grid--half">
+<div class="grid grid--half" data-tab="今天漲跌最多" id="movers">
   {% for title, rows in (('今天漲最多', market.gainers), ('今天跌最多', market.losers)) %}
   <section class="card">
     <div class="card__head"><h2>{{ title }}</h2><span class="muted small">只列符合規則基本資格的股票</span></div>
