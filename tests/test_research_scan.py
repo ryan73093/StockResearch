@@ -179,3 +179,20 @@ def test_an_old_scan_gets_its_effective_trials_from_a_sample(tmp_path):
     assert found["screened"] == len(rows) and 1 <= found["groups_090"] <= found["sample"] <= 20
     total = scan.all_effective(tmp_path)
     assert total == {"scans": 1, "groups_090": found["groups_090"], "screened": len(rows)}
+
+
+def test_an_equal_screen_score_goes_to_the_more_liquid_stock():
+    """scan 1.2.1 (2026-10-15): the screen broke ties by stock code too."""
+    import numpy as np
+
+    from quant_platform.research import scan
+
+    stocks, sessions = 30, 3
+    score = np.full((stocks, sessions), 0.5)                          # every stock equal
+    liquidity = np.tile(np.arange(stocks, dtype=float)[:, None], (1, sessions))   # later rows more liquid
+    _returns, _entries, history = scan.account(score, np.ones(sessions, dtype=bool), np.arange(stocks), np.zeros((stocks, sessions)),
+                                               None, 0.0, 0.0, record=True, liquidity=liquidity)
+    assert sorted(history[0]) == list(range(stocks - scan.TOP, stocks))
+    _returns, _entries, plain = scan.account(score, np.ones(sessions, dtype=bool), np.arange(stocks), np.zeros((stocks, sessions)),
+                                             None, 0.0, 0.0, record=True)
+    assert sorted(plain[0]) == list(range(scan.TOP))                  # without it, the first rows (the old way)

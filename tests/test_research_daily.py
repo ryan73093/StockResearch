@@ -585,3 +585,20 @@ def test_a_flat_price_does_not_draw_the_inverse_volatility_weight():
     rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=4, weighting="inverse_vol")
     weights = daily.daily_weights(fp, rule, {days[-1]: [*swing, "1104.TW"]})[days[-1]]
     assert weights["1104.TW"] == pytest.approx(weights["1102.TW"])             # the median, not everything
+
+
+def test_equal_values_share_a_percentile_and_an_equal_score_goes_to_the_more_liquid_stock():
+    """Engine 1.4.2 (2026-10-15): equal factor values were ranked by stock code — where most stocks are equal
+    (attention notices, EPS growth at its cap, exactly at the 52-week high) a later-listed code ranked higher."""
+    from quant_platform.research.daily import _percentile
+
+    assert list(_percentile(np.array([0.0, 0.0, 0.0, 1.0]))) == pytest.approx([1 / 3, 1 / 3, 1 / 3, 1.0])
+    days = weekdays(date(2023, 1, 2), date(2024, 3, 29))
+    data = market(days, {f"{1101 + i}.TW": {day: 20.0 for day in days} for i in range(3)})    # no momentum at all
+    data.traded_value["1101.TW"] = {day: 6_000_000_000.0 for day in days}
+    data.traded_value["1103.TW"] = {day: 9_000_000_000.0 for day in days}                    # the most liquid
+    fp = FactorPanel(Panel(data))
+    last = len(days) - 1
+    single = DailyRule(name="t", factors={"momentum_3": 1.0}, top=3)
+    double = DailyRule(name="t", factors={"momentum_3": 1.0, "momentum_6": 1.0}, top=3)
+    assert fp.ranked(single, last) == fp.ranked(double, last) == ["1103.TW", "1101.TW", "1102.TW"]

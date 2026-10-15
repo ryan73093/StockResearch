@@ -41,7 +41,9 @@ import pandas as pd
 # a holding out of the top 60 stays while its adjusted close is above its 20-session average and goes once it is
 # not (DailyRule hold "trend"); the screen's account does the same with ``Arrays.rising``. Older scans' rows carry
 # no "hold" and keep the fixed 20 sessions.
-SCAN_VERSION = "scan-1.2.0"
+# 1.2.1 (2026-10-15, with daily engine 1.4.2): an equal screen score goes to the more liquid stock (20-session
+# turnover, ``Arrays.liquidity``), not the lower stock code.
+SCAN_VERSION = "scan-1.2.1"
 EXCESS_CORRELATION_LIMIT = 0.7
 DEV_END = date(2020, 9, 30)
 TOP, KEEP, MIN_HOLD, INDUSTRY_SHARE = 20, 3, 20, 0.3
@@ -132,6 +134,7 @@ class Arrays:
     bench: np.ndarray           # session: 0050's return from this close to the next
     days: list[date]
     rising: np.ndarray | None = None   # symbol × session: above its 20-session average (1.2.0; None in older scans)
+    liquidity: np.ndarray | None = None  # symbol × session: 20-session turnover, the tie-break (1.2.1)
 
 
 def prepare(data, fp, costs, folder: Path) -> Arrays:
@@ -179,6 +182,7 @@ def prepare(data, fp, costs, folder: Path) -> Arrays:
     np.save(folder / "weekly_days.npy", weekly_days)
     np.save(folder / "bench.npy", np.nan_to_num(bench))
     np.save(folder / "rising.npy", fp.rising()[:, first:last + 1].astype(np.uint8))
+    np.save(folder / "liquidity.npy", np.nan_to_num(fp.turnover_20[:, first:last + 1]).astype(np.float32))
     (folder / "meta.json").write_text(json.dumps({"names": names, "days": [day.isoformat() for day in days]},
                                                  ensure_ascii=False), encoding="utf-8")
     return load_arrays(folder)
@@ -190,7 +194,8 @@ def load_arrays(folder: Path) -> Arrays:
                   next_returns=np.load(folder / "next_returns.npy"), calm=np.load(folder / "calm.npy"),
                   industry=np.load(folder / "industry.npy"), weekly_days=np.load(folder / "weekly_days.npy"),
                   bench=np.load(folder / "bench.npy"), days=[date.fromisoformat(day) for day in meta["days"]],
-                  rising=np.load(folder / "rising.npy") if (folder / "rising.npy").is_file() else None)
+                  rising=np.load(folder / "rising.npy") if (folder / "rising.npy").is_file() else None,
+                  liquidity=np.load(folder / "liquidity.npy") if (folder / "liquidity.npy").is_file() else None)
 
 
 # --- stage 1 account -----------------------------------------------------------------------------
@@ -205,7 +210,7 @@ def score_of(arrays: Arrays, candidate: dict) -> np.ndarray:
 
 def account(score: np.ndarray, checks: np.ndarray, industry: np.ndarray, next_returns: np.ndarray,
             calm: np.ndarray | None, cost_in: float, cost_out: float, record: bool = False,
-            rising: np.ndarray | None = None):
+            rising: np.ndarray | None = None, liquidity: np.ndarray | None = None):
     """Daily returns after costs of the top-20 rule on ``score`` (symbols × sessions, NaN = not ranked),
     deciding on ``checks``; with ``record`` also the holdings after each session. With ``rising`` (hold
     "trend") a holding out of the zone stays while it is rising, instead of for its first MIN_HOLD sessions."""
@@ -224,7 +229,10 @@ def account(score: np.ndarray, checks: np.ndarray, industry: np.ndarray, next_re
             if valid.size == 0:
                 held = []
             else:
-                order = valid[np.argsort(-column[valid], kind="stable")].tolist()
+                if liquidity is None:
+                    order = valid[np.argsort(-column[valid], kind="stable")].tolist()
+                else:                             # 1.2.1: an equal score goes to the more liquid stock
+                    order = valid[np.lexsort((-liquidity[valid, t], -column[valid]))].tolist()
                 zone = set(order[: TOP * KEEP])
                 if rising is not None:
                     kept = [row for row in held if row in zone or (not np.isnan(column[row]) and rising[row, t])]
@@ -310,7 +318,7 @@ def evaluate(arrays: Arrays, candidate: dict, costs, record: bool = False):
     if trend and arrays.rising is None:
         raise ValueError("這次掃描的陣列沒有月線資料（scan 1.2.0 以前），不能評估月線上續抱")
     outcome = account(score_of(arrays, candidate), checks, arrays.industry, arrays.next_returns, calm,
-                      fee + slippage, fee + tax + slippage, record, arrays.rising if trend else None)
+                      fee + slippage, fee + tax + slippage, record, arrays.rising if trend else None, arrays.liquidity)
     years = (arrays.days[-1] - arrays.days[0]).days / 365.25
     return metrics(outcome[0], arrays.bench, years, outcome[1]), outcome
 

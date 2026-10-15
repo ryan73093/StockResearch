@@ -30,6 +30,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import numpy as np
+import pandas as pd
 
 from quant_platform.research.stock_rules import FACTORS, STANDARD_PLAN, Panel, StockRule
 
@@ -46,10 +47,16 @@ STRONG_T = 2.0
 
 
 def _ranks(values: np.ndarray) -> np.ndarray:
-    order = np.argsort(values, kind="stable")
-    ranks = np.empty(len(values))
-    ranks[order] = np.arange(len(values))
-    return ranks
+    """Ranks 1..n, equal values sharing their average (2026-10-15: they were ranked by stock code)."""
+    return pd.Series(values).rank(method="average").to_numpy()
+
+
+def _fifths(s: np.ndarray, r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The returns of the top and the bottom fifth by score; a group of equal scores is in only when its shared
+    rank is (2026-10-15: a fifth cut through equal scores by stock code). Either may be empty."""
+    ranks = _ranks(s)
+    fifth = max(1, len(s) // 5)
+    return r[ranks > len(s) - fifth + 0.5], r[ranks < fifth + 0.5]
 
 
 def monthly_factor_table(panel: Panel, factors: list[str], start: date, end: date,
@@ -78,12 +85,11 @@ def monthly_factor_table(panel: Panel, factors: list[str], start: date, end: dat
                     continue
                 s, r = score[mask], forward[mask]
                 ic = float(np.corrcoef(_ranks(s), _ranks(r))[0, 1])
-                order = np.argsort(-s, kind="stable")
-                fifth = max(1, count // 5)
-                top, bottom = r[order[:fifth]], r[order[-fifth:]]
+                top, bottom = _fifths(s, r)
                 rows.append({"date": current.isoformat(), "factor": factor, "n": count, "ic": ic,
-                             "spread": float(top.mean() - bottom.mean()), "top_excess": float(top.mean() - r.mean()),
-                             "top_vs_0050": None if index_return is None else float(top.mean() - index_return)})
+                             "spread": float(top.mean() - bottom.mean()) if len(top) and len(bottom) else None,
+                             "top_excess": float(top.mean() - r.mean()) if len(top) else None,
+                             "top_vs_0050": None if index_return is None or not len(top) else float(top.mean() - index_return)})
     return rows
 
 
@@ -100,20 +106,21 @@ def summarize(rows: list[dict[str, object]], factors: list[str]) -> dict[str, ob
             ics = [row["ic"] for row in chosen]
             mean = statistics.fmean(ics)
             deviation = statistics.stdev(ics) if len(ics) > 1 else 0.0
-            spreads = [row["spread"] for row in chosen]
-            tops = [row["top_excess"] for row in chosen]
+            spreads = [row["spread"] for row in chosen if row["spread"] is not None]
+            tops = [row["top_excess"] for row in chosen if row["top_excess"] is not None]
             versus = [row["top_vs_0050"] for row in chosen if row.get("top_vs_0050") is not None]
             periods[key] = {
                 "label": label, "months": len(chosen), "ic": round(mean, 4),
                 "t": round(mean / (deviation / math.sqrt(len(ics))), 2) if deviation else None,
                 "positive": round(sum(value > 0 for value in ics) / len(ics), 3),
-                "spread_year": round(statistics.fmean(spreads) * 12, 4),
-                "top_excess_year": round(statistics.fmean(tops) * 12, 4),
+                "spread_year": round(statistics.fmean(spreads) * 12, 4) if spreads else None,
+                "top_excess_year": round(statistics.fmean(tops) * 12, 4) if tops else None,
                 "top_vs_0050_year": round(statistics.fmean(versus) * 12, 4) if versus else None,
             }
         by_year: dict[str, list[float]] = {}
         for row in mine:
-            by_year.setdefault(row["date"][:4], []).append(row["spread"])
+            if row["spread"] is not None:
+                by_year.setdefault(row["date"][:4], []).append(row["spread"])
         output[factor] = {"label": FACTORS[factor], "periods": periods, "verdict": verdict(periods),
                           "spread_by_year": {year: round(sum(values), 4) for year, values in sorted(by_year.items())}}
     return output
@@ -275,13 +282,12 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None) -> Path:
                 continue
             s, r = score[mask], forward[mask]
             ic = float(np.corrcoef(_ranks(s), _ranks(r))[0, 1])
-            order = np.argsort(-s, kind="stable")
-            fifth = max(1, usable // 5)
-            top, bottom = r[order[:fifth]], r[order[-fifth:]]
+            top, bottom = _fifths(s, r)
             index_return = benchmark[later] / benchmark[day] - 1 if day in benchmark and later in benchmark else None
-            rows.append({"date": day.isoformat(), "factor": factor, "ic": ic, "spread": float(top.mean() - bottom.mean()),
-                         "top_excess": float(top.mean() - r.mean()),
-                         "top_vs_0050": None if index_return is None else float(top.mean() - index_return)})
+            rows.append({"date": day.isoformat(), "factor": factor, "ic": ic,
+                         "spread": float(top.mean() - bottom.mean()) if len(top) and len(bottom) else None,
+                         "top_excess": float(top.mean() - r.mean()) if len(top) else None,
+                         "top_vs_0050": None if index_return is None or not len(top) else float(top.mean() - index_return)})
     scale = 252 / HORIZON
     summary: dict[str, object] = {}
     for factor in factors:
@@ -293,16 +299,20 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None) -> Path:
                 continue
             ics = [row["ic"] for row in chosen]
             versus = [row["top_vs_0050"] for row in chosen if row["top_vs_0050"] is not None]
+            spreads = [row["spread"] for row in chosen if row["spread"] is not None]       # 2026-10-15: a fifth of
+            tops = [row["top_excess"] for row in chosen if row["top_excess"] is not None]  # equal scores is none
             deviation = statistics.stdev(ics) if len(ics) > 1 else 0.0
             periods[key] = {"label": label, "observations": len(chosen), "ic": round(statistics.fmean(ics), 4),
                             "t": round(statistics.fmean(ics) / (deviation / math.sqrt(len(ics))), 2) if deviation else None,
                             "positive": round(sum(value > 0 for value in ics) / len(ics), 3),
-                            "spread_year": round(statistics.fmean(row["spread"] for row in chosen) * scale, 4),
-                            "top_excess_year": round(statistics.fmean(row["top_excess"] for row in chosen) * scale, 4),
+                            "spread_year": round(statistics.fmean(spreads) * scale, 4) if spreads else None,
+                            "top_excess_year": round(statistics.fmean(tops) * scale, 4) if tops else None,
+                            "top_share": round(len(tops) / len(chosen), 3),
                             "top_vs_0050_year": round(statistics.fmean(versus) * scale, 4) if versus else None}
         by_year: dict[str, list[float]] = {}
         for row in mine:
-            by_year.setdefault(row["date"][:4], []).append(row["top_excess"])
+            if row["top_excess"] is not None:
+                by_year.setdefault(row["date"][:4], []).append(row["top_excess"])
         summary[factor] = {"label": daily.FACTOR_LABELS[factor], "periods": periods, "verdict": recent_verdict(periods),
                            "spread_by_year": {year: round(statistics.fmean(values) * scale, 4)
                                               for year, values in sorted(by_year.items())}}

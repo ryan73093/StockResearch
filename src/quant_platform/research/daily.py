@@ -99,7 +99,10 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 # model retrained on the corrected data (the ex-dates on typhoon closures, 184 events, had been dropped — fake
 # overnight falls in the adjusted prices the models learned from), dividend_ahead by the calendar, and every rule
 # in the registry run again so no result on an older engine or an older model is left as the latest.
-ENGINE_VERSION = "daily-1.4.1"
+# 1.4.2 (2026-10-15): equal factor values share their average percentile and an equal score goes to the more
+# liquid stock — both had gone by stock code (``_percentile``, ``FactorPanel.ranked``): where most stocks are
+# equal (attention notices, EPS growth at its cap, exactly at the 52-week high) a later-listed code ranked higher.
+ENGINE_VERSION = "daily-1.4.2"
 SAME_DAY_PARTICIPATION = 0.001              # an order's share of the stock's turnover that session, at most
 NEXT_DAY_PARTICIPATION = 0.005
 PRICE_LIMIT_WIDENED = date(2015, 6, 1)
@@ -769,14 +772,18 @@ class FactorPanel:
             for name, weight in rule.factors.items():
                 score += weight * _percentile(columns[name][mask])
         chosen = np.flatnonzero(mask)
-        order = np.argsort(-score, kind="stable")
+        # 1.4.2 (2026-10-15): an equal score goes to the more liquid stock (20-session turnover), not the lower code
+        order = np.lexsort((-self.turnover_20[chosen, position], -score))
         return [self.symbols[chosen[index]] for index in order]
 
 
 def _percentile(values: np.ndarray) -> np.ndarray:
+    """0 (lowest) to 1 (highest). 1.4.2 (2026-10-15): equal values share their average rank — they were ranked by
+    stock code, and for a factor where most stocks are equal (attention notices 83–93% at 0, EPS growth 16–23% at
+    its cap, 8% exactly at the 52-week high) a later-listed code ranked higher for no reason."""
     if len(values) == 1:
         return np.ones(1)
-    return np.argsort(np.argsort(values, kind="stable"), kind="stable") / (len(values) - 1)
+    return (pd.Series(values).rank(method="average").to_numpy() - 1) / (len(values) - 1)
 
 
 def check_days(sessions: list[date], check: str) -> set[date]:
@@ -2243,6 +2250,8 @@ def rerun_all_batch() -> list:
             latest[record.spec_hash] = record
     rules = []
     for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        if (record.metrics or {}).get("engine") == ENGINE_VERSION:
+            continue                            # 2026-10-15: already on this engine (e.g. tonight's scan finalists)
         try:
             spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
         except (OSError, ValueError, KeyError):

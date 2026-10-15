@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -397,6 +397,22 @@ switch ($Name) {
         Invoke-Step "4-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "5-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
         Invoke-Step "6-leakcheck" @("-m", "quant_platform.research", "leakcheck")
+    }
+    "rebuild142" {
+        # 2026-10-15: engine 1.4.2 (equal factor values share their percentile, an equal score goes to the more liquid
+        # stock — both had gone by stock code). After lendingfactors (it runs on 1.4.2 already): every rule in the
+        # registry not yet on 1.4.2 again, the statistics, the board, the trade audit and the leak check.
+        while (Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*research-pipeline.ps1*-Name lendingdata*" -or $_.CommandLine -like "*research-pipeline.ps1*-Name lendingfactors*" }) {
+            Start-Sleep -Seconds 300
+        }
+        while ((Get-Date).TimeOfDay -ge [TimeSpan]"12:00" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:45") {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-rerun-all" @("-m", "quant_platform.research", "daily", "--name", "rerun_all", "--broker", "cathay")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "3-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+        Invoke-Step "4-audit" @("-m", "quant_platform.research", "trade-audit", "--broker", "cathay")
+        Invoke-Step "5-leakcheck" @("-m", "quant_platform.research", "leakcheck")
     }
     "rebuild141" {
         # 2026-10-14 夜（使用者：到底還有哪些東西是用舊的方式？）: every trained model again on the corrected data —

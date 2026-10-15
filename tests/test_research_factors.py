@@ -42,3 +42,17 @@ def test_verdicts():
     cases = [periods(0.07, 0.05, 0.09), periods(0.05, -0.04, 0.03), periods(-0.03, -0.05, -0.02),
              periods(0.01, -0.01, 0.03), periods(0.05, 0.05)]
     assert [verdict(item) for item in cases] == ["強", "不穩", "反向", "弱", "弱"]
+
+
+def test_a_fifth_of_equal_scores_is_in_only_as_a_whole():
+    """2026-10-15: the top and bottom fifths cut through equal scores by stock code; now a group of equal scores is
+    in a fifth only when its shared rank is, and the IC uses shared ranks."""
+    import numpy as np
+
+    from quant_platform.research.factors import _fifths, _ranks
+
+    s = np.array([0.0] * 8 + [1.0, 2.0])
+    r = np.arange(10, dtype=float)
+    top, bottom = _fifths(s, r)
+    assert list(top) == [8.0, 9.0] and len(bottom) == 0                 # the eight equal zeros share rank 4.5
+    assert list(_ranks(np.array([3.0, 1.0, 1.0]))) == [3.0, 1.5, 1.5]
