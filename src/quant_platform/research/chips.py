@@ -70,6 +70,17 @@ LENDING_FACTORS = {
     "low_lending_20": "新借券少（20 日借券成交量佔發行股數，反向）",
     "lending_fee_not_rising": "借券費率沒有升高（近 20 日比前 60 日，反向）",
 }
+# 2026-10-15 (公司財務政策): what a company announces it pays out or raises, from FinMind's dividend policies
+# (TaiwanStockDividend, the date of the ex-rights announcement — later than the board's decision, never early; used
+# from the next session). A raised dividend is followed by better returns and a cash capital increase by worse
+# (Michaely, Thaler & Womack 1995; Loughran & Ritter 1995). Each holds 250 sessions; a stock without one is 0.
+CORPORATE = "CorporateEvents"
+CORPORATE_FACTORS = {
+    "dividend_raise": "股利調升（現金股利比一年前同期多多少，佔股價；公告後 250 日）",
+    "no_cash_issue": "沒有現金增資（現增新股佔發行股數，反向；公告後 250 日）",
+}
+CORPORATE_SESSIONS = 250
+SAME_PERIOD_DAYS = (305, 425)          # the payout "a year earlier": announced 305–425 days before
 FIELDS = {
     "TaiwanStockShareholding": ("ForeignInvestmentSharesRatio", "NumberOfSharesIssued"),
     "TaiwanStockPER": ("PER", "PBR"),
@@ -126,6 +137,7 @@ def build(history: str | Path, job=None) -> dict[str, int]:
     steps = list(FIELDS) + ["TaiwanStockInstitutionalInvestorsBuySell", "TaiwanStockMonthRevenue"]
     steps += [dataset for dataset in SHORT_FIELDS if (raw / dataset).is_dir()]      # once downloaded
     steps += [LENDING] if (raw / LENDING).is_dir() else []
+    steps += [CORPORATE] if (raw / "TaiwanStockDividend").is_dir() else []
     if job:
         job.update(total=len(steps), done=0, force=True)
     for index, dataset in enumerate(steps):
@@ -143,6 +155,14 @@ def build(history: str | Path, job=None) -> dict[str, int]:
                     for name in fields:
                         value = row.get(name)
                         columns[name].append(float(value) if isinstance(value, (int, float)) else None)
+        elif dataset == CORPORATE:            # one row per announcement: a dividend change or new shares
+            columns.update({"dividend_change": [], "cash_issue_shares": []})
+            for code, rows in _rows(raw, "TaiwanStockDividend"):
+                for day, change, shares in corporate_events(rows):
+                    columns["date"].append(day)
+                    columns["code"].append(code)
+                    columns["dividend_change"].append(change)
+                    columns["cash_issue_shares"].append(shares)
         elif dataset == LENDING:              # one row per stock and day: lots lent, and lots × fee rate (%)
             columns.update({"LendingVolume": [], "FeeVolume": []})
             for code, rows in _rows(raw, dataset):
@@ -205,6 +225,34 @@ def build(history: str | Path, job=None) -> dict[str, int]:
     return written
 
 
+def corporate_events(rows: list[dict]) -> list[tuple[date, float | None, float | None]]:
+    """(announcement date, change of the cash dividend per share against the payout announced 305–425 days before —
+    None when there is none to compare with, new shares from a cash capital increase — None when none) per row."""
+    def number(value) -> float:
+        return float(value) if isinstance(value, (int, float)) else 0.0
+
+    cash: list[tuple[date, float]] = []
+    events: list[tuple[date, float | None, float | None]] = []
+    for row in rows:
+        try:
+            day = date.fromisoformat(str(row.get("AnnouncementDate") or "")[:10])
+        except ValueError:
+            continue
+        amount = number(row.get("CashEarningsDistribution")) + number(row.get("CashStatutorySurplus"))
+        if amount > 0:
+            cash.append((day, amount))
+        shares = number(row.get("TotalNumberOfCashCapitalIncrease"))
+        if shares > 0:
+            events.append((day, None, shares))
+    cash.sort()
+    low, high = SAME_PERIOD_DAYS
+    for day, amount in cash:
+        earlier = [(abs((day - when).days - 365), paid) for when, paid in cash if low <= (day - when).days <= high]
+        if earlier:
+            events.append((day, amount - min(earlier)[1], None))
+    return sorted(events, key=lambda event: event[0])
+
+
 class ChipStore:
     """The chip and fundamental factors on a factor panel's sessions × stocks (symbols × sessions)."""
 
@@ -241,6 +289,38 @@ class ChipStore:
         frame = frame.reindex(sessions, fill_value=0.0).reindex(columns=self._codes, fill_value=0.0).fillna(0.0)
         counts = frame.shift(1, fill_value=0.0).rolling(window, min_periods=1).sum()   # dated before the session
         return np.ascontiguousarray((-counts).to_numpy(dtype=np.float32).T)
+
+    def corporate_available(self) -> bool:
+        return (self._folder / f"{CORPORATE}.parquet").is_file()
+
+    def corporate_matrix(self, factor: str) -> np.ndarray:
+        """symbols × sessions, CORPORATE_FACTORS: the latest announcement's value from the session after it for
+        CORPORATE_SESSIONS sessions, 0 otherwise (once the data starts)."""
+        field = "dividend_change" if factor == "dividend_raise" else "cash_issue_shares"
+        table = pq.read_table(self._folder / f"{CORPORATE}.parquet").to_pandas()
+        if self.until is not None:
+            table = table[pd.to_datetime(table["date"]) < pd.Timestamp(self.until)]
+        sessions = pd.to_datetime(pd.Index(self.sessions))
+        if not len(table):
+            return np.full((len(self._codes), len(sessions)), np.nan, dtype=np.float32)
+        first = pd.to_datetime(table["date"]).min()
+        table = table[table[field].notna()]
+        # announced on day d (after its close, or on a holiday): used from the first session after d
+        table = table.assign(at=sessions.searchsorted(pd.to_datetime(table["date"]).to_numpy(), side="right"))
+        table = table[(table["at"] < len(sessions)) & table["code"].isin(self._codes)]
+        frame = pd.DataFrame(np.nan, index=sessions, columns=self._codes)
+        if len(table):
+            values = table.groupby(["at", "code"])[field].sum().unstack()
+            frame.loc[sessions[values.index], values.columns] = values.to_numpy()
+        if factor == "dividend_raise":           # NT$ per share against the close of the session it is used from
+            close = pd.DataFrame(self._close.T, index=sessions, columns=self._codes)
+            frame = frame / close.where(close > 0)
+        else:                                     # new shares against the shares issued, reversed
+            shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued").set_axis(sessions)
+            frame = -frame / shares.where(shares > 0)
+        frame = frame.ffill(limit=CORPORATE_SESSIONS - 1).fillna(0.0)
+        frame.loc[frame.index <= first] = np.nan  # before the first announcement nothing is known
+        return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
 
     def lending_available(self) -> bool:
         return (self._folder / f"{LENDING}.parquet").is_file()

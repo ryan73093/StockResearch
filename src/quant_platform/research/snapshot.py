@@ -37,7 +37,7 @@ GROUPS = (
              "low_disposition_60")),
     ("基本面", ("earnings_yield", "book_to_price", "revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "roe_ttm",
              "gross_margin", "operating_margin_change", "eps_growth", "low_debt")),
-    ("時間與事件", ("season_month", "dividend_ahead", "trust_quarter_end")),       # 2026-10-14
+    ("時間與事件", ("season_month", "dividend_ahead", "trust_quarter_end", "dividend_raise", "no_cash_issue")),       # 2026-10-14
 )
 
 
