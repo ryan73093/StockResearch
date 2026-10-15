@@ -1035,6 +1035,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         snapshot, verdicts = _stock_context(research_dir)
         holders = []
         for row in StockForwardTracker(research_dir).summary():
+            if row.get("stopped"):                  # 2026-10-15: a stopped account's last holdings are not holdings
+                continue
             for item in row["holdings"]:
                 if item.get("code") == code and row["value"]:
                     value = float(item.get("units") or 0) * float(item.get("close") or 0)

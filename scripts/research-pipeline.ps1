@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -374,6 +374,30 @@ switch ($Name) {
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "audit" { Invoke-Step "audit" @("-m", "quant_platform.research", "trade-audit", "--broker", "cathay") }
+    "lendingdata" {
+        # 2026-10-15 (借券賣出餘額低是強因子，沿著借券這條線): FinMind's securities-lending deals (lots and fee rate of
+        # each deal) for every listed and TPEx code; the download pauses 13:30–15:30 by itself.
+        Invoke-Step "1-lending" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanStockSecuritiesLending")
+    }
+    "lendingfactors" {
+        # 2026-10-15: once lendingdata is in — the chip tables rebuilt with the lending deals, the factors' strength,
+        # every 1-4 signal set with a lending factor that passes the novelty gate (holding by the trend), the
+        # statistics, the board and the leak check. Keeps out of 12:00–14:45 and of 19:30–22:15 (the 21:30 chip
+        # update rewrites the same files while a scan would read them).
+        while (Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*research-pipeline.ps1*-Name lendingdata*" }) {
+            Start-Sleep -Seconds 300
+        }
+        while (((Get-Date).TimeOfDay -ge [TimeSpan]"12:00" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:45") -or
+               ((Get-Date).TimeOfDay -ge [TimeSpan]"19:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"22:15")) {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-chips" @("-m", "quant_platform.research.history", "chips")
+        Invoke-Step "2-factors" @("-m", "quant_platform.research", "factors", "--recent")
+        Invoke-Step "3-scan" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "80", "--pool", "5000", "--signals-min", "1", "--signals-max", "4", "--require-lending")
+        Invoke-Step "4-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "5-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+        Invoke-Step "6-leakcheck" @("-m", "quant_platform.research", "leakcheck")
+    }
     "rebuild141" {
         # 2026-10-14 夜（使用者：到底還有哪些東西是用舊的方式？）: every trained model again on the corrected data —
         # the seven score models, the learned exit, the technical robots 1.0 and 1.1 and the robot 2.1 — then every rule

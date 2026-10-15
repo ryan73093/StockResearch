@@ -31,6 +31,17 @@ TWSE = {
                                        "投信買進股數", "投信賣出股數", "投信買賣超股數"],
               "data": [["2330", "台積電", "7,044,515", "12,958,489", "-5,913,974", "0", "0", "100", "539,805", "286,127", "253,678"],
                        ["9105", "TDR", "1", "1", "0", "0", "0", "0", "0", "0", "0"]]},
+    # 2026-10-15: as answered for 2026-10-13 / 10-14 (TSMC 借券賣出當日餘額 12,031,514; day trading 4,878,000 shares)
+    "sbl": {"stat": "OK", "fields": ["代號", "名稱", "前日餘額", "賣出", "買進", "現券", "今日餘額", "次一營業日限額", "前日餘額",
+                                     "當日賣出", "當日還券", "當日調整", "當日餘額", "次一營業日可限額", "備註"],
+            "data": [["00403A", "ETF", "1", "0", "0", "0", "1", "1", "1", "0", "0", "0", "1", "1", " "],
+                     ["2330", "台積電", "23,000", "2,000", "2,000", "0", "23,000", "6,483,092,516", "11,995,514", "42,000",
+                      "6,000", "0", "12,031,514", "7,026,738", " "]]},
+    "daytrade": {"stat": "OK", "tables": [
+        {"fields": ["當日沖銷交易總成交股數", "當日沖銷交易總成交股數占市場比重%", "當日沖銷交易總買進成交金額"], "data": [["1", "1", "1"]]},
+        {"fields": ["證券代號", "證券名稱", "暫停現股賣出後現款買進當沖註記", "當日沖銷交易成交股數", "當日沖銷交易買進成交金額",
+                    "當日沖銷交易賣出成交金額"],
+         "data": [["2330", "台積電", "", "4,878,000", "12,229,475,000", "12,299,340,000"]]}]},
 }
 TPEX = {
     "holding": {"stat": "ok", "tables": [{"fields": ["排行", "代號", "名稱", "發行股數(A)", "僑外資及陸資尚可投資股數B=A*F-C",
@@ -44,6 +55,16 @@ TPEX = {
     "insti": {"stat": "ok", "tables": [{"fields": ["代號", "名稱"] + ["買進股數", "賣出股數", "買賣超股數"] * 4,
                                          "data": [["6488", "環球晶", "4,366,400", "5,229,267", "-862,867", "0", "0", "0",
                                                    "4,366,400", "5,229,267", "-862,867", "106,000", "161", "105,839"]]}]},
+    "sbl": {"stat": "ok", "tables": [{"fields": ["股票代號", "股票名稱", "前日餘額", "賣出", "買進", "現券", "當日餘額", "限額",
+                                                  "前日餘額", "當日賣出", "當日還券", "當日調整數額", "當日餘額",
+                                                  "次一營業日可借券賣出限額", "備註"],
+                                       "data": [["6488", "環球晶", "1", "0", "0", "0", "486,000", "1", "26,588,000", "484,000",
+                                                 "5,813,000", "0", "21,259,000", "1", " "]]}]},
+    "daytrade": {"stat": "ok", "tables": [
+        {"fields": ["當日沖銷交易總成交股數", "當日沖銷交易總成交股數占市場比重"], "data": [["572,297,000", "23.07%"]]},
+        {"fields": ["證券代號", "證券名稱", "暫停現股賣出後現款買進當沖註記", "當日沖銷交易成交股數", "當日沖銷交易買進成交金額",
+                    "當日沖銷交易賣出成交金額"],
+         "data": [["6488", "環球晶", " ", "4,940,000", "4,994,515,000", "5,000,000,000"]]}]},
 }
 
 
@@ -62,12 +83,24 @@ def test_every_report_parses_into_the_chip_columns():
     assert parse("tpex", "insti", TPEX["insti"], DAY)[0] == {"date": DAY, "code": "6488", "foreign_net": -862_867,
                                                              "trust_net": 105_839}
     assert parse("twse", "per", {"stat": "很抱歉，沒有符合條件的資料!"}, DAY) == []
+    assert parse("twse", "sbl", TWSE["sbl"], DAY) == [
+        {"date": DAY, "code": "2330", "SBLShortSalesCurrentDayBalance": 12_031_514, "MarginShortSalesCurrentDayBalance": 23_000}]
+    assert parse("tpex", "sbl", TPEX["sbl"], DAY) == [
+        {"date": DAY, "code": "6488", "SBLShortSalesCurrentDayBalance": 21_259_000, "MarginShortSalesCurrentDayBalance": 486_000}]
+    assert parse("twse", "daytrade", TWSE["daytrade"], DAY) == [
+        {"date": DAY, "code": "2330", "BuyAmount": 12_229_475_000, "Volume": 4_878_000}]
+    assert parse("tpex", "daytrade", TPEX["daytrade"], DAY) == [
+        {"date": DAY, "code": "6488", "BuyAmount": 4_994_515_000, "Volume": 4_940_000}]
 
 
 def test_reports_fill_the_days_finmind_lacks(tmp_path):
     base = tmp_path / "history"
     finmind = base / "raw" / "finmind" / "TaiwanStockShareholding"
     finmind.mkdir(parents=True)
+    short = base / "raw" / "finmind" / "TaiwanDailyShortSaleBalances"      # the one-time download (2026-10-14)
+    short.mkdir(parents=True)
+    (short / "2330.json.gz").write_bytes(gzip.compress(json.dumps({"data": [
+        {"date": "2026-10-02", "SBLShortSalesCurrentDayBalance": 11_000_000, "MarginShortSalesCurrentDayBalance": 20}]}).encode()))
     (finmind / "2330.json.gz").write_bytes(gzip.compress(json.dumps({"data": [
         {"date": "2026-10-02", "ForeignInvestmentSharesRatio": 69.0, "NumberOfSharesIssued": 25_932_370_067}]}).encode()))
     reports = {**{("twse", name): payload for name, payload in TWSE.items()},
@@ -77,14 +110,16 @@ def test_reports_fill_the_days_finmind_lacks(tmp_path):
     def answer(url):
         asked.append(url)
         exchange = "twse" if "twse.com.tw" in url else "tpex"
-        name = next(name for name, part in (("holding", "QFII"), ("holding", "qfii"), ("per", "BWIBBU"), ("per", "peQry"),
+        name = next(name for name, part in (("sbl", "TWT93U"), ("sbl", "margin/sbl"), ("daytrade", "TWTB4U"),
+                                             ("daytrade", "intraday/stat"),
+                                             ("holding", "QFII"), ("holding", "qfii"), ("per", "BWIBBU"), ("per", "peQry"),
                                              ("margin", "MARGN"), ("margin", "margin/"), ("insti", "T86"), ("insti", "dailyTrade"))
                     if part in url)
         return reports[(exchange, name)]
 
     client = OfficialHistoryClient(base / "raw", fetch_json=answer, min_interval=0, today=lambda: date(2026, 10, 6))
     result = fetch(base, client, [date(2026, 10, 2), DAY], date(2026, 10, 6))
-    assert len(asked) == 16 and result["rows"]["twse_holding"] == 2 and result["rows"]["tpex_insti"] == 2
+    assert len(asked) == 24 and result["rows"]["twse_holding"] == 2 and result["rows"]["tpex_insti"] == 2
     assert (base / "raw" / f"{key('twse', 'per', DAY)}.json").is_file()
     build(base)
     rows = pq.read_table(base / "chips" / "TaiwanStockShareholding.parquet").to_pylist()
@@ -94,6 +129,11 @@ def test_reports_fill_the_days_finmind_lacks(tmp_path):
                       (date(2026, 10, 2), "6488"): 40.0, (DAY, "6488"): 40.0}
     flows = pq.read_table(base / "chips" / "TaiwanStockInstitutionalInvestorsBuySell.parquet").to_pylist()
     assert {(row["code"], row["foreign_net"]) for row in flows if row["date"] == DAY} == {("2330", -5_913_874), ("6488", -862_867)}
+    # 2026-10-15: the short-selling file is extended by the reports too (FinMind's 10-02 kept)
+    lent = {(row["date"], row["code"]): row["SBLShortSalesCurrentDayBalance"]
+            for row in pq.read_table(base / "chips" / "TaiwanDailyShortSaleBalances.parquet").to_pylist()}
+    assert lent[(date(2026, 10, 2), "2330")] == 11_000_000 and lent[(DAY, "2330")] == 12_031_514
+    assert lent[(DAY, "6488")] == 21_259_000
 
 
 def revenue_row(code, month="11508", compiled="1150917", revenue="514805337"):

@@ -310,6 +310,8 @@ def main() -> int:
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
+    parser.add_argument("--stop-ai-account", action="store_true",
+                        help="forward：停止追蹤「AI 研究員（整體）」帳戶（沒有合格規則時整個放 0050；紀錄保留）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
     parser.add_argument("--family", default="etf", choices=("etf", "stocks", "daily"), help="stats：ETF、個股或每天決策規則")
     parser.add_argument("--rl-version", default="rl-overlay-1.1.0", choices=("rl-overlay-1.0.0", "rl-overlay-1.1.0"),
@@ -352,6 +354,8 @@ def main() -> int:
                         help="scan：只跑至少含一個 2026-10-13 新價量因子的組（先過新穎性閘門）")
     parser.add_argument("--require-time", action="store_true",
                         help="scan：只跑至少含一個 2026-10-14 時間因子的組（先過新穎性閘門）")
+    parser.add_argument("--require-lending", action="store_true",
+                        help="scan：只跑至少含一個借券費率或借券量因子的組（先過新穎性閘門）")
     parser.add_argument("--require-short", action="store_true",
                         help="scan：只跑至少含一個借券、當沖、注意或處置因子的組（先過新穎性閘門）")
     parser.add_argument("--resume", help="scan：第一階段已完成的搜尋資料夾，只跑第二階段")
@@ -813,18 +817,19 @@ def main() -> int:
             if not check["passed"]:
                 return 0
         require = args.require
-        if args.require_new or args.require_time or args.require_short:  # a new family, after the novelty gate
+        if args.require_new or args.require_time or args.require_short or args.require_lending:  # after the novelty gate
             from quant_platform.research import daily as daily_research
 
             family = (daily_research.TIME_FACTORS if args.require_time else
                       {**daily_research.SHORT_FACTORS, **daily_research.ALERT_FACTORS} if args.require_short
-                      else daily_research.RAW_V2)
+                      else daily_research.LENDING_FACTORS if args.require_lending else daily_research.RAW_V2)
             _data, novelty_fp = daily_research.load(Path(args.base))
             gate = scan.novelty(novelty_fp, list(family))
             print(f"新穎性閘門：{gate}", flush=True)
             (RESEARCH / "scans").mkdir(parents=True, exist_ok=True)
             (RESEARCH / "scans" / ("novelty-time.json" if args.require_time else
-                                   "novelty-short.json" if args.require_short else "novelty-raw-v2.json")).write_text(
+                                   "novelty-short.json" if args.require_short else
+                                   "novelty-lending.json" if args.require_lending else "novelty-raw-v2.json")).write_text(
                 json.dumps(gate, ensure_ascii=False, indent=1), encoding="utf-8")
             require = [name for name, item in gate.items() if item["kept"]]
             del novelty_fp, _data
@@ -855,6 +860,11 @@ def main() -> int:
 
         day = date.fromisoformat(args.date) if args.date else datetime.now(TAIPEI).date()
         tracker = StockForwardTracker(RESEARCH)
+        if args.stop_ai_account:                # 2026-10-15: it held nothing but 0050 (META_STOPPED)
+            from quant_platform.research.stock_forward import META_AI, META_STOPPED
+
+            print("停止 AI 研究員（整體）帳戶：" + ("完成" if tracker.stop(META_AI["rule_hash"], day, META_STOPPED) else "沒有在追蹤"),
+                  flush=True)
         if args.trend_from:                     # 2026-10-14: fixed-holding rules give way to their trend versions
             switched = tracker.switch_to_trend(day, date.fromisoformat(args.trend_from))
             print(f"改追蹤月線上續抱版本：{len(switched)} 個（{args.trend_from} 起）", flush=True)

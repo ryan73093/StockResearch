@@ -59,6 +59,17 @@ ALERT_FACTORS = {
     "low_attention_20": "不過熱（20 日內被列注意股的次數，反向）",
     "low_disposition_60": "未被處置（60 日內被公告處置的次數，反向）",
 }
+# 2026-10-15 (借券賣出餘額低是強因子，沿著借券這條線): what borrowing a stock costs and how much of it is borrowed, from
+# FinMind's securities-lending deals (TaiwanStockSecuritiesLending: each deal's lots and fee rate, published after the
+# close: used from the next session). A stock short sellers want is borrowed a lot and costs more to borrow (Drechsler
+# & Drechsler 2014, the shorting premium). The fee is unknown for a stock without a deal in the window (left out of
+# the ranking); new borrowing is 0 on a session without a deal once the data starts.
+LENDING = "TaiwanStockSecuritiesLending"
+LENDING_FACTORS = {
+    "low_lending_fee_60": "借券費率低（60 日成交量加權平均費率，反向）",
+    "low_lending_20": "新借券少（20 日借券成交量佔發行股數，反向）",
+    "lending_fee_not_rising": "借券費率沒有升高（近 20 日比前 60 日，反向）",
+}
 FIELDS = {
     "TaiwanStockShareholding": ("ForeignInvestmentSharesRatio", "NumberOfSharesIssued"),
     "TaiwanStockPER": ("PER", "PBR"),
@@ -77,7 +88,9 @@ def _rows(raw: Path, dataset: str):
 
 
 OFFICIAL = {"TaiwanStockShareholding": "holding", "TaiwanStockPER": "per",
-            "TaiwanStockMarginPurchaseShortSale": "margin", "TaiwanStockInstitutionalInvestorsBuySell": "insti"}
+            "TaiwanStockMarginPurchaseShortSale": "margin", "TaiwanStockInstitutionalInvestorsBuySell": "insti",
+            # 2026-10-15: the short-selling datasets are extended night by night too (the forward rules use them)
+            "TaiwanDailyShortSaleBalances": "sbl", "TaiwanStockDayTrading": "daytrade"}
 
 
 def _add_official(base: Path, dataset: str, columns: dict[str, list]) -> int:
@@ -111,6 +124,7 @@ def build(history: str | Path, job=None) -> dict[str, int]:
     written: dict[str, int] = {}
     steps = list(FIELDS) + ["TaiwanStockInstitutionalInvestorsBuySell", "TaiwanStockMonthRevenue"]
     steps += [dataset for dataset in SHORT_FIELDS if (raw / dataset).is_dir()]      # once downloaded
+    steps += [LENDING] if (raw / LENDING).is_dir() else []
     if job:
         job.update(total=len(steps), done=0, force=True)
     for index, dataset in enumerate(steps):
@@ -128,6 +142,22 @@ def build(history: str | Path, job=None) -> dict[str, int]:
                     for name in fields:
                         value = row.get(name)
                         columns[name].append(float(value) if isinstance(value, (int, float)) else None)
+        elif dataset == LENDING:              # one row per stock and day: lots lent, and lots × fee rate (%)
+            columns.update({"LendingVolume": [], "FeeVolume": []})
+            for code, rows in _rows(raw, dataset):
+                days: dict[str, list[float]] = {}
+                for row in rows:
+                    lots, fee = row.get("volume"), row.get("fee_rate")
+                    if not isinstance(lots, (int, float)) or lots <= 0 or not isinstance(fee, (int, float)):
+                        continue
+                    total = days.setdefault(row["date"], [0.0, 0.0])
+                    total[0] += lots
+                    total[1] += lots * fee
+                for day in sorted(days):
+                    columns["date"].append(date.fromisoformat(day))
+                    columns["code"].append(code)
+                    columns["LendingVolume"].append(days[day][0])
+                    columns["FeeVolume"].append(days[day][1])
         elif dataset == "TaiwanStockInstitutionalInvestorsBuySell":
             columns.update({"foreign_net": [], "trust_net": []})
             for code, rows in _rows(raw, dataset):
@@ -164,8 +194,7 @@ def build(history: str | Path, job=None) -> dict[str, int]:
                     columns["revenue"].append(float(row["revenue"]))
                     columns["year"].append(year)
                     columns["month"].append(month)
-        if dataset not in SHORT_FIELDS:
-            _add_official(base, dataset, columns)
+        _add_official(base, dataset, columns)
         table = pa.table(columns)
         pq.write_table(table, out / f"{dataset}.parquet", compression="zstd")
         written[dataset] = table.num_rows
@@ -211,6 +240,47 @@ class ChipStore:
         frame = frame.reindex(sessions, fill_value=0.0).reindex(columns=self._codes, fill_value=0.0).fillna(0.0)
         counts = frame.shift(1, fill_value=0.0).rolling(window, min_periods=1).sum()   # dated before the session
         return np.ascontiguousarray((-counts).to_numpy(dtype=np.float32).T)
+
+    def lending_available(self) -> bool:
+        return (self._folder / f"{LENDING}.parquet").is_file()
+
+    def lending_matrix(self, factor: str) -> np.ndarray:
+        """symbols × sessions, LENDING_FACTORS (dated the day before)."""
+        lots, weighted = self._lending()
+
+        def fee(start: int, length: int) -> pd.DataFrame:     # lots-weighted fee of sessions t-start-length+1 .. t-start
+            lent = lots.shift(start).rolling(length, min_periods=length).sum()
+            return weighted.shift(start).rolling(length, min_periods=length).sum() / lent.where(lent > 0)
+
+        if factor == "low_lending_fee_60":
+            frame = -fee(0, 60)
+        elif factor == "low_lending_20":
+            shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued")
+            frame = -(lots.rolling(20, min_periods=20).sum() * 1000 / shares.where(shares > 0))
+        elif factor == "lending_fee_not_rising":
+            frame = -(fee(0, 20) - fee(20, 60))
+        else:
+            raise ValueError(factor)
+        return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
+
+    def _lending(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """sessions × codes: lots lent and lots × fee each session — 0 without a deal once the data starts —
+        dated the day before."""
+        if "lending" not in self._frames:
+            table = pq.read_table(self._folder / f"{LENDING}.parquet").to_pandas()
+            if self.until is not None:
+                table = table[pd.to_datetime(table["date"]) < pd.Timestamp(self.until)]
+            sessions = pd.to_datetime(pd.Index(self.sessions))
+            first = pd.to_datetime(table["date"]).min()
+            frames = []
+            for field in ("LendingVolume", "FeeVolume"):
+                frame = table.pivot_table(index="date", columns="code", values=field, aggfunc="sum")
+                frame.index = pd.to_datetime(frame.index)
+                frame = frame.reindex(sessions).reindex(columns=self._codes).fillna(0.0)
+                frame.loc[frame.index < first] = np.nan
+                frames.append(frame.shift(1))                       # published after the close: next session
+            self._frames["lending"] = frames
+        return self._frames["lending"]
 
     def short_available(self) -> bool:
         return all((self._folder / f"{dataset}.parquet").is_file() for dataset in SHORT_FIELDS)

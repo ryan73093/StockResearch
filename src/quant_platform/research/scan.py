@@ -64,6 +64,7 @@ SHORT = {
     "low_pv_corr_20": "量價背離", "overnight_reversal_12": "隔夜反轉", "rl_tech_weekly": "技術機器人週",
     "season_month": "同月季節性", "dividend_ahead": "即將除息", "trust_quarter_end": "投信季底作帳",
     "low_sbl_short": "借券賣出低", "sbl_cover_20": "借券回補", "low_day_trade_20": "當沖比例低",
+    "low_lending_fee_60": "借券費率低", "low_lending_20": "新借券少", "lending_fee_not_rising": "借券費率未升",
     "low_attention_20": "不過熱", "low_disposition_60": "未被處置",
 }
 

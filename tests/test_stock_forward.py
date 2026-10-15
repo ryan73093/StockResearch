@@ -161,6 +161,12 @@ def test_the_ai_researcher_account_follows_its_best_rule_from_each_quarter(tmp_p
                            "trial_id": 7}])
     monkeypatch.setattr(stock_forward, "best_ai_rule", lambda base: next(choices))
     assert review_days(days, date(2026, 10, 1), date(2027, 1, 15)) == [date(2026, 10, 1), date(2027, 1, 1)]
+    # 2026-10-15: the account is no longer added by itself (it held only 0050); tracked as it was from 10-01
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "tracked.json").write_text(json.dumps([{**META_AI, "rule": {}, "plan": "seed", "initial": 300_000,
+                                                      "monthly": 10_000, "since": "2026-10-01"}], ensure_ascii=False),
+                                         encoding="utf-8")
     tracker = StockForwardTracker(tmp_path, min_quotes=1)
     tracker.record(date(2026, 10, 1), now=at(date(2026, 10, 1)))
     assert any(item["rule_hash"] == META_AI["rule_hash"] for item in tracker.tracked())
@@ -227,3 +233,32 @@ def test_fixed_holding_rules_give_way_to_their_trend_versions(tmp_path):
     items = {item["rule_hash"]: item for item in tracker.tracked()}
     assert items[fixed.rule_hash]["stopped"] == "2026-10-14" and not items[free.rule_hash].get("stopped")
     assert tracker.switch_to_trend(date(2026, 10, 15), date(2026, 10, 1)) == []          # done once
+
+
+def test_blends_with_fixed_holding_sleeves_give_way_too_and_the_ai_account_stops(tmp_path):
+    """2026-10-15: the three tracked blends still held each sleeve a fixed 20 sessions; the AI researcher's account
+    held nothing but 0050 (paused, no qualifying rule)."""
+    from quant_platform.research.blend import BlendRule, Sleeve
+    from quant_platform.research.daily import DailyRule
+    from quant_platform.research.stock_forward import META_AI, META_STOPPED
+
+    fixed = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3)
+    trend = DailyRule(name="每天 6 個月動能：前 3 名", factors={"momentum_6": 1.0}, top=3, min_hold=0, hold="trend")
+    blend = BlendRule(name="組合：動能各半", sleeves=(Sleeve(rule=fixed, share=0.5), Sleeve(rule=trend, share=0.5)))
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    (folder / "tracked.json").write_text(json.dumps([
+        {"rule_hash": blend.rule_hash, "name": blend.name, "rule": blend.canonical(), "kind": "blend", "plan": "seed",
+         "since": "2026-10-09"},
+        {**META_AI, "rule": {}, "plan": "seed", "since": "2026-10-12"}], ensure_ascii=False), encoding="utf-8")
+    tracker = StockForwardTracker(tmp_path, experiments=False)
+    added = tracker.switch_to_trend(date(2026, 10, 15), date(2026, 10, 1))
+    assert len(added) == 1 and added[0]["kind"] == "blend" and added[0]["since"] == "2026-10-01"
+    sleeves = added[0]["rule"]["sleeves"]
+    assert [sleeve["rule"]["hold"] for sleeve in sleeves] == ["trend", "trend"] and sleeves[1]["rule"] == trend.canonical()
+    assert "1 個子策略" in added[0]["reason"]
+    assert tracker.stop(META_AI["rule_hash"], date(2026, 10, 15), META_STOPPED)
+    assert not tracker.stop(META_AI["rule_hash"], date(2026, 10, 16), META_STOPPED)      # already stopped
+    items = {item["rule_hash"]: item for item in tracker.tracked()}
+    assert items[blend.rule_hash]["stopped"] == "2026-10-15" and "0050" in items[META_AI["rule_hash"]]["stop_reason"]
+    assert tracker.sync(date(2026, 10, 16)) == []             # and the AI account is not added again

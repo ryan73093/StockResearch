@@ -54,6 +54,8 @@ UNITS_TOLERANCE = 1e-3
 
 FIXED_HOLD = ("使用者 2026-10-14：固定持有 20 個交易日是限制不是策略，買進後幾週都不能賣；"
               "改追蹤同一規則的「月線上續抱」版本（紀錄保留）")
+META_STOPPED = ("2026-10-15：AI 研究員暫停中、還沒有合格的規則，這個帳戶整個放 0050，等於比較基準本身；策略一律 100% 個股"
+                "（使用者 2026-10-09），停止追蹤（紀錄保留）。AI 研究員重開、有合格規則時再以 100% 個股的版本重新開始")
 
 
 def plan_of(item: dict[str, object]):
@@ -227,11 +229,8 @@ class StockForwardTracker:
             if not item.get("stopped") and item.get("kind") in ("daily", "blend") and uses_0050(item.get("rule") or {}):
                 item.update(stopped=today.isoformat(), stop_reason=NO_0050)
                 stopped = True
-        if self._experiments and META_AI["rule_hash"] not in known:
-            added.append({**META_AI, "rule": {}, "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
-                          "since": max(FORWARD_START, today).isoformat(),
-                          "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
-            known.add(META_AI["rule_hash"])
+        # 2026-10-15: the AI researcher's account (META_AI) is no longer added by itself — paused, with no qualifying
+        # rule it held nothing but 0050 (META_STOPPED); it comes back with the researcher, 100% stocks.
         for rule, reason in (forward_only() if self._experiments else []):
             if rule.rule_hash in known:
                 continue
@@ -270,32 +269,59 @@ class StockForwardTracker:
         """2026-10-14 (使用者：前向觀察從 10/1 只有買入，哪來的賣出): a tracked daily rule that holds every stock a fixed
         number of sessions cannot sell in its first weeks, a restriction the owner rejected on 10-13. It stops (its
         records stay) and its trend version — kept while above its 20-session average, sold once below — is tracked
-        from ``start`` instead; the days from ``start`` are recorded as late on the next record."""
+        from ``start`` instead; the days from ``start`` are recorded as late on the next record. 2026-10-15: a blend
+        whose sleeves hold a fixed number of sessions gives way the same way, every such sleeve in its trend version."""
+        from quant_platform.research.blend import BlendRule, Sleeve, parse_spec
         from quant_platform.research.daily import DailyRule
+
+        def fixed(rule: DailyRule) -> bool:
+            return rule.hold != "trend" and bool(rule.min_hold)
+
+        def trend_of(rule: DailyRule) -> DailyRule:
+            return DailyRule.model_validate({**rule.model_dump(), "hold": "trend", "name": (rule.name + "、月線上續抱")[:80]})
 
         items = self.tracked()
         known = {item["rule_hash"] for item in items}
         moment = datetime.now(TAIPEI).isoformat(timespec="seconds")
         added = []
         for item in items:
-            if item.get("stopped") or item.get("kind") != "daily":
+            if item.get("stopped") or item.get("kind") not in ("daily", "blend"):
                 continue
-            rule = DailyRule.model_validate(item["rule"])
-            if rule.hold == "trend" or not rule.min_hold:
-                continue
-            trend = DailyRule.model_validate({**rule.model_dump(), "hold": "trend",
-                                              "name": (rule.name + "、月線上續抱")[:80]})
+            if item["kind"] == "blend":
+                rule = parse_spec(item["rule"])
+                count = sum(1 for sleeve in rule.sleeves if fixed(sleeve.rule))
+                if not count:
+                    continue
+                trend = BlendRule(name=(rule.name + "、月線上續抱")[:80], core=rule.core,
+                                  sleeves=tuple(Sleeve(rule=trend_of(sleeve.rule) if fixed(sleeve.rule) else sleeve.rule,
+                                                       share=sleeve.share) for sleeve in rule.sleeves))
+                why = f"取代子策略固定持有的版本（{count} 個子策略改月線上續抱；{item['name'][:40]}）"
+            else:
+                rule = DailyRule.model_validate(item["rule"])
+                if not fixed(rule):
+                    continue
+                trend = trend_of(rule)
+                why = f"取代固定持有 {rule.min_hold} 個交易日的版本（{item['name'][:40]}）"
             item.update(stopped=today.isoformat(), stop_reason=FIXED_HOLD)
             if trend.rule_hash in known:
                 continue
             added.append({**{key: item[key] for key in ("kind", "plan", "initial", "monthly") if key in item},
                           "rule_hash": trend.rule_hash, "name": trend.name, "rule": trend.canonical(),
-                          "since": start.isoformat(), "added_at": moment,
-                          "reason": f"取代固定持有 {rule.min_hold} 個交易日的版本（{item['name'][:40]}）"})
+                          "since": start.isoformat(), "added_at": moment, "reason": why})
             known.add(trend.rule_hash)
         self._folder.mkdir(parents=True, exist_ok=True)
         self.tracked_path.write_text(json.dumps(items + added, ensure_ascii=False, indent=1), encoding="utf-8")
         return added
+
+    def stop(self, rule_hash: str, today: date, reason: str) -> bool:
+        """Stop recording one tracked account (its records stay); False when it is not tracked or already stopped."""
+        items = self.tracked()
+        hit = [item for item in items if item["rule_hash"] == rule_hash and not item.get("stopped")]
+        for item in hit:
+            item.update(stopped=today.isoformat(), stop_reason=reason)
+        if hit:
+            self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+        return bool(hit)
 
     def record(self, today: date, now: datetime | None = None) -> list[dict[str, object]]:
         """Append the state of every tracked rule for today and for any earlier session since its

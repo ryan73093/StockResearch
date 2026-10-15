@@ -355,7 +355,9 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
 
 def update_chips(container: "Container", now: datetime | None = None) -> object | None:
     """S9-W04 (2026-10-06): at 21:30 on trading days, the exchanges' daily chip reports for every session
-    the chip files lack (up to the last 20), then the chip files rebuilt (FinMind history + the reports)."""
+    the chip files lack (up to the last 20), then the chip files rebuilt (FinMind history + the reports).
+    2026-10-15: the short-selling reports too (borrowed shares sold, day trading) and this month's and year's
+    attention and disposition announcements — rules using them are under forward observation."""
     from datetime import timedelta
 
     import pyarrow.compute as pc
@@ -377,6 +379,10 @@ def update_chips(container: "Container", now: datetime | None = None) -> object 
     if not shareholding.is_file():
         return None
     last = pc.max(pq.read_table(shareholding, columns=["date"])["date"]).as_py()
+    for name in ("TaiwanDailyShortSaleBalances", "TaiwanStockDayTrading"):     # the oldest file sets the gap
+        path = base / "chips" / f"{name}.parquet"
+        if path.is_file():
+            last = min(last, pc.max(pq.read_table(path, columns=["date"])["date"]).as_py())
     calendar = container.market_calendar.calendar("TW")
     sessions, day = [], local_now.date()
     while day > last and len(sessions) < 20:
@@ -392,6 +398,14 @@ def update_chips(container: "Container", now: datetime | None = None) -> object 
             fetched["revenue"] = fetch_revenue(base, client)        # the latest month's table (2 requests)
         except Exception:  # a failed revenue table must not stop the chips
             logger.exception("Monthly revenue table failed")
+        if (base / "chips" / "AlertNotice.parquet").is_file():
+            from quant_platform.research.history import alerts
+
+            try:        # closed months and years are cached; this month and this year are asked again
+                fetched["alerts"] = alerts.fetch(client, local_now.date())
+                alerts.build(base)
+            except Exception:  # nor a failed announcement list
+                logger.exception("Attention and disposition lists failed")
         job.update(done=1, current="重建籌碼檔", force=True)
         written = build(base)
         job.update(done=2, force=True)

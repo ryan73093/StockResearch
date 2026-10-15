@@ -13,6 +13,13 @@ day by day from these reports, four requests per exchange and session:
 | TaiwanStockPER | afterTrading/BWIBBU_d | afterTrading/peQryDate |
 | TaiwanStockMarginPurchaseShortSale | marginTrading/MI_MARGN | margin/balance |
 | TaiwanStockInstitutionalInvestorsBuySell | fund/T86 | insti/dailyTrade |
+| TaiwanDailyShortSaleBalances | marginTrading/TWT93U | margin/sbl |
+| TaiwanStockDayTrading | dayTrading/TWTB4U | intraday/stat |
+
+The last two (2026-10-15) feed the short-selling factors (research/chips.py SHORT_FACTORS) after their one-time FinMind
+download: 借券賣出當日餘額 and 融券今日餘額 from the 信用額度總量管制餘額表, the day-trading shares and buy amount
+from the 當日沖銷交易標的 table — the same numbers FinMind serves (checked 2026-10-15: TSMC 12,031,514 borrowed
+shares sold on 10-13, 4,878,000 day-traded shares and NT$12,229,475,000 bought on 10-14; 環球晶 21,259,000).
 
 The raw replies are cached under ``raw/official_chips/`` (a session's copy is requested again once after
 it closed); ``research/chips.py`` adds their rows for the days the FinMind files do not have.
@@ -36,7 +43,7 @@ from quant_platform.research.history.official import TPEX_BULLETIN, OfficialHist
 TWSE = "https://www.twse.com.tw/rwd/zh"
 TPEX = TPEX_BULLETIN.rsplit("/", 1)[0]
 STOCK = re.compile(r"^(?!91)[1-9]\d{3}$")
-DATASETS = ("holding", "per", "margin", "insti")
+DATASETS = ("holding", "per", "margin", "insti", "sbl", "daytrade")
 
 
 def url(exchange: str, dataset: str, day: date) -> str:
@@ -47,6 +54,8 @@ def url(exchange: str, dataset: str, day: date) -> str:
             "per": f"{TWSE}/afterTrading/BWIBBU_d?date={compact}&selectType=ALL&response=json",
             "margin": f"{TWSE}/marginTrading/MI_MARGN?date={compact}&selectType=ALL&response=json",
             "insti": f"{TWSE}/fund/T86?date={compact}&selectType=ALLBUT0999&response=json",
+            "sbl": f"{TWSE}/marginTrading/TWT93U?date={compact}&response=json",
+            "daytrade": f"{TWSE}/dayTrading/TWTB4U?date={compact}&selectType=All&response=json",
         }[dataset]
     slash = f"{day:%Y/%m/%d}"
     return {
@@ -54,6 +63,8 @@ def url(exchange: str, dataset: str, day: date) -> str:
         "per": f"{TPEX}/afterTrading/peQryDate?date={slash}&response=json",
         "margin": f"{TPEX}/margin/balance?date={slash}&response=json",
         "insti": f"{TPEX}/insti/dailyTrade?type=Daily&sect=EW&date={slash}&response=json",
+        "sbl": f"{TPEX}/margin/sbl?date={slash}&response=json",
+        "daytrade": f"{TPEX}/intraday/stat?type=Daily&date={slash}&response=json",
     }[dataset]
 
 
@@ -105,6 +116,14 @@ def parse(exchange: str, dataset: str, payload: object, day: date) -> list[dict[
                 else:
                     margin_at = _column(fields, "資餘額")
                     short_at = _column(fields, "券餘額")
+            elif dataset == "sbl":           # 融券 (今日餘額 at TWSE, 當日餘額 at TPEx) then 借券賣出 (當日餘額)
+                code_at = _column(fields, "代號", "股票代號")
+                short_at = _column(fields, "今日餘額", "當日餘額")
+                sbl_at = _column(fields, "當日餘額", start=_column(fields, "當日賣出"))
+            elif dataset == "daytrade":      # the per-stock table, after the market totals
+                code_at = _column(fields, "證券代號")
+                volume_at = _column(fields, "當日沖銷交易成交股數")
+                bought_at = _column(fields, "當日沖銷交易買進成交金額")
             else:
                 code_at = _column(fields, "證券代號", "代號")
         except ValueError:
@@ -120,6 +139,11 @@ def parse(exchange: str, dataset: str, payload: object, day: date) -> list[dict[
                 row.update(PER=_value(item[per_at]), PBR=_value(item[pbr_at]))
             elif dataset == "margin":
                 row.update(MarginPurchaseTodayBalance=_value(item[margin_at]), ShortSaleTodayBalance=_value(item[short_at]))
+            elif dataset == "sbl":
+                row.update(SBLShortSalesCurrentDayBalance=_value(item[sbl_at]),
+                           MarginShortSalesCurrentDayBalance=_value(item[short_at]))
+            elif dataset == "daytrade":
+                row.update(BuyAmount=_value(item[bought_at]), Volume=_value(item[volume_at]))
             elif exchange == "twse":
                 # T86: foreign excluding their dealers (net at 4), foreign dealers (7), investment trust (10)
                 row.update(foreign_net=(_value(item[4]) or 0.0) + (_value(item[7]) or 0.0), trust_net=_value(item[10]) or 0.0)
