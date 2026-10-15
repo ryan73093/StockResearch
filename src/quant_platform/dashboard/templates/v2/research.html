@@ -742,7 +742,7 @@
           <td class="num" data-label="0050 定期定額">{{ '{:,.0f}'.format(row.benchmark_value) }}</td>
           <td class="num {{ 'up' if (row.excess or 0) > 0 else ('down' if (row.excess or 0) < 0 else '') }}" data-label="相對 0050">{{ '{:+.2%}'.format(row.excess) if row.excess is not none else '—' }}</td>
           <td class="num" data-label="持股／費稅">{{ row.holdings|length }} 檔／{{ '{:,}'.format(row.costs) }} 元</td>
-          <td data-label="對帳">{% if row.problems or row.replay_mismatches %}<span class="badge badge--bad">{{ row.problems|length + row.replay_mismatches }} 項不符</span>{% elif row.sessions %}<span class="badge badge--ok">正常</span>{% else %}<span class="muted small">等第一個交易日</span>{% endif %}</td>
+          <td data-label="對帳">{% if row.problems or row.replay_mismatches %}<span class="badge badge--bad">{{ row.problems|length + row.replay_mismatches }} 項不符</span>{% elif row.sessions %}<span class="badge badge--ok">正常</span>{% else %}<span class="muted small">等第一個交易日</span>{% endif %}{% if row.rebased %} <span class="badge" title="這幾天是重新計算的結果，原因見明細頁">重算 {{ row.rebased|length }} 天</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

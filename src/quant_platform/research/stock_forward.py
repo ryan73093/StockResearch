@@ -313,6 +313,32 @@ class StockForwardTracker:
         self.tracked_path.write_text(json.dumps(items + added, ensure_ascii=False, indent=1), encoding="utf-8")
         return added
 
+    @property
+    def rebases_path(self) -> Path:
+        return self._folder / "rebases.json"
+
+    def rebases(self) -> dict[str, dict[str, str]]:
+        """rule hash -> {day: why}: records that start again from what the replay held that day (a known cause, not
+        a reconciliation error); see ``rebase``."""
+        if not self.rebases_path.is_file():
+            return {}
+        return json.loads(self.rebases_path.read_text(encoding="utf-8"))
+
+    def rebase(self, reason: str) -> int:
+        """2026-10-15: every record that does not follow from the day before (holdings or cash changed without a
+        trade) is marked with ``reason`` — the replay rewrote a decision already taken (an engine or model change,
+        data that came after the decision); from then on the decisions are kept (research/decisions.py). Returns
+        how many records were marked."""
+        marks = self.rebases()
+        found = 0
+        for (rule_hash, day) in continuity_breaks(self.records(), marks):
+            marks.setdefault(rule_hash, {})[day] = reason
+            found += 1
+        if found:
+            self._folder.mkdir(parents=True, exist_ok=True)
+            self.rebases_path.write_text(json.dumps(marks, ensure_ascii=False, indent=1), encoding="utf-8")
+        return found
+
     def stop(self, rule_hash: str, today: date, reason: str) -> bool:
         """Stop recording one tracked account (its records stay); False when it is not tracked or already stopped."""
         items = self.tracked()
@@ -323,13 +349,25 @@ class StockForwardTracker:
             self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
         return bool(hit)
 
-    def record(self, today: date, now: datetime | None = None) -> list[dict[str, object]]:
+    def freeze(self, today: date) -> list[dict[str, object]]:
+        """2026-10-15 (research/decisions.py): write down the decisions behind every daily rule's and blend's latest
+        record, replayed with today's data; returns the accounts whose replayed holdings differ from that record."""
+        return self.record(today, freeze=True)
+
+    def record(self, today: date, now: datetime | None = None, freeze: bool = False) -> list[dict[str, object]]:
         """Append the state of every tracked rule for today and for any earlier session since its
         start that has no record yet (the computer was off at 15:30, or the quotes came late): those
-        are marked ``late``. A day whose quotes (stocks and 0050) are not on disk is left for later."""
+        are marked ``late``. A day whose quotes (stocks and 0050) are not on disk is left for later.
+        2026-10-15: a daily rule's or blend's decisions on days already recorded are taken as they were made
+        (research/decisions.py); the new days' decisions are kept with the records."""
+        from quant_platform.research.decisions import DecisionStore
+        from quant_platform.research.decisions import key as decision_key
+        from quant_platform.research.decisions import rankings as kept_rankings
+
         if today < FORWARD_START:
             return []
-        self.sync(today)
+        if not freeze:
+            self.sync(today)
         items = [item for item in self.tracked() if date.fromisoformat(item["since"]) <= today and not item.get("stopped")]
         earlier = self.records()
         done = {(item["date"], item["rule_hash"]) for item in earlier}
@@ -349,6 +387,12 @@ class StockForwardTracker:
                  if day >= FORWARD_START and count >= self._min_quotes and day in data.closes.get(BENCHMARK, {})]
         todo = {item["rule_hash"]: [day for day in ready if day >= date.fromisoformat(item["since"])
                                     and (day.isoformat(), item["rule_hash"]) not in done] for item in items}
+        latest = {record["rule_hash"]: record for record in earlier}            # the log is in order
+        if freeze:                          # the day of each daily rule's or blend's latest record, nothing new
+            todo = {item["rule_hash"]: [date.fromisoformat(latest[item["rule_hash"]]["date"])]
+                    if item["rule_hash"] in latest and item.get("kind") in ("daily", "blend") else [] for item in items}
+        store = DecisionStore(self._base)
+        differences = []
         if not any(todo.values()):
             return []
         twse_data = data
@@ -400,11 +444,12 @@ class StockForwardTracker:
                     run = self.meta_run(data, factor_panel, start, last, plan, ledger, snapshots)
                 elif item.get("kind") == "blend":
                     rule = BlendRule.model_validate(item["rule"])
-                    run = BlendAccount(data, factor_panel, rule, self._costs, start, last).run(
+                    run = BlendAccount(data, factor_panel, rule, self._costs, start, last, store=store,
+                                       name=decision_key(item["rule_hash"], start), through=last).run(
                         start, last, plan, ledger=ledger, snapshots=snapshots)
                 else:
                     rule = DailyRule.model_validate(item["rule"])
-                    ranks = daily_rankings(factor_panel, rule, start, last)
+                    ranks = kept_rankings(factor_panel, rule, start, last, store, decision_key(item["rule_hash"], start), last)
                     run = simulate_daily(data, rule, self._costs, start, last, ranks, plan, ledger=ledger,
                                          snapshots=snapshots, weights=daily_weights(factor_panel, rule, ranks),
                                          parked=account_parking(data, factor_panel, rule, self._costs),
@@ -415,6 +460,14 @@ class StockForwardTracker:
                 run = simulate(data, rule_variant(rule), self._costs, start, last, rankings(panel, rule, start, last),
                                plan, ledger=ledger, snapshots=snapshots)
                 benchmark = simulate(data, None, self._costs, start, last, plan=plan)
+            if freeze:
+                _cash, units = snapshots[last]
+                replayed_units = {symbol.split(".")[0]: round(count, 6) for symbol, count in units.items() if count > 1e-9}
+                logged = {row["code"]: row["units"] for row in latest[item["rule_hash"]]["holdings"] if row["units"] > 1e-9}
+                if replayed_units != logged:
+                    differences.append({"rule_hash": item["rule_hash"], "name": item["name"], "date": last.isoformat(),
+                                        "recorded": logged, "replayed": replayed_units})
+                continue
             values, benchmark_values = dict(zip(run.days, run.values)), dict(zip(benchmark.days, benchmark.values))
             replayed = _replay_check(earlier, rule.rule_hash, values)
             for day in days:
@@ -425,7 +478,9 @@ class StockForwardTracker:
             with self.log_path.open("a", encoding="utf-8") as handle:
                 for record in written:
                     handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-        return written
+        if written or freeze:
+            store.save()
+        return differences if freeze else written
 
     def _day_record(self, rule, start, day, data, names, ledger, snapshots, value, benchmark_value, run, replayed,
                     fingerprint, moment) -> dict[str, object]:
@@ -462,14 +517,17 @@ class StockForwardTracker:
     def summary(self) -> list[dict[str, object]]:
         """Per tracked rule: the latest record, days recorded, the latest trades and any problem."""
         records = self.records()
-        problems = reconcile(records)
+        marks = self.rebases()
+        problems = reconcile(records, marks)
         finals = final_validation(self._base)
         rows = []
         for item in self.tracked():
             mine = [record for record in records if record["rule_hash"] == item["rule_hash"]]
             latest = mine[-1] if mine else None
             traded = next((record for record in reversed(mine) if record["trades_today"]), None)
-            mismatches = sum(len((record.get("replay_check") or {}).get("mismatches") or []) for record in mine)
+            based = marks.get(item["rule_hash"]) or {}
+            mismatches = sum(len((record.get("replay_check") or {}).get("mismatches") or []) for record in mine
+                             if record["date"] not in based)     # a marked day's replay differences have their reason
             rows.append({
                 "rule_hash": item["rule_hash"], "name": item["name"], "since": item["since"], "reason": item.get("reason"),
                 "plan": item.get("plan", "dca"), "amount": item.get("amount"),
@@ -486,6 +544,7 @@ class StockForwardTracker:
                 "late": sum(1 for record in mine if record.get("late")),
                 "problems": problems.get(item["rule_hash"], []), "replay_mismatches": mismatches,
                 "final": finals.get(item["rule_hash"]), "stopped": item.get("stopped"), "stop_reason": item.get("stop_reason"),
+                "rebased": sorted((marks.get(item["rule_hash"]) or {}).items()),
             })
         return rows
 
@@ -617,10 +676,11 @@ class StockForwardTracker:
                        for entry in record.get("adjustments_today") or []]
         series = [{"date": record["date"], "value": record["value"], "benchmark": record["benchmark_value"],
                    "contributed": record["contributed"]} for record in days]
-        problems = reconcile(days).get(rule_hash, [])
+        marks = self.rebases()
+        problems = reconcile(days, marks).get(rule_hash, [])
         decisions = self.meta_decisions() if item.get("kind") == "meta-ai" else []
         return {"item": item, "latest": latest, "holdings": holdings, "trades": trades, "adjustments": adjustments,
-                "decisions": list(reversed(decisions)),
+                "decisions": list(reversed(decisions)), "rebased": sorted((marks.get(rule_hash) or {}).items()),
                 "series": series, "sessions": len(days), "problems": problems,
                 "buys": sum(1 for trade in trades if trade["side"] == "BUY"),
                 "sells": sum(1 for trade in trades if trade["side"] == "SELL")}
@@ -685,9 +745,10 @@ def _replay_check(earlier: list[dict[str, object]], rule_hash: str, replayed: di
     return {"days": len(mine), "mismatches": mismatches}
 
 
-def reconcile(records: list[dict[str, object]]) -> dict[str, list[str]]:
+def reconcile(records: list[dict[str, object]], rebased: dict[str, dict[str, str]] | None = None) -> dict[str, list[str]]:
     """Per rule: every record's value equals cash plus its holdings at the closes, and every record
-    follows from the one before through its logged adjustments, trades and new money."""
+    follows from the one before through its logged adjustments, trades and new money — except a record marked
+    in ``rebased`` (StockForwardTracker.rebase), which starts again from what it holds."""
     problems: dict[str, list[str]] = {}
     previous: dict[str, dict[str, object]] = {}
     for record in records:
@@ -698,25 +759,46 @@ def reconcile(records: list[dict[str, object]]) -> dict[str, list[str]]:
             issues.append(f"{day} 資產 {record['value']:,.0f} ≠ 現金＋持股 {record['cash'] + held:,.0f}")
         before = previous.get(rule_hash)
         previous[rule_hash] = record
-        if before is None:
+        if before is None or day in ((rebased or {}).get(rule_hash) or {}):
             continue
-        units = {item["code"]: item["units"] for item in before["holdings"]}
-        for item in record.get("adjustments_today") or []:
-            if item["code"] in units:
-                units[item["code"]] *= item["factor"]
-        cash = before["cash"] + record["contributed"] - before["contributed"] + float(record.get("income_today") or 0.0)
-        for trade in record["trades_today"]:
-            amount = trade["shares"] * trade["price"]
-            if trade["side"] == "BUY":
-                units[trade["code"]] = units.get(trade["code"], 0.0) + trade["shares"]
-                cash -= amount + trade["fee"]
-            else:
-                units[trade["code"]] = units.get(trade["code"], 0.0) - trade["shares"]
-                cash += amount - trade["fee"] - trade["tax"]
-        now = {item["code"]: item["units"] for item in record["holdings"]}
-        for code in set(units) | set(now):
-            if abs(units.get(code, 0.0) - now.get(code, 0.0)) > UNITS_TOLERANCE:
-                issues.append(f"{day} {code} 股數 {now.get(code, 0.0):.4f}，前一天加今天交易應為 {units.get(code, 0.0):.4f}")
-        if abs(cash - record["cash"]) > VALUE_TOLERANCE + 0.5 * len(record["trades_today"]):
-            issues.append(f"{day} 現金 {record['cash']:,.2f}，前一天加今天交易應為 {cash:,.2f}")
+        issues.extend(_continuity(before, record))
     return {key: value for key, value in problems.items() if value}
+
+
+def continuity_breaks(records: list[dict[str, object]], rebased: dict[str, dict[str, str]] | None = None) -> list[tuple[str, str]]:
+    """(rule hash, day) of every record that does not follow from the one before (not already marked)."""
+    breaks = []
+    previous: dict[str, dict[str, object]] = {}
+    for record in records:
+        rule_hash, day = record["rule_hash"], record["date"]
+        before = previous.get(rule_hash)
+        previous[rule_hash] = record
+        if before is not None and day not in ((rebased or {}).get(rule_hash) or {}) and _continuity(before, record):
+            breaks.append((rule_hash, day))
+    return breaks
+
+
+def _continuity(before: dict[str, object], record: dict[str, object]) -> list[str]:
+    """What does not follow from ``before`` through ``record``'s adjustments, trades and new money."""
+    issues: list[str] = []
+    day = record["date"]
+    units = {item["code"]: item["units"] for item in before["holdings"]}
+    for item in record.get("adjustments_today") or []:
+        if item["code"] in units:
+            units[item["code"]] *= item["factor"]
+    cash = before["cash"] + record["contributed"] - before["contributed"] + float(record.get("income_today") or 0.0)
+    for trade in record["trades_today"]:
+        amount = trade["shares"] * trade["price"]
+        if trade["side"] == "BUY":
+            units[trade["code"]] = units.get(trade["code"], 0.0) + trade["shares"]
+            cash -= amount + trade["fee"]
+        else:
+            units[trade["code"]] = units.get(trade["code"], 0.0) - trade["shares"]
+            cash += amount - trade["fee"] - trade["tax"]
+    now = {item["code"]: item["units"] for item in record["holdings"]}
+    for code in set(units) | set(now):
+        if abs(units.get(code, 0.0) - now.get(code, 0.0)) > UNITS_TOLERANCE:
+            issues.append(f"{day} {code} 股數 {now.get(code, 0.0):.4f}，前一天加今天交易應為 {units.get(code, 0.0):.4f}")
+    if abs(cash - record["cash"]) > VALUE_TOLERANCE + 0.5 * len(record["trades_today"]):
+        issues.append(f"{day} 現金 {record['cash']:,.2f}，前一天加今天交易應為 {cash:,.2f}")
+    return issues

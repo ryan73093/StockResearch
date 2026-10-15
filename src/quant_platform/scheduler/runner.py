@@ -379,7 +379,7 @@ def update_chips(container: "Container", now: datetime | None = None) -> object 
     if not shareholding.is_file():
         return None
     last = pc.max(pq.read_table(shareholding, columns=["date"])["date"]).as_py()
-    for name in ("TaiwanDailyShortSaleBalances", "TaiwanStockDayTrading"):     # the oldest file sets the gap
+    for name in ("TaiwanDailyShortSaleBalances", "TaiwanStockDayTrading", "TaiwanStockSecuritiesLending"):  # oldest sets the gap
         path = base / "chips" / f"{name}.parquet"
         if path.is_file():
             last = min(last, pc.max(pq.read_table(path, columns=["date"])["date"]).as_py())

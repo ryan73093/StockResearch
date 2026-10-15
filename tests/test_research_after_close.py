@@ -91,3 +91,19 @@ def test_an_order_is_round_lots_at_the_close_and_the_odd_lot_with_a_limit():
     refused = after_close.order_lines({"symbol": "2330.TW", "side": "BLOCKED", "order": "BUY", "reason": "漲停買不到"},
                                       1_085.0, 990.0, {})
     assert refused["refused"] == "漲停買不到" and "parts" not in refused
+
+
+def test_todays_decisions_are_kept_for_the_record_and_the_board(tmp_path):
+    """2026-10-15 (research/decisions.py): the 13:50 orders write down today's decisions, so the 15:30 record and
+    the board hold what the orders said, whatever data comes later."""
+    from quant_platform.research.decisions import DecisionStore, key
+
+    days = weekdays(date(2025, 1, 1), date(2026, 10, 13))
+    today = days[-1]
+    build(tmp_path / "history", days[:-1])
+    track(tmp_path)
+    after_close.prepare(tmp_path / "history", tmp_path, today, table(today, len(days) - 1),
+                        now=datetime.combine(today, time(13, 52), tzinfo=TAIPEI), min_rows=1)
+    kept = DecisionStore(tmp_path).fixed(key(RULE.rule_hash, date(2026, 10, 1)))
+    assert kept["through"] == today and kept["days"][date(2026, 10, 1)]           # every day since the common start
+    assert len(kept["days"][today]) == 3

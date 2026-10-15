@@ -120,13 +120,17 @@ class BlendAccount:
     """A blend replayed on one factor panel: each sleeve's ranking, weights and parking computed once over
     the selection period (as ``daily.evaluate`` does for a single rule); ``run`` any stretch of it."""
 
-    def __init__(self, data, fp, blend: BlendRule, costs, start: date, end: date) -> None:
-        from quant_platform.research.daily import account_parking, daily_rankings, daily_weights, exposure_schedule
+    def __init__(self, data, fp, blend: BlendRule, costs, start: date, end: date, store=None, name: str | None = None,
+                 through: date | None = None) -> None:
+        """``store``/``name``/``through``: each sleeve's decisions kept as made (research/decisions.py), the sleeve
+        numbered after ``#``."""
+        from quant_platform.research.daily import account_parking, daily_weights, exposure_schedule
+        from quant_platform.research.decisions import rankings
 
         self.data, self.blend, self.costs = data, blend, costs
         self.parts = []
-        for sleeve in blend.sleeves:
-            ranks = daily_rankings(fp, sleeve.rule, start, end)
+        for number, sleeve in enumerate(blend.sleeves):
+            ranks = rankings(fp, sleeve.rule, start, end, store, f"{name}#{number}" if name else None, through)
             self.parts.append((sleeve, ranks, daily_weights(fp, sleeve.rule, ranks), account_parking(data, fp, sleeve.rule, costs),
                                exposure_schedule(data, fp, sleeve.rule, costs)))
         self.first = max(next((day for day in sorted(ranks) if ranks[day]), start) for _sleeve, ranks, *_rest in self.parts)

@@ -262,3 +262,54 @@ def test_blends_with_fixed_holding_sleeves_give_way_too_and_the_ai_account_stops
     items = {item["rule_hash"]: item for item in tracker.tracked()}
     assert items[blend.rule_hash]["stopped"] == "2026-10-15" and "0050" in items[META_AI["rule_hash"]]["stop_reason"]
     assert tracker.sync(date(2026, 10, 16)) == []             # and the AI account is not added again
+
+
+def test_decisions_already_taken_stay_when_the_data_changes_afterwards(tmp_path, monkeypatch):
+    """2026-10-15 (108 accounts failed the reconciliation): data that came after a decision — the evening's revenue
+    table, a retrained model — changed it when the next day replayed from the start, and a recorded account jumped to
+    holdings it never traded into. The decisions taken are kept (research/decisions.py)."""
+    from quant_platform.research.daily import DailyRule, FactorPanel
+
+    days = weekdays(date(2024, 1, 1), date(2026, 10, 9))
+    build(tmp_path, days)
+    rule = DailyRule(name="每天 3 個月動能：前 3 名、月線上續抱", factors={"momentum_3": 1.0}, top=3, min_hold=0, hold="trend")
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    (folder / "tracked.json").write_text(json.dumps([{
+        "rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.canonical(), "kind": "daily", "plan": "seed",
+        "since": "2026-10-01"}], ensure_ascii=False), encoding="utf-8")
+    tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
+    for day in (date(2026, 10, 1), date(2026, 10, 2)):
+        tracker.record(day, now=at(day))
+    bought = {row["code"] for row in tracker.records()[-1]["holdings"]}
+    assert bought == {"1104", "1105", "1106"}                                    # the three strongest trends
+    original = FactorPanel.ranked
+    monkeypatch.setattr(FactorPanel, "ranked", lambda self, rule, position: list(reversed(original(self, rule, position))))
+    assert [item["date"] for item in tracker.freeze(date(2026, 10, 5))] == []     # kept: the replay still holds them
+    tracker.record(date(2026, 10, 5), now=at(date(2026, 10, 5)))
+    records = tracker.records()
+    assert reconcile(records) == {} and {row["code"] for row in records[-1]["holdings"]} >= bought   # still rising: kept
+    (folder / "decisions.json").unlink()                                          # without them, the replay rewrites
+    changed = tracker.freeze(date(2026, 10, 6))
+    assert changed and changed[0]["date"] == "2026-10-05" and "1101" in changed[0]["replayed"]
+
+
+def test_known_breaks_become_new_bases_with_their_reason(tmp_path):
+    """2026-10-15: records that do not follow from the day before for a known reason (an engine or model change, data
+    after the decision) are marked, not counted as reconciliation errors."""
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    (folder / "tracked.json").write_text(json.dumps([{"rule_hash": "r", "name": "測試", "kind": "daily", "rule": {},
+                                                      "since": "2026-10-01"}], ensure_ascii=False), encoding="utf-8")
+    base = {"rule_hash": "r", "name": "測試", "since": "2026-10-01", "contributed": 1_000.0, "benchmark_value": 1_000.0,
+            "excess": 0.0, "trades_today": [], "adjustments_today": [], "income_today": 0.0, "trades_total": 1,
+            "fees_total": 0, "taxes_total": 0}
+    records = [{**base, "date": "2026-10-13", "cash": 0.0, "value": 1_000.0, "holdings": [{"code": "1101", "units": 10.0, "close": 100.0, "value": 1_000.0}]},
+               {**base, "date": "2026-10-14", "cash": 0.0, "value": 1_000.0, "holdings": [{"code": "1102", "units": 10.0, "close": 100.0, "value": 1_000.0}]}]
+    (folder / "log.jsonl").write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding="utf-8")
+    tracker = StockForwardTracker(tmp_path, experiments=False)
+    assert reconcile(tracker.records())["r"]                                     # 1102 appeared without a trade
+    assert tracker.rebase("引擎改版後重算") == 1 and tracker.rebase("again") == 0
+    assert reconcile(tracker.records(), tracker.rebases()) == {}
+    row = tracker.summary()[0]
+    assert row["problems"] == [] and row["rebased"] == [("2026-10-14", "引擎改版後重算")]

@@ -5,6 +5,7 @@ import json
 from datetime import date
 
 import pyarrow.parquet as pq
+import pytest
 
 from quant_platform.research.chips import build
 from quant_platform.research.history.chips_daily import fetch, key, parse
@@ -37,6 +38,13 @@ TWSE = {
             "data": [["00403A", "ETF", "1", "0", "0", "0", "1", "1", "1", "0", "0", "0", "1", "1", " "],
                      ["2330", "台積電", "23,000", "2,000", "2,000", "0", "23,000", "6,483,092,516", "11,995,514", "42,000",
                       "6,000", "0", "12,031,514", "7,026,738", " "]]},
+    # 2026-10-15: every lending deal of the day, both markets (TSMC's first two deals of 10-14, an ETF, a TPEx stock)
+    "lending": {"stat": "OK", "fields": ["成交日期", "證券代號名稱", "交易方式", "成交數量(交易單位)", "成交費率", "成交日收盤價",
+                                         "約定還券日期", "約定借券天數", "費率異動"],
+                "data": [["115年10月14日", "00403A 主動統一升級50", "競價", "75", "2.00", "11.00", "116年04月14日", 182, ""],
+                         ["115年10月14日", "2330 台積電", "議借", "1,450", "0.05", "2,490.00", "116年04月14日", 182, ""],
+                         ["115年10月14日", "2330 台積電", "議借", "600", "4.63", "2,490.00", "116年04月14日", 182, ""],
+                         ["115年10月14日", "6488 環球晶", "競價", "10", "1.00", "500.00", "116年04月14日", 182, ""]]},
     "daytrade": {"stat": "OK", "tables": [
         {"fields": ["當日沖銷交易總成交股數", "當日沖銷交易總成交股數占市場比重%", "當日沖銷交易總買進成交金額"], "data": [["1", "1", "1"]]},
         {"fields": ["證券代號", "證券名稱", "暫停現股賣出後現款買進當沖註記", "當日沖銷交易成交股數", "當日沖銷交易買進成交金額",
@@ -91,6 +99,9 @@ def test_every_report_parses_into_the_chip_columns():
         {"date": DAY, "code": "2330", "BuyAmount": 12_229_475_000, "Volume": 4_878_000}]
     assert parse("tpex", "daytrade", TPEX["daytrade"], DAY) == [
         {"date": DAY, "code": "6488", "BuyAmount": 4_994_515_000, "Volume": 4_940_000}]
+    assert parse("twse", "lending", TWSE["lending"], DAY) == [
+        {"date": DAY, "code": "2330", "LendingVolume": 2_050, "FeeVolume": pytest.approx(1_450 * 0.05 + 600 * 4.63)},
+        {"date": DAY, "code": "6488", "LendingVolume": 10, "FeeVolume": pytest.approx(10.0)}]
 
 
 def test_reports_fill_the_days_finmind_lacks(tmp_path):
@@ -110,7 +121,7 @@ def test_reports_fill_the_days_finmind_lacks(tmp_path):
     def answer(url):
         asked.append(url)
         exchange = "twse" if "twse.com.tw" in url else "tpex"
-        name = next(name for name, part in (("sbl", "TWT93U"), ("sbl", "margin/sbl"), ("daytrade", "TWTB4U"),
+        name = next(name for name, part in (("lending", "t13sa710"), ("sbl", "TWT93U"), ("sbl", "margin/sbl"), ("daytrade", "TWTB4U"),
                                              ("daytrade", "intraday/stat"),
                                              ("holding", "QFII"), ("holding", "qfii"), ("per", "BWIBBU"), ("per", "peQry"),
                                              ("margin", "MARGN"), ("margin", "margin/"), ("insti", "T86"), ("insti", "dailyTrade"))
@@ -119,7 +130,8 @@ def test_reports_fill_the_days_finmind_lacks(tmp_path):
 
     client = OfficialHistoryClient(base / "raw", fetch_json=answer, min_interval=0, today=lambda: date(2026, 10, 6))
     result = fetch(base, client, [date(2026, 10, 2), DAY], date(2026, 10, 6))
-    assert len(asked) == 24 and result["rows"]["twse_holding"] == 2 and result["rows"]["tpex_insti"] == 2
+    assert len(asked) == 26 and result["rows"]["twse_holding"] == 2 and result["rows"]["tpex_insti"] == 2
+    assert result["rows"]["twse_lending"] == 4 and "tpex_lending" not in result["rows"]       # one report, both markets
     assert (base / "raw" / f"{key('twse', 'per', DAY)}.json").is_file()
     build(base)
     rows = pq.read_table(base / "chips" / "TaiwanStockShareholding.parquet").to_pylist()

@@ -103,4 +103,11 @@
 {% else %}
 <section class="card"><p class="muted" style="margin:0">這個規則 {{ forward.item.since }} 加入，還沒有第一筆紀錄；每個交易日 15:30 記錄。</p></section>
 {% endif %}
+
+{% if forward.rebased %}
+<section class="card"><div class="card__head"><h2>重算基準 <span class="badge">{{ forward.rebased|length }} 天</span></h2></div>
+  <p class="muted small" style="margin:0 0 8px">這幾天的持股不是由前一天加上當天的買賣得來，而是重新計算的結果（原因如下）。2026-10-15 起，已經做過的決定會固定下來，之後的資料不再改寫過去。</p>
+  <ul class="reasons">{% for day, why in forward.rebased %}<li><strong>{{ day }}</strong>：{{ why }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
 {% endblock %}

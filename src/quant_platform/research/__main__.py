@@ -310,6 +310,9 @@ def main() -> int:
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
+    parser.add_argument("--freeze", action="store_true",
+                        help="forward：把每個帳戶最新紀錄背後的決定寫下來（之後重算不再改變已做的決定）")
+    parser.add_argument("--rebase", help="forward：把接不上前一天的紀錄標成重算基準，附上原因")
     parser.add_argument("--stop-ai-account", action="store_true",
                         help="forward：停止追蹤「AI 研究員（整體）」帳戶（沒有合格規則時整個放 0050；紀錄保留）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -865,6 +868,14 @@ def main() -> int:
 
             print("停止 AI 研究員（整體）帳戶：" + ("完成" if tracker.stop(META_AI["rule_hash"], day, META_STOPPED) else "沒有在追蹤"),
                   flush=True)
+        if args.rebase:                         # 2026-10-15: known causes, not reconciliation errors
+            print(f"標成重算基準：{tracker.rebase(args.rebase)} 筆紀錄", flush=True)
+        if args.freeze:                         # 2026-10-15: the decisions behind every latest record, kept
+            differences = tracker.freeze(day)
+            print(f"寫下決定；重算和最新紀錄不同的帳戶 {len(differences)} 個", flush=True)
+            for item in differences:
+                print(f"  {item['date']} {item['name']}：紀錄 {len(item['recorded'])} 檔、重算 {len(item['replayed'])} 檔", flush=True)
+            return 0
         if args.trend_from:                     # 2026-10-14: fixed-holding rules give way to their trend versions
             switched = tracker.switch_to_trend(day, date.fromisoformat(args.trend_from))
             print(f"改追蹤月線上續抱版本：{len(switched)} 個（{args.trend_from} 起）", flush=True)

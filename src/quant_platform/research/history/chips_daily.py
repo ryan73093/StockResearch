@@ -21,6 +21,11 @@ download: 借券賣出當日餘額 and 融券今日餘額 from the 信用額度�
 from the 當日沖銷交易標的 table — the same numbers FinMind serves (checked 2026-10-15: TSMC 12,031,514 borrowed
 shares sold on 10-13, 4,878,000 day-traded shares and NT$12,229,475,000 bought on 10-14; 環球晶 21,259,000).
 
+TaiwanStockSecuritiesLending (2026-10-15, the lending factors): TWSE's 歷史借券成交明細 (SBL/t13sa710) lists every
+lending deal of the day, listed and TPEx stocks alike, in one reply; the rows are summed per stock into lots lent and
+lots × fee. Checked against FinMind for 10-14: 環球晶 and TSMC deal for deal, except two deals FinMind does not have
+(TSMC 600 lots at 4.63%, a negotiated deal reported late); the reply is asked again once after the day closed.
+
 The raw replies are cached under ``raw/official_chips/`` (a session's copy is requested again once after
 it closed); ``research/chips.py`` adds their rows for the days the FinMind files do not have.
 
@@ -44,6 +49,8 @@ TWSE = "https://www.twse.com.tw/rwd/zh"
 TPEX = TPEX_BULLETIN.rsplit("/", 1)[0]
 STOCK = re.compile(r"^(?!91)[1-9]\d{3}$")
 DATASETS = ("holding", "per", "margin", "insti", "sbl", "daytrade")
+TWSE_ONLY = ("lending",)            # one report for both markets
+LENDING_URL = "https://www.twse.com.tw/SBL/t13sa710"
 
 
 def url(exchange: str, dataset: str, day: date) -> str:
@@ -56,6 +63,7 @@ def url(exchange: str, dataset: str, day: date) -> str:
             "insti": f"{TWSE}/fund/T86?date={compact}&selectType=ALLBUT0999&response=json",
             "sbl": f"{TWSE}/marginTrading/TWT93U?date={compact}&response=json",
             "daytrade": f"{TWSE}/dayTrading/TWTB4U?date={compact}&selectType=All&response=json",
+            "lending": f"{LENDING_URL}?startDate={compact}&endDate={compact}&response=json",
         }[dataset]
     slash = f"{day:%Y/%m/%d}"
     return {
@@ -94,8 +102,33 @@ def _column(fields: list[str], *names: str, start: int = 0) -> int:
     raise ValueError(f"欄位不見了：{names}（{fields}）")
 
 
+def parse_lending(payload: object, day: date) -> list[dict[str, object]]:
+    """The day's lending deals summed per stock: lots lent and lots × fee rate (%)."""
+    totals: dict[str, list[float]] = {}
+    for table in _tables(payload):
+        fields = table.get("fields") or []
+        try:
+            name_at = _column(fields, "證券代號名稱")
+            lots_at = _column(fields, "成交數量(交易單位)", "成交數量")
+            fee_at = _column(fields, "成交費率")
+        except ValueError:
+            continue
+        for item in table["data"]:
+            code = str(item[name_at]).split()[0] if str(item[name_at]).strip() else ""
+            lots, fee = _value(item[lots_at]), _value(item[fee_at])
+            if not STOCK.match(code) or not lots or lots <= 0 or fee is None:
+                continue
+            total = totals.setdefault(code, [0.0, 0.0])
+            total[0] += lots
+            total[1] += lots * fee
+    return [{"date": day, "code": code, "LendingVolume": lots, "FeeVolume": weighted}
+            for code, (lots, weighted) in sorted(totals.items())]
+
+
 def parse(exchange: str, dataset: str, payload: object, day: date) -> list[dict[str, object]]:
     """Rows in the chips parquet's columns: date, code and the dataset's values."""
+    if dataset == "lending":
+        return parse_lending(payload, day)
     rows: list[dict[str, object]] = []
     for table in _tables(payload):
         fields = table.get("fields") or []
@@ -163,7 +196,7 @@ def fetch(base: Path, client: OfficialHistoryClient, sessions: Iterable[date], t
     days = sorted(sessions)
     for day in days:
         for exchange in exchanges:
-            for dataset in DATASETS:
+            for dataset in DATASETS + (TWSE_ONLY if exchange == "twse" else ()):
                 payload = client._cached(key(exchange, dataset, day), url(exchange, dataset, day),
                                          final=day < today, period_end=day)
                 counts[f"{exchange}_{dataset}"] = counts.get(f"{exchange}_{dataset}", 0) + len(

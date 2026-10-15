@@ -106,6 +106,13 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
                      market, models_root(history))
     names = {row["code"]: row["name"] for row in rows} | _names(history, day.year)
     plan = SeedPlan()
+    from quant_platform.research.decisions import DecisionStore
+    from quant_platform.research.decisions import key as decision_key
+    from quant_platform.research.decisions import rankings as kept_rankings
+
+    # 2026-10-15: the days already decided stay as they were; today's decisions are kept, so the 15:30 record and
+    # the board hold what these orders say
+    store = DecisionStore(research)
     output: list[dict] = []
     folder = research / FOLDER
     folder.mkdir(parents=True, exist_ok=True)
@@ -127,11 +134,12 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
         try:
             if item.get("kind") == "blend":
                 rule = BlendRule.model_validate(item["rule"])
-                BlendAccount(data, fp, rule, costs, COMMON_START, day).run(COMMON_START, day, plan, ledger=ledger,
-                                                                          snapshots=snapshots)
+                BlendAccount(data, fp, rule, costs, COMMON_START, day, store=store,
+                             name=decision_key(item["rule_hash"], COMMON_START), through=day).run(
+                    COMMON_START, day, plan, ledger=ledger, snapshots=snapshots)
             else:
                 rule = DailyRule.model_validate(item["rule"])
-                ranks = daily_rankings(fp, rule, COMMON_START, day)
+                ranks = kept_rankings(fp, rule, COMMON_START, day, store, decision_key(item["rule_hash"], COMMON_START), day)
                 simulate_daily(data, rule, costs, COMMON_START, day, ranks, plan, ledger=ledger, snapshots=snapshots,
                                weights=daily_weights(fp, rule, ranks), parked=account_parking(data, fp, rule, costs),
                                exposure=exposure_schedule(data, fp, rule, costs))
@@ -153,6 +161,7 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
         output.append({"rule_hash": item["rule_hash"], "name": item["name"], "rank": ranks_now.get(item["rule_hash"]),
                        "orders": orders, "holdings": holdings, "cash": round(cash)})
         save(False)
+    store.save()
     save(True)
     return report
 

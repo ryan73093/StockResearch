@@ -849,9 +849,12 @@ def switch_mapping(fp: FactorPanel, rule: DailyRule):
     return fp._cache[key]
 
 
-def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> dict[date, list[str]]:
+def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: dict | None = None,
+                   trace: dict | None = None) -> dict[date, list[str]]:
     """The holdings the rule wants on each check day: keep a holding while it ranks within top × keep
-    (or until it has been held min_hold sessions while still eligible), fill up with the best others."""
+    (or until it has been held min_hold sessions while still eligible), fill up with the best others.
+    2026-10-15 (research/decisions.py): ``fixed`` — the decisions already taken up to ``fixed["through"]`` are taken
+    as they were made, only later sessions are ranked; ``trace`` receives the sessions that decide again."""
     sessions = [day for day in fp.sessions if start <= day <= end]
     checks = check_days(sessions, rule.check)
     output: dict[date, list[str]] = {}
@@ -875,12 +878,27 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
     gone = fp.gone() if hasattr(fp, "gone") else {}
     lag = 1 if getattr(rule, "execution", "same") == "next" else 0
     again: set[int] = set()               # 1.3.0: sessions to decide again (the market refused an order)
+    through = fixed["through"] if fixed else None
+    if fixed and fixed.get("again_after"):
+        following = next((count for count, day in enumerate(sessions) if day > through), None)
+        if following is not None:
+            again.add(following)
     for count, day in enumerate(sessions):
         if count + lag >= len(sessions):
             break                             # 1.4.0 "next": decided on the last day, filled after the period
         position = fp.index[day]
         when = sessions[count + lag]          # the session the orders fill (the output's key)
         act = fp.index[when]
+        if through is not None and day <= through:     # 2026-10-15: a decision already taken stays as it was
+            if when in fixed["days"]:
+                current = list(fixed["days"][when])
+                bought = {symbol: bought.get(symbol, count) for symbol in current}
+                if rule.stop_loss or exit_agent is not None:
+                    peak = {symbol: peak[symbol] if symbol in peak else fp.price(symbol, position) for symbol in current}
+                if exit_agent is not None:
+                    buy_price = {symbol: buy_price.get(symbol, fp.price(symbol, position)) for symbol in current}
+                output[when] = list(current)
+            continue
         lost = [symbol for symbol in current if gone.get(symbol, len(fp.sessions)) <= position]
         if day not in checks and count not in again and not lost:
             continue
@@ -978,6 +996,9 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date) -> 
         if exit_agent is not None:
             buy_price = {symbol: buy_price.get(symbol, fp.price(symbol, position)) for symbol in current}
         output[when] = list(current)
+    if trace is not None:
+        trace["again"] = {sessions[index] for index in again if index < len(sessions)}
+        trace["again_after"] = len(sessions) in again
     return output
 
 

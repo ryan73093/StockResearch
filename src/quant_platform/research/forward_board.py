@@ -113,6 +113,11 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
     fp = FactorPanel(panel, Industries(load_industries(history)), ChipStore(history, panel.sessions, panel.symbols, panel.close),
                      market_closes(history, panel.sessions), models_root(history))
     plan = SeedPlan()
+    from quant_platform.research.decisions import DecisionStore
+    from quant_platform.research.decisions import key as decision_key
+    from quant_platform.research.decisions import rankings as kept_rankings
+
+    store = DecisionStore(research)                 # 2026-10-15: decisions already taken stay as they were made
     bench = simulate_daily(data, None, costs, COMMON_START, last, plan=plan)
     bench_units = np.array(unit_values(bench.values, bench.flows))
     months = len(days) / SESSIONS_PER_MONTH
@@ -122,10 +127,12 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
         try:
             if item.get("kind") == "blend":
                 rule = BlendRule.model_validate(item["rule"])
-                run = BlendAccount(data, fp, rule, costs, COMMON_START, last).run(COMMON_START, last, plan, ledger=ledger)
+                run = BlendAccount(data, fp, rule, costs, COMMON_START, last, store=store,
+                                   name=decision_key(item["rule_hash"], COMMON_START), through=last).run(
+                    COMMON_START, last, plan, ledger=ledger)
             else:
                 rule = DailyRule.model_validate(item["rule"])
-                ranks = daily_rankings(fp, rule, COMMON_START, last)
+                ranks = kept_rankings(fp, rule, COMMON_START, last, store, decision_key(item["rule_hash"], COMMON_START), last)
                 run = simulate_daily(data, rule, costs, COMMON_START, last, ranks, plan, ledger=ledger,
                                      weights=daily_weights(fp, rule, ranks), parked=account_parking(data, fp, rule, costs),
                                      exposure=exposure_schedule(data, fp, rule, costs))
@@ -179,6 +186,7 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
              "date": last.isoformat(), "sessions": len(days), "months": round(months, 2), "rows": rows,
              "counts": {label: sum(1 for row in rows if row.get("state") == label) for label in ADVICE}}
     folder.mkdir(parents=True, exist_ok=True)
+    store.save()
     (folder / "board.json").write_text(json.dumps(board, ensure_ascii=False, indent=1), encoding="utf-8")
     with history_path.open("w", encoding="utf-8") as handle:
         for entry in [*earlier, {"date": last.isoformat(), "ranks": {row["rule_hash"]: row["rank"] for row in ranked},

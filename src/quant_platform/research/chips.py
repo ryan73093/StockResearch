@@ -90,7 +90,8 @@ def _rows(raw: Path, dataset: str):
 OFFICIAL = {"TaiwanStockShareholding": "holding", "TaiwanStockPER": "per",
             "TaiwanStockMarginPurchaseShortSale": "margin", "TaiwanStockInstitutionalInvestorsBuySell": "insti",
             # 2026-10-15: the short-selling datasets are extended night by night too (the forward rules use them)
-            "TaiwanDailyShortSaleBalances": "sbl", "TaiwanStockDayTrading": "daytrade"}
+            "TaiwanDailyShortSaleBalances": "sbl", "TaiwanStockDayTrading": "daytrade",
+            "TaiwanStockSecuritiesLending": "lending"}
 
 
 def _add_official(base: Path, dataset: str, columns: dict[str, list]) -> int:
