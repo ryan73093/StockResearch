@@ -84,7 +84,10 @@ def monthly_factor_table(panel: Panel, factors: list[str], start: date, end: dat
                 if count < 50:
                     continue
                 s, r = score[mask], forward[mask]
-                ic = float(np.corrcoef(_ranks(s), _ranks(r))[0, 1])
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    ic = float(np.corrcoef(_ranks(s), _ranks(r))[0, 1])
+                if not np.isfinite(ic):
+                    continue                # every score equal that day (shared ranks): nothing to rank
                 top, bottom = _fifths(s, r)
                 rows.append({"date": current.isoformat(), "factor": factor, "n": count, "ic": ic,
                              "spread": float(top.mean() - bottom.mean()) if len(top) and len(bottom) else None,
@@ -281,7 +284,10 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None) -> Path:
             if usable < 50:
                 continue
             s, r = score[mask], forward[mask]
-            ic = float(np.corrcoef(_ranks(s), _ranks(r))[0, 1])
+            with np.errstate(invalid="ignore", divide="ignore"):
+                ic = float(np.corrcoef(_ranks(s), _ranks(r))[0, 1])
+            if not np.isfinite(ic):
+                continue                    # 2026-10-15: every score equal that day (shared ranks), nothing to rank
             top, bottom = _fifths(s, r)
             index_return = benchmark[later] / benchmark[day] - 1 if day in benchmark and later in benchmark else None
             rows.append({"date": day.isoformat(), "factor": factor, "ic": ic,

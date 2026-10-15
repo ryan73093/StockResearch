@@ -56,3 +56,16 @@ def test_a_fifth_of_equal_scores_is_in_only_as_a_whole():
     top, bottom = _fifths(s, r)
     assert list(top) == [8.0, 9.0] and len(bottom) == 0                 # the eight equal zeros share rank 4.5
     assert list(_ranks(np.array([3.0, 1.0, 1.0]))) == [3.0, 1.5, 1.5]
+
+
+def test_a_day_on_which_every_score_is_equal_is_left_out():
+    """2026-10-15: with shared ranks a factor equal for every stock (dividend_ahead on most days) has no rank
+    correlation at all; that day is left out instead of stopping the whole report."""
+    days = weekdays(date(2014, 1, 1), 760)
+    closes = {f"{1101 + i}.TW": {day: 20 * 1.0003 ** n for n, day in enumerate(days)} for i in range(60)}  # all alike
+    closes["0050.TW"] = {day: 100.0 for day in days}
+    data = LegacyData(sessions=days, closes=closes,
+                      traded_value={symbol: {day: 50_000_000.0 for day in days} for symbol in closes},
+                      factors={}, predictions={})
+    rows = monthly_factor_table(Panel(data), ["momentum_6"], date(2015, 2, 1), date(2016, 11, 30))
+    assert rows == [] and summarize(rows, ["momentum_6"])["momentum_6"]["periods"] == {}
