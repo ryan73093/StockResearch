@@ -1037,7 +1037,7 @@ def main() -> int:
             print("停止 AI 研究員（整體）帳戶：" + ("完成" if tracker.stop(META_AI["rule_hash"], day, META_STOPPED) else "沒有在追蹤"),
                   flush=True)
         if args.restart_from:                   # 2026-10-17: every live account from the common start again
-            found = tracker.restart(date.fromisoformat(args.restart_from), args.reason or "使用者：前向一律從 10/01 起算")
+            found = tracker.restart(date.fromisoformat(args.restart_from), args.reason or "使用者：前向從每月滾動起點起算")
             print(f"重新起算：{found}", flush=True)
         if args.rebase:                         # 2026-10-15: known causes, not reconciliation errors
             print(f"標成重算基準：{tracker.rebase(args.rebase)} 筆紀錄", flush=True)

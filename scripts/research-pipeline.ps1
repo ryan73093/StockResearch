@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -529,6 +529,21 @@ switch ($Name) {
         }
         Invoke-Step "2-models" @("-m", "quant_platform.research", "rolling", "--step", "models")
         Invoke-Step "3-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+    }
+    "forward-rolling" {
+        # 2026-10-17 (使用者：前向觀察照現在的月份往前推兩個月起算): once the month's selection is graded and its models
+        # are trained (the rolling run has reached its forward test, or finished), every forward account starts again
+        # from the day after the cutoff and is recorded through the latest session; then the common-start board.
+        $rollingRecord = Join-Path $records "rolling.json"
+        while ($true) {
+            $state = if (Test-Path $rollingRecord) { Get-Content $rollingRecord -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+            $alive = $state -and $state.status -eq "running" -and (Get-Process -Id $state.pid -ErrorAction SilentlyContinue)
+            $holdout = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "quant_platform\.research rolling --step holdout" }
+            if (-not $alive -or $holdout) { break }
+            Start-Sleep -Seconds 60
+        }
+        Invoke-Step "1-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "2-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "rolling-holdout" {
         # 2026-10-16: the month's passing rules' forward test refreshed through the day (the worker, trading days 22:30)
