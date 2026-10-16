@@ -52,11 +52,18 @@ def factor_names(version: str = VERSION) -> list[str]:
     from quant_platform.research.tech_rl import TECH_FEATURES
 
     if version == ALL_VERSION:
-        from quant_platform.research.chips import ALERT_FACTORS, CORPORATE_FACTORS, LENDING_FACTORS, SHORT_FACTORS
+        from quant_platform.research.chips import (
+            ALERT_FACTORS,
+            CORPORATE_FACTORS,
+            ISSUANCE_FACTORS,
+            LENDING_FACTORS,
+            SHORT_FACTORS,
+        )
         from quant_platform.research.daily import FACTOR_LABELS, MODEL_FACTORS, TIME_FACTORS
 
         left_out = {"revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap",
-                    *TIME_FACTORS, *SHORT_FACTORS, *ALERT_FACTORS, *LENDING_FACTORS, *CORPORATE_FACTORS}
+                    *TIME_FACTORS, *SHORT_FACTORS, *ALERT_FACTORS, *LENDING_FACTORS, *CORPORATE_FACTORS,
+                    *ISSUANCE_FACTORS}
         return [name for name in (*FACTOR_LABELS, *MODEL_FACTORS) if name not in left_out]
     return list(TECH_FEATURES)
 

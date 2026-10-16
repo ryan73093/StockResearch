@@ -38,7 +38,8 @@ def keep(base, exchange, night, payload):
 def test_both_tables_parse_into_stock_rows():
     twse = parse("twse", TWSE)
     assert [row["code"] for row in twse] == ["2330", "1101"]                       # the ETF is left out
-    assert twse[0] == {"code": "2330", "ex_date": date(2026, 11, 3), "cash": None, "issue_ratio": 0.0, "issue_shares": None}
+    assert twse[0] == {"code": "2330", "ex_date": date(2026, 11, 3), "cash": None, "issue_ratio": 0.0, "issue_shares": None,
+                       "stock_ratio": 0.0}
     assert twse[1]["issue_ratio"] == 0.05
     tpex = parse("tpex", TPEX)
     assert tpex[0]["cash"] == 1.0 and tpex[0]["ex_date"] == date(2026, 10, 7)
@@ -55,7 +56,7 @@ def test_an_event_counts_from_the_first_night_its_amount_is_listed(tmp_path):
     keep(tmp_path, "tpex", date(2026, 10, 16), TPEX)
     found = announcements(tmp_path)
     assert found["2330"] == [{"ex_date": date(2026, 11, 3), "cash": 7.0, "cash_announced": date(2026, 10, 19),
-                              "issue_ratio": 0.0, "issue_shares": None, "issue_announced": None}]
+                              "issue_ratio": 0.0, "issue_shares": None, "issue_announced": None, "stock_ratio": 0.0}]
     assert found["1101"][0]["issue_announced"] == date(2026, 10, 16) and found["6129"][0]["issue_shares"] == 20_000_000
 
 

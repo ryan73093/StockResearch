@@ -65,7 +65,7 @@ def parse(exchange: str, payload: object) -> list[dict[str, object]]:
             return []
         fields = [str(field).replace(" ", "") for field in payload.get("fields") or []]
         try:
-            at = {name: fields.index(name) for name in ("除權除息日期", "股票代號", "現金增資配股率", "現金股利")}
+            at = {name: fields.index(name) for name in ("除權除息日期", "股票代號", "無償配股率", "現金增資配股率", "現金股利")}
         except ValueError:
             return []
         for item in payload.get("data") or []:
@@ -73,7 +73,8 @@ def parse(exchange: str, payload: object) -> list[dict[str, object]]:
             ex_date = _roc(item[at["除權除息日期"]])
             if STOCK.match(code) and ex_date:
                 rows.append({"code": code, "ex_date": ex_date, "cash": _number(item[at["現金股利"]]),
-                             "issue_ratio": _number(item[at["現金增資配股率"]]) or 0.0, "issue_shares": None})
+                             "issue_ratio": _number(item[at["現金增資配股率"]]) or 0.0, "issue_shares": None,
+                             "stock_ratio": _number(item[at["無償配股率"]]) or 0.0})
         return rows
     for item in payload if isinstance(payload, list) else []:
         code = str(item.get("SecuritiesCompanyCode", "")).strip()
@@ -84,7 +85,7 @@ def parse(exchange: str, payload: object) -> list[dict[str, object]]:
                  ("AllocatedForPublicUnderwriting", "SubscribedByEmployees", "SubscribedByExistingShareholders")]
         rows.append({"code": code, "ex_date": ex_date, "cash": _number(item.get("CashDividend")),
                      "issue_ratio": _number(item.get("SubscriptionRatioToNewSharesIssued")) or 0.0,
-                     "issue_shares": sum(parts) or None})
+                     "issue_shares": sum(parts) or None, "stock_ratio": _number(item.get("StockDividendRatio")) or 0.0})
     return rows
 
 
@@ -105,14 +106,17 @@ def announcements(base: Path) -> dict[str, list[dict[str, object]]]:
         for row in parse(exchange, payload):
             event = events.setdefault((row["code"], row["ex_date"]), {"ex_date": row["ex_date"], "cash": None,
                                                                       "cash_announced": None, "issue_ratio": 0.0,
-                                                                      "issue_shares": None, "issue_announced": None})
+                                                                      "issue_shares": None, "issue_announced": None,
+                                                                      "stock_ratio": 0.0})
+            if row.get("stock_ratio", 0.0) > event["stock_ratio"]:
+                event["stock_ratio"] = row["stock_ratio"]         # new shares per share held (a stock dividend)
             if event["cash_announced"] is None and (row["cash"] or 0) > 0:
                 event.update(cash=row["cash"], cash_announced=night)
             if event["issue_announced"] is None and row["issue_ratio"] > 0:
                 event.update(issue_ratio=row["issue_ratio"], issue_shares=row["issue_shares"], issue_announced=night)
     output: dict[str, list[dict[str, object]]] = {}
     for (code, _ex_date), event in sorted(events.items(), key=lambda item: (item[0][0], item[0][1])):
-        if event["cash_announced"] or event["issue_announced"]:
+        if event["cash_announced"] or event["issue_announced"] or event["stock_ratio"] > 0:
             output.setdefault(code, []).append(event)
     return output
 

@@ -80,6 +80,15 @@ CORPORATE_FACTORS = {
     "no_cash_issue": "沒有現金增資（現增新股佔發行股數，反向；公告後 250 日）",
 }
 CORPORATE_SESSIONS = 250
+# 2026-10-16 (股本膨脹): new shares over 250 sessions against the shares issued — cash capital increases, convertible
+# bonds and employee shares turned into stock, shares issued in mergers (net share issuance, Pontiff & Woodgate 2008).
+# A stock dividend's new shares are not issuance: the first jump in the shares issued within 70 sessions after its
+# ex-date that is 0.5–1.5 times log(1 + new shares per share) is taken out (TSMC-style listings follow the ex-date by
+# 1–10 weeks). A fall (capital reduction, cancelled treasury shares) is left out: a reduction that offsets losses is
+# not a buyback. Higher = fewer new shares.
+ISSUANCE_FACTORS = {"low_issuance_250": "股本沒有膨脹（250 日內新增股數佔發行股數，扣掉配股；反向）"}
+STOCK_DIVIDENDS = "StockDividends"
+DIVIDEND_LISTING_SESSIONS = 70
 SAME_PERIOD_DAYS = (305, 425)          # the payout "a year earlier": announced 305–425 days before
 FIELDS = {
     "TaiwanStockShareholding": ("ForeignInvestmentSharesRatio", "NumberOfSharesIssued"),
@@ -137,7 +146,7 @@ def build(history: str | Path, job=None) -> dict[str, int]:
     steps = list(FIELDS) + ["TaiwanStockInstitutionalInvestorsBuySell", "TaiwanStockMonthRevenue"]
     steps += [dataset for dataset in SHORT_FIELDS if (raw / dataset).is_dir()]      # once downloaded
     steps += [LENDING] if (raw / LENDING).is_dir() else []
-    steps += [CORPORATE] if (raw / "TaiwanStockDividend").is_dir() else []
+    steps += [CORPORATE, STOCK_DIVIDENDS] if (raw / "TaiwanStockDividend").is_dir() else []
     if job:
         job.update(total=len(steps), done=0, force=True)
     for index, dataset in enumerate(steps):
@@ -166,6 +175,13 @@ def build(history: str | Path, job=None) -> dict[str, int]:
                     columns["code"].append(code)
                     columns["dividend_change"].append(change)
                     columns["cash_issue_shares"].append(shares)
+        elif dataset == STOCK_DIVIDENDS:      # 2026-10-16: (ex-date, new shares per share held) per stock dividend
+            columns.update({"ratio": []})
+            for code, items in stock_dividends(base, raw).items():
+                for ex_date, ratio in items:
+                    columns["date"].append(ex_date)
+                    columns["code"].append(code)
+                    columns["ratio"].append(ratio)
         elif dataset == LENDING:              # one row per stock and day: lots lent, and lots × fee rate (%)
             columns.update({"LendingVolume": [], "FeeVolume": []})
             for code, rows in _rows(raw, dataset):
@@ -264,6 +280,28 @@ def _official_policies(base: Path, out: Path, policies: dict[str, list[dict]]) -
     return output
 
 
+def stock_dividends(base: Path, raw: Path) -> dict[str, list[tuple[date, float]]]:
+    """code -> [(ex-date, new shares per share held)]: FinMind's policies (par NT$10 a share), then the exchanges'
+    nightly ex-rights tables for the ex-dates FinMind does not have."""
+    from quant_platform.research.history.dividends_daily import announcements
+
+    output: dict[str, dict[date, float]] = {}
+    for code, rows in _rows(raw, "TaiwanStockDividend"):
+        for row in rows:
+            ratio = sum(float(row.get(name) or 0.0) for name in ("StockEarningsDistribution", "StockStatutorySurplus")) / 10
+            try:
+                ex_date = date.fromisoformat(str(row.get("StockExDividendTradingDate") or "")[:10])
+            except ValueError:
+                continue
+            if ratio > 0:
+                output.setdefault(code, {})[ex_date] = output.get(code, {}).get(ex_date, 0.0) + ratio
+    for code, events in announcements(base).items():
+        for event in events:
+            if event.get("stock_ratio", 0.0) > 0 and event["ex_date"] not in output.get(code, {}):
+                output.setdefault(code, {})[event["ex_date"]] = event["stock_ratio"]
+    return {code: sorted(days.items()) for code, days in output.items()}
+
+
 def corporate_events(rows: list[dict]) -> list[tuple[date, float | None, float | None]]:
     """(announcement date, change of the cash dividend per share against the payout announced 305–425 days before —
     None when there is none to compare with, new shares from a cash capital increase — None when none) per row."""
@@ -360,6 +398,35 @@ class ChipStore:
         frame = frame.ffill(limit=CORPORATE_SESSIONS - 1).fillna(0.0)
         frame.loc[frame.index <= first] = np.nan  # before the first announcement nothing is known
         return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
+
+    def issuance_available(self) -> bool:
+        return (self._folder / f"{STOCK_DIVIDENDS}.parquet").is_file()
+
+    def issuance_matrix(self) -> np.ndarray:
+        """symbols × sessions, ``low_issuance_250``: minus the log growth of the shares issued over 250 sessions from
+        rises only, a stock dividend's listing taken out (dated the day before, like the shares)."""
+        shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued")
+        jumps = np.log(shares.where(shares > 0)).diff()
+        table = pq.read_table(self._folder / f"{STOCK_DIVIDENDS}.parquet").to_pandas()
+        if self.until is not None:
+            table = table[pd.to_datetime(table["date"]) < pd.Timestamp(self.until)]
+        sessions = pd.to_datetime(pd.Index(self.sessions))
+        values = jumps.to_numpy(copy=True)
+        column = {code: index for index, code in enumerate(jumps.columns)}
+        for code, ex_date, ratio in table[["code", "date", "ratio"]].itertuples(index=False):
+            if code not in column or ratio <= 0:
+                continue
+            target = float(np.log1p(ratio))
+            first = int(sessions.searchsorted(pd.Timestamp(ex_date)))
+            series = values[:, column[code]]
+            for index in range(first, min(first + DIVIDEND_LISTING_SESSIONS, len(series))):
+                if np.isfinite(series[index]) and 0.5 * target <= series[index] <= 1.5 * target:
+                    series[index] = 0.0            # the dividend's new shares listed: not issuance
+                    break
+        rises = pd.DataFrame(np.clip(values, 0.0, None), index=jumps.index, columns=jumps.columns)
+        known = shares.notna()
+        issued = rises.fillna(0.0).rolling(250, min_periods=250).sum().where(known)
+        return np.ascontiguousarray((-issued).to_numpy(dtype=np.float32).T)
 
     def lending_available(self) -> bool:
         return (self._folder / f"{LENDING}.parquet").is_file()
