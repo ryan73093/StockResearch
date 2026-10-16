@@ -766,8 +766,8 @@
 
 <section class="card">
   <div class="card__head">
-    <h2>ETF 基準前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>
-    <span class="muted small">標準現金流：每月 5 日投入 10,000 元；每個交易日 15:30 記錄，只追加不改寫</span>
+    <h2>ETF 基準前向模擬 <span class="badge">{{ rolling_start }} 起</span></h2>
+    <span class="muted small">和個股帳戶同一個每月滾動起點；標準現金流：每月 5 日投入 10,000 元；每個交易日 15:30 記錄，只追加不改寫</span>
   </div>
   {% if forward_rows %}
   <div class="table-wrap table-wrap--stack">

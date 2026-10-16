@@ -23,8 +23,15 @@ from quant_platform.research.market import load_market
 from quant_platform.research.spec import BASELINES, StrategySpec
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-FORWARD_START = date(2026, 10, 1)
+FORWARD_START = date(2026, 10, 1)        # the first start; 2026-10-17 on, ``start_for`` (rolls monthly)
 STANDARD_PLAN = ContributionPlan(monthly_amount=10_000, day_of_month=5)
+
+
+def start_for(today: date) -> date:
+    """2026-10-17 (使用者：同一頁不能有兩個起點): the day after the month's rolling cutoff, as the stock accounts."""
+    from quant_platform.research.forward_board import common_start
+
+    return common_start(today)
 
 
 class ForwardTracker:
@@ -52,37 +59,40 @@ class ForwardTracker:
         return [json.loads(line) for line in self.log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def record(self, today: date, costs: CostModel | None = None) -> list[dict[str, object]]:
-        """Append today's state for every tracked spec that has none yet."""
-        if today < FORWARD_START:
-            return []
-        seen = {(item["date"], item["spec_hash"]) for item in self.records()}
+        """Append every session from the month's start (``start_for``) through the latest one on or before today that
+        a tracked spec has no record of yet; each record carries its start (``since``)."""
+        start = start_for(today)
+        seen = {(item["date"], item["spec_hash"], item.get("since", FORWARD_START.isoformat())) for item in self.records()}
         written = []
+        moment = datetime.now(TAIPEI).isoformat(timespec="seconds")
         for spec in self.tracked():
-            if (today.isoformat(), spec.spec_hash) in seen:
-                continue
             assets = sorted(set(spec.assets) | {spec.signal})
             market = load_market(assets, self._base / "history")
-            if today not in market.sessions or any(market.close(asset, today) is None for asset in spec.assets):
+            days = [day for day in market.sessions if start <= day <= today
+                    and all(market.close(asset, day) is not None for asset in spec.assets)]
+            if not days or (days[-1].isoformat(), spec.spec_hash, start.isoformat()) in seen:
                 continue
-            result = simulate(spec, market, self._plan, costs, start=FORWARD_START, end=today)
-            if result.end != today:
-                continue
-            record = {
-                "date": today.isoformat(),
-                "spec_hash": spec.spec_hash,
-                "name": spec.name,
-                "value": round(result.final_value, 2),
-                "cash": round(result.final_cash, 2),
-                "contributed": round(result.total_contributed, 2),
-                "trades_today": [
-                    {"asset": trade.asset, "side": trade.side, "shares": trade.shares, "price": trade.price}
-                    for trade in result.trades if trade.day == today
-                ],
-                "data_fingerprint": market.fingerprint,
-                "engine": ENGINE_VERSION,
-                "recorded_at": datetime.now(TAIPEI).isoformat(timespec="seconds"),
-            }
-            written.append(record)
+            result = simulate(spec, market, self._plan, costs, start=start, end=days[-1])
+            contributed = 0.0
+            for day, value, flow in zip(result.days, result.values, result.flows):
+                contributed += flow
+                if (day.isoformat(), spec.spec_hash, start.isoformat()) in seen:
+                    continue
+                written.append({
+                    "date": day.isoformat(),
+                    "spec_hash": spec.spec_hash,
+                    "name": spec.name,
+                    "since": start.isoformat(),
+                    "value": round(value, 2),
+                    "contributed": round(contributed, 2),
+                    "trades_today": [
+                        {"asset": trade.asset, "side": trade.side, "shares": trade.shares, "price": trade.price}
+                        for trade in result.trades if trade.day == day
+                    ],
+                    "data_fingerprint": market.fingerprint,
+                    "engine": ENGINE_VERSION,
+                    "recorded_at": moment,
+                })
         if written:
             self._folder.mkdir(parents=True, exist_ok=True)
             with self.log_path.open("a", encoding="utf-8") as handle:
@@ -90,11 +100,14 @@ class ForwardTracker:
                     handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         return written
 
-    def summary(self) -> list[dict[str, object]]:
-        """Latest record per spec, with the difference to the DCA benchmark on that day."""
+    def summary(self, today: date | None = None) -> list[dict[str, object]]:
+        """Latest record per spec from the month's start, with the difference to the DCA benchmark on that day."""
+        start = start_for(today or datetime.now(TAIPEI).date()).isoformat()
         latest: dict[str, dict[str, object]] = {}
         days: dict[str, set[str]] = {}
         for record in self.records():
+            if record.get("since", FORWARD_START.isoformat()) != start:
+                continue
             latest[record["spec_hash"]] = record
             days.setdefault(record["spec_hash"], set()).add(record["date"])
         benchmark = latest.get(BASELINES["benchmark_dca"].spec_hash)

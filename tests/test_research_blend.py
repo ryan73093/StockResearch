@@ -116,6 +116,13 @@ def test_a_qualifying_blend_is_tracked_forward_and_reconciles(tmp_path):
         data_fingerprint="daily:x", report_file="b.json",
         metrics={"full_period_excess": 0.4, "since_2020_excess": 0.2, "max_drawdown": -0.2, "benchmark_max_drawdown": -0.3,
                  "windows": {"1y": {"count": 50, "win_ratio": 0.7}, "3y": {"count": 30, "win_ratio": 0.8, "median_excess": 0.1}}})
+    # 2026-10-17: accounts come from the month's rolling selection; a blend account already tracked keeps recording
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    (folder / "tracked.json").write_text(json.dumps([{"rule_hash": mix.rule_hash, "name": mix.name, "kind": "blend",
+                                                      "rule": mix.model_dump(mode="json"), "since": "2026-10-02", "plan": "seed",
+                                                      "initial": 300_000, "monthly": 10_000}],
+                                                    ensure_ascii=False), encoding="utf-8")
     tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
     written = tracker.record(date(2026, 10, 2), now=at(date(2026, 10, 2)))
     assert tracker.tracked()[0]["kind"] == "blend"

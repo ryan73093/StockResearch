@@ -26,7 +26,7 @@ def test_records_are_appended_once_per_day_and_summarised(tmp_path):
     tracker = ForwardTracker(tmp_path)
     _dataset(tmp_path, date(2026, 10, 6))
 
-    assert tracker.record(date(2026, 9, 30)) == []           # before the forward start
+    # 2026-10-17 (使用者：同一頁不能有兩個起點): from the month's rolling start (October: 09-01), every session
     first = tracker.record(date(2026, 10, 5))
     again = tracker.record(date(2026, 10, 5))
     tracker.record(date(2026, 10, 6))
@@ -34,12 +34,14 @@ def test_records_are_appended_once_per_day_and_summarised(tmp_path):
     from quant_platform.research.spec import BASELINES
 
     assert {item["name"] for item in first} == {spec.name for spec in BASELINES.values()}
-    assert len(first) == 4 and again == []                     # the four baselines, once per day
-    dca = next(item for item in first if item["name"] == "定期定額基準")
-    assert dca["contributed"] == 10_000 and dca["trades_today"][0]["shares"] == 99
-    rows = tracker.summary()
-    assert rows[0]["benchmark"] and rows[0]["sessions"] == 2 and rows[0]["date"] == "2026-10-06"
+    assert len(first) == 4 * 25 and again == []                # the four baselines, 09-01 to 10-05, once per day
+    assert {item["since"] for item in first} == {"2026-09-01"} and min(item["date"] for item in first) == "2026-09-01"
+    dca = next(item for item in first if item["name"] == "定期定額基準" and item["date"] == "2026-09-07")
+    assert dca["contributed"] == 10_000 and dca["trades_today"][0]["shares"] == 99   # the 5th was a Saturday
+    rows = tracker.summary(date(2026, 10, 6))
+    assert rows[0]["benchmark"] and rows[0]["sessions"] == 26 and rows[0]["date"] == "2026-10-06"
     assert all(row["excess"] is not None for row in rows if not row["benchmark"])
+    assert tracker.summary(date(2026, 11, 2)) == []            # November starts on 10-01: nothing recorded from there yet
     assert FORWARD_START == date(2026, 10, 1)
 
 
@@ -47,5 +49,5 @@ def test_days_without_data_are_skipped(tmp_path):
     tracker = ForwardTracker(tmp_path)
     _dataset(tmp_path, date(2026, 10, 2))
 
-    assert tracker.record(date(2026, 10, 5)) == []            # the dataset ends on 10-02
-    assert not tracker.log_path.exists()
+    written = tracker.record(date(2026, 10, 5))               # the dataset ends on 10-02
+    assert max(item["date"] for item in written) == "2026-10-02"
