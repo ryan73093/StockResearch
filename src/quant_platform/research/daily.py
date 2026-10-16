@@ -102,7 +102,11 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 # 1.4.2 (2026-10-15): equal factor values share their average percentile and an equal score goes to the more
 # liquid stock — both had gone by stock code (``_percentile``, ``FactorPanel.ranked``): where most stocks are
 # equal (attention notices, EPS growth at its cap, exactly at the 52-week high) a later-listed code ranked higher.
-ENGINE_VERSION = "daily-1.4.2"
+# 1.4.3 (2026-10-16; 使用者：為什麼又有 20 天這種限制？好好 review 每一個機制): a rule holding by the trend sells a
+# holding the session it is out of the keep zone and below its 20-session average, whatever the rule's decision days —
+# a weekly rule kept such a holding until its next weekly decision (up to four more sessions); new buys still wait for
+# the rule's decision days.
+ENGINE_VERSION = "daily-1.4.3"
 SAME_DAY_PARTICIPATION = 0.001              # an order's share of the stock's turnover that session, at most
 NEXT_DAY_PARTICIPATION = 0.005
 PRICE_LIMIT_WIDENED = date(2015, 6, 1)
@@ -215,7 +219,8 @@ META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現�
                 "rl_all": "RL 機器人 2.1（每 20 個交易日決定全部因子與模型分數的權重，永遠滿倉）",
                 "all_equal": "全部因子與模型分數平均（機器人 2.1 的對照）",
                 "rl_blocks": "RL 機器人 3.0（每 20 個交易日決定 8 個強訊號區塊的權重，驗證沒贏平均就不押）",
-                "block_equal": "8 個強訊號區塊平均（機器人 3.0 的對照）"}
+                "block_equal": "8 個強訊號區塊平均（機器人 3.0 的對照）",
+                "rl_free": "RL 機器人 4.0 的每檔比重（每天自己決定買哪些、各多少、留多少現金；只受交易所規則限制）"}
 RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FACTORS, **META_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
@@ -291,6 +296,11 @@ class DailyRule(BaseModel):
     # same day's after-hours sessions (14:30); "next" = fill in the next session's closing auction — the
     # platform's numbers come after 15:14, so this is what it can actually do. Left out of the hash when "same".
     execution: Literal["same", "next"] = "same"
+    # 2026-10-16 (RL 4.0; 使用者：月線上續抱、每週決策是策略不是規則，不要給 RL 加一堆奇怪的限制): the account holds the
+    # weights its one factor gives each stock (the rest in cash), rebalanced every session; top, keep, min_hold, check,
+    # hold, the industry cap and the weighting do not apply — only the exchange's rules, the costs and the turnover cap.
+    # Left out of the hash when False.
+    free: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -341,6 +351,8 @@ class DailyRule(BaseModel):
             data.pop("hold", None)
         if data.get("execution") == "same":
             data.pop("execution", None)
+        if not data.get("free"):
+            data.pop("free", None)
         return data
 
     @property
@@ -417,6 +429,11 @@ class FactorPanel:
 
             if factor == "factor_momentum":
                 return timing_scores(self)                                             # sessions × symbols
+            if factor == "rl_free":                                                    # 2026-10-16: RL 4.0
+                from quant_platform.research.rl_free import VERSION as FREE_VERSION
+                from quant_platform.research.rl_free import weights as free_weights
+
+                return free_weights(self, Path(self.models) / FREE_VERSION if self.models is not None else Path("missing"))
             if factor == "tech_momentum":
                 return timing_scores(self, factor_names())
             version = (ALL_VERSION if factor in ("rl_all", "all_equal") else
@@ -928,11 +945,30 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                 output[when] = list(current)
             continue
         lost = [symbol for symbol in current if gone.get(symbol, len(fp.sessions)) <= position]
-        if day not in checks and count not in again and not lost:
+        exits_only = day not in checks and count not in again and not lost
+        if exits_only and (getattr(rule, "hold", "days") != "trend" or not current):
             continue
         if lost:                              # 1.3.1: delisted before it was sold — worthless, off the list
             current = [symbol for symbol in current if symbol not in lost]
         holding = list(current)
+        if exits_only:                        # 1.4.3: out of the zone and below its average: sold that session
+            ranked = fp.ranked(rule, position)
+            keep_zone, eligible = set(ranked[: rule.top * rule.keep]), set(ranked)
+            rising = fp.rising()[:, position]
+            kept = [symbol for symbol in current
+                    if symbol in keep_zone or (symbol in eligible and rising[fp.row[symbol]])]
+            if len(kept) == len(current):
+                continue
+            if locks is not None:             # not sold: limit-down or no trade today (tried again tomorrow)
+                traded, _locked_up, locked_down = locks
+                kept += [symbol for symbol in current if symbol not in kept and fp.row.get(symbol) is not None
+                         and (not traded[fp.row[symbol], act] or locked_down[fp.row[symbol], act])]
+                if len(kept) == len(current):
+                    continue
+            current = kept
+            bought = {symbol: bought.get(symbol, count) for symbol in current}
+            output[when] = list(current)
+            continue
         if rule.market_filter != "none" and not fp.risk_on(position):
             current, bought, peak = [], {}, {}
             output[when] = []
@@ -1035,8 +1071,11 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                    ranks: dict[date, list[str]] | None = None, plan=None,
                    ledger: list[dict[str, object]] | None = None,
                    snapshots: dict | None = None, weights: dict[date, dict[str, float]] | None = None,
-                   parked: set[date] | None = None, exposure: dict[date, float] | None = None) -> RunResult:
-    """``rule=None`` is the benchmark: the same cash flow into 0050 on the day it arrives. ``weights``:
+                   parked: set[date] | None = None, exposure: dict[date, float] | None = None,
+                   targets: dict[date, dict[str, float]] | None = None) -> RunResult:
+    """``rule=None`` is the benchmark: the same cash flow into 0050 on the day it arrives. ``targets`` (2026-10-16,
+    a free rule): each session's weight per stock, the rest cash — every holding sold, trimmed or bought to its
+    weight, a trade placed only when its minimum fee is at most 2% of it. ``weights``:
     each pick's share of the stock part on its check day (equal when absent). ``parked``: days the stock
     part is held in 0050 (the stocks are sold and 0050 bought the same close; on the first day after,
     the 0050 above the core is sold and the picks bought)."""
@@ -1077,6 +1116,8 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         return False
 
     gone = write_off_days(data)
+    free_goals = targets                         # (the rule branch below has a local ``targets`` of its own)
+    last_goal: dict[str, float] = {}
     actions = getattr(data, "actions", None) or {}
     owed: list[tuple[date, float, str]] = []     # 1.4.0: (payment session, NT$, symbol) — dividends not yet paid
     short: set[str] = set()                      # 1.4.0: bought less than wanted today (the turnover cap)
@@ -1215,7 +1256,27 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                 units[symbol] = 0.0
         contribution = by_day.get(day, 0.0)
         cash += contribution
-        if rule is None:
+        if free_goals is not None:                 # 2026-10-16: the free rule's weights (RL 4.0)
+            goal = free_goals.get(day)
+            if goal is None and retry:
+                goal = last_goal
+            if goal is not None:
+                last_goal = goal
+                floor = 50 * order_fee(1, 100.0, day)          # a trade whose minimum fee is over 2% is not placed
+                total = cash + sum(count * price(symbol, day) for symbol, count in units.items() if count > 0)
+                for symbol in [held for held, count in units.items() if count > 0 and held not in goal]:
+                    sell_all(symbol, day)
+                for symbol, weight in goal.items():
+                    excess = units[symbol] * price(symbol, day) - total * weight
+                    if units[symbol] > 0 and excess >= floor:
+                        sell_all(symbol, day, excess)
+                gaps = sorted(((total * weight - units[symbol] * price(symbol, day), symbol)
+                               for symbol, weight in goal.items()), reverse=True)
+                for gap, symbol in gaps:
+                    amount = min(gap, cash)
+                    if amount >= floor:
+                        buy(symbol, amount, day)
+        elif rule is None:
             if cash > 0:
                 buy(BENCHMARK, cash, day)
         else:
@@ -1519,8 +1580,31 @@ def tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
     return "T0 候選", f"前向觀察 {sessions}／{FORWARD_SESSIONS} 個交易日"
 
 
+def free_targets(fp: FactorPanel, rule: DailyRule) -> dict[date, dict[str, float]]:
+    """A free rule's weights per session (its one factor's values; sessions without any are left out)."""
+    matrix = fp.matrix(next(iter(rule.factors)))
+    output: dict[date, dict[str, float]] = {}
+    for position, day in enumerate(fp.sessions):
+        column = matrix[:, position]
+        held = np.flatnonzero(np.isfinite(column) & (column > 0))
+        if held.size:
+            output[day] = {fp.symbols[row]: float(column[row]) for row in held}
+    return output
+
+
 def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel,
              benchmark_cache: dict | None = None) -> dict[str, object]:
+    if rule.free:                              # 2026-10-16 (RL 4.0): the weights, every session
+        targets = free_targets(fp, rule)
+        first = min(targets) if targets else RECENT_START
+
+        def free_account(start: date, end: date) -> RunResult:
+            return simulate_daily(data, rule, costs, start, end, targets=targets)
+
+        report = account_report(data, free_account, first, costs, benchmark_cache)
+        report["parked_sessions"] = 0
+        return {"engine": ENGINE_VERSION, "spec": rule.canonical(), "rule_hash": rule.rule_hash, "label": rule.label,
+                **report}
     ranks = daily_rankings(fp, rule, RECENT_START, RECENT_END)
     weights, parked = daily_weights(fp, rule, ranks), account_parking(data, fp, rule, costs)
     first = next((day for day in sorted(ranks) if ranks[day]), RECENT_START)
@@ -1710,6 +1794,12 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         payload["models_all"] = {name: digest(model_dir(history, MODELS[name]["version"])) for name in MODEL_FACTORS}
         if "rl_all" in factor_names:
             payload["robot_all"] = robot_digest(models_root(history) / ALL_VERSION)
+    if "rl_free" in factor_names:                                # 2026-10-16: the robot 4.0's weights
+        from quant_platform.research.model import models_root
+        from quant_platform.research.rl_free import VERSION as FREE_VERSION
+        from quant_platform.research.rl_free import digest as free_digest
+
+        payload["robot_free"] = free_digest(models_root(history) / FREE_VERSION)
     if any(name in ("rl_blocks", "block_equal") for name in factor_names):   # 2026-10-16: the robot 3.0 and model F
         from quant_platform.research.model import MODELS, digest, model_dir, models_root
         from quant_platform.research.rl_timing import BLOCK_VERSION
@@ -2284,6 +2374,13 @@ def robot30_batch() -> list:
                       factors={"block_equal": 1.0}, **common)]
 
 
+def robot40_batch() -> list:
+    """2026-10-16: the robot 4.0 — every session its own weights for every stock and for cash (a free rule: only
+    the exchange's rules, the costs and the turnover cap apply)."""
+    return [DailyRule(name="RL 機器人 4.0：每天自己決定買哪些、各多少、留多少現金（只受交易所規則限制）",
+                      factors={"rl_free": 1.0}, free=True)]
+
+
 def rerun_all_batch() -> list:
     """2026-10-14 夜: every 100%-stock daily rule and blend whose latest result is in the registry, run again on engine
     1.4.1 (the retrained models) — none left on an older engine. Rules holding 0050 (NO_0050) and the 17-way blend
@@ -2348,4 +2445,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
-           "robot30": robot30_batch}
+           "robot30": robot30_batch, "robot40": robot40_batch}

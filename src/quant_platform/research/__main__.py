@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3"),
+                            "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "free-rl4"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
@@ -701,6 +701,27 @@ def main() -> int:
             abstained = sum(1 for item in meta["yearly"].values() if item["abstained"])
             job.payload["summary"] = (f"{len(meta['yearly'])} 年樣本外：機器人比 0050 {robot:+.3f}、平均 {alike:+.3f}"
                                       f"（對數報酬加總）；{abstained} 年驗證沒贏平均、不押")
+        print(job.payload["summary"])
+        for year, item in meta["yearly"].items():
+            print(year, {key: value for key, value in item.items() if not key.startswith("curve")})
+        return 0
+
+    if args.command == "free-rl4":
+        # 2026-10-16: the robot 4.0 — a free agent, every session's weights (research/rl_free.py)
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import rl_free
+        from quant_platform.research.jobs import JobLog
+        from quant_platform.research.model import models_root
+        from quant_platform.research.rl_timing import benchmark_units
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("RL 機器人 4.0：每天自己決定每檔比重與現金（逐年滾動訓練）", command) as job:
+            job.update(current="載入資料、整理每天每檔的因子", force=True)
+            data, fp = daily_research.load(Path(args.base))
+            market = rl_free.Market(fp, benchmark_units(data, fp.sessions), broker_costs(args.broker))
+            meta = rl_free.walk_forward(market, models_root(Path(args.base)) / rl_free.VERSION, job=job)
+            robot = sum(item["robot_excess"] for item in meta["yearly"].values())
+            job.payload["summary"] = f"{len(meta['yearly'])} 年樣本外（訓練環境）：比 0050 {robot:+.3f}（對數報酬加總）"
         print(job.payload["summary"])
         for year, item in meta["yearly"].items():
             print(year, {key: value for key, value in item.items() if not key.startswith("curve")})

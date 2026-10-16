@@ -143,6 +143,25 @@ def _add_official(base: Path, dataset: str, columns: dict[str, list]) -> int:
     return added
 
 
+def replace_parquet(table, path: Path, tries: int = 60) -> None:
+    """2026-10-16: written next to the file and moved over it, so a run reading the chip tables meanwhile sees the
+    old or the new table, never half of one (pipelines no longer wait out the 21:30 update). Windows refuses the
+    move while a reader holds the file open: tried again for up to a minute."""
+    import os
+    import time
+
+    partial = path.with_suffix(".parquet.partial")
+    pq.write_table(table, partial, compression="zstd")
+    for attempt in range(tries):
+        try:
+            os.replace(partial, path)
+            return
+        except PermissionError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(1)
+
+
 def build(history: str | Path, job=None) -> dict[str, int]:
     """One Parquet per dataset with the columns the factors use; returns rows written. FinMind's download
     first, then the exchanges' daily reports for the days it does not have (research/history/chips_daily.py)."""
@@ -249,7 +268,7 @@ def build(history: str | Path, job=None) -> dict[str, int]:
                     columns["month"].append(month)
         _add_official(base, dataset, columns)
         table = pa.table(columns)
-        pq.write_table(table, out / f"{dataset}.parquet", compression="zstd")
+        replace_parquet(table, out / f"{dataset}.parquet")
         written[dataset] = table.num_rows
     if job:
         job.update(done=len(steps), force=True)

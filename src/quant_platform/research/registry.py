@@ -92,6 +92,39 @@ def one_per_rule(records: list[TrialRecord]) -> list[TrialRecord]:
     return sorted(chosen.values(), key=lambda item: item.trial_id)
 
 
+class _locked:
+    """A lock file next to the registry (created exclusively; one left over 10 minutes by a dead process is removed)."""
+
+    def __init__(self, path: Path) -> None:
+        self._lock = Path(str(path) + ".lock")
+
+    def __enter__(self):
+        import os
+        import time
+
+        self._lock.parent.mkdir(parents=True, exist_ok=True)
+        while True:
+            try:
+                handle = os.open(self._lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(handle, str(os.getpid()).encode())
+                os.close(handle)
+                return self
+            except FileExistsError:
+                try:
+                    if time.time() - self._lock.stat().st_mtime > 600:
+                        self._lock.unlink()
+                        continue
+                except OSError:
+                    pass
+                time.sleep(0.05)
+
+    def __exit__(self, *_exc) -> None:
+        try:
+            self._lock.unlink()
+        except OSError:
+            pass
+
+
 class TrialRegistry:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
@@ -125,6 +158,13 @@ class TrialRegistry:
         metrics: dict[str, object],
         report_file: str = "",
     ) -> TrialRecord:
+        with _locked(self._path):           # 2026-10-16: pipelines run side by side; one writer at a time keeps the chain
+            return self._register(kind=kind, period=period, spec_hash=spec_hash, spec_name=spec_name,
+                                  input_hash=input_hash, data_fingerprint=data_fingerprint, metrics=metrics,
+                                  report_file=report_file)
+
+    def _register(self, *, kind, period, spec_hash, spec_name, input_hash, data_fingerprint, metrics,
+                  report_file) -> TrialRecord:
         existing = self.find(kind, period, input_hash)
         if existing is not None:
             return existing

@@ -186,7 +186,7 @@ class DailyResearcher:
                                                             for w in factors.values()):
                 rejected.append({"name": name, "reason": f"因子不合規定：{', '.join(unknown) or '數量或權重'}"})
                 continue
-            settings = {"top": raw.get("top", 20), "check": raw.get("check", "daily"),
+            settings = {"top": raw.get("top", 20), "check": raw.get("check", "daily"), "hold": "trend", "min_hold": 0,
                         "industry_cap": float(raw.get("industry_cap") or 0), "weighting": raw.get("weighting", "equal"),
                         "core": float(raw.get("core") or 0)}
             if settings["core"] not in CORES:

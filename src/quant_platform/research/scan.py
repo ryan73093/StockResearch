@@ -43,7 +43,10 @@ import pandas as pd
 # no "hold" and keep the fixed 20 sessions.
 # 1.2.1 (2026-10-15, with daily engine 1.4.2): an equal screen score goes to the more liquid stock (20-session
 # turnover, ``Arrays.liquidity``), not the lower stock code.
-SCAN_VERSION = "scan-1.2.1"
+# 1.3.0 (2026-10-16, with daily engine 1.4.3): a trend holding below its average and out of the zone is sold every
+# session, not only on the weekly decision days; and the decision frequency is a candidate dimension — every set is
+# tried deciding daily and weekly (sets with a chip or model factor used to be weekly only, never tried daily).
+SCAN_VERSION = "scan-1.3.0"
 EXCESS_CORRELATION_LIMIT = 0.7
 DEV_END = date(2020, 9, 30)
 TOP, KEEP, MIN_HOLD, INDUSTRY_SHARE = 20, 3, 20, 0.3
@@ -100,8 +103,9 @@ def candidates(names: list[str] | None = None, largest: int = 3, smallest: int =
                 continue
             for universe in ("all", "large"):
                 for weighting in ("equal", "inverse_vol"):
-                    output.append({"factors": list(group), "universe": universe, "weighting": weighting,
-                                   "check": "weekly" if weekly(group) else "daily", "hold": hold})
+                    for check in ("daily", "weekly"):        # 1.3.0: both, whatever the signals
+                        output.append({"factors": list(group), "universe": universe, "weighting": weighting,
+                                       "check": check, "hold": hold})
     return output
 
 
@@ -256,6 +260,15 @@ def account(score: np.ndarray, checks: np.ndarray, industry: np.ndarray, next_re
                     kept.append(row)
                 held = kept
             bought = {row: bought.get(row, t) for row in held}
+        elif rising is not None and held:         # 1.3.0: a trend holding out of the zone and falling goes today
+            column = score[:, t]
+            valid = np.flatnonzero(~np.isnan(column))
+            if liquidity is None:
+                order = valid[np.argsort(-column[valid], kind="stable")].tolist()
+            else:
+                order = valid[np.lexsort((-liquidity[valid, t], -column[valid]))].tolist()
+            zone = set(order[: TOP * KEEP])
+            held = [row for row in held if row in zone or (not np.isnan(column[row]) and rising[row, t])]
         if record:
             history.append(list(held))
         if not held:

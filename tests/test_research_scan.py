@@ -95,7 +95,7 @@ def test_the_screen_finds_the_planted_signal_and_finalists_differ(tmp_path):
     arrays = scan.prepare(data, fp, FREE, tmp_path / "arrays")
     assert arrays.days[0] >= date(2015, 6, 1) and arrays.days[-2] <= scan.DEV_END
     items = scan.candidates(["momentum_6", "reversal_1", "trend_200"], largest=1)
-    assert len(items) == 12 and {item["check"] for item in items} == {"daily"}
+    assert len(items) == 24 and {item["check"] for item in items} == {"daily", "weekly"}   # 1.3.0: both frequencies
     rows = scan.screen(tmp_path / "arrays", items, FREE, 0, tmp_path)
     best = max((row for row in rows if row["universe"] == "all"), key=lambda row: row["excess"])
     worst = min((row for row in rows if row["universe"] == "all"), key=lambda row: row["excess"])
@@ -113,10 +113,10 @@ def test_the_space_is_wide_all_stock_and_every_rule_is_valid():
     count = len(names)
     assert count >= 40 and not set(scan.LEFT_OUT) & set(names) and set(names) <= set(scan.SHORT)
     items = scan.candidates()
-    assert len(items) == (count + count * (count - 1) // 2 + count * (count - 1) * (count - 2) // 6) * 4
+    assert len(items) == (count + count * (count - 1) // 2 + count * (count - 1) * (count - 2) // 6) * 8   # 1.3.0: daily and weekly
     required = scan.candidates(require="ml_gbm_quality")
     assert required and all("ml_gbm_quality" in item["factors"] for item in required)
-    assert len(required) == (1 + (count - 1) + (count - 1) * (count - 2) // 2) * 4
+    assert len(required) == (1 + (count - 1) + (count - 1) * (count - 2) // 2) * 8
     rules = [scan.to_rule(item) for item in items[::37]]                  # names fit (≤ 80) and parse
     assert all(rule.core == 0 and rule.top == 20 and not uses_0050(rule.canonical()) for rule in rules)
     assert scan.to_rule({"factors": ["ml_gbm_60", "trend_200"], "universe": "large", "weighting": "equal",
@@ -127,7 +127,7 @@ def test_a_later_scan_skips_near_copies_of_earlier_finalists(tmp_path):
     data, fp = planted()
     arrays = scan.prepare(data, fp, FREE, tmp_path / "arrays")
     items = scan.candidates(["momentum_6", "momentum_12_1", "trend_200"], largest=2, smallest=2)
-    assert len(items) == 3 * 4 and all(len(item["factors"]) == 2 for item in items)
+    assert len(items) == 3 * 8 and all(len(item["factors"]) == 2 for item in items)
     rows = scan.screen(tmp_path / "arrays", items, FREE, 0, tmp_path)
     alone = scan.finalists(arrays, rows, FREE, 10)
     assert alone

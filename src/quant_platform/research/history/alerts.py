@@ -98,9 +98,11 @@ def build(base: Path) -> dict[str, int]:
     out = Path(base) / "chips"
     out.mkdir(parents=True, exist_ok=True)
     notice_rows, punish_rows = sorted(notice), sorted(punish, key=lambda row: (row[0], row[1]))
-    pq.write_table(pa.table({"date": [row[0] for row in notice_rows], "code": [row[1] for row in notice_rows]}),
-                   out / "AlertNotice.parquet")
-    pq.write_table(pa.table({"date": [row[0] for row in punish_rows], "code": [row[1] for row in punish_rows],
+    from quant_platform.research.chips import replace_parquet
+
+    replace_parquet(pa.table({"date": [row[0] for row in notice_rows], "code": [row[1] for row in notice_rows]}),
+                    out / "AlertNotice.parquet")
+    replace_parquet(pa.table({"date": [row[0] for row in punish_rows], "code": [row[1] for row in punish_rows],
                              "start": [row[2] for row in punish_rows], "end": [row[3] for row in punish_rows],
                              "order": [row[4] for row in punish_rows]}), out / "AlertDisposition.parquet")
     return {"notice": len(notice_rows), "disposition": len(punish_rows)}

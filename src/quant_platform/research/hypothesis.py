@@ -177,8 +177,9 @@ def run_one(research: Path, history: Path, item: dict, client, data, fp, fingerp
     item["similar"] = similar(research, parsed["factors"])
     item["strengths"] = strengths(research, parsed["factors"])
     name = f"使用者假設：{str(parsed.get('restatement') or item['text'])[:60]}"
+    # 2026-10-16 (使用者：為什麼又有 20 天這種限制): held by the trend, not a fixed 20 sessions
     rule = daily.DailyRule(name=name[:80], factors=parsed["factors"], top=20, check=parsed["check"], industry_cap=0.3,
-                           large_caps=100 if parsed["universe"] == "large" else 0)
+                           large_caps=100 if parsed["universe"] == "large" else 0, hold="trend", min_hold=0)
     record, report = daily.run_trial(rule, history, TrialRegistry(research / "trials.jsonl"), research / "reports", costs,
                                      data, fp, fingerprint, {}, item["id"])
     grade = daily.tier(record.metrics)[0]

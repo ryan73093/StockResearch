@@ -602,3 +602,27 @@ def test_equal_values_share_a_percentile_and_an_equal_score_goes_to_the_more_liq
     single = DailyRule(name="t", factors={"momentum_3": 1.0}, top=3)
     double = DailyRule(name="t", factors={"momentum_3": 1.0, "momentum_6": 1.0}, top=3)
     assert fp.ranked(single, last) == fp.ranked(double, last) == ["1103.TW", "1101.TW", "1102.TW"]
+
+
+def test_a_weekly_trend_rule_sells_the_session_a_holding_breaks_down():
+    """Engine 1.4.3 (2026-10-16; 使用者：為什麼又有 20 天這種限制？好好 review 每一個機制): out of the keep zone and below
+    its 20-session average, a holding is sold that session — a weekly rule used to wait for its next weekly decision."""
+    from quant_platform.research.daily import daily_rankings
+
+    days = weekdays(date(2023, 1, 2), date(2024, 3, 29))
+    crash = next(day for day in days if day >= date(2024, 3, 13) and day.weekday() == 2)          # a Wednesday
+    closes = {}
+    for i in range(6):
+        series = {}
+        for n, day in enumerate(days):
+            price = 20 * (1 + (i + 1) * 0.0008) ** n
+            if i == 5 and day >= crash:
+                price *= 0.6                                                   # the strongest falls 40% that day
+            series[day] = price
+        closes[f"{1101 + i}.TW"] = series
+    fp = FactorPanel(Panel(market(days, closes)))
+    weekly = DailyRule(name="t", factors={"momentum_3": 1.0}, top=3, keep=1, check="weekly", hold="trend", min_hold=0)
+    fixed = weekly.model_copy(update={"hold": "days", "min_hold": 0})
+    trend = daily_rankings(fp, weekly, date(2024, 1, 2), date(2024, 3, 29))
+    assert crash in trend and "1106.TW" not in trend[crash]                     # sold on the Wednesday
+    assert crash not in daily_rankings(fp, fixed, date(2024, 1, 2), date(2024, 3, 29))   # no trend: waits for the week

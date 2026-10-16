@@ -339,3 +339,26 @@ def test_stock_rule_trials_never_define_the_etf_basis(tmp_path):
     assert distinct_rules(current + older) == 2                       # the stock rule still counts as an attempt
     rows = stock_rule_rows(registry.path, "development", "ContributionPlan")
     assert [row["name"] for row in rows] == ["個股 動能"] and rows[0]["xirr"] == 0.1
+
+
+def test_writers_side_by_side_keep_one_unbroken_chain(tmp_path):
+    """2026-10-16 (使用者：要跑什麼就趕快跑，不要排隊): pipelines register trials at the same time."""
+    import threading
+
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+
+    def write(start):
+        for number in range(start, start + 25):
+            TrialRegistry(tmp_path / "trials.jsonl").register(
+                kind="candidate", period="recent", spec_hash=f"s{number}", spec_name="x", input_hash=f"i{number}",
+                data_fingerprint="daily:x", metrics={})
+
+    threads = [threading.Thread(target=write, args=(start,)) for start in (0, 100, 200, 300)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    records = registry.records()
+    assert [record.trial_id for record in records] == list(range(1, 101))
+    assert all(later.prev_hash == earlier.record_hash for earlier, later in zip(records, records[1:]))
+    assert not (tmp_path / "trials.jsonl.lock").exists()
