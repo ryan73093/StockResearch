@@ -313,6 +313,8 @@ def main() -> int:
     parser.add_argument("--freeze", action="store_true",
                         help="forward：把每個帳戶最新紀錄背後的決定寫下來（之後重算不再改變已做的決定）")
     parser.add_argument("--rebase", help="forward：把接不上前一天的紀錄標成重算基準，附上原因")
+    parser.add_argument("--restart-from", help="forward：所有在跑的帳戶從這天重新起算（舊紀錄封存，YYYY-MM-DD）")
+    parser.add_argument("--reason", help="forward --restart-from：原因")
     parser.add_argument("--stop-ai-account", action="store_true",
                         help="forward：停止追蹤「AI 研究員（整體）」帳戶（沒有合格規則時整個放 0050；紀錄保留）")
     parser.add_argument("--passed", action="store_true", help="stocks：只跑開發期已通過視窗與回撤門檻的規則")
@@ -1034,6 +1036,9 @@ def main() -> int:
 
             print("停止 AI 研究員（整體）帳戶：" + ("完成" if tracker.stop(META_AI["rule_hash"], day, META_STOPPED) else "沒有在追蹤"),
                   flush=True)
+        if args.restart_from:                   # 2026-10-17: every live account from the common start again
+            found = tracker.restart(date.fromisoformat(args.restart_from), args.reason or "使用者：前向一律從 10/01 起算")
+            print(f"重新起算：{found}", flush=True)
         if args.rebase:                         # 2026-10-15: known causes, not reconciliation errors
             print(f"標成重算基準：{tracker.rebase(args.rebase)} 筆紀錄", flush=True)
         if args.freeze:                         # 2026-10-15: the decisions behind every latest record, kept

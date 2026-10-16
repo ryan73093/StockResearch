@@ -75,3 +75,14 @@ def test_the_recent_page_lists_every_order_and_both_periods(tmp_path):
     body = client.get("/research/recent/abcdef12").get_data(as_text=True)
     assert "近 3 個月模擬操作" in body and "漲停買不到" in body and "鴻海" in body and "沒有任何資料挑過規則" in body
     assert client.get("/research/recent/zzzzzzzz").status_code == 404
+
+
+def test_the_common_start_rolls_with_the_month():
+    """2026-10-17 (使用者：前向觀察的起點照現在的月份往前推兩個月): the day after the month's cutoff."""
+    from datetime import date
+
+    from quant_platform.research.forward_board import common_start
+
+    assert common_start(date(2026, 10, 17)) == date(2026, 9, 1)
+    assert common_start(date(2026, 11, 3)) == date(2026, 10, 1)
+    assert common_start(date(2027, 1, 6)) == date(2026, 12, 1)

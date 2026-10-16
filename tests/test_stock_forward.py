@@ -100,51 +100,34 @@ def test_missed_days_are_caught_up_as_late_and_tampering_is_caught(tmp_path):
     assert any("股數" in problem for problem in reconcile(records)[RULE.rule_hash])
 
 
-def test_rules_that_win_both_periods_are_tracked_from_the_day_they_qualify(tmp_path):
-    registry = TrialRegistry(tmp_path / "trials.jsonl")
-    (tmp_path / "reports").mkdir()
-    loser = StockRule(name="驗證期輸", factor="momentum_6", top=10)
-    good = {"3y": {"count": 10, "win_ratio": 0.8, "median_excess": 0.05}, "5y": {"count": 5, "win_ratio": 0.8,
-                                                                               "median_excess": 0.08}}
-    bad = {"3y": {"count": 10, "win_ratio": 0.3, "median_excess": -0.05}}
-    for number, (rule, period, windows) in enumerate(((RULE, "development", good), (RULE, "validation", good),
-                                                      (loser, "development", good), (loser, "validation", bad))):
-        report = f"r{number}.json"
-        (tmp_path / "reports" / report).write_text(json.dumps({"spec": rule.canonical()}, ensure_ascii=False),
-                                                   encoding="utf-8")
-        registry.register(kind="candidate", period=period, spec_hash=rule.rule_hash, spec_name=rule.name,
-                          input_hash=f"i{number}", data_fingerprint="stocks:x", report_file=report, metrics={
-                              "windows": windows, "max_drawdown": -0.2, "benchmark_max_drawdown": -0.25,
-                              "full_period_excess": 0.2, "plan": {"kind": "SeedPlan"}, "engine": "stocks-1.2.0"})
-    tracker = StockForwardTracker(tmp_path, experiments=False)
-    added = tracker.sync(date(2026, 10, 7))
-    assert [item["rule_hash"] for item in added] == [RULE.rule_hash] and added[0]["since"] == "2026-10-07"
-    assert "兩段期間都贏" in added[0]["reason"] and added[0]["plan"] == "seed" and added[0]["initial"] == 300_000
-    assert tracker.sync(date(2026, 10, 8)) == [] and len(tracker.tracked()) == 1
-
-
-def test_daily_rules_that_pass_the_new_design_are_tracked_and_recorded_every_day(tmp_path):
+def test_the_accounts_follow_the_months_rolling_selection_from_the_day_after_the_cutoff(tmp_path):
+    """2026-10-17 (使用者：前向觀察的起點照現在的月份往前推兩個月): the month's passing rules are tracked from the day
+    after the cutoff (October → 2026-09-01); nothing is added before the month is graded; the next month moves on."""
     from quant_platform.research.daily import DailyRule
 
-    days = weekdays(date(2024, 1, 1), date(2026, 10, 9))
+    days = weekdays(date(2024, 1, 1), date(2026, 11, 13))
     build(tmp_path, days)
     rule = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3)
-    (tmp_path / "reports").mkdir()
-    (tmp_path / "reports" / "d.json").write_text(json.dumps({"spec": rule.canonical()}, ensure_ascii=False), encoding="utf-8")
-    TrialRegistry(tmp_path / "trials.jsonl").register(
-        kind="candidate", period="recent", spec_hash=rule.rule_hash, spec_name=rule.name, input_hash="d1",
-        data_fingerprint="daily:x", report_file="d.json",
-        metrics={"full_period_excess": 0.4, "since_2020_excess": 0.2, "max_drawdown": -0.2, "benchmark_max_drawdown": -0.3,
-                 "windows": {"1y": {"count": 50, "win_ratio": 0.7}, "3y": {"count": 30, "win_ratio": 0.8, "median_excess": 0.1}}})
+    other = DailyRule(name="每天 6 個月動能：前 3 名", factors={"momentum_6": 1.0}, top=3)
     tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
+    assert tracker.sync(date(2026, 10, 2)) == []                                   # the month not graded yet
+    folder = tmp_path / "rolling"
+    folder.mkdir()
+    (folder / "2026-08-31.json").write_text(json.dumps({"cutoff": "2026-08-31", "graded": [
+        {"passed": True, "tier": "T0 候選", "spec": rule.canonical()},
+        {"passed": False, "tier": "T3", "spec": other.canonical()}]}, ensure_ascii=False), encoding="utf-8")
     written = tracker.record(date(2026, 10, 2), now=at(date(2026, 10, 2)))
     item = tracker.tracked()[0]
-    assert item["kind"] == "daily" and item["plan"] == "seed" and "新設計 T0 候選" in item["reason"]
-    # the account starts on 10-02 with NT$300,000 and buys the three strongest trends the same day
-    assert len(written) == 1 and written[0]["contributed"] == 300_000 and len(written[0]["holdings"]) == 3
-    tracker.record(date(2026, 10, 5), now=at(date(2026, 10, 5)))
+    assert len(tracker.tracked()) == 1 and item["since"] == "2026-09-01" and "2026-08-31" in item["reason"]
+    assert written[0]["date"] == "2026-09-01" and written[0]["contributed"] == 300_000 and len(written[0]["holdings"]) == 3
     records = tracker.records()
-    assert records[-1]["contributed"] == 310_000 and reconcile(records) == {}
+    assert records[-1]["date"] == "2026-10-02" and records[-1]["contributed"] == 310_000 and reconcile(records) == {}
+    # November: the cutoff is 2026-09-30 — the account starts again on 2026-10-01, its September records archived
+    (folder / "2026-09-30.json").write_text(json.dumps({"cutoff": "2026-09-30", "graded": [
+        {"passed": True, "tier": "T0 候選", "spec": rule.canonical()}]}, ensure_ascii=False), encoding="utf-8")
+    tracker.record(date(2026, 11, 2), now=at(date(2026, 11, 2)))
+    assert tracker.tracked()[0]["since"] == "2026-10-01" and tracker.records()[0]["date"] == "2026-10-01"
+    assert (tmp_path / "forward" / "stocks" / "log-archive.jsonl").is_file()
 
 
 def test_the_ai_researcher_account_follows_its_best_rule_from_each_quarter(tmp_path, monkeypatch):
@@ -209,16 +192,12 @@ def test_accounts_that_hold_0050_stop_and_new_ones_are_not_tracked(tmp_path):
                                                     ensure_ascii=False), encoding="utf-8")
     tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
     added = tracker.sync(date(2026, 10, 9))
-    # the half-0050 rule is not added; the pure one (a fixed 20-session holding) as its trend version (2026-10-16)
-    from quant_platform.research.stock_forward import trend_version
-
-    trend = trend_version(pure)
-    assert [item["rule_hash"] for item in added] == [trend.rule_hash] and "月線上續抱" in added[0]["reason"]
-    assert tracker.sync(date(2026, 10, 12)) == []                                # not again
+    # 2026-10-17: accounts come only from the month's rolling selection (none graded here): nothing added
+    assert added == [] and tracker.sync(date(2026, 10, 12)) == []
     old = next(item for item in tracker.tracked() if item["rule_hash"] == "old-half")
     assert old["stopped"] == "2026-10-09" and "0050" in old["stop_reason"]
     written = tracker.record(date(2026, 10, 9), now=at(date(2026, 10, 9)))
-    assert {record["rule_hash"] for record in written} == {trend.rule_hash}
+    assert written == []                                 # the stopped 0050 account is not recorded
 
 
 def test_fixed_holding_rules_give_way_to_their_trend_versions(tmp_path):
@@ -318,3 +297,26 @@ def test_known_breaks_become_new_bases_with_their_reason(tmp_path):
     assert reconcile(tracker.records(), tracker.rebases()) == {}
     row = tracker.summary()[0]
     assert row["problems"] == [] and row["rebased"] == [("2026-10-14", "引擎改版後重算")]
+
+
+def test_a_restart_moves_every_live_account_to_the_common_start_and_keeps_the_old_records(tmp_path):
+    """2026-10-17 (使用者：前向觀察一律從 10/01 開始，兩個交易日不能當觀察)."""
+    import json as _json
+
+    from quant_platform.research.stock_forward import StockForwardTracker
+
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    (folder / "tracked.json").write_text(_json.dumps([
+        {"rule_hash": "a", "name": "甲", "since": "2026-10-15", "kind": "daily"},
+        {"rule_hash": "b", "name": "乙", "since": "2026-10-01", "kind": "daily", "stopped": "2026-10-10"}]), encoding="utf-8")
+    (folder / "log.jsonl").write_text("".join(_json.dumps({"date": day, "rule_hash": key}) + "\n"
+                                              for day, key in (("2026-10-02", "b"), ("2026-10-15", "a"), ("2026-10-16", "a"))),
+                                      encoding="utf-8")
+    tracker = StockForwardTracker(tmp_path)
+    found = tracker.restart(date(2026, 10, 1), "測試")
+    assert found["accounts"] == 1 and found["archived_records"] == 2
+    items = {item["rule_hash"]: item for item in tracker.tracked()}
+    assert items["a"]["since"] == "2026-10-01" and items["a"]["added"] == "2026-10-15" and items["b"]["since"] == "2026-10-01"
+    assert [record["rule_hash"] for record in tracker.records()] == ["b"]            # the stopped account keeps its record
+    assert len((folder / found["archive"]).read_text(encoding="utf-8").splitlines()) == 3

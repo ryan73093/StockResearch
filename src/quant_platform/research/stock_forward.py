@@ -20,13 +20,13 @@ Forward results are observations; they do not pick rules.
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from quant_platform.research.costs import CostModel, broker_costs
-from quant_platform.research.forward import FORWARD_START
 from quant_platform.research.legacy_challenger import BENCHMARK, simulate
 from quant_platform.research.registry import TrialRegistry
 from quant_platform.research.stock_rules import (
@@ -217,51 +217,100 @@ class StockForwardTracker:
         return json.loads(self.tracked_path.read_text(encoding="utf-8"))
 
     def sync(self, today: date) -> list[dict[str, object]]:
-        """Add rules that newly won both periods, starting today (never earlier than the forward start), and
-        the forward-only experiments (FORWARD_ONLY) the first time this runs after they were defined."""
+        """2026-10-17 (使用者：前向觀察的起點照現在的月份往前推兩個月): the accounts follow the month's rolling selection
+        (research/rolling.py) — the rules that pass the gate on data up to the cutoff (the end of the month two months
+        back), each from the day after the cutoff. A rule not in the month's selection stops (its records stay); one
+        whose account started elsewhere starts again from the month's start (its records moved to an archive). Until
+        the month's selection is graded nothing is added. Accounts that hold 0050 stop (NO_0050); the forward-only
+        experiments (FORWARD_ONLY) start from the month's start too."""
         from quant_platform.research.categories import NO_0050, uses_0050
+        from quant_platform.research.daily import DailyRule
+        from quant_platform.research.rolling import cutoff_for, folder as rolling_folder
 
+        cutoff = cutoff_for(today)
+        start = (cutoff.fromordinal(cutoff.toordinal() + 1)).isoformat()
         items = self.tracked()
-        known = {item["rule_hash"] for item in items}
-        added = []
-        stopped = False
+        changed = False
         for item in items:                          # 2026-10-09: accounts that hold 0050 stop (records kept)
             if not item.get("stopped") and item.get("kind") in ("daily", "blend") and uses_0050(item.get("rule") or {}):
                 item.update(stopped=today.isoformat(), stop_reason=NO_0050)
-                stopped = True
-        # 2026-10-15: the AI researcher's account (META_AI) is no longer added by itself — paused, with no qualifying
-        # rule it held nothing but 0050 (META_STOPPED); it comes back with the researcher, 100% stocks.
-        for rule, reason in (forward_only() if self._experiments else []):
-            if rule.rule_hash in known:
+                changed = True
+        moment = datetime.now(TAIPEI).isoformat(timespec="seconds")
+        experiments = {rule.rule_hash: (rule, reason) for rule, reason in (forward_only() if self._experiments else [])}
+        month_path = rolling_folder(self._base) / f"{cutoff.isoformat()}.json"
+        month = None
+        if month_path.is_file():
+            try:
+                month = json.loads(month_path.read_text(encoding="utf-8"))
+            except ValueError:
+                month = None
+        target: dict[str, tuple] = {}
+        if month and month.get("graded"):
+            for row in month["graded"]:
+                if not row.get("passed"):
+                    continue
+                try:
+                    rule = DailyRule.model_validate(row["spec"])
+                except (KeyError, ValueError):
+                    continue
+                target[rule.rule_hash] = (rule, f"每月滾動：只用 {cutoff.isoformat()} 以前的資料挑出（{row.get('tier')}）")
+        target.update(experiments)
+        if not target:
+            if changed:
+                self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+            return []
+        restart: set[str] = set()
+        by_hash: dict[str, dict] = {}
+        for item in items:
+            by_hash.setdefault(item["rule_hash"], item)
+            live = not item.get("stopped")
+            if item.get("kind") not in ("daily", "blend") or item["rule_hash"] == META_AI["rule_hash"]:
                 continue
-            added.append({"rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.model_dump(mode="json"),
+            if item["rule_hash"] not in target:
+                if live and month and month.get("graded"):
+                    item.update(stopped=today.isoformat(), stop_reason=f"不在 {cutoff.isoformat()} 的每月滾動名單")
+                    changed = True
+                continue
+            if item["since"] != start or not live:
+                restart.add(item["rule_hash"])
+                item.setdefault("added", item["since"])
+                item.update(since=start, reason=target[item["rule_hash"]][1], restarted={"at": moment, "month": cutoff.isoformat()})
+                item.pop("stopped", None)
+                item.pop("stop_reason", None)
+                changed = True
+        added = []
+        for rule_hash, (rule, reason) in target.items():
+            if rule_hash in by_hash:
+                continue
+            added.append({"rule_hash": rule_hash, "name": rule.name, "rule": rule.model_dump(mode="json"),
                           "kind": "daily", "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
-                          "since": max(FORWARD_START, today).isoformat(), "reason": reason,
-                          "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
-            known.add(rule.rule_hash)
-        for rule, reason in qualifying_rules(self._base):
-            if rule.rule_hash in known:
-                continue
-            added.append({"rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.model_dump(mode="json"),
-                          "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
-                          "since": max(FORWARD_START, today).isoformat(), "reason": "兩段期間都贏：" + reason,
-                          "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
-            known.add(rule.rule_hash)
-        for rule, reason in qualifying_daily(self._base):
-            trend = trend_version(rule)         # 2026-10-16: a fixed holding is tracked as its trend version
-            if trend is not None:
-                rule, reason = trend, reason + "；固定持有改追蹤月線上續抱版本"
-            if rule.rule_hash in known:
-                continue
-            added.append({"rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.model_dump(mode="json"),
-                          "kind": "blend" if getattr(rule, "kind", None) == "blend" else "daily", "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
-                          "since": max(FORWARD_START, today).isoformat(), "reason": reason,
-                          "added_at": datetime.now(TAIPEI).isoformat(timespec="seconds")})
-            known.add(rule.rule_hash)
-        if added or stopped:
+                          "since": start, "added": today.isoformat(), "reason": reason, "added_at": moment})
+        if restart:
+            self._archive_records(restart, moment)
+        if added or changed:
             self._folder.mkdir(parents=True, exist_ok=True)
             self.tracked_path.write_text(json.dumps(items + added, ensure_ascii=False, indent=1), encoding="utf-8")
         return added
+
+    def _archive_records(self, hashes: set[str], moment: str) -> int:
+        """Move these accounts' records to ``log-archive.jsonl`` (appended, never deleted) and off the log."""
+        records = self.records()
+        moved = [record for record in records if record["rule_hash"] in hashes]
+        if not moved:
+            return 0
+        with open(self._folder / "log-archive.jsonl", "a", encoding="utf-8") as handle:
+            for record in moved:
+                handle.write(json.dumps({**record, "archived_at": moment}, ensure_ascii=False, default=str) + "\n")
+        kept = [record for record in records if record["rule_hash"] not in hashes]
+        partial = self.log_path.with_suffix(".partial")
+        partial.write_text("".join(json.dumps(record, ensure_ascii=False, default=str) + "\n" for record in kept),
+                           encoding="utf-8")
+        os.replace(partial, self.log_path)
+        marks = self.rebases()
+        if any(key in marks for key in hashes):
+            self.rebases_path.write_text(json.dumps({key: value for key, value in marks.items() if key not in hashes},
+                                                    ensure_ascii=False, indent=1), encoding="utf-8")
+        return len(moved)
 
     def records(self) -> list[dict[str, object]]:
         if not self.log_path.is_file():
@@ -334,6 +383,37 @@ class StockForwardTracker:
             self.rebases_path.write_text(json.dumps(marks, ensure_ascii=False, indent=1), encoding="utf-8")
         return found
 
+    def restart(self, start: date, reason: str, now: datetime | None = None) -> dict[str, object]:
+        """2026-10-17 (使用者：前向觀察一律從 10/01 開始，兩個交易日不能當觀察): every live account starts on ``start``
+        again — its records are moved to an archive file (kept, not deleted), its start set to ``start`` (the day it
+        joined kept as ``added``), its rebase marks archived too; the next ``record`` writes every session from
+        ``start`` with the engine of the day. Stopped accounts keep their records."""
+        stamp = (now or datetime.now(TAIPEI)).strftime("%Y%m%d-%H%M%S")
+        items = self.tracked()
+        live = {item["rule_hash"] for item in items if not item.get("stopped")}
+        records = self.records()
+        archive = self._folder / f"log-before-restart-{stamp}.jsonl"
+        if self.log_path.is_file():
+            archive.write_bytes(self.log_path.read_bytes())
+        kept = [record for record in records if record["rule_hash"] not in live]
+        partial = self.log_path.with_suffix(".partial")
+        partial.write_text("".join(json.dumps(record, ensure_ascii=False, default=str) + "\n" for record in kept),
+                           encoding="utf-8")
+        os.replace(partial, self.log_path)
+        for item in items:
+            if item["rule_hash"] in live:
+                item.setdefault("added", item["since"])
+                item["since"] = start.isoformat()
+                item["restarted"] = {"at": stamp, "reason": reason}
+        self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+        marks = self.rebases()
+        if marks:
+            (self._folder / f"rebases-before-restart-{stamp}.json").write_text(
+                json.dumps(marks, ensure_ascii=False, indent=1), encoding="utf-8")
+            self.rebases_path.write_text(json.dumps({key: value for key, value in marks.items() if key not in live},
+                                                    ensure_ascii=False, indent=1), encoding="utf-8")
+        return {"accounts": len(live), "archived_records": len(records) - len(kept), "archive": archive.name}
+
     def stop(self, rule_hash: str, today: date, reason: str) -> bool:
         """Stop recording one tracked account (its records stay); False when it is not tracked or already stopped."""
         items = self.tracked()
@@ -359,8 +439,6 @@ class StockForwardTracker:
         from quant_platform.research.decisions import key as decision_key
         from quant_platform.research.decisions import rankings as kept_rankings
 
-        if today < FORWARD_START:
-            return []
         if not freeze:
             self.sync(today)
         items = [item for item in self.tracked() if date.fromisoformat(item["since"]) <= today and not item.get("stopped")]
@@ -379,7 +457,7 @@ class StockForwardTracker:
                 if day in closes:
                     quoted[day] += 1
         ready = [day for day, count in sorted(quoted.items())
-                 if day >= FORWARD_START and count >= self._min_quotes and day in data.closes.get(BENCHMARK, {})]
+                 if count >= self._min_quotes and day in data.closes.get(BENCHMARK, {})]
         todo = {item["rule_hash"]: [day for day in ready if day >= date.fromisoformat(item["since"])
                                     and (day.isoformat(), item["rule_hash"]) not in done] for item in items}
         latest = {record["rule_hash"]: record for record in earlier}            # the log is in order

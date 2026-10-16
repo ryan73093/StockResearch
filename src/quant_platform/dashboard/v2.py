@@ -31,6 +31,8 @@ from quant_platform.config.settings import PAUSABLE_MODULES
 from quant_platform.container import _instance_dir
 from quant_platform.research.agent.researcher import agent_status
 from quant_platform.research.forward import FORWARD_START, ForwardTracker
+from quant_platform.research.forward_board import common_start as forward_common_start
+from quant_platform.research.rolling import cutoff_for
 from quant_platform.research.legacy_challenger import challenger_view
 from quant_platform.research.legacy_challenger import latest_report as latest_challenger
 from quant_platform.research.forward import STANDARD_PLAN as FORWARD_PLAN
@@ -919,6 +921,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             tool_groups=TOOL_GROUPS,
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
+            # 2026-10-17: the stock accounts start the day after the month's rolling cutoff
+            rolling_cutoff=cutoff_for(datetime.now(TAIPEI).date()).isoformat(),
+            rolling_start=forward_common_start(datetime.now(TAIPEI).date()).isoformat(),
             stock_forward=StockForwardTracker(research_dir).summary(),
             forward_board=forward_board_load(research_dir) if tab == "forward" else None,
             after_close=after_close_load(research_dir, datetime.now(TAIPEI).date()) if tab == "orders" else None,

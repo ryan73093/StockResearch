@@ -1,10 +1,9 @@
 """2026-10-13 (使用者：前向策略的起跑時間基準？能否監控前向是否相較其他策略轉強、給調整建議): the
 common-start board.
 
-Each tracked strategy starts forward observation the day it qualified, with its own NT$300,000, so a rule
-added on 10-04 and one added on 10-12 cannot be compared. The board replays every active strategy from one
-common start — the first session after the research period ended (2026-10-01: no data from then on chose any
-rule) — on the owner's account, against the same money in 0050, and holds each against what its own backtest
+2026-10-17 (使用者：前向觀察的起點照現在的月份往前推兩個月): the common start rolls monthly — the day after the
+month's cutoff (``common_start``: in October 09-01, in November 10-01), the first session no data chose any rule
+with (research/rolling.py). The board replays every active strategy from it on the owner's account, against the same money in 0050, and holds each against what its own backtest
 expects: its mean monthly excess × the months elapsed, with a 90% band of ±1.645 standard deviations × √months.
 States: 強於預期 above the band, 符合預期 inside, 弱於預期 below, 警示 under the 1% line (−2.326 sd). The rank
 and its change over five sessions show who is getting stronger. Written every trading day after the forward
@@ -16,13 +15,19 @@ from a few days.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 
-COMMON_START = date(2026, 10, 1)
-RESEARCH_END = date(2026, 9, 30)          # the rules were chosen with data up to here
+
+
+def common_start(today: date) -> date:
+    """The day after the month's rolling cutoff (the end of the month two months back): 2026-10 → 2026-09-01."""
+    from quant_platform.research.rolling import cutoff_for
+
+    return cutoff_for(today) + timedelta(days=1)
+
 BAND, ALERT = 1.645, 2.326
 SESSIONS_PER_MONTH = 21
 RECENT_SESSIONS = 63                      # 2026-10-13 (使用者：近三個月它會做什麼買賣、成效如何): about three months
@@ -102,10 +107,11 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
     items = [item for item in StockForwardTracker(research).tracked()
              if not item.get("stopped") and item.get("kind") in ("daily", "blend")
              and (item.get("rule") or {}).get("universe", "twse") == "twse"]
-    if not items or today < COMMON_START:
+    if not items:
         return None
+    first = common_start(today)                  # 2026-10-17: rolls monthly
     data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, today.year)
-    days = [day for day in data.sessions if COMMON_START <= day <= today and day in data.closes.get(BENCHMARK, {})]
+    days = [day for day in data.sessions if first <= day <= today and day in data.closes.get(BENCHMARK, {})]
     if not days:
         return None
     last = days[-1]
@@ -118,7 +124,7 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
     from quant_platform.research.decisions import rankings as kept_rankings
 
     store = DecisionStore(research)                 # 2026-10-15: decisions already taken stay as they were made
-    bench = simulate_daily(data, None, costs, COMMON_START, last, plan=plan)
+    bench = simulate_daily(data, None, costs, first, last, plan=plan)
     bench_units = np.array(unit_values(bench.values, bench.flows))
     months = len(days) / SESSIONS_PER_MONTH
     rows = []
@@ -127,13 +133,13 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
         try:
             if item.get("kind") == "blend":
                 rule = BlendRule.model_validate(item["rule"])
-                run = BlendAccount(data, fp, rule, costs, COMMON_START, last, store=store,
-                                   name=decision_key(item["rule_hash"], COMMON_START), through=last).run(
-                    COMMON_START, last, plan, ledger=ledger)
+                run = BlendAccount(data, fp, rule, costs, first, last, store=store,
+                                   name=decision_key(item["rule_hash"], first), through=last).run(
+                    first, last, plan, ledger=ledger)
             else:
                 rule = DailyRule.model_validate(item["rule"])
-                ranks = kept_rankings(fp, rule, COMMON_START, last, store, decision_key(item["rule_hash"], COMMON_START), last)
-                run = simulate_daily(data, rule, costs, COMMON_START, last, ranks, plan, ledger=ledger,
+                ranks = kept_rankings(fp, rule, first, last, store, decision_key(item["rule_hash"], first), last)
+                run = simulate_daily(data, rule, costs, first, last, ranks, plan, ledger=ledger,
                                      weights=daily_weights(fp, rule, ranks), parked=account_parking(data, fp, rule, costs),
                                      exposure=exposure_schedule(data, fp, rule, costs))
         except Exception as error:                    # one bad item does not stop the board
@@ -182,7 +188,7 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
     for row in ranked:
         previous = (before or {}).get("ranks", {}).get(row["rule_hash"])
         row["rank_change"] = (previous - row["rank"]) if previous else None      # positive: moved up
-    board = {"built_at": datetime.now().isoformat(timespec="seconds"), "common_start": COMMON_START.isoformat(),
+    board = {"built_at": datetime.now().isoformat(timespec="seconds"), "common_start": first.isoformat(),
              "date": last.isoformat(), "sessions": len(days), "months": round(months, 2), "rows": rows,
              "counts": {label: sum(1 for row in rows if row.get("state") == label) for label in ADVICE}}
     folder.mkdir(parents=True, exist_ok=True)
@@ -209,8 +215,8 @@ def _period(values: list[float], flows: list[float], bench_values: list[float], 
 def recent(research: Path, history: Path, item: dict, data, fp, costs, days: list, names: dict) -> dict | None:
     """The last RECENT_SESSIONS sessions of one strategy on the owner's account (NT$300,000 at the start,
     NT$10,000 on the 5th), every order it would have placed — the ones the market refused too — its holdings
-    and its value against the same money in 0050; split at RESEARCH_END (before it the rule was chosen with
-    that data, after it nothing chose it)."""
+    and its value against the same money in 0050; split at the month's rolling cutoff (before it the rule was
+    chosen with that data, after it nothing chose it)."""
     from quant_platform.research.blend import BlendAccount, BlendRule
     from quant_platform.research.daily import (
         DailyRule,
@@ -222,9 +228,12 @@ def recent(research: Path, history: Path, item: dict, data, fp, costs, days: lis
     )
     from quant_platform.research.stock_rules import SeedPlan
 
+    from quant_platform.research.rolling import cutoff_for
+
     if len(days) < 2:
         return None
     start, last = days[0], days[-1]
+    research_end = cutoff_for(last)
     plan, ledger, snapshots = SeedPlan(), [], {}
     if item.get("kind") == "blend":
         rule = BlendRule.model_validate(item["rule"])
@@ -280,14 +289,14 @@ def recent(research: Path, history: Path, item: dict, data, fp, costs, days: lis
     holdings = sorted(({"code": symbol.split(".")[0], "name": names.get(symbol.split(".")[0], ""),
                         "value": round(count * (data.last_close(symbol, last) or 0.0), 0)}
                        for symbol, count in units.items()), key=lambda row: -row["value"])
-    split = next((index for index, day in enumerate(run.days) if day > RESEARCH_END), None)
+    split = next((index for index, day in enumerate(run.days) if day > research_end), None)
     periods = {"all": _period(run.values, run.flows, bench.values, bench.flows)}
     if split:
         periods["research"] = _period(run.values[:split], run.flows[:split], bench.values[:split], bench.flows[:split])
         periods["unseen"] = _period(run.values[split - 1:], [0.0] + run.flows[split:], bench.values[split - 1:],
                                     [0.0] + bench.flows[split:])
     return {"rule_hash": item["rule_hash"], "name": item["name"], "start": start.isoformat(), "end": last.isoformat(),
-            "research_end": RESEARCH_END.isoformat(), "periods": periods, "curve": curve, "trades": trades,
+            "research_end": research_end.isoformat(), "periods": periods, "curve": curve, "trades": trades,
             "holdings": holdings, "cash": round(cash, 0),
             "counts": {"buys": sum(1 for row in trades if row["side"] == "BUY" and "refused" not in row),
                        "sells": sum(1 for row in trades if row["side"] == "SELL" and "refused" not in row),

@@ -80,13 +80,13 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
         ENGINE_VERSION, RECENT_START, ChipStore, DailyRule, FactorPanel, Industries, account_parking, daily_rankings,
         daily_weights, exposure_schedule, load_industries, market_closes, simulate_daily,
     )
-    from quant_platform.research.forward_board import COMMON_START
+    from quant_platform.research.forward_board import common_start
     from quant_platform.research.model import models_root
     from quant_platform.research.stock_forward import StockForwardTracker, _names
     from quant_platform.research.stock_rules import WARMUP_YEARS, Panel, SeedPlan, load_stock_data
 
     rows, benchmark, taiex = today_table(payload, day)
-    if len(rows) < min_rows or not benchmark or not taiex or day < COMMON_START:
+    if len(rows) < min_rows or not benchmark or not taiex:
         return None
     started = (now or datetime.now(TAIPEI)).astimezone(TAIPEI)
     costs = costs or broker_costs("cathay")
@@ -117,7 +117,7 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
     folder = research / FOLDER
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{day.isoformat()}.json"
-    report = {"date": day.isoformat(), "common_start": COMMON_START.isoformat(), "engine": ENGINE_VERSION,
+    report = {"date": day.isoformat(), "common_start": common_start(day).isoformat(), "engine": ENGINE_VERSION,
               "table_rows": len(rows), "taiex": taiex, "benchmark_close": benchmark,
               "started_at": started.isoformat(timespec="seconds"), "total": len(items), "rules": output}
 
@@ -131,9 +131,9 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
     for item in items:
         ledger: list = []
         snapshots: dict = {}
-        # 2026-10-16 (audit): the forward account's own start, so the 15:30 record keeps what these orders say (the
-        # orders of the 44 accounts started after 10-01 were those of a 10-01 account, not the recorded one)
-        start = max(COMMON_START, date.fromisoformat(item["since"]))
+        # 2026-10-16 (audit): the forward account's own start, so the 15:30 record keeps what these orders say;
+        # 2026-10-17: every account starts the day after the month's rolling cutoff (stock_forward.sync)
+        start = date.fromisoformat(item["since"])
         try:
             if item.get("kind") == "blend":
                 rule = BlendRule.model_validate(item["rule"])
