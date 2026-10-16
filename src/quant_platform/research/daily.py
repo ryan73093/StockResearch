@@ -216,6 +216,8 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_tech_ens": "技術模型（同樣的集成，只用 20 個價量技術因子、逐年滾動訓練）",
                  "ml_gbm_ext": "機器學習集成 G（同模型 F 的集成，特徵加上後來的借券、注意處置、借券費率、股利與現增、股本、自營商因子，不含月營收）",
                  "ml_deep": "深度學習（GRU 讀每檔最近 40 個交易日的報酬、成交值與 12 個因子名次，逐年滾動訓練）",
+                 "ml_deep2": "深度學習第二版（GRU 讀 60 個交易日的價量與籌碼 z 分數＋當天因子快照與大盤狀態；標籤 20 日超額報酬，損失 Huber＋偏重前段的 ListNet；10 個種子）",
+                 "ml_deep2_top": "深度學習第二版・前一成（同上，學「之後 20 日是否在當天前 10%」；10 個種子）",
                  "dl_risk": "深度學習風險（未來 20 個交易日內跌 15% 以上的機率，越高越危險；當濾網用，不拿來選股）"}
 RISK_VETO_SHARE = 0.10      # risk_veto dl1: no new buy in the day's top tenth of drop risk
 RISK_EXIT_SHARE = 0.05      # risk_veto dl1x: a holding in the top twentieth is sold that session
@@ -2408,6 +2410,21 @@ def deep_batch() -> list[DailyRule]:
                       check="daily", industry_cap=0.3, hold="trend", min_hold=0)]
 
 
+def deep2_batch() -> list[DailyRule]:
+    """2026-10-17 (使用者：深度學習繼續優化): each second-version deep model as a rule — only past its registered gate
+    (research/model_deep2.py: 2016-2020 top-20 gain at least gbm-2.2.0's, four of five years at +0.6% or more)."""
+    from quant_platform.research.model_deep2 import gate
+
+    rules = []
+    for factor, version, label in (("ml_deep2", "dl-2.0.0", "深度學習第二版"), ("ml_deep2_top", "dl-2.1.0", "深度學習第二版・前一成")):
+        check = gate(Path("instance") / "research" / "models", version)
+        print(f"{version} 門檻（2016-2020 前 20 名多賺不少於 gbm-2.2.0，且 5 年中至少 4 年 ≥ +0.6%）：{check}", flush=True)
+        if check["passed"]:
+            rules.append(DailyRule(name=f"{label}：前 20 名、同產業最多 3 成、每週決策、月線上續抱", factors={factor: 1.0},
+                                   check="weekly", industry_cap=0.3, hold="trend", min_hold=0))
+    return rules
+
+
 def model_g_batch() -> list[DailyRule]:
     """2026-10-16: gbm-2.2.0 as a rule — only if its development years' top-20 gain is at least gbm-2.0.0's (the
     same registered gate as model F's against gbm-1.4.0)."""
@@ -2757,7 +2774,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

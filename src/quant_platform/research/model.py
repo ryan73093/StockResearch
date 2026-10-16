@@ -51,6 +51,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
+          # 2026-10-17 (使用者：深度學習繼續優化; docs/research_dl_exits_review.md D1): the second version
+          # (research/model_deep2.py), two registered losses aimed at the top of the list
+          "ml_deep2": {"version": "dl-2.0.0", "label": "deep2"},
+          "ml_deep2_top": {"version": "dl-2.1.0", "label": "deep2"},
           # 2026-10-16 (使用者：深度學習能不能用到交易裡輔助這些策略？): the probability of a 15% fall within 20 sessions
           # (research/model_risk.py) — a risk overlay for rules (DailyRule.risk_veto), not a picking signal
           "dl_risk": {"version": "dl-risk-1.0.0", "label": "deep_risk"}}
@@ -218,6 +222,10 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
         from quant_platform.research.model_deep import train as train_deep
 
         return train_deep(fp, out_dir, years, job)
+    if label == "deep2":                     # 2026-10-17: the second version (research/model_deep2.py)
+        from quant_platform.research.model_deep2 import train as train_deep2
+
+        return train_deep2(fp, out_dir, version, years, job)
     if label == "deep_risk":                 # 2026-10-16: the drop probability (research/model_risk.py)
         from quant_platform.research.model_risk import train as train_risk
 
@@ -455,6 +463,11 @@ def scores(fp, out_dir: str | Path) -> np.ndarray:
     trained year); NaN where the stock is not eligible or no model exists yet."""
     folder = Path(out_dir)
     if (folder / "deep.npz").is_file():      # 2026-10-16: the deep model keeps its scores, not pickled models
+        meta = folder / "meta.json"
+        if meta.is_file() and json.loads(meta.read_text(encoding="utf-8")).get("label") == "deep2":
+            from quant_platform.research.model_deep2 import scores as deep2_scores
+
+            return deep2_scores(fp, folder)
         from quant_platform.research.model_deep import scores as deep_scores
 
         return deep_scores(fp, folder)

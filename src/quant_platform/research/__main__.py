@@ -326,7 +326,7 @@ def main() -> int:
                         help="rl-sleeves：版本（1.1.0 隨機起點；2.0.0 第三個位置是現金、回撤懲罰加倍）")
     parser.add_argument("--model-version", default="gbm-1.2.0",
                         choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0", "gbm-2.0.0",
-                                 "gbm-2.1.0", "gbm-2.2.0", "dl-1.0.0", "dl-risk-1.0.0"),
+                                 "gbm-2.1.0", "gbm-2.2.0", "dl-1.0.0", "dl-risk-1.0.0", "dl-2.0.0", "dl-2.1.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
@@ -602,6 +602,14 @@ def main() -> int:
             job.update(done=len(years), force=True)
             ics = [item["ic"] for item in meta["years"].values() if item.get("ic") is not None]
             job.payload["summary"] = f"{len(meta['years'])} 個年度模型；樣本外 IC 平均 {np.mean(ics):+.3f}" if ics else "沒有模型"
+            if label == "deep2":                # 2026-10-17: the second deep version's registered gate
+                from quant_platform.research.model_deep2 import gate as deep2_gate
+
+                check = deep2_gate(research_model.models_root(Path(args.base)), version)
+                job.payload["summary"] = (f"{len(meta['years'])} 個年度模型；2016～2020 前 20 名多 {check.get('top20_gain')}"
+                                          f"（gbm-2.2.0 {check.get('against_top20_gain')}）、≥ +0.6% 的年 "
+                                          f"{check.get('years_above_floor')}；門檻{'通過' if check['passed'] else '沒過'}")
+                print(check, flush=True)
             if label == "deep_risk":            # 2026-10-16: the drop model's AUC against the volatility yardstick
                 from quant_platform.research.model_risk import gate as risk_gate
 

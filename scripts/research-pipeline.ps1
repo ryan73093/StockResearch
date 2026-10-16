@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -529,6 +529,26 @@ switch ($Name) {
         }
         Invoke-Step "2-models" @("-m", "quant_platform.research", "rolling", "--step", "models")
         Invoke-Step "3-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+    }
+    "deep2a" {
+        # 2026-10-17 (使用者：深度學習繼續優化; docs/research_dl_exits_review.md D1): the second deep version, Huber +
+        # top-weighted ListNet (dl-2.0.0) — the development years first, the other years only past its registered gate
+        # (research/model_deep2.py); then its rule (deep2_batch: only past the gate) and the statistics.
+        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.0.0")
+        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "deep2b" {
+        # 2026-10-17: the same second version learning the day's top tenth (dl-2.1.0), its own registered gate.
+        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.1.0")
+        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "forward-rolling" {
         # 2026-10-17 (使用者：前向觀察照現在的月份往前推兩個月起算): once the month's selection is graded and its models
