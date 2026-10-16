@@ -653,9 +653,17 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             if books.trades:
                 dividends_due = len(dependencies.dividend_calendar.account_view(books.flows, books.trades, day)["due"])
             drawdown_note = drawdown_alert(books, investment_plan.max_drawdown_tolerance)
+        growth = None
+        try:                      # 2026-10-16: the strategy roles' growth on the home page (never breaks the page)
+            from quant_platform.research.roles import summary as roles_summary
+
+            growth = roles_summary(_instance_dir(dependencies.settings.database_url) / "research")
+        except Exception:  # noqa: BLE001
+            logger.exception("Strategy roles failed")
         return render_template(
             "v2/today.html",
             active_nav="today",
+            growth=growth,
             dividends_due=dividends_due,
             drawdown_note=drawdown_note,
             onboarding=onboarding_steps(investment_plan),
@@ -964,6 +972,15 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         chart = value_chart({row["date"]: [row["value"], row["benchmark"], row["contributed"]] for row in detail["series"]})
         return render_template("v2/research_forward.html", active_nav="research", forward=detail, chart=chart,
                                research_tab="forward", jobs=JobLog(research_dir).jobs())
+
+    @blueprint.get("/research/roles")
+    def research_roles():
+        """2026-10-16 (使用者：策略是我的角色，我要知道每個角色成長了多少): every strategy role, its growth and metrics."""
+        from quant_platform.research.roles import summary
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        return render_template("v2/research_roles.html", active_nav="research", research_tab="roles",
+                               growth=summary(research_dir), jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/rl")
     def research_rl():

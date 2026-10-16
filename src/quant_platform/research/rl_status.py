@@ -17,6 +17,7 @@ from pathlib import Path
 ROBOTS = (
     ("free-rl-4.1.0", "RL 機器人 4.1", "每天自己決定買哪些、各多少、留多少現金；訓練帳戶＝30 萬＋每月 1 萬、最低手續費、整股"),
     ("free-rl-4.0.0", "RL 機器人 4.0", "每天自己決定買哪些、各多少、留多少現金（訓練時只有比例成本）"),
+    ("worst-rl-1.0.0", "反向 RL 機器人", "同 3.0 的 8 個區塊，但學著賠最多（趣味與檢查：能故意輸，表示訊號真的有資訊）"),
     ("block-rl-3.1.0", "RL 機器人 3.1", "同 3.0，但 8 個槽位的因子每年只用那年以前的資料挑（3.0 的區塊用到了測試年的資料）"),
     ("block-rl-3.0.0", "RL 機器人 3.0", "8 個強訊號區塊、四組錯開的起點、留最後五分之一驗證，驗證沒贏平均就不押"),
     ("factor-rl-2.1.0", "RL 機器人 2.1", "47 個因子與模型分數"),
@@ -115,6 +116,7 @@ def latest_day(models_root: str | Path) -> date | None:
 
 ENGINE_FACTORS = {"free-rl-4.1.0": ("rl_free41",), "free-rl-4.0.0": ("rl_free",),
                   "block-rl-3.0.0": ("rl_blocks", "block_equal"), "block-rl-3.1.0": ("rl_rolling", "rolling_equal"),
+                  "worst-rl-1.0.0": ("rl_worst",),
                   "factor-rl-2.1.0": ("rl_all", "all_equal")}
 
 
@@ -132,7 +134,7 @@ def engine(research_dir: str | Path) -> dict[str, list[dict[str, object]]]:
     records = newest(TrialRegistry(base / "trials.jsonl").records(),
                      lambda record: record.kind == "candidate" and record.period == "recent"
                      and ("機器人" in record.spec_name or "區塊" in record.spec_name or "因子平均" in record.spec_name
-                          or "槽位" in record.spec_name))
+                          or "槽位" in record.spec_name or "反向" in record.spec_name))
     for record in sorted(records.values(), key=lambda record: record.trial_id):
         try:
             spec = json.loads((base / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]

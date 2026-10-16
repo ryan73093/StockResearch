@@ -341,3 +341,24 @@ def test_the_rl_page_shows_each_robots_years(client, tmp_path):
     body = client.get("/research/rl").get_data(as_text=True)
     assert "RL 機器人 3.0" in body and "不押，用平均" in body and "照機器人" in body and "接近 52 週高點" in body
     assert "1<small> 年／2 年" in body and 'href="/research/rl"' in client.get("/research?tab=ml").get_data(as_text=True)
+
+
+def test_the_home_page_and_the_roles_page_show_how_each_strategy_role_grew(client, monkeypatch):
+    """2026-10-16 (使用者：每次優化之後我要在首頁看到每種角色成長了多少，不只是現在多少錢)."""
+    from quant_platform.research import roles
+
+    fake = {"latest_run": "2026-10-16T21:00:00+08:00", "benchmark": 9821414.0, "roles": [{
+        "role": "機器學習＋因子", "note": "", "rules": 205, "grades": {"T0 候選": 15}, "change": 0.25,
+        "now": {"trial": 3919, "spec": "abc", "name": "外資持股＋新高次數", "engine": "daily-1.5.0", "tier": "T0 候選",
+                "final": 25910000.0, "bench_final": 9821414.0, "xirr": 0.381, "bench_xirr": 0.247, "excess_full": 9.69,
+                "excess_recent": 2.76, "drawdown": -0.318, "bench_drawdown": -0.340, "calmar": 1.2, "win_1y": 0.68,
+                "win_3y": 0.9, "worst_1y": -0.2, "orders": 30.5, "cost_share": 0.4, "turnover": 5.0, "start": "2015-06-01",
+                "contributed": 1660000.0},
+        "before": {"final": 20728000.0}, "first": {"day": "2026-10-09", "final": 8770000.0}, "growth_total": 1.95,
+        "last_run": "2026-10-16T10:03:00+08:00", "history": [{"day": "2026-10-09", "final": 8770000.0},
+                                                             {"day": "2026-10-16", "final": 25910000.0}]}]}
+    monkeypatch.setattr(roles, "summary", lambda _research: fake)
+    home = client.get("/").get_data(as_text=True)
+    assert "策略角色成長" in home and "機器學習＋因子" in home and "+25%" in home and "2,591 萬" in home
+    page = client.get("/research/roles").get_data(as_text=True)
+    assert "策略角色" in page and "報酬／回撤" in page and "10-09：877" in page and "+195%" in page

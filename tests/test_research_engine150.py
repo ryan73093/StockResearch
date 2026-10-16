@@ -251,3 +251,19 @@ def test_every_day_follows_from_the_day_before_through_stock_dividends_and_reduc
         for symbol in set(units) | set(now):
             assert units.get(symbol, 0.0) == pytest.approx(now.get(symbol, 0.0), abs=1e-6), (day, symbol)
         assert cash == pytest.approx(snapshots[day][0], abs=1e-6), day
+
+
+def test_the_deep_risk_overlay_skips_and_sells_the_riskiest():
+    """2026-10-16: risk_veto dl1 buys none of the day's riskiest; dl1x also sells a holding once it is among them."""
+    script = {DAYS[0]: ["A", "B", "C", "D", "E"]}
+    panel = Panel(DAYS, script, "ABCDE")
+    flagged = {0: {"A"}, 1: set(), 2: {"B"}}
+    panel.risky = lambda position, share: flagged.get(position, set()) if share == daily.RISK_VETO_SHARE else (
+        {"B"} if position == 2 else set())
+    base = {"name": "x", "factors": {"trend_200": 1.0}, "top": 3, "keep": 2, "check": "weekly", "hold": "trend"}
+    plain = daily_rankings(panel, DailyRule(**base), DAYS[0], DAYS[4])
+    veto = daily_rankings(panel, DailyRule(**base, risk_veto="dl1"), DAYS[0], DAYS[4])
+    sell = daily_rankings(panel, DailyRule(**base, risk_veto="dl1x"), DAYS[0], DAYS[4])
+    assert plain[DAYS[0]] == ["A", "B", "C"] and veto[DAYS[0]] == ["B", "C", "D"]   # A is the riskiest that day
+    assert DAYS[2] not in veto and sell[DAYS[2]] == ["C", "D"]                       # B turns risky: dl1x sells it
+    assert "risk_veto" not in DailyRule(**base).canonical()

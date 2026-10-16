@@ -107,7 +107,7 @@ def test_the_robot_21_sees_every_full_history_factor_and_the_model_scores():
 
     names = rl_timing.factor_names(rl_timing.ALL_VERSION)
     # the seven model scores it was trained on; model G (2026-10-16) came later and is not one of them
-    assert set(daily.MODEL_FACTORS) - {"ml_gbm_ext", "ml_deep"} <= set(names) and set(rl_timing.factor_names()) <= set(names)
+    assert set(daily.MODEL_FACTORS) - {"ml_gbm_ext", "ml_deep", "dl_risk"} <= set(names) and set(rl_timing.factor_names()) <= set(names)
     assert not {"revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap"} & set(names)
     assert not (set(daily.TIME_FACTORS) | set(daily.SHORT_FACTORS) | set(daily.ALERT_FACTORS)) & set(names)
     rules = daily.robot21_batch()
@@ -204,3 +204,17 @@ def test_the_gpu_rewards_match_the_cpu_rewards(monkeypatch):
     monkeypatch.setattr(rl_timing, "_on_gpu", lambda: False)
     cpu = rl_timing.Timeline.rewards(stub, weights, decisions)
     assert gpu.shape == cpu.shape == (7, 9) and np.allclose(gpu, cpu, atol=1e-9)
+
+
+def test_the_reverse_robot_learns_to_lose(monkeypatch, tmp_path):
+    """2026-10-16 (使用者：訓練一個賠最多的模型，反著做): the same learning with the reward turned around leans on the
+    factor that loses in this market (momentum pays here, so the reverse leans away from it)."""
+    data, fp = _blocks_market(monkeypatch)
+    meta = rl_timing.walk_forward_blocks(fp, rl_timing.benchmark_units(data, fp.sessions), tmp_path, worst=True)
+    year = meta["yearly"]["2019"]
+    assert meta["version"] == rl_timing.WORST_VERSION
+    if not year["abstained"]:
+        weights = dict(year["heaviest"])
+        assert "momentum_3" not in weights or weights["momentum_3"] < 0.25
+        assert year["robot_excess"] <= year["equal_excess"]
+    assert rl_timing.factor_names(rl_timing.WORST_VERSION) == list(rl_timing.BLOCKS)

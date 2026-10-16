@@ -215,7 +215,10 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_ens": "機器學習集成（多種子提升樹、前五分之一分類器、脊迴歸、60 日標籤，36 個因子、逐年滾動訓練）",
                  "ml_tech_ens": "技術模型（同樣的集成，只用 20 個價量技術因子、逐年滾動訓練）",
                  "ml_gbm_ext": "機器學習集成 G（同模型 F 的集成，特徵加上後來的借券、注意處置、借券費率、股利與現增、股本、自營商因子，不含月營收）",
-                 "ml_deep": "深度學習（GRU 讀每檔最近 40 個交易日的報酬、成交值與 12 個因子名次，逐年滾動訓練）"}
+                 "ml_deep": "深度學習（GRU 讀每檔最近 40 個交易日的報酬、成交值與 12 個因子名次，逐年滾動訓練）",
+                 "dl_risk": "深度學習風險（未來 20 個交易日內跌 15% 以上的機率，越高越危險；當濾網用，不拿來選股）"}
+RISK_VETO_SHARE = 0.10      # risk_veto dl1: no new buy in the day's top tenth of drop risk
+RISK_EXIT_SHARE = 0.05      # risk_veto dl1x: a holding in the top twentieth is sold that session
 # 2026-10-10 (使用者：純技術分析的 RL 機器人): research/tech_rl.py — sees only price and volume.
 TECH_FACTORS = {"rl_tech": "技術分析 RL 機器人：沒持有時想進場的機率（只看價格與成交量）",
                 "rl_tech_weekly": "技術分析 RL 機器人（每週決策版）：沒持有時想進場的機率（只看價格與成交量）"}
@@ -235,6 +238,7 @@ META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現�
                 "all_equal": "全部因子與模型分數平均（機器人 2.1 的對照）",
                 "rl_blocks": "RL 機器人 3.0（每 20 個交易日決定 8 個強訊號區塊的權重，驗證沒贏平均就不押）",
                 "block_equal": "8 個強訊號區塊平均（機器人 3.0 的對照）",
+                "rl_worst": "反向 RL 機器人（同 3.0 的 8 個區塊，學著賠最多；趣味與檢查）",
                 "rl_rolling": "RL 機器人 3.1（8 個槽位，每年只用那年以前的資料挑各槽位最強的因子，再由機器人決定權重）",
                 "rolling_equal": "8 個逐年挑選的槽位平均（機器人 3.1 的對照）",
                 "rl_free": "RL 機器人 4.0 的每檔比重（每天自己決定買哪些、各多少、留多少現金；只受交易所規則限制）",
@@ -331,6 +335,10 @@ class DailyRule(BaseModel):
     # leaves like one out of the keep zone; "entry": eligibility decides only the buys, a holding is kept or sold by
     # the hold rule alone. Left out of the hash when "both".
     eligibility: Literal["both", "entry"] = "both"
+    # 2026-10-16 (使用者：深度學習能不能用到交易裡輔助這些策略？): the deep-learning risk model (research/model_risk.py)
+    # as an overlay — "dl1": no new buy among the day's top tenth by drop probability; "dl1x": also sell a holding
+    # once it is in the top twentieth (every session). Left out of the hash when "none".
+    risk_veto: Literal["none", "dl1", "dl1x"] = "none"
 
     @model_validator(mode="before")
     @classmethod
@@ -389,6 +397,8 @@ class DailyRule(BaseModel):
             data.pop("cooldown", None)
         if data.get("eligibility") == "both":
             data.pop("eligibility", None)
+        if data.get("risk_veto") == "none":
+            data.pop("risk_veto", None)
         return data
 
     @property
@@ -437,6 +447,16 @@ class FactorPanel:
         self.turnover_120 = turnover.rolling(120, min_periods=1).mean().to_numpy().T
         self.age = np.arange(len(self.sessions))[None, :] - panel.first[:, None]
 
+    def risky(self, position: int, share: float) -> set[str]:
+        """2026-10-16: the stocks in the day's top ``share`` by the deep risk model's drop probability (none without
+        the model)."""
+        column = self.matrix("dl_risk")[:, position]
+        known = np.isfinite(column)
+        if not known.any():
+            return set()
+        cut = np.quantile(column[known], 1 - share)
+        return {self.symbols[row] for row in np.flatnonzero(known & (column >= cut))}
+
     def news_vetoed(self, position: int) -> set[str]:
         """The stocks under a bad-news flag at ``position`` (R15 D); none without the chip store's history."""
         if "__news_veto__" not in self._cache:
@@ -476,10 +496,11 @@ class FactorPanel:
                 return free_weights(self, Path(self.models) / version if self.models is not None else Path("missing"))
             if factor == "tech_momentum":
                 return timing_scores(self, factor_names())
-            from quant_platform.research.rl_timing import ROLLING_VERSION
+            from quant_platform.research.rl_timing import ROLLING_VERSION, WORST_VERSION
 
             version = (ALL_VERSION if factor in ("rl_all", "all_equal") else
                        BLOCK_VERSION if factor in ("rl_blocks", "block_equal") else
+                       WORST_VERSION if factor == "rl_worst" else
                        ROLLING_VERSION if factor in ("rl_rolling", "rolling_equal") else ROBOT_VERSION)
             folder = Path(self.models) / version if self.models is not None else Path("missing")
             return robot_scores(self, folder,
@@ -973,6 +994,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
     cooldown = getattr(rule, "cooldown", STOP_COOLDOWN)
     entry_only = getattr(rule, "eligibility", "both") == "entry"
     tracked = bool(rule.stop_loss) or exit_agent is not None
+    risk_veto = getattr(rule, "risk_veto", "none")
     again: set[int] = set()               # decisions kept before 1.5.0 with again_after: decide in full that session
     pending_sells: set[str] = set()       # 1.5.0: sells the market refused, looked at again every session
     pending_slots = 0                     # 1.5.0: places whose buy the market refused, filled again every session
@@ -1018,6 +1040,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             vetoed = vetoed | fp.excluded(position)       # no new buys; holdings keep their usual rules
         if exit_agent is not None and hasattr(exit_agent, "refuses"):
             vetoed = vetoed | exit_agent.refuses(position)  # tech1: the robot buys only what it wants
+        if risk_veto != "none":
+            vetoed = vetoed | fp.risky(position, RISK_VETO_SHARE)   # the deep risk model: not the riskiest tenth
         held, chosen = set(kept), []
         for symbol in ranked:
             if len(chosen) >= places:
@@ -1072,6 +1096,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                 if np.isfinite(price) and price < peak[symbol] * (1 - rule.stop_loss):
                     out.add(symbol)
                     stopped[symbol] = count
+        if risk_veto == "dl1x" and current:          # the deep risk model: the riskiest twentieth sold, every session
+            out |= {symbol for symbol in current if symbol in fp.risky(position, RISK_EXIT_SHARE)}
         risk_off = rule.market_filter != "none" and not fp.risk_on(position)
         if not decide:
             if not (current or pending_slots):
@@ -1880,6 +1906,10 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
     payload = {"rule": rule.canonical(), "period": PERIOD, "costs": costs.as_dict(), "data": data_fingerprint,
                "engine": ENGINE_VERSION, "plan": SEED_PLAN}
     payload.update(input_digests(history, list(rule.factors), rule.exit_model != "none"))
+    if getattr(rule, "risk_veto", "none") != "none":           # 2026-10-16: the deep risk model it reads
+        from quant_platform.research.model import MODELS, digest, model_dir
+
+        payload["dl_risk"] = digest(model_dir(history, MODELS["dl_risk"]["version"]))
     delisted = sorted((code, day.isoformat()) for code, days in (data.notes.get("delisted") or {}).items()
                       for day in days if day <= RECENT_END)
     payload["delisted"] = hashlib.sha256(json.dumps(delisted).encode()).hexdigest()   # 1.3.1: the list it read
@@ -1948,6 +1978,13 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]))
         if "rl_blocks" in factor_names:
             payload["robot_blocks"] = robot_digest(models_root(history) / BLOCK_VERSION)
+    if "rl_worst" in factor_names:                               # 2026-10-16: the reverse robot, model F
+        from quant_platform.research.model import MODELS, digest, model_dir, models_root
+        from quant_platform.research.rl_timing import WORST_VERSION
+        from quant_platform.research.rl_timing import digest as robot_digest
+
+        payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]))
+        payload["robot_worst"] = robot_digest(models_root(history) / WORST_VERSION)
     if any(name in ("rl_rolling", "rolling_equal") for name in factor_names):   # 2026-10-16: the robot 3.1, model F
         from quant_platform.research.model import MODELS, digest, model_dir, models_root
         from quant_platform.research.rl_timing import ROLLING_VERSION
@@ -2545,6 +2582,58 @@ def robot31_batch() -> list:
                       factors={"rolling_equal": 1.0}, **common)]
 
 
+def risk_batch() -> list:
+    """2026-10-16 (使用者：深度學習能不能輔助這些策略？): the eight strongest 100%-stock T0 candidates (by final value, the
+    newest engine's run) each with the deep risk overlay — "dl1" (no buy among the riskiest tenth) and "dl1x" (and sell
+    a holding in the riskiest twentieth) — only past the risk model's registered gate (research/model_risk.py)."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.model_risk import gate as risk_gate
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = _Path("instance") / "research"
+    check = risk_gate(research / "models")
+    print(f"dl-risk-1.0.0 門檻（2016-2020 大跌 AUC 比波動對照高 0.02）：{check}", flush=True)
+    if not check["passed"]:
+        return []
+    latest = newest(TrialRegistry(research / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent"
+                    and str((record.metrics or {}).get("engine", "")).startswith("daily-"))
+    picked = []
+    for record in latest.values():
+        if tier(record.metrics or {})[0] != "T0 候選":
+            continue
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            base = DailyRule.model_validate(spec)
+        except (OSError, ValueError, KeyError):
+            continue                                  # a blend or an older spec
+        if uses_0050(spec) or base.free or getattr(base, "risk_veto", "none") != "none":
+            continue
+        picked.append(((record.metrics or {}).get("final_value") or 0, base))
+    rules = []
+    for _value, base in sorted(picked, key=lambda item: -item[0])[:8]:
+        for mode, word in (("dl1", "深度風險不買最高一成"), ("dl1x", "深度風險不買最高一成、持股進最高 5% 就賣")):
+            name = f"{base.name[: 79 - len(word) - 1]}＋{word}"
+            rules.append(DailyRule.model_validate({**base.model_dump(), "name": name, "risk_veto": mode}))
+    return rules
+
+
+def worst_batch() -> list:
+    """2026-10-16 (使用者：訓練一個賠最多的模型，反著做的趣味): the same envelope as the robots' rules with the signal
+    turned around — the reverse robot, model F's lowest, the eight blocks' lowest. Registered like any rule (T3 is the
+    expected grade); they show how much the signals know about losers."""
+    common = {"top": 20, "check": "weekly", "industry_cap": 0.3, "hold": "trend"}
+    return [DailyRule(name="反向 RL 機器人（學著賠最多）：8 個區塊、前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"rl_worst": 1.0}, **common),
+            DailyRule(name="反向：模型 F 分數最低的 20 檔、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"ml_gbm_ens": -1.0}, **common),
+            DailyRule(name="反向：8 個強訊號區塊平均最低的 20 檔、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"block_equal": -1.0}, **common)]
+
+
 def robot40_batch() -> list:
     """2026-10-16: the robot 4.0 — every session its own weights for every stock and for cash (a free rule: only
     the exchange's rules, the costs and the turnover cap apply)."""
@@ -2622,5 +2711,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
-           "robot30": robot30_batch, "robot31": robot31_batch, "robot40": robot40_batch,
+           "robot30": robot30_batch, "robot31": robot31_batch, "worst": worst_batch, "risk": risk_batch, "robot40": robot40_batch,
            "robot41": robot41_batch}

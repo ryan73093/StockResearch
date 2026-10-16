@@ -1,0 +1,32 @@
+{# 2026-10-16 (使用者：每次優化之後我都要在首頁看到每種角色成長了多少、跟之前訓練相比強化了多少): the strategy roles. #}
+{% macro roles_card(growth, limit=8, tab=none) %}
+{% if growth and growth.roles %}
+<section class="card" id="roles"{% if tab %} data-tab="{{ tab }}"{% endif %}>
+  <div class="card__head">
+    <h2>策略角色成長</h2>
+    <a class="small" href="/research/roles">全部角色與指標</a>
+  </div>
+  <p class="muted small" style="margin:0 0 8px">每個角色玩同一個帳戶：2015-06 起 30 萬、每月 5 日加 1 萬，只照台股交易規則；對手是同樣的錢全買 0050（{{ '{:,.0f}'.format((growth.benchmark or 0) / 10000) }} 萬）。「上次優化」是這個角色最近一次找到新規則之前的最好成績。</p>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>角色</th><th>等級</th><th class="num">現在最好</th><th class="num">上次優化前</th><th class="num">這次成長</th><th class="num">年化（0050）</th><th class="num">最大回撤（0050）</th></tr></thead>
+      <tbody>
+      {% for row in growth.roles[:limit] %}
+        {% set now = row.now %}
+        <tr>
+          <td data-primary class="name"><strong>{{ row.role }}</strong><br><span class="muted small">{{ row.rules }} 個規則{% if row.grades.get('T0 候選') %}・T0 候選 {{ row.grades.get('T0 候選') }}{% endif %}</span></td>
+          <td data-label="等級"><span class="badge{% if now.tier == 'T0 候選' %} badge--ok{% elif now.tier == 'T3' %} badge--warn{% endif %}">{{ now.tier }}</span></td>
+          <td class="num" data-label="現在最好">{{ '{:,.0f}'.format(now.final / 10000) }} 萬</td>
+          <td class="num" data-label="上次優化前">{{ '{:,.0f}'.format(row.before.final / 10000) ~ ' 萬' if row.before else '—' }}</td>
+          <td class="num {{ 'up' if (row.change or 0) > 0 else ('down' if (row.change or 0) < 0 else '') }}" data-label="這次成長">{{ '{:+.0%}'.format(row.change) if row.change is not none else '新角色' }}</td>
+          <td class="num" data-label="年化（0050）">{{ '{:.1%}'.format(now.xirr) if now.xirr is not none else '—' }}<span class="muted small">（{{ '{:.1%}'.format(now.bench_xirr) if now.bench_xirr is not none else '—' }}）</span></td>
+          <td class="num" data-label="最大回撤（0050）">{{ '{:.0%}'.format(now.drawdown) if now.drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(now.bench_drawdown) if now.bench_drawdown is not none else '—' }}）</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>這次成長</b>：和這個角色上次找到新規則之前比。數字也會下降：引擎改得更貼近真實交易（漲停買不到、整股零股、減資等）時，全部規則會重算。<b>年化</b>：帳戶的內部報酬率。RL 角色從 2018 起算（之前沒有訓練資料），0050 對照也同期。</p>
+</section>
+{% endif %}
+{% endmacro %}

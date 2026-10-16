@@ -50,7 +50,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_gbm_ext": {"version": "gbm-2.2.0", "label": "ensemble", "features": "extended"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
-          "ml_deep": {"version": "dl-1.0.0", "label": "deep"}}
+          "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
+          # 2026-10-16 (使用者：深度學習能不能用到交易裡輔助這些策略？): the probability of a 15% fall within 20 sessions
+          # (research/model_risk.py) — a risk overlay for rules (DailyRule.risk_veto), not a picking signal
+          "dl_risk": {"version": "dl-risk-1.0.0", "label": "deep_risk"}}
 MONTHLY_REVENUE = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel")
 VERSIONS = {spec["version"]: spec for spec in MODELS.values()}
 LATEST = "gbm-1.2.0"
@@ -215,6 +218,10 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
         from quant_platform.research.model_deep import train as train_deep
 
         return train_deep(fp, out_dir, years, job)
+    if label == "deep_risk":                 # 2026-10-16: the drop probability (research/model_risk.py)
+        from quant_platform.research.model_risk import train as train_risk
+
+        return train_risk(fp, out_dir, years, job)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     names = trained_features(out, version)

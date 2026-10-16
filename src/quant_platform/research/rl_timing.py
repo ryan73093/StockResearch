@@ -83,12 +83,17 @@ SLOTS = {
 }
 SELECT_FROM = date(2015, 6, 1)
 SELECT_LEAST = 120
+# 2026-10-16 (使用者：訓練一個賠最多的模型，反著做，看看會怎樣): the robot 3.0's learning with the reward turned around —
+# it learns the eight blocks' weights that lose the most to 0050 (abstaining, i.e. the blocks alike, when its
+# held-out fifth does not lose more than them). A curiosity and a check: a robot that can lose on purpose shows the
+# signals carry information both ways; one that cannot shows they are mostly noise.
+WORST_VERSION = "worst-rl-1.0.0"
 
 
 def factor_names(version: str = VERSION) -> list[str]:
     from quant_platform.research.tech_rl import TECH_FEATURES
 
-    if version == BLOCK_VERSION:
+    if version in (BLOCK_VERSION, WORST_VERSION):
         return list(BLOCKS)
     if version == ROLLING_VERSION:
         return list(dict.fromkeys(name for members in SLOTS.values() for name in members))
@@ -106,7 +111,7 @@ def factor_names(version: str = VERSION) -> list[str]:
         left_out = {"revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap",
                     *TIME_FACTORS, *SHORT_FACTORS, *ALERT_FACTORS, *LENDING_FACTORS, *CORPORATE_FACTORS,
                     *ISSUANCE_FACTORS, *DEALER_FACTORS, "ml_gbm_ext"}
-        left_out |= {"rl_free", "ml_deep"}
+        left_out |= {"rl_free", "ml_deep", "dl_risk"}
         return [name for name in (*FACTOR_LABELS, *MODEL_FACTORS) if name not in left_out]
     return list(TECH_FEATURES)
 
@@ -349,7 +354,7 @@ def _rewards_of(pairs: list, logits: np.ndarray) -> np.ndarray:
 
 
 def train_held_out(train_pairs: list, held_pairs: list, seed: int, epochs: int | None = None,
-                   penalty: float | None = None) -> dict[str, object]:
+                   penalty: float | None = None, sign: float = 1.0) -> dict[str, object]:
     """The linear policy by REINFORCE on ``train_pairs``, kept at the epoch whose held-out reward (no exploration) is
     best; returns the kept weights and the curves (every CHECK_EVERY epochs)."""
     import torch
@@ -371,7 +376,7 @@ def train_held_out(train_pairs: list, held_pairs: list, seed: int, epochs: int |
         mean = states @ weight + bias
         noise = rng.normal(0, SIGMA, (states.shape[0], ROLLOUTS, count)).astype(np.float32)
         actions = mean.detach().numpy()[:, None, :] + noise
-        rewards = _rewards_of(train_pairs, actions)
+        rewards = sign * _rewards_of(train_pairs, actions)               # sign −1: learn to lose (WORST_VERSION)
         advantage = torch.from_numpy(((rewards - rewards.mean(axis=1, keepdims=True))
                                       / (rewards.std(axis=1, keepdims=True) + 1e-8)).astype(np.float32))
         log_prob = -(((torch.from_numpy(actions) - mean[:, None, :]) ** 2).sum(-1)) / (2 * SIGMA ** 2)
@@ -381,7 +386,7 @@ def train_held_out(train_pairs: list, held_pairs: list, seed: int, epochs: int |
         optimiser.step()
         if epoch % CHECK_EVERY == CHECK_EVERY - 1:
             w, b = weight.detach().numpy(), bias.detach().numpy()
-            held = float(_rewards_of(held_pairs, (held_states @ w + b)[:, None, :]).mean())
+            held = sign * float(_rewards_of(held_pairs, (held_states @ w + b)[:, None, :]).mean())
             curve_train.append(round(float(rewards.mean()), 5))
             curve_held.append(round(held, 5))
             if held > best[0]:
@@ -390,7 +395,7 @@ def train_held_out(train_pairs: list, held_pairs: list, seed: int, epochs: int |
             "train": curve_train, "held": curve_held}
 
 
-def walk_forward_blocks(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> dict[str, object]:
+def walk_forward_blocks(fp, benchmark: np.ndarray, out_dir: Path, job=None, worst: bool = False) -> dict[str, object]:
     """The robot 3.0: per test year, trained on the decisions (all four offsets) realised before the year, the last
     fifth of them held out; the test decisions are offset 0's, as the rule decides."""
     timelines = [Timeline(fp, benchmark, BLOCK_VERSION, offset) for offset in PHASES]
@@ -415,12 +420,13 @@ def walk_forward_blocks(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> d
                       for timeline, indexes in zip(timelines, before)]
         train_pairs = [pair for pair in train_pairs if pair[1]]
         held_pairs = [pair for pair in held_pairs if pair[1]]
-        runs = [train_held_out(train_pairs, held_pairs, seed) for seed in BLOCK_SEEDS]
+        sign = -1.0 if worst else 1.0
+        runs = [train_held_out(train_pairs, held_pairs, seed, sign=sign) for seed in BLOCK_SEEDS]
         held_states = np.concatenate([timeline.states[decisions] for timeline, decisions in held_pairs])
         held_equal = float(_rewards_of(held_pairs, np.repeat(np.zeros((1, 1, len(names))), len(held_states), axis=0)).mean())
         logits = np.mean([main.states[test_at] @ run["weight"] + run["bias"] for run in runs], axis=0)
-        held_robot = float(np.mean([run["held_reward"] for run in runs]))
-        abstain = held_robot <= held_equal
+        held_robot = sign * float(np.mean([run["held_reward"] for run in runs]))     # in rewards, not the sign's
+        abstain = held_robot >= held_equal if worst else held_robot <= held_equal
         chosen = np.repeat(equal[None, :], len(test_at), axis=0) if abstain else _softmax(logits)
         for index, row in zip(test_at, chosen):
             weights[main.days[index].isoformat()] = [round(float(value), 6) for value in row]
@@ -439,7 +445,7 @@ def walk_forward_blocks(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> d
         if job:
             job.update(done=number + 1, total=len(years),
                        current=f"{year}：{'不押（用平均）' if abstain else '機器人'} {robot.sum():+.3f}、平均 {alike.sum():+.3f}")
-    meta = {"version": BLOCK_VERSION, "factors": names, "weights": weights, "yearly": yearly,
+    meta = {"version": WORST_VERSION if worst else BLOCK_VERSION, "factors": names, "weights": weights, "yearly": yearly,
             "config": {"step": STEP, "top": TOP, "cost_swap": COST_SWAP, "sigma": SIGMA, "penalty": BLOCK_PENALTY,
                        "epochs": EPOCHS, "rollouts": ROLLOUTS, "learning_rate": LEARNING_RATE, "seeds": list(BLOCK_SEEDS),
                        "phases": list(PHASES), "held_out": HELD_OUT, "check_every": CHECK_EVERY},

@@ -244,8 +244,11 @@ def _score_later(fp, folder: Path, positions: list[int], output: np.ndarray) -> 
         network.load_state_dict(torch.load(path, weights_only=True, map_location=device()))
         network.eval()
         networks.append(network)
+    meta = folder / "meta.json"
+    drop = meta.is_file() and json.loads(meta.read_text(encoding="utf-8")).get("target") == "drop"   # the risk model
     for position in positions:
         rows = np.flatnonzero(eligible[:, position])
         if rows.size:
             pairs = np.stack([np.full(rows.size, position), rows], axis=1)
-            output[position, rows] = np.mean([_score(network, data, pairs) for network in networks], axis=0)
+            value = np.mean([_score(network, data, pairs) for network in networks], axis=0)
+            output[position, rows] = 1 / (1 + np.exp(-value)) if drop else value

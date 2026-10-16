@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -511,6 +511,20 @@ switch ($Name) {
         Invoke-Step "1-train" @("-m", "quant_platform.research", "free-rl4", "--broker", "cathay")
         Invoke-Step "2-rule" @("-m", "quant_platform.research", "daily", "--name", "robot40", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "dlrisk" {
+        # 2026-10-16 (使用者：深度學習能不能用到交易裡輔助這些策略？GPU 先用起來): the drop-risk model on the GPU.
+        Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-risk-1.0.0")
+        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "risk", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "worst" {
+        # 2026-10-16 (使用者：訓練一個賠最多的模型，反著做的趣味): the reverse robot (GPU), then the three reverse rules.
+        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-train" @("-m", "quant_platform.research", "worst-rl")
+        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "worst", "--broker", "cathay")
     }
     "rebuild150" {
         # 2026-10-16 (the mechanism audit): engine 1.5.0 — capital reductions, idle cash reinvested on decision days,

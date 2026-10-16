@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "free-rl4", "free-rl41"),
+                            "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
@@ -324,7 +324,7 @@ def main() -> int:
                         help="rl-sleeves：版本（1.1.0 隨機起點；2.0.0 第三個位置是現金、回撤懲罰加倍）")
     parser.add_argument("--model-version", default="gbm-1.2.0",
                         choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0", "gbm-2.0.0",
-                                 "gbm-2.1.0", "gbm-2.2.0", "dl-1.0.0"),
+                                 "gbm-2.1.0", "gbm-2.2.0", "dl-1.0.0", "dl-risk-1.0.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
@@ -595,6 +595,13 @@ def main() -> int:
             job.update(done=len(years), force=True)
             ics = [item["ic"] for item in meta["years"].values() if item.get("ic") is not None]
             job.payload["summary"] = f"{len(meta['years'])} 個年度模型；樣本外 IC 平均 {np.mean(ics):+.3f}" if ics else "沒有模型"
+            if label == "deep_risk":            # 2026-10-16: the drop model's AUC against the volatility yardstick
+                from quant_platform.research.model_risk import gate as risk_gate
+
+                check = risk_gate(research_model.models_root(Path(args.base)))
+                job.payload["summary"] = (f"{len(meta['years'])} 個年度模型；2016～2020 AUC {check['auc']}、"
+                                          f"波動對照 {check['auc_volatility']}；門檻{'通過' if check['passed'] else '沒過'}")
+                print(check, flush=True)
         for year, item in meta["years"].items():
             print(f"{year}：訓練 {item.get('train_rows', item.get('train_samples'))} 筆、樣本外 IC {item.get('ic')}、"
                   f"IC 為正的週 {item.get('ic_positive')}、前五分之一排名多 {item.get('top_fifth_rank_gap')}、"
@@ -704,6 +711,24 @@ def main() -> int:
         print(job.payload["summary"])
         for year, item in meta["yearly"].items():
             print(year, {key: value for key, value in item.items() if not key.startswith("curve")})
+        return 0
+
+    if args.command == "worst-rl":
+        # 2026-10-16 (使用者：訓練一個賠最多的模型): the robot 3.0's learning, the reward turned around
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import rl_timing
+        from quant_platform.research.jobs import JobLog
+        from quant_platform.research.model import models_root
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("反向 RL 機器人：學著賠最多（8 個區塊，逐年滾動）", command) as job:
+            data, fp = daily_research.load(Path(args.base))
+            meta = rl_timing.walk_forward_blocks(fp, rl_timing.benchmark_units(data, fp.sessions),
+                                                 models_root(Path(args.base)) / rl_timing.WORST_VERSION, job=job, worst=True)
+            robot = sum(item["robot_excess"] for item in meta["yearly"].values())
+            alike = sum(item["equal_excess"] for item in meta["yearly"].values())
+            job.payload["summary"] = f"{len(meta['yearly'])} 年樣本外：反向機器人比 0050 {robot:+.3f}、平均 {alike:+.3f}"
+        print(job.payload["summary"])
         return 0
 
     if args.command == "block-rl31":
