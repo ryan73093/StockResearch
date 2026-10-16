@@ -105,10 +105,10 @@ class DailyResearcher:
         from quant_platform.research.pool import _spec_of
         from quant_platform.research.registry import TrialRegistry
 
-        latest = {}
-        for record in TrialRegistry(self._dir / "trials.jsonl").records():
-            if record.kind == "candidate" and record.period == "recent":
-                latest[record.spec_hash] = record
+        from quant_platform.research.registry import newest
+
+        latest = newest(TrialRegistry(self._dir / "trials.jsonl").records(),
+                        lambda record: record.kind == "candidate" and record.period == "recent")
         rows = []
         for spec_hash, record in latest.items():
             spec = _spec_of(self._dir, record.report_file)

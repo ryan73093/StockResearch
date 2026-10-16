@@ -64,7 +64,17 @@ def records(fp, names: list[str] | None = None) -> tuple[pd.DataFrame, dict[str,
     frame = pd.DataFrame(spreads)
     realised = frame.shift(HORIZON).rolling(WINDOW, min_periods=LEAST).mean()
     fp._cache[key] = (realised, ranks)
+    fp._cache[("__factor_spreads__",) + key[1:]] = frame.shift(HORIZON)
     return realised, ranks
+
+
+def known_spreads(fp, names: list[str]) -> pd.DataFrame:
+    """sessions × factors: each factor's top-fifth-minus-bottom-fifth spread as known on each session (the spread of
+    the session HORIZON sessions before, whose forward return has just been realised)."""
+    key = ("__factor_spreads__", tuple(names), HORIZON, WINDOW, LEAST)
+    if key not in fp._cache:
+        records(fp, names)
+    return fp._cache[key]
 
 
 def scores(fp, names: list[str] | None = None) -> np.ndarray:

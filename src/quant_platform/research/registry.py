@@ -92,6 +92,27 @@ def one_per_rule(records: list[TrialRecord]) -> list[TrialRecord]:
     return sorted(chosen.values(), key=lambda item: item.trial_id)
 
 
+def engine_order(record) -> tuple[int, ...]:
+    """The engine version of a record as numbers ("daily-1.5.0" → (1, 5, 0)); () when it has none."""
+    import re
+
+    engine = str((record.metrics or {}).get("engine") or "")
+    return tuple(int(part) for part in re.findall(r"\d+", engine.split("-", 1)[-1])) if engine else ()
+
+
+def newest(records, keep=None) -> dict[str, object]:
+    """spec hash → its run on the newest engine, the latest of those (2026-10-16: a rerun on an older engine still
+    running beside a newer one registers after it — the registry's order alone would show the older engine)."""
+    output: dict[str, object] = {}
+    for record in records:
+        if keep is not None and not keep(record):
+            continue
+        old = output.get(record.spec_hash)
+        if old is None or engine_order(record) >= engine_order(old):
+            output[record.spec_hash] = record
+    return output
+
+
 class _locked:
     """A lock file next to the registry (created exclusively; one left over 10 minutes by a dead process is removed)."""
 
@@ -109,7 +130,7 @@ class _locked:
                 os.write(handle, str(os.getpid()).encode())
                 os.close(handle)
                 return self
-            except FileExistsError:
+            except (FileExistsError, PermissionError):   # Windows: a lock being deleted refuses with access denied
                 try:
                     if time.time() - self._lock.stat().st_mtime > 600:
                         self._lock.unlink()

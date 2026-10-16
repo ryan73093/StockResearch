@@ -188,7 +188,9 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
 
 
 def scores(fp, folder: str | Path) -> np.ndarray:
-    """sessions × symbols from ``deep.npz`` (NaN where none)."""
+    """sessions × symbols from ``deep.npz`` (NaN where none); the sessions after the last one kept there (the
+    forward days) scored by the latest year's networks (2026-10-16: they had no score, and a rule holding by the
+    model would have sold everything)."""
     output = np.full((len(fp.sessions), len(fp.symbols)), np.nan, dtype=np.float32)
     path = Path(folder) / "deep.npz"
     if not path.is_file():
@@ -199,8 +201,38 @@ def scores(fp, folder: str | Path) -> np.ndarray:
     columns = {symbol: fp.row[symbol] for symbol in stored["symbols"].tolist() if symbol in fp.row}
     keep = [index for index, symbol in enumerate(stored["symbols"].tolist()) if symbol in columns]
     rows = [columns[symbol] for symbol in np.array(stored["symbols"].tolist())[keep]]
-    for day, values in zip(stored["days"].tolist(), stored["scores"]):
+    days = stored["days"].tolist()
+    for day, values in zip(days, stored["scores"]):
         position = fp.index.get(date.fromisoformat(day))
         if position is not None:
             output[position, rows] = values[keep].astype(np.float32)
+    if days:
+        last = date.fromisoformat(days[-1])
+        later = [position for position, day in enumerate(fp.sessions) if day > last and position >= LENGTH]
+        if later:
+            _score_later(fp, Path(folder), later, output)
     return output
+
+
+def _score_later(fp, folder: Path, positions: list[int], output: np.ndarray) -> None:
+    import torch
+
+    from quant_platform.research.model import eligibility
+
+    saved = sorted(folder.glob("*-*.pt"))
+    if not saved:
+        return
+    year = max(int(path.stem.split("-")[0]) for path in saved)
+    networks = []
+    eligible = eligibility(fp)
+    data = sequences(fp, eligible)
+    for path in [path for path in saved if path.stem.startswith(f"{year}-")]:
+        network = _network(data.shape[2])
+        network.load_state_dict(torch.load(path, weights_only=True))
+        network.eval()
+        networks.append(network)
+    for position in positions:
+        rows = np.flatnonzero(eligible[:, position])
+        if rows.size:
+            pairs = np.stack([np.full(rows.size, position), rows], axis=1)
+            output[position, rows] = np.mean([_score(network, data, pairs) for network in networks], axis=0)

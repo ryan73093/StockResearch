@@ -131,16 +131,19 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
     for item in items:
         ledger: list = []
         snapshots: dict = {}
+        # 2026-10-16 (audit): the forward account's own start, so the 15:30 record keeps what these orders say (the
+        # orders of the 44 accounts started after 10-01 were those of a 10-01 account, not the recorded one)
+        start = max(COMMON_START, date.fromisoformat(item["since"]))
         try:
             if item.get("kind") == "blend":
                 rule = BlendRule.model_validate(item["rule"])
-                BlendAccount(data, fp, rule, costs, COMMON_START, day, store=store,
-                             name=decision_key(item["rule_hash"], COMMON_START), through=day).run(
-                    COMMON_START, day, plan, ledger=ledger, snapshots=snapshots)
+                BlendAccount(data, fp, rule, costs, start, day, store=store,
+                             name=decision_key(item["rule_hash"], start), through=day).run(
+                    start, day, plan, ledger=ledger, snapshots=snapshots)
             else:
                 rule = DailyRule.model_validate(item["rule"])
-                ranks = kept_rankings(fp, rule, COMMON_START, day, store, decision_key(item["rule_hash"], COMMON_START), day)
-                simulate_daily(data, rule, costs, COMMON_START, day, ranks, plan, ledger=ledger, snapshots=snapshots,
+                ranks = kept_rankings(fp, rule, start, day, store, decision_key(item["rule_hash"], start), day)
+                simulate_daily(data, rule, costs, start, day, ranks, plan, ledger=ledger, snapshots=snapshots,
                                weights=daily_weights(fp, rule, ranks), parked=account_parking(data, fp, rule, costs),
                                exposure=exposure_schedule(data, fp, rule, costs))
         except Exception as error:                # one bad rule does not stop the others

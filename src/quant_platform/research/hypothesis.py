@@ -115,10 +115,10 @@ def similar(research: Path, factors: dict[str, float], limit: int = 8) -> list[d
     from quant_platform.research.registry import TrialRegistry
 
     wanted = set(factors)
-    latest = {}
-    for record in TrialRegistry(research / "trials.jsonl").records():
-        if record.kind == "candidate" and record.period == "recent":
-            latest[record.spec_hash] = record
+    from quant_platform.research.registry import newest
+
+    latest = newest(TrialRegistry(research / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent")
     found = []
     for record in latest.values():
         try:

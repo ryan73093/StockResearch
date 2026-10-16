@@ -9,9 +9,10 @@ list the rule wants on every session it decides, after the market's limits, and 
 new ones (``daily.daily_rankings(fixed=...)``). The after-close orders write the day's decisions at 13:50, so the
 15:30 record keeps what the orders said.
 
-One file, ``forward/stocks/decisions.json``: ``{key: {"through": day, "days": {day: [symbols]}, "again_after": bool}}``
-(``again_after``: the market refused an order on ``through``, so the next session decides again), the key being the
-account (rule hash and start day, a blend's sleeve numbered after ``#``).
+One file, ``forward/stocks/decisions.json``: ``{key: {"through": day, "days": {day: [symbols]}, "pending": {...}}}``
+(``pending``, engine 1.5.0: the orders the market refused that are still to be tried — the sells and the number of
+places to fill; entries written before 1.5.0 have ``again_after``: the next session decides again in full), the key
+being the account (rule hash and start day, a blend's sleeve numbered after ``#``).
 """
 
 from __future__ import annotations
@@ -42,16 +43,16 @@ class DecisionStore:
             return None
         return {"through": date.fromisoformat(entry["through"]),
                 "days": {date.fromisoformat(day): list(symbols) for day, symbols in entry["days"].items()},
-                "again_after": bool(entry.get("again_after"))}
+                "pending": entry.get("pending"), "again_after": bool(entry.get("again_after"))}
 
-    def keep(self, name: str, ranks: dict[date, list[str]], again_after: bool, through: date) -> None:
+    def keep(self, name: str, ranks: dict[date, list[str]], pending: dict | None, through: date) -> None:
         """Write down an account's decisions up to ``through`` (never moving an earlier ``through`` back)."""
         entry = self._kept.get(name) or self._data.get(name)
         if entry and date.fromisoformat(entry["through"]) > through:
             return
         self._kept[name] = {"through": through.isoformat(),
                             "days": {day.isoformat(): list(symbols) for day, symbols in sorted(ranks.items()) if day <= through},
-                            "again_after": bool(again_after)}
+                            "pending": pending or None}
 
     def save(self) -> None:
         """Merge what this run kept into the file as it is now (another process may have written meanwhile)."""
@@ -85,7 +86,9 @@ def rankings(fp, rule, start: date, end: date, store: DecisionStore | None = Non
     ranks = daily_rankings(fp, rule, start, end, fixed=store.fixed(name), trace=trace)
     if through is not None:
         sessions = [day for day in fp.sessions if start <= day <= end]
-        following = next((day for day in sessions if day > through), None)
-        again_after = trace["again_after"] if following is None else following in trace["again"]
-        store.keep(name, ranks, again_after, through)
+        lag = 1 if getattr(rule, "execution", "same") == "next" else 0
+        resume = next((day for number, day in enumerate(sessions)            # the first session decided live
+                       if number + lag < len(sessions) and sessions[number + lag] > through), None)
+        pending = trace["pending"].get(resume) if resume is not None else trace["pending_after"]
+        store.keep(name, ranks, pending, through)
     return ranks

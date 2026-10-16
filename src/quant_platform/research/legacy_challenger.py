@@ -181,6 +181,11 @@ def exchange_events(raw_dir: Path, first_year: int) -> dict[str, dict[date, tupl
                 if day and before and reference and before > 0 and reference > 0 and kind:
                     events[f"{str(record.get('代號')).strip()}.TWO"][day] = (
                         "cash" if kind == "除息" else "shares", before, reference)
+    from quant_platform.research.history.reductions import events as reduction_events
+
+    for symbol, days in reduction_events(raw_dir, first_year).items():   # 2026-10-16: TWSE capital reductions
+        for day, event in days.items():
+            events[symbol].setdefault(day, event)
     return events
 
 

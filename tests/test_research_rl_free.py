@@ -75,3 +75,29 @@ def test_the_free_agent_learns_from_every_session_and_keeps_its_curves(monkeypat
     weights = rl_free.weights(fp, tmp_path)
     first = fp.index[next(day for day in fp.sessions if day.year == 2019)]
     assert np.isnan(weights[first - 1]).all() and np.nansum(weights[first]) <= 1.0 + 1e-6
+
+
+def test_sparsemax_gives_exact_zeros_and_sums_to_one():
+    import torch
+
+    weights = rl_free.sparsemax(torch.tensor([3.0, 1.0, 0.2, -1e4]))
+    assert float(weights.sum()) == pytest.approx(1.0) and float(weights[3]) == 0.0 and float(weights[0]) > float(weights[1])
+
+
+def test_the_robot_41_trains_in_the_owners_account(monkeypatch, tmp_path):
+    monkeypatch.setattr(rl_free, "EPOCHS", 2)
+    monkeypatch.setattr(rl_free, "SEEDS", (0,))
+    monkeypatch.setattr(rl_free, "FIRST_TEST_YEAR", 2019)
+    monkeypatch.setattr(rl_free, "feature_names", lambda: ["momentum_3", "reversal_1"])
+    from quant_platform.research import daily
+
+    monkeypatch.setattr(daily, "RECENT_START", date(2017, 1, 2))
+    days = weekdays(date(2016, 1, 1), date(2019, 6, 28))
+    data = market(days)
+    fp = FactorPanel(Panel(data))
+    from quant_platform.research.rl_timing import benchmark_units
+
+    world = rl_free.Market(fp, benchmark_units(data, fp.sessions), CostModel(fee_rate=0.001425, fee_discount=0.28, minimum_fee=1))
+    assert world.minimum_fee[0] == 20 and world.monthly.sum() > 0 and world.close.shape == world.returns.shape
+    meta = rl_free.walk_forward(world, tmp_path, version=rl_free.VERSION_41)
+    assert meta["version"] == rl_free.VERSION_41 and "2019" in meta["yearly"]

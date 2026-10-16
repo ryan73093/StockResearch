@@ -969,12 +969,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     def research_rl():
         """2026-10-16 (使用者：我要怎麼看到學習的狀況？): every RL robot's yearly learning record."""
         from quant_platform.research.model import models_root
-        from quant_platform.research.rl_status import labels, view
+        from quant_platform.research.rl_status import engine, labels, view
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         return render_template("v2/research_rl.html", active_nav="research", research_tab="rl",
                                robots=view(models_root(research_dir / "history")), labels=labels(),
-                               jobs=JobLog(research_dir).jobs())
+                               engine=engine(research_dir), jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/recent/<rule_hash>")
     def research_recent(rule_hash: str):

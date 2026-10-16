@@ -150,3 +150,37 @@ def test_the_robot_30_uses_the_blocks_alike_when_its_held_out_reward_does_not_be
     meta = rl_timing.walk_forward_blocks(fp, rl_timing.benchmark_units(data, fp.sessions), tmp_path)
     assert meta["yearly"]["2019"]["abstained"] is True
     assert all(np.allclose(row, 0.25) for row in meta["weights"].values())             # the four alike
+
+
+def test_the_robot_31_chooses_each_slots_factor_only_from_what_was_known_before_the_year(monkeypatch):
+    """2026-10-16 (the audit): 3.0's blocks were chosen on 2015-06..2020-10 and tested from 2018."""
+    import pandas as pd
+
+    from quant_platform.research import factor_timing
+
+    days = weekdays(date(2016, 1, 4), date(2019, 12, 31))
+    cut = date(2019, 1, 2)
+    frame = pd.DataFrame({"a": [0.01 if day < cut else 0.20 for day in days],      # pays after the year starts
+                          "b": [0.02 if day < cut else -0.20 for day in days],     # paid before it
+                          "c": [0.05] * 50 + [np.nan] * (len(days) - 50)})         # too short a record
+    fp = type("FP", (), {"sessions": days})()
+    monkeypatch.setattr(factor_timing, "known_spreads", lambda _fp, _names: frame)
+    monkeypatch.setattr(rl_timing, "SLOTS", {"one": ("a", "b"), "two": ("c", "a")})
+    monkeypatch.setattr(rl_timing, "SELECT_FROM", date(2016, 1, 1))
+    assert rl_timing.choose_members(fp, cut) == ["b", "a"]
+
+
+def test_the_robot_31_trains_per_year_on_its_chosen_slots_and_scores_with_them(monkeypatch, tmp_path):
+    data, fp = _blocks_market(monkeypatch)
+    monkeypatch.setattr(rl_timing, "SLOTS", {"動能": ("momentum_3", "reversal_1"), "波動": ("low_volatility_60", "kd_k")})
+    monkeypatch.setattr(rl_timing, "SELECT_FROM", date(2015, 1, 1))
+    monkeypatch.setattr(rl_timing, "SELECT_LEAST", 60)
+    meta = rl_timing.walk_forward_rolling(fp, rl_timing.benchmark_units(data, fp.sessions), tmp_path)
+    assert meta["version"] == rl_timing.ROLLING_VERSION and meta["factors"] == ["動能", "波動"]
+    chosen = meta["members"]["2019"]
+    assert chosen[0] == "momentum_3" and chosen[1] in ("low_volatility_60", "kd_k")    # momentum pays in this market
+    assert meta["yearly"]["2019"]["members"] == chosen and len(next(iter(meta["weights"].values()))) == 2
+    robot = rl_timing.scores(fp, tmp_path, "robot", rl_timing.ROLLING_VERSION)
+    alike = rl_timing.scores(fp, tmp_path, "equal", rl_timing.ROLLING_VERSION)
+    first = fp.index[min(date.fromisoformat(day) for day in meta["weights"])]
+    assert np.isnan(robot[first - 1]).all() and np.isfinite(robot[first]).sum() > 10 and np.isfinite(alike[first]).sum() > 10

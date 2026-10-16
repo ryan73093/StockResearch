@@ -412,6 +412,12 @@ def update_chips(container: "Container", now: datetime | None = None) -> object 
             fetched["dividends"] = dividends_daily.fetch(client, local_now.date())
         except Exception:  # nor the ex-rights tables
             logger.exception("Ex-rights tables failed")
+        try:                    # 2026-10-16: TWSE capital reductions (this year's table; closed years cached)
+            from quant_platform.research.history import reductions
+
+            fetched["reductions"] = reductions.fetch(client, local_now.date(), local_now.year - 1)
+        except Exception:  # nor the reductions table
+            logger.exception("Capital reductions table failed")
         job.update(done=1, current="重建籌碼檔", force=True)
         written = build(base)
         job.update(done=2, force=True)

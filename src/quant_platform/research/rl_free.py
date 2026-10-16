@@ -33,6 +33,13 @@ import numpy as np
 import pandas as pd
 
 VERSION = "free-rl-4.0.0"
+# 4.1.0 (2026-10-16): 4.0 learned to spread the account over about 800 stocks — free of costs in its training account,
+# impossible in a NT$300,000 one. The training account is now the owner's: NT$300,000 then NT$10,000 on the 5th, every
+# order paying at least the minimum fee (NT$20 an odd-lot order before 2020-10-26), an order whose minimum fee is over
+# 2% not placed (the holding stays as it is, as the engine does), a holding worth less than one share impossible; the
+# weights a sparsemax (any number of them exactly 0) instead of a softmax. What it learns is still its own.
+VERSION_41 = "free-rl-4.1.0"
+INITIAL, MONTHLY = 300_000.0, 10_000.0
 HIDDEN = 32
 EPOCHS = 40
 CHUNK = 40
@@ -93,6 +100,16 @@ class Market:
             breadth = np.nanmean(np.where(eligible & np.isfinite(trend), trend > 0, np.nan), axis=0)
         self.state = np.stack([np.clip(np.nan_to_num(gap), -0.5, 0.5) * 4, np.nan_to_num(breadth, nan=0.5) * 2 - 1,
                                np.clip(np.nan_to_num(volatility), 0, 0.05) * 40 - 1], axis=1)[span].astype(np.float32)
+        from quant_platform.research.costs import order_fee
+        from quant_platform.research.stock_rules import SeedPlan
+
+        dates = list(fp.sessions[self.start:])
+        self.close = np.nan_to_num(fp.panel.close[:, span].T, nan=0.0).astype(np.float32)   # session × symbol, raw
+        self.minimum_fee = np.array([order_fee(costs, 1, 100.0, day) for day in dates], dtype=np.float32)
+        flows = dict(SeedPlan(INITIAL, MONTHLY).schedule(dates, dates[0], dates[-1]))
+        self.monthly = np.array([0.0 if index == 0 else flows.get(day, 0.0) for index, day in enumerate(dates)],
+                                dtype=np.float32)                         # the starting capital is set apart
+        self.fee_rate = costs.fee_rate * costs.fee_discount
         self.cost_buy = costs.fee_rate * costs.fee_discount + costs.slippage_bps / 10_000
         self.cost_sell = self.cost_buy + dict(costs.tax_rates).get("stock", 0.003)
         self.names, self.symbols = names, list(fp.symbols)
@@ -119,6 +136,73 @@ def _policy(features: int, hidden: int):
             return weights[:-1], weights[-1]
 
     return Policy()
+
+
+def sparsemax(logits):
+    """Martins & Astudillo (2016): the Euclidean projection on the simplex — weights that can be exactly 0."""
+    import torch
+
+    ordered, _ = torch.sort(logits, descending=True)
+    running = ordered.cumsum(0)
+    steps = torch.arange(1, len(logits) + 1, dtype=logits.dtype)
+    support = (1 + steps * ordered) > running
+    count = support.sum()
+    threshold = (running[count - 1] - 1) / count
+    return torch.clamp(logits - threshold, min=0.0)
+
+
+def run_account(policy, market: Market, first: int, last: int, train: bool = False, optimiser=None,
+                record: dict | None = None) -> np.ndarray:
+    """4.1: the owner's account — the money, the minimum fees, the orders too small to place, whole shares."""
+    import torch
+
+    symbols = len(market.symbols)
+    held = torch.zeros(symbols)
+    wealth = INITIAL
+    rewards, chunk = [], []
+    for t in range(first, last):
+        x = torch.from_numpy(market.features[t].astype(np.float32))
+        mask = torch.from_numpy(market.eligible[t]) | (held.detach() > 1e-6)
+        state = torch.from_numpy(market.state[t])
+        with torch.set_grad_enabled(train):
+            score = policy.stock(torch.cat([x, held[:, None] * 20.0], dim=1)).squeeze(1)
+            score = torch.where(mask, score, torch.full_like(score, -1e4))
+            target = sparsemax(torch.cat([score, policy.cash(state)]))[:-1]
+            floor = 50.0 * float(market.minimum_fee[t])
+            amount = (target - held).abs() * wealth
+            placed = torch.sigmoid((amount - floor) / (0.25 * floor))          # too small to place: not traded
+            weights = held + placed * (target - held)
+            price = torch.from_numpy(market.close[t])
+            possible = torch.sigmoid((weights * wealth - price) / (0.25 * price + 1e-6))   # less than one share
+            weights = weights * torch.where(price > 0, possible, torch.zeros_like(possible))
+            bought = torch.relu(weights - held)
+            sold = torch.relu(held - weights)
+            minimum = (placed * torch.relu(float(market.minimum_fee[t]) - market.fee_rate * amount)).sum() / wealth
+            cost = bought.sum() * market.cost_buy + sold.sum() * market.cost_sell + minimum
+            move = torch.from_numpy(market.returns[t])
+            gross = (weights * move).sum()
+            reward = torch.log1p(torch.clamp(gross - cost, min=-0.95)) - float(np.log1p(market.bench[t]))
+        chunk.append(reward)
+        rewards.append(float(reward.detach()))
+        grown = float(1 + gross.detach() - cost.detach())
+        after = wealth * grown
+        added = float(market.monthly[t + 1]) if t + 1 < len(market.monthly) else 0.0
+        held = weights * (1 + move) / (1 + gross - cost) * (after / (after + added))
+        wealth = after + added
+        if record is not None:
+            keep = torch.nonzero(weights.detach() >= SMALLEST).squeeze(1).tolist()
+            record[t] = {int(index): float(weights[index].detach()) for index in keep}
+        if train and (len(chunk) == CHUNK or t == last - 1):
+            loss = -torch.stack(chunk).mean()
+            optimiser.zero_grad()
+            loss.backward()
+            optimiser.step()
+            chunk = []
+            held = held.detach()
+        elif not train:
+            held = held.detach()
+            chunk = []
+    return np.array(rewards)
 
 
 def run(policy, market: Market, first: int, last: int, train: bool = False, optimiser=None,
@@ -164,10 +248,11 @@ def run(policy, market: Market, first: int, last: int, train: bool = False, opti
     return np.array(rewards)
 
 
-def walk_forward(market: Market, out_dir: Path, job=None) -> dict[str, object]:
+def walk_forward(market: Market, out_dir: Path, job=None, version: str = VERSION) -> dict[str, object]:
     import torch
 
     torch.set_num_threads(4)                  # other pipelines run alongside
+    step = run_account if version == VERSION_41 else run
 
     years = sorted({day.year for day in market.days[market.start:] if day.year >= FIRST_TEST_YEAR})
     targets: dict[str, dict[str, float]] = {}
@@ -186,8 +271,8 @@ def walk_forward(market: Market, out_dir: Path, job=None) -> dict[str, object]:
             best = (-np.inf, 0, None)
             curve_train, curve_held = [], []
             for epoch in range(EPOCHS):
-                fitted = run(policy, market, 0, held_from, train=True, optimiser=optimiser)
-                path = run(policy, market, 0, fit_end)                         # the held-out fifth, its own path
+                fitted = step(policy, market, 0, held_from, train=True, optimiser=optimiser)
+                path = step(policy, market, 0, fit_end)                        # the held-out fifth, its own path
                 held_reward = float(path[held_from:].mean())
                 curve_train.append(round(float(fitted.mean()), 6))
                 curve_held.append(round(held_reward, 6))
@@ -195,7 +280,7 @@ def walk_forward(market: Market, out_dir: Path, job=None) -> dict[str, object]:
                     best = (held_reward, epoch + 1, {key: value.clone() for key, value in policy.state_dict().items()})
             policy.load_state_dict(best[2])
             record: dict[int, dict[int, float]] = {}
-            rewards = run(policy, market, 0, test[-1] + 1, record=record)
+            rewards = step(policy, market, 0, test[-1] + 1, record=record)
             recorded.append({t: record[t] for t in test})
             test_rewards.append(rewards[test])
             curves_train.append(curve_train)
@@ -225,7 +310,7 @@ def walk_forward(market: Market, out_dir: Path, job=None) -> dict[str, object]:
         if job:
             job.update(done=number + 1, total=len(years),
                        current=f"{year}：比 0050 {robot:+.3f}（訓練環境）、平均持有 {np.mean(holdings):.0f} 檔")
-    meta = {"version": VERSION, "factors": market.names, "yearly": yearly,
+    meta = {"version": version, "factors": market.names, "yearly": yearly,
             "config": {"hidden": HIDDEN, "epochs": EPOCHS, "chunk": CHUNK, "learning_rate": LEARNING_RATE,
                        "weight_decay": WEIGHT_DECAY, "seeds": list(SEEDS), "held_out": HELD_OUT,
                        "cost_buy": market.cost_buy, "cost_sell": market.cost_sell, "smallest": SMALLEST},

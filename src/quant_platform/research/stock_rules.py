@@ -129,8 +129,10 @@ def unit_factors_all(closes: dict[date, float], events: dict[date, tuple[str, fl
     for previous, day in zip(days, days[1:]):
         event = events.get(day)
         if event is not None:
-            _kind, before, reference = event
-            if before > reference > 0:
+            kind, before, reference = event
+            if kind == "reduction" and before > 0 and reference > 0:
+                factors[day] = before / reference    # 2026-10-16: fewer shares (or money back as shares), either way
+            elif before > reference > 0:
                 factors[day] = before / reference
             continue
         ratio = closes[previous] / closes[day] if closes[day] > 0 else 1.0
@@ -221,9 +223,18 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
     official, moved_actions = move_to_open_days(official, sessions)          # the holder's day: the next session
     limits = {symbol: {day: (event["low"], event["high"]) for day, event in days.items()
                        if event.get("low") and event.get("high")} for symbol, days in official.items()}
+    from quant_platform.research.history.reductions import exchanges as reduction_terms
+    from quant_platform.research.history.reductions import limits as reduction_limits
+
+    for symbol, days in reduction_limits(base / "raw", first_year).items():   # 2026-10-16: a resume day's limits
+        if symbol in closes:
+            for day, pair in days.items():
+                limits.setdefault(symbol, {}).setdefault(day, pair)
+    reductions = {symbol: days for symbol, days in reduction_terms(base / "raw", first_year).items() if symbol in closes}
     return LegacyData(sessions=sessions, closes=closes, traded_value=traded, factors=factors, predictions={},
                       notes={"symbols": len(closes) - 1, "years": [first_year, last_year], "universe": universe,
                              "limits": limits, "moved_events": moved_actions,
+                             "reductions": reductions,        # 2026-10-16 (engine 1.5.0): shares exchanged, money back
                              "delisted": delisting_dates(base),       # 1.3.1: an unsold delisted holding is worthless
                              # 2026-10-14: announced cash dividends, by symbol (time factor dividend_ahead)
                              "dividend_plans": {symbol: plans for code, plans in
@@ -270,6 +281,9 @@ def stock_fingerprint(base: str | Path, first_year: int, last_year: int, until: 
         for path in sorted((base / "raw" / "twse_ex_rights").glob("*.json")):
             if path.stem.isdigit() and first_year <= int(path.stem) <= last_year:
                 digest.update(f"{path.stem}:{sha256(path)}".encode())
+        for path in sorted((base / "raw" / "twse_reductions").glob("*.json")):     # 2026-10-16
+            if path.stem.isdigit() and first_year <= int(path.stem) <= last_year:
+                digest.update(f"reduction{path.stem}:{sha256(path)}".encode())
     else:                      # a research period: only what it covers (0050 and the events up to ``until``)
         digest.update(f"0050:{_year_digest(base / 'daily' / '0050.parquet', until)}".encode())
         digest.update(f"events:{_events_digest(base / 'raw', first_year, last_year, until, universe)}".encode())

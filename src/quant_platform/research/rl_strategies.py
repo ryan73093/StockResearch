@@ -62,10 +62,10 @@ def t0_candidates(research: Path) -> list[tuple[int, str, dict]]:
     from quant_platform.research.daily import tier
     from quant_platform.research.registry import TrialRegistry
 
-    latest = {}
-    for record in TrialRegistry(research / "trials.jsonl").records():
-        if record.kind == "candidate" and record.period == "recent":
-            latest[record.spec_hash] = record
+    from quant_platform.research.registry import newest
+
+    latest = newest(TrialRegistry(research / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent")
     output = []
     for record in latest.values():
         if tier(record.metrics)[0] != "T0 候選":

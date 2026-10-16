@@ -52,7 +52,7 @@ def _summary(manifest: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
-                                            "chips", "tpex", "fundamentals", "alerts"))
+                                            "chips", "tpex", "fundamentals", "alerts", "reductions"))
     parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報")
     parser.add_argument("--refresh-quarter", help="finmind：季更新，due＝法定期限已過的最新一季；只重抓近期有交易、"
                                                   "還沒有這一季的檔（2026-10-07）")
@@ -207,6 +207,22 @@ def main() -> int:
             written = build_alerts(base)
             job.payload["summary"] = f"注意 {written['notice']:,} 筆、處置 {written['disposition']:,} 筆"
         print(json.dumps({"requested": requested, **written}, ensure_ascii=False), flush=True)
+        return 0
+
+    if args.command == "reductions":         # 2026-10-16: both exchanges' capital reductions and their details
+        from datetime import date as _date
+
+        from quant_platform.research.history import reductions
+        from quant_platform.research.history.official import OfficialHistoryClient
+        from quant_platform.research.jobs import JobLog
+
+        with JobLog(base.parent).start("下載減資資料（證交所與櫃買，2005 起，含每筆換發比例與退還股款）",
+                                       "python -m quant_platform.research.history reductions") as job:
+            client = OfficialHistoryClient(base / "raw")
+            listed = reductions.fetch(client, _date.today())
+            known = sum(len(days) for days in reductions.exchanges(base / "raw", reductions.FIRST_YEAR).values())
+            job.payload["summary"] = f"減資 {listed} 筆，換發比例已知 {known} 筆；請求 {client.requests} 次"
+        print(json.dumps({"listed": listed, "terms": known, "requests": client.requests}, ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "chips":

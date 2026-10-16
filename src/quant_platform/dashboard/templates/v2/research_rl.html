@@ -18,36 +18,64 @@
   <div class="card__head"><h2>{{ robot.title }} <span class="badge">{{ robot.version }}</span></h2><span class="muted small">{{ robot.note }}；{{ (robot.trained_at or '')[:10] }} 訓練</span></div>
   <div class="kpis kpis--four">
     <div class="kpi"><div class="kpi__label">樣本外 {{ robot.years|length }} 年合計（機器人）</div><div class="kpi__value {{ 'up' if robot.robot_total > 0 else 'down' }}">{{ '{:+.1%}'.format(robot.robot_total) }}</div></div>
+    {% if robot.free %}
+    <div class="kpi"><div class="kpi__label">贏 0050 的年數</div><div class="kpi__value">{{ robot.wins }}<small> 年／{{ robot.rows|length }} 年</small></div></div>
+    <div class="kpi"><div class="kpi__label">平均持有檔數</div><div class="kpi__value">{% set held = robot.rows|map(attribute='holdings')|select|list %}{{ '{:.0f}'.format(held|sum / held|length) if held else '—' }}</div></div>
+    {% else %}
     <div class="kpi"><div class="kpi__label">同樣因子平均（對照）</div><div class="kpi__value {{ 'up' if robot.equal_total > 0 else 'down' }}">{{ '{:+.1%}'.format(robot.equal_total) }}</div></div>
     <div class="kpi"><div class="kpi__label">贏對照的年數</div><div class="kpi__value">{{ robot.wins }}<small> 年／{{ robot.rows|length }} 年</small></div></div>
+    {% endif %}
     <div class="kpi"><div class="kpi__label">因子／區塊數</div><div class="kpi__value">{{ robot.names|length }}</div></div>
   </div>
+  {% set ran = engine.get(robot.version) or [] %}
+  {% if ran %}
+  <div class="table-wrap" style="margin-top:8px">
+    <table>
+      <thead><tr><th>引擎實跑的規則（交易所規則、30 萬＋每月 1 萬）</th><th class="num">2015-06 起比 0050</th><th class="num">2020-10 起</th><th>分級</th><th>引擎</th></tr></thead>
+      <tbody>
+      {% for item in ran %}
+        <tr><td class="name">{{ item.name }}</td>
+          <td class="num {{ 'up' if (item.full or 0) > 0 else 'down' }}">{{ '{:+.1%}'.format(item.full) if item.full is not none else '—' }}</td>
+          <td class="num {{ 'up' if (item.recent or 0) > 0 else 'down' }}">{{ '{:+.1%}'.format(item.recent) if item.recent is not none else '—' }}</td>
+          <td><span class="badge">{{ item.tier }}</span></td><td class="muted small">{{ item.engine }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
   {% if robot.cumulative %}
   <svg class="rule-chart" viewBox="0 0 {{ robot.cumulative.width }} {{ robot.cumulative.height }}" preserveAspectRatio="none" role="img" aria-label="樣本外累積">
     {% if robot.cumulative.zero is not none %}<line x1="0" x2="{{ robot.cumulative.width }}" y1="{{ robot.cumulative.zero }}" y2="{{ robot.cumulative.zero }}" class="line-put"/>{% endif %}
     <polyline class="line-bench" points="{{ robot.cumulative.lines[1] }}"/>
     <polyline class="line-rule" points="{{ robot.cumulative.lines[0] }}"/>
   </svg>
-  <div class="legend"><span><i style="background:var(--accent)"></i>機器人，樣本外累積比 0050</span><span><i style="background:var(--warn)"></i>同樣因子平均</span><span>{{ robot.years[0] }}～{{ robot.years[-1] }}，每年一點</span></div>
+  <div class="legend"><span><i style="background:var(--accent)"></i>機器人，樣本外累積比 0050</span>{% if not robot.free %}<span><i style="background:var(--warn)"></i>同樣因子平均</span>{% endif %}<span>{{ robot.years[0] }}～{{ robot.years[-1] }}，每年一點</span></div>
   {% endif %}
   <div class="table-wrap table-wrap--stack" style="margin-top:12px">
     <table class="table--stack">
-      <thead><tr><th>年</th><th class="num">訓練樣本</th><th class="num">訓練時每 20 天</th><th class="num">實際每 20 天</th>{% if robot.rows and robot.rows[0].held_robot is not none %}<th class="num">驗證：機器人／平均</th><th>決定</th><th>學習曲線</th>{% endif %}<th class="num">這一年：機器人</th><th class="num">平均</th><th>押最重的</th></tr></thead>
+      <thead><tr><th>年</th><th class="num">訓練樣本</th><th class="num">訓練時{{ robot.unit }}</th><th class="num">實際{{ robot.unit }}</th>{% if robot.rows and robot.rows[0].held_robot is not none %}<th class="num">驗證：機器人／平均</th><th>決定</th>{% endif %}{% if robot.rows and robot.rows[0].curve %}<th>學習曲線</th>{% endif %}<th class="num">這一年：機器人</th>{% if robot.free %}<th class="num">平均持有</th><th class="num">平均現金</th>{% else %}<th class="num">平均</th><th>押最重的</th>{% endif %}</tr></thead>
       <tbody>
       {% for row in robot.rows %}
         <tr>
           <td data-primary>{{ row.year }}</td>
           <td class="num" data-label="訓練樣本">{{ row.train_decisions }}{% if row.held_decisions %}＋驗證 {{ row.held_decisions }}{% endif %}</td>
-          <td class="num" data-label="訓練時每 20 天">{{ '{:+.2%}'.format(row.trained) if row.trained is not none else '—' }}</td>
-          <td class="num {{ 'up' if row.tested > 0 else 'down' }}" data-label="實際每 20 天">{{ '{:+.2%}'.format(row.tested) }}</td>
+          <td class="num" data-label="訓練時{{ robot.unit }}">{{ '{:+.3%}'.format(row.trained) if row.trained is not none else '—' }}</td>
+          <td class="num {{ 'up' if row.tested > 0 else 'down' }}" data-label="實際{{ robot.unit }}">{{ '{:+.3%}'.format(row.tested) }}</td>
           {% if row.held_robot is not none %}
           <td class="num" data-label="驗證">{{ '{:+.2%}'.format(row.held_robot) }}／{{ '{:+.2%}'.format(row.held_equal) }}</td>
           <td data-label="決定">{% if row.abstained %}<span class="badge">不押，用平均</span>{% else %}<span class="badge badge--ok">照機器人</span>{% endif %}</td>
+          {% endif %}
+          {% if row.curve %}
           <td data-label="學習曲線">{% if row.curve %}<svg viewBox="0 0 {{ row.curve.width }} {{ row.curve.height }}" width="{{ row.curve.width }}" height="{{ row.curve.height }}" role="img" aria-label="訓練與驗證">{% if row.curve.zero is not none %}<line x1="0" x2="{{ row.curve.width }}" y1="{{ row.curve.zero }}" y2="{{ row.curve.zero }}" class="line-put"/>{% endif %}<polyline class="line-rule" points="{{ row.curve.lines[0] }}"/><polyline class="line-bench" points="{{ row.curve.lines[1] }}"/></svg>{% endif %}</td>
           {% endif %}
           <td class="num {{ 'up' if row.robot > row.equal else 'down' }}" data-label="這一年：機器人">{{ '{:+.1%}'.format(row.robot) }}</td>
+          {% if robot.free %}
+          <td class="num" data-label="平均持有">{{ '{:.0f}'.format(row.holdings) if row.holdings is not none else '—' }} 檔</td>
+          <td class="num" data-label="平均現金">{{ '{:.0%}'.format(row.cash) if row.cash is not none else '—' }}</td>
+          {% else %}
           <td class="num" data-label="平均">{{ '{:+.1%}'.format(row.equal) }}</td>
           <td data-label="押最重的" class="name">{% for name, share in row.heaviest %}{{ labels.get(name, name) }} {{ '{:.0%}'.format(share) }}{% if not loop.last %}、{% endif %}{% endfor %}</td>
+          {% endif %}
         </tr>
       {% endfor %}
       </tbody>

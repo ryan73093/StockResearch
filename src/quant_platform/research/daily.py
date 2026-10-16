@@ -106,7 +106,21 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 # holding the session it is out of the keep zone and below its 20-session average, whatever the rule's decision days —
 # a weekly rule kept such a holding until its next weekly decision (up to four more sessions); new buys still wait for
 # the rule's decision days.
-ENGINE_VERSION = "daily-1.4.3"
+# 1.5.0 (2026-10-16; the mechanism audit; 使用者：好好 review 每一個機制，不要加交易所規則以外的限制):
+#   * capital reductions, both exchanges (research/history/reductions.py): the shares exchanged at the official
+#     ratio (whole shares) and the money back paid on the resume day — before, a reduction under 40% was a fake jump;
+#   * on every decision day the idle cash (sales, dividends) tops up the picks below their target (``reinvest``);
+#     before, only the contribution days did, while 0050's account reinvested every day;
+#   * an order the market refused is tried again the next session alone — a refused sell sold if the rule still
+#     would, a refused buy's place filled with the best the rule would buy — instead of the whole list decided again
+#     (a suspended holding had turned a weekly rule into a daily one);
+#   * the stop-loss, the learned exit and the market filter act every session (they had waited for decision days);
+#   * a stock dividend's new shares are credited on the distribution day (PAY_LAG sessions when unknown), not the
+#     ex-date; until then they count in the value but cannot be sold;
+#   * the cooldown after a stop-out (``cooldown``) and whether eligibility also sells (``eligibility``) are rule
+#     fields — they had been fixed in the engine;
+#   * the 20-session average turnover counts a session without a trade as nothing traded (it had skipped them).
+ENGINE_VERSION = "daily-1.5.0"
 SAME_DAY_PARTICIPATION = 0.001              # an order's share of the stock's turnover that session, at most
 NEXT_DAY_PARTICIPATION = 0.005
 PRICE_LIMIT_WIDENED = date(2015, 6, 1)
@@ -221,7 +235,10 @@ META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現�
                 "all_equal": "全部因子與模型分數平均（機器人 2.1 的對照）",
                 "rl_blocks": "RL 機器人 3.0（每 20 個交易日決定 8 個強訊號區塊的權重，驗證沒贏平均就不押）",
                 "block_equal": "8 個強訊號區塊平均（機器人 3.0 的對照）",
-                "rl_free": "RL 機器人 4.0 的每檔比重（每天自己決定買哪些、各多少、留多少現金；只受交易所規則限制）"}
+                "rl_rolling": "RL 機器人 3.1（8 個槽位，每年只用那年以前的資料挑各槽位最強的因子，再由機器人決定權重）",
+                "rolling_equal": "8 個逐年挑選的槽位平均（機器人 3.1 的對照）",
+                "rl_free": "RL 機器人 4.0 的每檔比重（每天自己決定買哪些、各多少、留多少現金；只受交易所規則限制）",
+                "rl_free41": "RL 機器人 4.1 的每檔比重（同 4.0，訓練帳戶是 30 萬＋每月 1 萬、最低手續費、整股）"}
 RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FACTORS, **META_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
@@ -302,6 +319,18 @@ class DailyRule(BaseModel):
     # hold, the industry cap and the weighting do not apply — only the exchange's rules, the costs and the turnover cap.
     # Left out of the hash when False.
     free: bool = False
+    # 2026-10-16 (engine 1.5.0; the audit: choices that had been fixed in the engine, now the rule's own) —
+    # reinvest "decision": on every decision day the idle cash (sales, dividends) tops up the picks below their target,
+    # the largest gap first; "contribution": only on contribution days (the engine before 1.5.0). Left out of the hash
+    # when "decision".
+    reinvest: Literal["decision", "contribution"] = "decision"
+    # sessions a stock sold by the stop-loss or the learned exit may not be bought again (fixed at 20 before 1.5.0);
+    # 1 = from the next session (never back the session it was sold). Left out of the hash when 20.
+    cooldown: int = Field(default=20, ge=1, le=250)
+    # eligibility "both": a holding no longer eligible (under NT$10, thin, out of the large caps, no factor value)
+    # leaves like one out of the keep zone; "entry": eligibility decides only the buys, a holding is kept or sold by
+    # the hold rule alone. Left out of the hash when "both".
+    eligibility: Literal["both", "entry"] = "both"
 
     @model_validator(mode="before")
     @classmethod
@@ -354,6 +383,12 @@ class DailyRule(BaseModel):
             data.pop("execution", None)
         if not data.get("free"):
             data.pop("free", None)
+        if data.get("reinvest") == "decision":
+            data.pop("reinvest", None)
+        if data.get("cooldown") == STOP_COOLDOWN:
+            data.pop("cooldown", None)
+        if data.get("eligibility") == "both":
+            data.pop("eligibility", None)
         return data
 
     @property
@@ -395,7 +430,9 @@ class FactorPanel:
         self._market_average = (pd.Series(market).rolling(200).mean().to_numpy() if market is not None else None)
         self._prices = pd.DataFrame(panel.filled.T)
         self._cache: dict[str, np.ndarray] = {}
-        turnover = pd.DataFrame(panel.turnover.T)
+        # 1.5.0 (the audit): a session without a trade counts as nothing traded — the average had skipped those
+        # sessions, so a stock trading one day in twenty could pass the NT$20 million turnover on that day alone
+        turnover = pd.DataFrame(panel.turnover.T).fillna(0.0)
         self.turnover_20 = turnover.rolling(20, min_periods=1).mean().to_numpy().T
         self.turnover_120 = turnover.rolling(120, min_periods=1).mean().to_numpy().T
         self.age = np.arange(len(self.sessions))[None, :] - panel.first[:, None]
@@ -430,17 +467,23 @@ class FactorPanel:
 
             if factor == "factor_momentum":
                 return timing_scores(self)                                             # sessions × symbols
-            if factor == "rl_free":                                                    # 2026-10-16: RL 4.0
+            if factor in ("rl_free", "rl_free41"):                                    # 2026-10-16: RL 4.0, 4.1
                 from quant_platform.research.rl_free import VERSION as FREE_VERSION
+                from quant_platform.research.rl_free import VERSION_41
                 from quant_platform.research.rl_free import weights as free_weights
 
-                return free_weights(self, Path(self.models) / FREE_VERSION if self.models is not None else Path("missing"))
+                version = VERSION_41 if factor == "rl_free41" else FREE_VERSION
+                return free_weights(self, Path(self.models) / version if self.models is not None else Path("missing"))
             if factor == "tech_momentum":
                 return timing_scores(self, factor_names())
+            from quant_platform.research.rl_timing import ROLLING_VERSION
+
             version = (ALL_VERSION if factor in ("rl_all", "all_equal") else
-                       BLOCK_VERSION if factor in ("rl_blocks", "block_equal") else ROBOT_VERSION)
+                       BLOCK_VERSION if factor in ("rl_blocks", "block_equal") else
+                       ROLLING_VERSION if factor in ("rl_rolling", "rolling_equal") else ROBOT_VERSION)
             folder = Path(self.models) / version if self.models is not None else Path("missing")
-            return robot_scores(self, folder, "equal" if factor in ("tech_equal", "all_equal", "block_equal") else "robot",
+            return robot_scores(self, folder,
+                                "equal" if factor in ("tech_equal", "all_equal", "block_equal", "rolling_equal") else "robot",
                                 version)
         if factor in CONSENSUS_FACTORS:
             from quant_platform.research.consensus import scores as consensus_scores
@@ -897,10 +940,13 @@ def switch_mapping(fp: FactorPanel, rule: DailyRule):
 
 def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: dict | None = None,
                    trace: dict | None = None) -> dict[date, list[str]]:
-    """The holdings the rule wants on each check day: keep a holding while it ranks within top × keep
-    (or until it has been held min_hold sessions while still eligible), fill up with the best others.
+    """The holdings the rule wants on each session it acts: on its decision days, keep a holding while it ranks
+    within top × keep (or while the hold rule keeps it), fill up with the best others; on every session (engine
+    1.5.0) the standing exits — the stop-loss, the learned exit, the market filter, the trend exit — and the orders the
+    market refused, looked at again: a refused sell is sold if the rule still would, a place whose buy was refused is
+    filled with the best stock the rule would buy that day; the other holdings are not touched until the next decision.
     2026-10-15 (research/decisions.py): ``fixed`` — the decisions already taken up to ``fixed["through"]`` are taken
-    as they were made, only later sessions are ranked; ``trace`` receives the sessions that decide again."""
+    as they were made, only later sessions are ranked; ``trace`` receives the refused orders pending each session."""
     sessions = [day for day in fp.sessions if start <= day <= end]
     checks = check_days(sessions, rule.check)
     output: dict[date, list[str]] = {}
@@ -923,111 +969,58 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
     locks = fp.market_locks() if hasattr(fp, "market_locks") else None
     gone = fp.gone() if hasattr(fp, "gone") else {}
     lag = 1 if getattr(rule, "execution", "same") == "next" else 0
-    again: set[int] = set()               # 1.3.0: sessions to decide again (the market refused an order)
+    hold = getattr(rule, "hold", "days")
+    cooldown = getattr(rule, "cooldown", STOP_COOLDOWN)
+    entry_only = getattr(rule, "eligibility", "both") == "entry"
+    tracked = bool(rule.stop_loss) or exit_agent is not None
+    again: set[int] = set()               # decisions kept before 1.5.0 with again_after: decide in full that session
+    pending_sells: set[str] = set()       # 1.5.0: sells the market refused, looked at again every session
+    pending_slots = 0                     # 1.5.0: places whose buy the market refused, filled again every session
     through = fixed["through"] if fixed else None
-    if fixed and fixed.get("again_after"):
+    if fixed and fixed.get("pending"):
+        pending_sells = set(fixed["pending"].get("sells") or ())
+        pending_slots = int(fixed["pending"].get("slots") or 0)
+    elif fixed and fixed.get("again_after"):
         following = next((count for count, day in enumerate(sessions) if day > through), None)
         if following is not None:
             again.add(following)
-    for count, day in enumerate(sessions):
-        if count + lag >= len(sessions):
-            break                             # 1.4.0 "next": decided on the last day, filled after the period
-        position = fp.index[day]
-        when = sessions[count + lag]          # the session the orders fill (the output's key)
-        act = fp.index[when]
-        if through is not None and day <= through:     # 2026-10-15: a decision already taken stays as it was
-            if when in fixed["days"]:
-                current = list(fixed["days"][when])
-                bought = {symbol: bought.get(symbol, count) for symbol in current}
-                if rule.stop_loss or exit_agent is not None:
-                    peak = {symbol: peak[symbol] if symbol in peak else fp.price(symbol, position) for symbol in current}
-                if exit_agent is not None:
-                    buy_price = {symbol: buy_price.get(symbol, fp.price(symbol, position)) for symbol in current}
-                output[when] = list(current)
-            continue
-        lost = [symbol for symbol in current if gone.get(symbol, len(fp.sessions)) <= position]
-        exits_only = day not in checks and count not in again and not lost
-        if exits_only and (getattr(rule, "hold", "days") != "trend" or not current):
-            continue
-        if lost:                              # 1.3.1: delisted before it was sold — worthless, off the list
-            current = [symbol for symbol in current if symbol not in lost]
-        holding = list(current)
-        if exits_only:                        # 1.4.3: out of the zone and below its average: sold that session
-            ranked = fp.ranked(rule, position)
-            keep_zone, eligible = set(ranked[: rule.top * rule.keep]), set(ranked)
-            rising = fp.rising()[:, position]
-            kept = [symbol for symbol in current
-                    if symbol in keep_zone or (symbol in eligible and rising[fp.row[symbol]])]
-            if len(kept) == len(current):
-                continue
-            if locks is not None:             # not sold: limit-down or no trade today (tried again tomorrow)
-                traded, _locked_up, locked_down = locks
-                kept += [symbol for symbol in current if symbol not in kept and fp.row.get(symbol) is not None
-                         and (not traded[fp.row[symbol], act] or locked_down[fp.row[symbol], act])]
-                if len(kept) == len(current):
-                    continue
-            current = kept
-            bought = {symbol: bought.get(symbol, count) for symbol in current}
-            output[when] = list(current)
-            continue
-        if rule.market_filter != "none" and not fp.risk_on(position):
-            current, bought, peak = [], {}, {}
-            output[when] = []
-            continue
-        ranked = fp.ranked(rule, position)
-        if rule.stop_loss:
-            for symbol in list(current):
-                price = fp.price(symbol, position)
-                if not np.isfinite(price):
-                    continue
+    pending_before: dict[date, dict] = {}
+
+    def track(symbols: list[str], position: int) -> None:
+        for symbol in symbols:
+            price = fp.price(symbol, position)
+            if np.isfinite(price):
                 peak[symbol] = max(peak.get(symbol, price), price)
-                if price < peak[symbol] * (1 - rule.stop_loss):
-                    current.remove(symbol)
-                    stopped[symbol] = count
-        if exit_agent is not None and current:
-            for symbol in current:
-                price = fp.price(symbol, position)
-                if np.isfinite(price):
-                    peak[symbol] = max(peak.get(symbol, price), price)
-            held_for = {symbol: count - bought[symbol] for symbol in current}
-            for symbol in exit_agent.sells(position, list(current), held_for, buy_price, peak, ranked):
-                current.remove(symbol)
-                stopped[symbol] = count
-        if stopped:
-            barred = {symbol for symbol, when in stopped.items() if count - when < STOP_COOLDOWN}
-            ranked = [symbol for symbol in ranked if symbol not in barred]
-        keep_zone = set(ranked[: rule.top * rule.keep])
-        eligible = set(ranked)
-        if getattr(rule, "hold", "days") == "trend":     # keep what is still rising, sell what is not
-            rising = fp.rising()[:, position]
-            kept = [symbol for symbol in current
-                    if symbol in keep_zone or (symbol in eligible and rising[fp.row[symbol]])]
-        else:
-            kept = [symbol for symbol in current
-                    if symbol in keep_zone or (symbol in eligible and count - bought[symbol] < rule.min_hold)]
-        if switch is not None:                  # cost1: keep a leaving holding unless swapping pays a round trip
-            percentiles, gain = switch
-            leaving = sorted((symbol for symbol in current if symbol not in kept and symbol in eligible),
-                             key=lambda symbol: percentiles[fp.row[symbol], position])
-            waiting = [symbol for symbol in ranked if symbol not in current][: len(leaving)]
-            for symbol, replacement in zip(leaving, waiting):
-                if (gain(percentiles[fp.row[replacement], position]) - gain(percentiles[fp.row[symbol], position])
-                        <= ROUND_TRIP):
-                    kept.append(symbol)
-        held = set(kept)
+
+    def keeps(symbol: str, count: int, keep_zone: set, eligible: set, rising) -> bool:
+        """The rule's hold: in the keep zone; else, while eligible (or always, eligibility "entry"), still rising
+        (hold "trend") or held less than min_hold sessions."""
+        if symbol in keep_zone:
+            return True
+        if symbol not in eligible and not entry_only:
+            return False
+        if hold == "trend":
+            row = fp.row.get(symbol)
+            return row is not None and bool(rising[row])
+        return count - bought.get(symbol, count) < rule.min_hold
+
+    def fill(ranked: list[str], kept: list[str], places: int, position: int) -> list[str]:
+        """Up to ``places`` new picks, best first: not held, not vetoed, within the industry cap."""
+        if places <= 0:
+            return []
         limit = rule.industry_limit
         counts: dict[str, int] = defaultdict(int)
         if limit:
             for symbol in kept:
                 counts[fp.industry(symbol)] += 1
-        chosen = []
         vetoed = fp.news_vetoed(position) if getattr(rule, "news_veto", "none") == "v1" else set()
         if getattr(rule, "exclude", "none") == "v1":
             vetoed = vetoed | fp.excluded(position)       # no new buys; holdings keep their usual rules
         if exit_agent is not None and hasattr(exit_agent, "refuses"):
             vetoed = vetoed | exit_agent.refuses(position)  # tech1: the robot buys only what it wants
+        held, chosen = set(kept), []
         for symbol in ranked:
-            if len(kept) + len(chosen) >= rule.top:
+            if len(chosen) >= places:
                 break
             if symbol in held or symbol in vetoed:
                 continue
@@ -1037,33 +1030,125 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                     continue                      # this industry is full: the next best from another
                 counts[group] += 1
             chosen.append(symbol)
-        current = kept + chosen
+        return chosen
+
+    for count, day in enumerate(sessions):
+        if count + lag >= len(sessions):
+            break                             # 1.4.0 "next": decided on the last day, filled after the period
+        position = fp.index[day]
+        when = sessions[count + lag]          # the session the orders fill (the output's key)
+        act = fp.index[when]
+        if trace is not None and (pending_sells or pending_slots):
+            pending_before[day] = {"sells": sorted(pending_sells), "slots": pending_slots}
+        if through is not None and when <= through:    # 2026-10-15: a decision already taken stays as it was
+            if when in fixed["days"]:
+                previous, current = current, list(fixed["days"][when])
+                if rule.stop_loss:            # 1.5.0: a holding that left below its stop was stopped out
+                    for symbol in previous:
+                        price = fp.price(symbol, position)
+                        if (symbol not in current and symbol in peak and np.isfinite(price)
+                                and price < peak[symbol] * (1 - rule.stop_loss)):
+                            stopped[symbol] = count
+                bought = {symbol: bought.get(symbol, count) for symbol in current}
+                peak = {symbol: peak[symbol] for symbol in current if symbol in peak}
+                if exit_agent is not None:
+                    buy_price = {symbol: buy_price.get(symbol, fp.price(symbol, position)) for symbol in current}
+                output[when] = list(current)
+            if tracked:
+                track(current, position)      # 1.5.0: the highest close since bought, through the kept days too
+            continue
+        lost = [symbol for symbol in current if gone.get(symbol, len(fp.sessions)) <= position]
+        if lost:                              # 1.3.1: delisted before it was sold — worthless, off the list
+            current = [symbol for symbol in current if symbol not in lost]
+            pending_sells -= set(lost)
+        holding = list(current)
+        decide = day in checks or count in again
+        if tracked and current:
+            track(current, position)
+        out: set[str] = set()                 # 1.5.0: the stop-loss, every session
+        if rule.stop_loss:
+            for symbol in current:
+                price = fp.price(symbol, position)
+                if np.isfinite(price) and price < peak[symbol] * (1 - rule.stop_loss):
+                    out.add(symbol)
+                    stopped[symbol] = count
+        risk_off = rule.market_filter != "none" and not fp.risk_on(position)
+        if not decide:
+            if not (current or pending_slots):
+                continue
+            standing = out or risk_off or lost or pending_sells or pending_slots
+            if not standing and exit_agent is None and hold != "trend":
+                continue
+        ranked = fp.ranked(rule, position)
+        if exit_agent is not None and current:
+            left = [symbol for symbol in current if symbol not in out]
+            held_for = {symbol: count - bought[symbol] for symbol in left}
+            for symbol in exit_agent.sells(position, left, held_for, buy_price, peak, ranked):
+                out.add(symbol)
+                stopped[symbol] = count
+        if stopped:
+            barred = {symbol for symbol, at in stopped.items() if count - at < cooldown}
+            ranked = [symbol for symbol in ranked if symbol not in barred]
+        keep_zone, eligible = set(ranked[: rule.top * rule.keep]), set(ranked)
+        rising = fp.rising()[:, position] if hold == "trend" else None
+        asked = 0
+        if risk_off:                          # the market filter: no stocks (1.5.0: every session)
+            wanted: list[str] = []
+        elif decide:
+            staying = [symbol for symbol in current if symbol not in out]
+            kept = [symbol for symbol in staying if keeps(symbol, count, keep_zone, eligible, rising)]
+            if switch is not None:            # cost1: keep a leaving holding unless swapping pays a round trip
+                percentiles, gain = switch
+                leaving = sorted((symbol for symbol in staying if symbol not in kept and symbol in eligible),
+                                 key=lambda symbol: percentiles[fp.row[symbol], position])
+                waiting = [symbol for symbol in ranked if symbol not in staying][: len(leaving)]
+                for symbol, replacement in zip(leaving, waiting):
+                    if (gain(percentiles[fp.row[replacement], position]) - gain(percentiles[fp.row[symbol], position])
+                            <= ROUND_TRIP):
+                        kept.append(symbol)
+            wanted = kept + fill(ranked, kept, rule.top - len(kept), position)
+        else:                                 # between decisions: the exits and the refused orders only
+            wanted = [symbol for symbol in current if symbol not in out]
+            if hold == "trend":               # 1.4.3: out of the zone and below its average: sold that session
+                wanted = [symbol for symbol in wanted if keeps(symbol, count, keep_zone, eligible, rising)]
+            elif pending_sells:               # a refused sell: sold if the rule still would
+                wanted = [symbol for symbol in wanted
+                          if symbol not in pending_sells or keeps(symbol, count, keep_zone, eligible, rising)]
+            asked = min(pending_slots, max(0, rule.top - len(wanted)))
+            chosen = fill(ranked, wanted, asked, position)
+            asked -= len(chosen)              # places the rule could not fill today: tried again tomorrow
+            wanted = wanted + chosen
+        refused_buys, refused_sells = 0, set()
         if locks is not None:                 # 1.3.0: what the market lets the rule do at this close
             traded, locked_up, locked_down = locks
-            refused, final = False, []
-            for symbol in current:
+            final = []
+            for symbol in wanted:
                 row = fp.row.get(symbol)
                 if symbol not in holding and row is not None and (not traded[row, act] or locked_up[row, act]):
-                    refused = True             # not bought: limit-up or no trade today
+                    refused_buys += 1          # not bought: limit-up or no trade today
                     continue
                 final.append(symbol)
             for symbol in holding:
                 row = fp.row.get(symbol)
-                if symbol not in current and row is not None and (not traded[row, act] or locked_down[row, act]):
-                    refused = True             # not sold: limit-down or no trade today (a suspension too)
+                if symbol not in wanted and row is not None and (not traded[row, act] or locked_down[row, act]):
+                    refused_sells.add(symbol)  # not sold: limit-down or no trade today (a suspension too)
                     final.append(symbol)
-            current = final
-            if refused:
-                again.add(count + 1)
+            wanted = final
+        pending_sells = refused_sells
+        pending_slots = 0 if risk_off else refused_buys + asked
+        if not decide and not lost and set(wanted) == set(holding):
+            continue
+        current = wanted
         bought = {symbol: bought.get(symbol, count) for symbol in current}
-        if rule.stop_loss or exit_agent is not None:
+        if tracked:
             peak = {symbol: peak[symbol] if symbol in peak else fp.price(symbol, position) for symbol in current}
         if exit_agent is not None:
             buy_price = {symbol: buy_price.get(symbol, fp.price(symbol, position)) for symbol in current}
         output[when] = list(current)
     if trace is not None:
-        trace["again"] = {sessions[index] for index in again if index < len(sessions)}
-        trace["again_after"] = len(sessions) in again
+        trace["pending"] = pending_before
+        trace["pending_after"] = ({"sells": sorted(pending_sells), "slots": pending_slots}
+                                  if pending_sells or pending_slots else None)
     return output
 
 
@@ -1116,11 +1201,21 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
             return True
         return False
 
+    def stuck(symbol: str, day: date) -> bool:
+        """No trade today, or a close locked at limit-down."""
+        close = data.closes.get(symbol, {}).get(day)
+        if close is None:
+            return True
+        low = price_limits(data, symbol, day)[0]
+        return low is not None and close <= low + 1e-6
+
     gone = write_off_days(data)
     free_goals = targets                         # (the rule branch below has a local ``targets`` of its own)
     last_goal: dict[str, float] = {}
     actions = getattr(data, "actions", None) or {}
+    reductions = (getattr(data, "notes", None) or {}).get("reductions") or {}   # 1.5.0: shares exchanged, money back
     owed: list[tuple[date, float, str]] = []     # 1.4.0: (payment session, NT$, symbol) — dividends not yet paid
+    coming: list[tuple[date, float, str, date]] = []   # 1.5.0: (distribution session, shares, symbol, ex-date)
     short: set[str] = set()                      # 1.4.0: bought less than wanted today (the turnover cap)
     calendar = data.sessions
     where = {session: number for number, session in enumerate(calendar)}
@@ -1139,6 +1234,12 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         return _order_fee(costs, shares, fill, day)
 
     most = participation(rule)
+    topups: set[date] = set()                    # 1.5.0: the sessions whose idle cash tops up the picks
+    if rule is not None and free_goals is None and getattr(rule, "reinvest", "decision") == "decision":
+        lag = 1 if getattr(rule, "execution", "same") == "next" else 0
+        decided = check_days(sessions, rule.check)
+        topups = {sessions[number + lag] for number, session in enumerate(sessions)
+                  if session in decided and number + lag < len(sessions)}
 
     def capacity(symbol: str, day: date, fill: float) -> float:
         """Whole shares the session can take: ``most`` of the stock's turnover that day."""
@@ -1224,6 +1325,13 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                 cash += amount
                 if ledger is not None:
                     ledger.append({"day": day, "symbol": symbol, "side": "PAID", "amount": round(amount, 2)})
+        if coming and min(coming)[0] <= day:      # 1.5.0: a stock dividend's shares arrive on the distribution day
+            coming.sort()
+            while coming and coming[0][0] <= day:
+                _when, whole, symbol, declared = coming.pop(0)
+                units[symbol] += whole
+                if ledger is not None:                 # owned since the ex-date (its ADJUST); now they can be sold
+                    ledger.append({"day": day, "symbol": symbol, "side": "CREDIT", "shares": whole, "declared": declared})
         for symbol in [held for held, count in units.items() if count > 0]:
             action = actions.get(symbol, {}).get(day) if actions else None
             count = units[symbol]
@@ -1238,10 +1346,26 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                                        "paid": payment_session(day, action.paid)})
                 if action.shares > 0:
                     whole, _fraction = whole_shares(count, action.shares)   # the fraction: lost (the transfer fee)
-                    units[symbol] = count + whole
-                    if ledger is not None and whole:
-                        ledger.append({"day": day, "symbol": symbol, "side": "ADJUST", "kind": "stock_dividend",
-                                       "factor": (count + whole) / count, "shares": whole})
+                    if whole:                      # 1.5.0: owned from the ex-date, sellable from the distribution
+                        credited = payment_session(day, action.paid)
+                        owned_before = count + sum(item[1] for item in coming if item[2] == symbol)
+                        coming.append((credited, float(whole), symbol, day))
+                        if ledger is not None:
+                            ledger.append({"day": day, "symbol": symbol, "side": "ADJUST", "kind": "stock_dividend",
+                                           "factor": (owned_before + whole) / owned_before, "shares": whole,
+                                           "credited": credited})
+            elif symbol in reductions and day in reductions[symbol]:
+                kept, refund = reductions[symbol][day]     # 1.5.0: a capital reduction, as the exchange set it
+                after = float(math.floor(count * kept + 1e-9))
+                units[symbol] = after
+                if refund > 0:
+                    cash += count * refund
+                if ledger is not None:
+                    ledger.append({"day": day, "symbol": symbol, "side": "ADJUST", "kind": "reduction",
+                                   "factor": after / count, "shares": after - count})
+                    if refund > 0:
+                        ledger.append({"day": day, "symbol": symbol, "side": "REFUND",
+                                       "cash": round(count * refund, 2)})
             else:
                 factor = data.factors.get(symbol, {}).get(day, 1.0)
                 if factor != 1.0:                  # a split or capital change: whole shares, the fraction lost
@@ -1299,7 +1423,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                     sell_all(BENCHMARK, day, excess)
             level = exposure.get(day, applied) if exposure is not None else 1.0
             moved = level != applied
-            if today is not None or contribution or park != was_parked or moved:
+            if today is not None or contribution or park != was_parked or moved or day in topups:
                 total = cash + sum(count * price(symbol, day) for symbol, count in units.items() if count > 0)
                 targets: dict[str, float] = {}
                 if rule.core > 0 or park:
@@ -1316,7 +1440,10 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                 for symbol, target in targets.items():
                     held_value = units[symbol] * price(symbol, day)
                     gap = target - held_value
-                    if gap > 0 and (held_value <= 0 or contribution or (park and symbol == BENCHMARK)
+                    # 1.5.0: a holding is topped up on contribution and decision days — not one at a locked
+                    # limit-down close or without a trade (it is one the rule wanted sold and the market refused)
+                    adding = (contribution or day in topups) and not stuck(symbol, day)
+                    if gap > 0 and (held_value <= 0 or adding or (park and symbol == BENCHMARK)
                                     or (moved and level > applied) or symbol in topping):
                         orders.append((gap, symbol))
                 applied = level
@@ -1327,11 +1454,14 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         if rule is not None:
             was_parked = parked is not None and day in parked
         receivable = sum(amount for _when, amount, _symbol in owed)       # declared, not yet paid: still owned
-        value = cash + receivable + sum(count * price(symbol, day) for symbol, count in units.items() if count > 0)
+        owned = {symbol: count for symbol, count in units.items() if count > 0}
+        for _when, whole, symbol, _declared in coming:                   # 1.5.0: new shares not yet credited
+            owned[symbol] = owned.get(symbol, 0.0) + whole
+        value = cash + receivable + sum(count * price(symbol, day) for symbol, count in owned.items())
         result.values.append(value)
         result.flows.append(contribution)
         if snapshots is not None:
-            snapshots[day] = (cash + receivable, {symbol: count for symbol, count in units.items() if count > 0})
+            snapshots[day] = (cash + receivable, owned)
     return result
 
 
@@ -1388,6 +1518,10 @@ def actions_digest(data: LegacyData) -> str:
                        action.paid.isoformat() if action.paid else "", action.source)
                       for symbol, days in (getattr(data, "actions", None) or {}).items()
                       for day, action in days.items() if day <= RECENT_END)
+        reductions = (getattr(data, "notes", None) or {}).get("reductions") or {}     # 1.5.0
+        rows += sorted((symbol, day.isoformat(), round(kept, 8), round(refund, 6), "", "reduction")
+                       for symbol, days in reductions.items()
+                       for day, (kept, refund) in days.items() if day <= RECENT_END)
         cached = data.__dict__["_actions_digest"] = hashlib.sha256(json.dumps(rows).encode()).hexdigest()
     return cached
 
@@ -1582,13 +1716,16 @@ def tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
 
 
 def free_targets(fp: FactorPanel, rule: DailyRule) -> dict[date, dict[str, float]]:
-    """A free rule's weights per session (its one factor's values; sessions without any are left out)."""
+    """A free rule's weights per session (its one factor's values). A session the factor gives values for but no
+    positive one is all cash (an empty goal: everything sold) — 2026-10-16 audit, such days had been dropped and the
+    old holdings kept; a session without any value is left out."""
     matrix = fp.matrix(next(iter(rule.factors)))
     output: dict[date, dict[str, float]] = {}
     for position, day in enumerate(fp.sessions):
         column = matrix[:, position]
-        held = np.flatnonzero(np.isfinite(column) & (column > 0))
-        if held.size:
+        known = np.isfinite(column)
+        if known.any():
+            held = np.flatnonzero(known & (column > 0))
             output[day] = {fp.symbols[row]: float(column[row]) for row in held}
     return output
 
@@ -1795,12 +1932,14 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         payload["models_all"] = {name: digest(model_dir(history, MODELS[name]["version"])) for name in MODEL_FACTORS}
         if "rl_all" in factor_names:
             payload["robot_all"] = robot_digest(models_root(history) / ALL_VERSION)
-    if "rl_free" in factor_names:                                # 2026-10-16: the robot 4.0's weights
+    if "rl_free" in factor_names or "rl_free41" in factor_names:    # 2026-10-16: the robots 4.0 and 4.1's weights
         from quant_platform.research.model import models_root
         from quant_platform.research.rl_free import VERSION as FREE_VERSION
+        from quant_platform.research.rl_free import VERSION_41
         from quant_platform.research.rl_free import digest as free_digest
 
-        payload["robot_free"] = free_digest(models_root(history) / FREE_VERSION)
+        version = VERSION_41 if "rl_free41" in factor_names else FREE_VERSION
+        payload["robot_free"] = free_digest(models_root(history) / version)
     if any(name in ("rl_blocks", "block_equal") for name in factor_names):   # 2026-10-16: the robot 3.0 and model F
         from quant_platform.research.model import MODELS, digest, model_dir, models_root
         from quant_platform.research.rl_timing import BLOCK_VERSION
@@ -1809,6 +1948,13 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]))
         if "rl_blocks" in factor_names:
             payload["robot_blocks"] = robot_digest(models_root(history) / BLOCK_VERSION)
+    if any(name in ("rl_rolling", "rolling_equal") for name in factor_names):   # 2026-10-16: the robot 3.1, model F
+        from quant_platform.research.model import MODELS, digest, model_dir, models_root
+        from quant_platform.research.rl_timing import ROLLING_VERSION
+        from quant_platform.research.rl_timing import digest as robot_digest
+
+        payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]))
+        payload["robot_rolling"] = robot_digest(models_root(history) / ROLLING_VERSION)    # the yardstick reads it too
     if any(name in TECH_FACTORS for name in factor_names):      # 2026-10-10: the technical robot's policies
         from quant_platform.research.tech_rl import digest as tech_digest
         from quant_platform.research.tech_rl import tech_dir
@@ -2324,10 +2470,10 @@ def rerun_models_batch() -> list:
 
     research = _Path("instance") / "research"
     known = {rule.rule_hash for rule in rerun131_batch()}
-    latest = {}
-    for record in TrialRegistry(research / "trials.jsonl").records():
-        if record.kind == "candidate" and record.period == "recent":
-            latest[record.spec_hash] = record
+    from quant_platform.research.registry import newest
+
+    latest = newest(TrialRegistry(research / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent")
     learned = set(MODEL_FACTORS) | set(TECH_FACTORS)
     rules = []
     for record in sorted(latest.values(), key=lambda record: record.trial_id):
@@ -2389,11 +2535,27 @@ def robot30_batch() -> list:
                       factors={"block_equal": 1.0}, **common)]
 
 
+def robot31_batch() -> list:
+    """2026-10-16: the robot 3.1 (each year's slot factors chosen before the year) and its yardstick; the same rule
+    otherwise as robot30_batch."""
+    common = {"top": 20, "check": "weekly", "industry_cap": 0.3, "hold": "trend"}
+    return [DailyRule(name="RL 機器人 3.1：逐年挑選的 8 個槽位由機器人決定權重、前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"rl_rolling": 1.0}, **common),
+            DailyRule(name="逐年挑選的 8 個槽位平均：前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"rolling_equal": 1.0}, **common)]
+
+
 def robot40_batch() -> list:
     """2026-10-16: the robot 4.0 — every session its own weights for every stock and for cash (a free rule: only
     the exchange's rules, the costs and the turnover cap apply)."""
     return [DailyRule(name="RL 機器人 4.0：每天自己決定買哪些、各多少、留多少現金（只受交易所規則限制）",
                       factors={"rl_free": 1.0}, free=True)]
+
+
+def robot41_batch() -> list:
+    """2026-10-16: the robot 4.1 — 4.0 trained in the owner's account (money, minimum fees, whole shares)."""
+    return [DailyRule(name="RL 機器人 4.1：每天自己決定買哪些、各多少、留多少現金（訓練帳戶＝30 萬＋每月 1 萬、最低手續費、整股）",
+                      factors={"rl_free41": 1.0}, free=True)]
 
 
 def rerun_all_batch() -> list:
@@ -2408,10 +2570,10 @@ def rerun_all_batch() -> list:
     from quant_platform.research.registry import TrialRegistry
 
     research = _Path("instance") / "research"
-    latest = {}
-    for record in TrialRegistry(research / "trials.jsonl").records():
-        if record.kind == "candidate" and record.period == "recent":
-            latest[record.spec_hash] = record
+    from quant_platform.research.registry import newest
+
+    latest = newest(TrialRegistry(research / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent")
     rules = []
     for record in sorted(latest.values(), key=lambda record: record.trial_id):
         if (record.metrics or {}).get("engine") == ENGINE_VERSION:
@@ -2460,4 +2622,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
-           "robot30": robot30_batch, "robot40": robot40_batch}
+           "robot30": robot30_batch, "robot31": robot31_batch, "robot40": robot40_batch,
+           "robot41": robot41_batch}

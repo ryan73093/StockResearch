@@ -40,6 +40,18 @@ def test_the_deep_model_learns_year_by_year_and_keeps_every_sessions_scores(monk
     scores = model.scores(fp, tmp_path)
     first = fp.index[next(day for day in fp.sessions if day.year == 2018)]
     assert np.isnan(scores[first - 1]).all() and np.isfinite(scores[first]).sum() > 10
+    # sessions after the kept ones (the forward days): scored by the latest year's networks, the same as kept
+    later = weekdays(date(2016, 1, 1), date(2019, 1, 18))
+    for symbol, series in closes.items():
+        last = series[days[-1]]
+        series.update({day: last for day in later[len(days):]})
+    longer = LegacyData(sessions=later, closes=closes, traded_value={s: {d: 5e9 for d in v} for s, v in closes.items()},
+                        factors={}, predictions={})
+    fp2 = FactorPanel(Panel(longer))
+    extended = model.scores(fp2, tmp_path)
+    assert np.isfinite(extended[len(days):]).sum(axis=1).min() > 10
+    kept = np.isfinite(scores[len(days) - 1])
+    assert np.allclose(extended[len(days) - 1][kept], scores[len(days) - 1][kept])
 
 
 def test_the_deep_model_is_a_model_factor_the_robots_did_not_learn():

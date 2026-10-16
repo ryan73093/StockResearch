@@ -225,10 +225,10 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
     from quant_platform.research.stock_forward import StockForwardTracker
 
     base = Path(research_dir)
-    latest: dict[str, object] = {}
-    for record in TrialRegistry(base / "trials.jsonl").records():
-        if record.kind == "candidate" and record.period == "recent":
-            latest[record.spec_hash] = record
+    from quant_platform.research.registry import newest
+
+    latest = newest(TrialRegistry(base / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent")
     origin = _sources(base) if latest else {}
     tracker = StockForwardTracker(base)
     since = {item["rule_hash"]: item["since"] for item in tracker.tracked()}

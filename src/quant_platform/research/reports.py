@@ -83,9 +83,9 @@ def stock_rule_rows(registry_path: str | Path, period: str, plan_kind: str = "Se
                and record.data_fingerprint.startswith("stocks:")
                and (record.metrics.get("plan") or {}).get("kind", "ContributionPlan") == plan_kind
                and (plan_kind != "LumpSumPlan" or str(record.metrics.get("engine") or "") >= "stocks-1.2.0")]
-    latest: dict[str, object] = {}
-    for record in records:                       # one row per rule: its newest run
-        latest[record.spec_hash] = record
+    from quant_platform.research.registry import newest
+
+    latest = newest(records)                     # one row per rule: its run on the newest engine
 
     def score(record) -> float:
         value = ((record.metrics.get("windows") or {}).get("3y") or {}).get("median_excess")

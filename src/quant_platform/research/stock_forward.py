@@ -103,10 +103,10 @@ def best_ai_rule(research_dir: str | Path) -> dict[str, object] | None:
 
     base = Path(research_dir)
     mine = {item["spec_hash"] for item in proposals(base)}
-    latest = {}
-    for record in TrialRegistry(base / "trials.jsonl").records():
-        if record.spec_hash in mine and record.kind == "candidate" and record.period == "recent":
-            latest[record.spec_hash] = record
+    from quant_platform.research.registry import newest
+
+    latest = newest(TrialRegistry(base / "trials.jsonl").records(),
+                    lambda record: record.spec_hash in mine and record.kind == "candidate" and record.period == "recent")
     best = None
     for spec_hash, record in latest.items():
         grade, _why = tier(record.metrics)
@@ -147,10 +147,10 @@ def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:
     from quant_platform.research.daily import tier
 
     base = Path(research_dir)
-    latest: dict[str, object] = {}
-    for record in TrialRegistry(base / "trials.jsonl").records():
-        if record.kind == "candidate" and record.period == "recent":
-            latest[record.spec_hash] = record
+    from quant_platform.research.registry import newest
+
+    latest = newest(TrialRegistry(base / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent")
     output = []
     for record in latest.values():
         grade, _why = tier(record.metrics)
@@ -501,7 +501,9 @@ class StockForwardTracker:
             # daily engine 1.4.0: dividends net of the health-insurance premium, owned from the ex-date — the
             # cash shown includes what is declared and not yet paid
             "income_today": round(sum(float(entry.get("net") or 0.0) for entry in ledger
-                                      if entry["day"] == day and entry["side"] == "DIVIDEND"), 2),
+                                      if entry["day"] == day and entry["side"] == "DIVIDEND")
+                                  + sum(float(entry.get("cash") or 0.0) for entry in ledger      # 1.5.0: money back
+                                        if entry["day"] == day and entry["side"] == "REFUND"), 2),
             "trades_total": len(trades), "fees_total": sum(int(entry["fee"]) for entry in trades),
             "taxes_total": sum(int(entry["tax"]) for entry in trades),
             "replay_check": replayed, "costs": BROKER, "data_fingerprint": fingerprint, "engine": ENGINE_VERSION,

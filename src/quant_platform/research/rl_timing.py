@@ -65,6 +65,24 @@ HELD_OUT = 0.2
 BLOCK_PENALTY = 0.2
 BLOCK_SEEDS = (0, 1, 2, 3, 4)
 CHECK_EVERY = 10
+# 3.1.0 (2026-10-16; the mechanism audit: 3.0's eight blocks were each family's strongest over 2015-06..2020-10 while
+# its test years start in 2018 — its 2018–2020 knew which signals would work): the same robot over eight slots whose
+# factor is chosen anew for every test year — the slot's strongest by its top fifth's next-20-session return over the
+# bottom fifth's, as realised from 2015-06 to the year's first session (at least SELECT_LEAST sessions of record).
+# Model F is a slot of its own. Monthly revenue is left out (lagging, the owner).
+ROLLING_VERSION = "block-rl-3.1.0"
+SLOTS = {
+    "高點突破": ("high_52w", "breakout_55", "high_52w_count_60", "range_position_60"),
+    "均線趨勢": ("trend_200", "ma_cross_20_60", "fip_12"),
+    "技術擺盪": ("kd_k", "rsi_14", "macd_hist", "bollinger_b"),
+    "動能": ("momentum_3", "momentum_6", "momentum_12_1", "resid_mom_12", "imom_12"),
+    "法人與融資": ("margin_growth_20", "foreign_buy_20", "trust_buy_20", "foreign_holding_change", "dealer_buy_20"),
+    "借券": ("low_sbl_short", "low_lending_20", "sbl_cover_20", "low_lending_fee_60"),
+    "基本面": ("eps_growth", "roe_ttm", "gross_margin", "operating_margin_change", "dividend_raise"),
+    "模型": ("ml_gbm_ens",),
+}
+SELECT_FROM = date(2015, 6, 1)
+SELECT_LEAST = 120
 
 
 def factor_names(version: str = VERSION) -> list[str]:
@@ -72,6 +90,8 @@ def factor_names(version: str = VERSION) -> list[str]:
 
     if version == BLOCK_VERSION:
         return list(BLOCKS)
+    if version == ROLLING_VERSION:
+        return list(dict.fromkeys(name for members in SLOTS.values() for name in members))
     if version == ALL_VERSION:
         from quant_platform.research.chips import (
             ALERT_FACTORS,
@@ -129,6 +149,7 @@ class Timeline:
             forward.append(np.where(eligible[:, position] & np.isfinite(move), move, np.nan))
             bench.append(benchmark[position + STEP] / benchmark[position] - 1)
         self.names = names
+        self.records = np.array([values[position] for position in self.positions], dtype=np.float64)  # decision × factor
         self.states = np.array(states, dtype=np.float32)
         self.percentiles = np.array(percentiles, dtype=np.float32)             # decision × factor × symbol
         self.forward = np.array(forward, dtype=np.float64)                     # decision × symbol
@@ -153,6 +174,39 @@ class Timeline:
             output[index] = np.log1p(np.clip(gross - cost, -0.9, None)) - np.log1p(self.bench[decision])
             previous = chosen
         return output
+
+
+class Slotted:
+    """A timeline seen through one factor per slot (the robot 3.1): the chosen factors' percentiles and records, the
+    same market state, forward returns and 0050."""
+
+    picks = Timeline.picks
+    rewards = Timeline.rewards
+
+    def __init__(self, timeline: Timeline, chosen: list[int]) -> None:
+        self.names = [timeline.names[index] for index in chosen]
+        self.positions, self.days = timeline.positions, timeline.days
+        market = timeline.states[:, len(timeline.names):]
+        self.states = np.concatenate([np.clip(np.nan_to_num(timeline.records[:, chosen]), -0.2, 0.2) * 10, market],
+                                     axis=1).astype(np.float32) if len(timeline.positions) else timeline.states
+        self.percentiles = timeline.percentiles[:, chosen, :]
+        self.forward, self.bench = timeline.forward, timeline.bench
+
+
+def choose_members(fp, first_session: date) -> list[str]:
+    """Each slot's factor for a test year: the strongest by its spread as known from SELECT_FROM to ``first_session``."""
+    from quant_platform.research.factor_timing import known_spreads
+
+    every = factor_names(ROLLING_VERSION)
+    frame = known_spreads(fp, every)
+    sessions = pd.Index(fp.sessions)
+    window = frame[(sessions >= SELECT_FROM) & (sessions < first_session)]
+    means, counts = window.mean(), window.count()
+    chosen = []
+    for members in SLOTS.values():
+        usable = [name for name in members if counts.get(name, 0) >= SELECT_LEAST and np.isfinite(means.get(name, np.nan))]
+        chosen.append(max(usable, key=lambda name: means[name]) if usable else members[0])
+    return chosen
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
@@ -343,11 +397,110 @@ def walk_forward_blocks(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> d
     return meta
 
 
+def walk_forward_rolling(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> dict[str, object]:
+    """The robot 3.1: the robot 3.0's learning over slots whose factors are chosen for each test year before it."""
+    timelines = [Timeline(fp, benchmark, ROLLING_VERSION, offset) for offset in PHASES]
+    every = timelines[0].names
+    slots = list(SLOTS)
+    equal = np.full(len(slots), 1 / len(slots))
+    years = sorted({day.year for day in timelines[0].days if day.year >= FIRST_TEST_YEAR})
+    weights: dict[str, list[float]] = {}
+    yearly, members = {}, {}
+    for number, year in enumerate(years):
+        first_session = next(day for day in fp.sessions if day.year == year)
+        chosen = choose_members(fp, first_session)
+        views = [Slotted(timeline, [every.index(name) for name in chosen]) for timeline in timelines]
+        main = views[0]
+        before = [[index for index, position in enumerate(view.positions)
+                   if fp.sessions[min(position + STEP, len(fp.sessions) - 1)] < first_session] for view in views]
+        dated = sorted(view.days[index] for view, indexes in zip(views, before) for index in indexes)
+        test_at = [index for index, day in enumerate(main.days) if day.year == year]
+        if len(dated) < 40 or not test_at:
+            continue
+        members[str(year)] = chosen
+        cut = dated[int(len(dated) * (1 - HELD_OUT))]
+        train_pairs = [(view, [index for index in indexes if view.days[index] < cut]) for view, indexes in zip(views, before)]
+        held_pairs = [(view, [index for index in indexes if view.days[index] >= cut]) for view, indexes in zip(views, before)]
+        train_pairs = [pair for pair in train_pairs if pair[1]]
+        held_pairs = [pair for pair in held_pairs if pair[1]]
+        runs = [train_held_out(train_pairs, held_pairs, seed) for seed in BLOCK_SEEDS]
+        held_states = np.concatenate([view.states[decisions] for view, decisions in held_pairs])
+        held_equal = float(_rewards_of(held_pairs, np.repeat(np.zeros((1, 1, len(slots))), len(held_states), axis=0)).mean())
+        logits = np.mean([main.states[test_at] @ run["weight"] + run["bias"] for run in runs], axis=0)
+        held_robot = float(np.mean([run["held_reward"] for run in runs]))
+        abstain = held_robot <= held_equal
+        picked = np.repeat(equal[None, :], len(test_at), axis=0) if abstain else _softmax(logits)
+        for index, row in zip(test_at, picked):
+            weights[main.days[index].isoformat()] = [round(float(value), 6) for value in row]
+        robot = main.rewards(picked[:, None, :], test_at)[:, 0]
+        alike = main.rewards(np.repeat(equal[None, None, :], len(test_at), axis=0), test_at)[:, 0]
+        yearly[str(year)] = {
+            "decisions": len(test_at), "train_decisions": sum(len(pair[1]) for pair in train_pairs),
+            "held_decisions": sum(len(pair[1]) for pair in held_pairs), "held_from": cut.isoformat(),
+            "held_robot": round(held_robot, 5), "held_equal": round(held_equal, 5), "abstained": bool(abstain),
+            "best_epochs": [run["best_epoch"] for run in runs], "members": chosen,
+            "curve_train": [round(float(value), 5) for value in np.mean([run["train"] for run in runs], axis=0)],
+            "curve_held": [round(float(value), 5) for value in np.mean([run["held"] for run in runs], axis=0)],
+            "robot_excess": round(float(robot.sum()), 4), "equal_excess": round(float(alike.sum()), 4),
+            "heaviest": [[f"{slot}：{name}", round(float(share), 4)] for slot, name, share in
+                         sorted(zip(slots, chosen, picked.mean(axis=0)), key=lambda item: -item[2])[:3]]}
+        if job:
+            job.update(done=number + 1, total=len(years),
+                       current=f"{year}：{'不押（用平均）' if abstain else '機器人'} {robot.sum():+.3f}、平均 {alike.sum():+.3f}")
+    meta = {"version": ROLLING_VERSION, "factors": slots, "members": members, "weights": weights, "yearly": yearly,
+            "config": {"step": STEP, "top": TOP, "cost_swap": COST_SWAP, "sigma": SIGMA, "penalty": BLOCK_PENALTY,
+                       "epochs": EPOCHS, "rollouts": ROLLOUTS, "learning_rate": LEARNING_RATE, "seeds": list(BLOCK_SEEDS),
+                       "phases": list(PHASES), "held_out": HELD_OUT, "check_every": CHECK_EVERY,
+                       "slots": {slot: list(names) for slot, names in SLOTS.items()},
+                       "select_from": SELECT_FROM.isoformat(), "select_least": SELECT_LEAST},
+            "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    return meta
+
+
+def _rolling_scores(fp, folder: str | Path, kind: str) -> np.ndarray:
+    """The robot 3.1's scores (``robot``) or its yardstick's (``equal``: the year's eight factors alike): each session
+    uses its year's factors (the latest trained year's after it) and the latest decision's weights."""
+    from quant_platform.research.model import _rank, eligibility
+
+    output = np.full((len(fp.sessions), len(fp.symbols)), np.nan, dtype=np.float32)
+    path = Path(folder) / "meta.json"
+    if not path.is_file():
+        return output
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    members = meta.get("members") or {}
+    if not members:
+        return output
+    eligible = eligibility(fp)
+    needed = sorted({name for names in members.values() for name in names})
+    percentiles = {name: _rank(np.where(eligible, fp.matrix(name), np.nan).T).astype(np.float32) for name in needed}
+    decided = sorted((date.fromisoformat(day), np.array(values)) for day, values in meta["weights"].items())
+    years = sorted(members)
+    equal = np.full(len(SLOTS), 1 / len(SLOTS))
+    index, current = 0, None
+    for position, day in enumerate(fp.sessions):
+        while index < len(decided) and decided[index][0] <= day:
+            current = decided[index][1]
+            index += 1
+        if current is None:
+            continue
+        year = max((item for item in years if item <= str(day.year)), default=None)
+        if year is None:
+            continue
+        stack = np.stack([percentiles[name][position] for name in members[year]])        # slot × symbol
+        weights = equal if kind == "equal" else current
+        output[position] = np.where(np.isfinite(stack).any(axis=0), weights @ np.nan_to_num(stack, nan=0.5), np.nan)
+    return output
+
+
 def scores(fp, folder: str | Path, kind: str = "robot", version: str = VERSION) -> np.ndarray:
     """sessions × symbols. ``robot``: each session's percentiles weighted by the latest decision's weights (NaN
     before the first test decision or without a trained robot); ``equal``: the version's factors alike."""
     from quant_platform.research.model import _rank, eligibility
 
+    if version == ROLLING_VERSION:
+        return _rolling_scores(fp, folder, kind)
     names = factor_names(version)
     eligible = eligibility(fp)
     percentiles = np.stack([_rank(np.where(eligible, fp.matrix(name), np.nan).T)

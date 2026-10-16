@@ -362,3 +362,19 @@ def test_writers_side_by_side_keep_one_unbroken_chain(tmp_path):
     assert [record.trial_id for record in records] == list(range(1, 101))
     assert all(later.prev_hash == earlier.record_hash for earlier, later in zip(records, records[1:]))
     assert not (tmp_path / "trials.jsonl.lock").exists()
+
+
+def test_newest_prefers_the_newest_engine_over_the_registry_order():
+    """2026-10-16: a rerun on an older engine still running beside a newer one registers after it."""
+    from types import SimpleNamespace
+
+    from quant_platform.research.registry import engine_order, newest
+
+    def record(spec, engine, trial):
+        return SimpleNamespace(spec_hash=spec, metrics={"engine": engine} if engine else {}, trial_id=trial)
+
+    rows = [record("a", "daily-1.5.0", 1), record("a", "daily-1.4.3", 2), record("b", "daily-1.4.3", 3),
+            record("b", "daily-1.4.3", 4), record("c", None, 5), record("a", "daily-1.10.0", 6)]
+    chosen = newest(rows)
+    assert chosen["a"].trial_id == 6 and chosen["b"].trial_id == 4 and chosen["c"].trial_id == 5
+    assert engine_order(rows[0]) == (1, 5, 0) and newest(rows, lambda row: row.spec_hash == "b").keys() == {"b"}

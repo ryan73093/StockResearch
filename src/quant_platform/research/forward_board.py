@@ -245,11 +245,21 @@ def recent(research: Path, history: Path, item: dict, data, fp, costs, days: lis
     trades = []
     for entry in ledger:
         code = str(entry["symbol"]).split(".")[0]
-        if entry["side"] == "DIVIDEND" or (entry["side"] == "ADJUST" and entry.get("kind") == "stock_dividend"):
-            # engine 1.4.0: cash dividends (paid later, less the health-insurance premium) and stock dividends
-            note = (f"現金股利（{entry['paid'].isoformat() if entry.get('paid') and entry['paid'] != date.max else '日後'}入帳"
-                    f"{'，扣補充保費 ' + format(entry['premium'], ',') + ' 元' if entry.get('premium') else ''}）"
-                    if entry["side"] == "DIVIDEND" else f"配股 {int(entry['shares']):,} 股")
+        if (entry["side"] in ("DIVIDEND", "REFUND")
+                or (entry["side"] == "ADJUST" and entry.get("kind") in ("stock_dividend", "reduction"))):
+            # engine 1.4.0: cash dividends (paid later, less the health-insurance premium) and stock dividends;
+            # 1.5.0: a capital reduction's shares exchanged and money back
+            if entry["side"] == "DIVIDEND":
+                note = (f"現金股利（{entry['paid'].isoformat() if entry.get('paid') and entry['paid'] != date.max else '日後'}入帳"
+                        f"{'，扣補充保費 ' + format(entry['premium'], ',') + ' 元' if entry.get('premium') else ''}）")
+            elif entry["side"] == "REFUND":
+                note = "減資退還股款"
+            elif entry.get("kind") == "reduction":
+                note = f"減資換股 {int(entry['shares']):,} 股"
+            else:
+                credited = entry.get("credited")
+                note = f"配股 {int(entry['shares']):,} 股" + (
+                    f"（{credited.isoformat()} 撥入）" if credited and credited != date.max else "")
             trades.append({"date": entry["day"].isoformat(), "code": code, "name": names.get(code, ""),
                            "side": entry["side"], "income": note,
                            "amount": round(float(entry.get("net", entry.get("cash", 0.0)) or 0.0), 0)})

@@ -547,7 +547,8 @@ def test_the_ranking_keeps_an_unsellable_holding_and_drops_it_when_written_off()
     rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, min_hold=0, check="weekly")
     ranks = daily_rankings(panel, rule, days[0], days[-1])
     assert days[1] not in ranks and "A" in ranks[days[5]]                       # next Monday: cannot be sold
-    assert all("A" in ranks[days[n]] for n in range(6, 12))                     # decided again every session
+    # 1.5.0: only the refused sell is tried again each session (unchanged: no new list); the next Monday decides
+    assert not any(days[n] in ranks for n in (6, 7, 8, 9, 11)) and "A" in ranks[days[10]]
     assert ranks[days[12]] == ["B", "C", "D"]                                   # delisted: worthless, off the list
     assert days[13] not in ranks                                                # then back to weekly
 

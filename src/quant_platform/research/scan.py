@@ -443,7 +443,8 @@ def sample_effective(folder: Path, costs, sample: int = 10_000, workers: int = 6
             for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     rng = np.random.default_rng(seed)
     pick = rng.choice(len(rows), size=min(sample, len(rows)), replace=False)
-    items = [{key: rows[index][key] for key in ("factors", "universe", "weighting", "check")} for index in pick]
+    items = [{key: rows[index][key] for key in ("factors", "universe", "weighting", "check", "hold") if key in rows[index]}
+             for index in pick]                         # 2026-10-16 (audit): the hold too, else trend sets ran fixed
     out = folder / "sample"
     out.mkdir(exist_ok=True)
     for path in out.glob("screen-*"):
@@ -502,7 +503,7 @@ def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 6
     for row in ranked:
         if len(taken) >= count:
             break
-        candidate = {key: row[key] for key in ("factors", "universe", "weighting", "check")}
+        candidate = {key: row[key] for key in ("factors", "universe", "weighting", "check", "hold") if key in row}
         _metrics, (returns, _entries) = evaluate(arrays, candidate, costs)
         if np.std(returns) == 0:
             continue
@@ -536,7 +537,8 @@ def earlier_finalists(research: Path) -> list[dict]:
             continue
         seen.add(key)
         output.append({"factors": list(spec["factors"]), "universe": "large" if spec.get("large_caps") else "all",
-                       "weighting": spec.get("weighting", "equal"), "check": spec.get("check", "daily")})
+                       "weighting": spec.get("weighting", "equal"), "check": spec.get("check", "daily"),
+                       "hold": spec.get("hold", "days")})
     return output
 
 
