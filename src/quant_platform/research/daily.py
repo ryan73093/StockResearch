@@ -317,7 +317,9 @@ class DailyRule(BaseModel):
     # 2026-10-13 (engine 1.4.0; 使用者：所有交易都要照台股的機制): "same" = decide on the close and fill in the
     # same day's after-hours sessions (14:30); "next" = fill in the next session's closing auction — the
     # platform's numbers come after 15:14, so this is what it can actually do. Left out of the hash when "same".
-    execution: Literal["same", "next"] = "same"
+    # 2026-10-16 (使用者：除了盤後，盤前或盤中買會不會比較好？): "open" = decide on the close, fill in the next session's
+    # opening auction at its open (09:00); a buy refused when the open is at limit-up, a sell when at limit-down.
+    execution: Literal["same", "next", "open"] = "same"
     # 2026-10-16 (RL 4.0; 使用者：月線上續抱、每週決策是策略不是規則，不要給 RL 加一堆奇怪的限制): the account holds the
     # weights its one factor gives each stock (the rest in cash), rebalanced every session; top, keep, min_hold, check,
     # hold, the industry cap and the weighting do not apply — only the exchange's rules, the costs and the turnover cap.
@@ -808,12 +810,14 @@ class FactorPanel:
             self._cache["__gone__"] = output
         return self._cache["__gone__"]
 
-    def market_locks(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def market_locks(self, at: str = "close") -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """symbols × sessions: traded (a close that day), closed locked at limit-up, closed locked at
         limit-down — the exchange's limits on the reference price (the previous traded close over the day's
-        ex-rights unit factor) ± 10% (± 7% before 2015-06-01), rounded inward to the tick (engine 1.3.0)."""
-        if "__locks__" in self._cache:
-            return self._cache["__locks__"]
+        ex-rights unit factor) ± 10% (± 7% before 2015-06-01), rounded inward to the tick (engine 1.3.0).
+        ``at="open"`` (2026-10-16): the same limits against the session's open (the opening auction)."""
+        key = "__locks__" if at == "close" else "__locks_open__"
+        if key in self._cache:
+            return self._cache[key]
         close = self.panel.close
         traded = np.isfinite(close)
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -844,10 +848,12 @@ class FactorPanel:
                     if position is not None:
                         down[row, position], up[row, position] = low, high
             beyond = (close > up + 1e-6) | (close < down - 1e-6)   # 1.4.0: traded beyond them: no limit that day
-            locked_up = traded & np.isfinite(up) & (close >= up - 1e-6) & ~beyond
-            locked_down = traded & np.isfinite(down) & (close <= down + 1e-6) & ~beyond
-        self._cache["__locks__"] = (traded, locked_up, locked_down)
-        return self._cache["__locks__"]
+            fill = close if at == "close" else np.where(np.isfinite(self.panel.open), self.panel.open, np.nan)
+            traded = traded & np.isfinite(fill)
+            locked_up = traded & np.isfinite(up) & (fill >= up - 1e-6) & ~beyond
+            locked_down = traded & np.isfinite(down) & (fill <= down + 1e-6) & ~beyond
+        self._cache[key] = (traded, locked_up, locked_down)
+        return self._cache[key]
 
     def smoothed(self, factor: str, sessions: int) -> np.ndarray:
         """The factor averaged over the last ``sessions`` sessions (symbols × sessions; days with no value
@@ -987,9 +993,10 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
 
             factor = TECH_EXITS[rule.exit_model]
             exit_agent = TechAgent(fp, Path(fp.models) / TECH_FACTOR_VERSION[factor], factor)
-    locks = fp.market_locks() if hasattr(fp, "market_locks") else None
+    opening = getattr(rule, "execution", "same") == "open"
+    locks = ((fp.market_locks("open") if opening else fp.market_locks()) if hasattr(fp, "market_locks") else None)
     gone = fp.gone() if hasattr(fp, "gone") else {}
-    lag = 1 if getattr(rule, "execution", "same") == "next" else 0
+    lag = lag_of(rule)
     hold = getattr(rule, "hold", "days")
     cooldown = getattr(rule, "cooldown", STOP_COOLDOWN)
     entry_only = getattr(rule, "eligibility", "both") == "entry"
@@ -1209,11 +1216,21 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
 
     blocked = False                              # an order the market refused today: try again tomorrow
 
+    opening = rule is not None and getattr(rule, "execution", "same") == "open"
+    opens = getattr(data, "opens", None) or {}
+
+    def fill_base(symbol: str, day: date) -> float | None:
+        """The price an order fills around: the close, or the open for the opening auction (2026-10-16)."""
+        if opening and symbol != BENCHMARK:
+            value = opens.get(symbol, {}).get(day)
+            return value if value and data.closes.get(symbol, {}).get(day) is not None else None
+        return data.closes.get(symbol, {}).get(day)
+
     def refused(symbol: str, day: date, side: str) -> bool:
         """The market's rule: no trade on a session without a close, no buy at a locked limit-up close, no
-        sell at a locked limit-down close."""
+        sell at a locked limit-down close (for the opening auction: the open)."""
         nonlocal blocked
-        close = data.closes.get(symbol, {}).get(day)
+        close = fill_base(symbol, day)
         locked = False
         if close is not None:
             low, high = price_limits(data, symbol, day)
@@ -1262,7 +1279,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
     most = participation(rule)
     topups: set[date] = set()                    # 1.5.0: the sessions whose idle cash tops up the picks
     if rule is not None and free_goals is None and getattr(rule, "reinvest", "decision") == "decision":
-        lag = 1 if getattr(rule, "execution", "same") == "next" else 0
+        lag = lag_of(rule)
         decided = check_days(sessions, rule.check)
         topups = {sessions[number + lag] for number, session in enumerate(sessions)
                   if session in decided and number + lag < len(sessions)}
@@ -1281,7 +1298,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
 
     def buy(symbol: str, budget: float, day: date) -> None:
         nonlocal cash
-        close = data.closes.get(symbol, {}).get(day)
+        close = fill_base(symbol, day)
         if budget <= 0 or refused(symbol, day, "BUY"):
             return
         fill = fill_price(close, "BUY", costs.slippage_bps, _tick(symbol))
@@ -1310,7 +1327,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
     def sell_all(symbol: str, day: date, amount: float | None = None) -> None:
         """Sell the whole holding, or whole shares worth about ``amount``."""
         nonlocal cash
-        close = data.closes.get(symbol, {}).get(day)
+        close = fill_base(symbol, day)
         if units[symbol] <= 0 or refused(symbol, day, "SELL"):
             return
         shares, fill = units[symbol], fill_price(close, "SELL", costs.slippage_bps, _tick(symbol))
@@ -1532,8 +1549,15 @@ def write_off_days(data: LegacyData) -> dict[str, date]:
 
 
 def participation(rule) -> float:
-    """An order's share of the stock's turnover in the session it fills, at most (engine 1.4.0)."""
-    return NEXT_DAY_PARTICIPATION if getattr(rule, "execution", "same") == "next" else SAME_DAY_PARTICIPATION
+    """An order's share of the stock's turnover in the session it fills, at most (engine 1.4.0; the opening auction
+    as the closing one, 2026-10-16)."""
+    return NEXT_DAY_PARTICIPATION if getattr(rule, "execution", "same") in ("next", "open") else SAME_DAY_PARTICIPATION
+
+
+def lag_of(rule) -> int:
+    """Sessions between the decision and the fill: 0 the same day's after-hours sessions, 1 the next session's
+    closing auction ("next") or opening auction ("open")."""
+    return 1 if getattr(rule, "execution", "same") in ("next", "open") else 0
 
 
 def actions_digest(data: LegacyData) -> str:
@@ -1613,7 +1637,7 @@ def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs:
             output[day] = 1.0
             continue
         output[day] = float(np.floor(min(1.0, VOL_BAND * normal / now) / VOL_STEP) * VOL_STEP)
-    if getattr(rule, "execution", "same") == "next":          # 1.4.0: acted on at the next session
+    if lag_of(rule):                                          # 1.4.0: acted on at the next session
         later = dict(zip(run.days, run.days[1:]))
         output = {later[day]: level for day, level in output.items() if day in later}
     return output
@@ -1625,7 +1649,7 @@ def daily_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]
     if rule.weighting == "equal":
         return None
     volatility = -fp.matrix("low_volatility_60")             # stored negated: the daily standard deviation
-    lag = 1 if getattr(rule, "execution", "same") == "next" else 0
+    lag = lag_of(rule)
     output: dict[date, dict[str, float]] = {}
     for day, names in ranks.items():
         if not names:
@@ -1652,7 +1676,7 @@ def account_parking(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: C
     units = unit_values(run.values, run.flows)
     average = pd.Series(units).rolling(200).mean().to_numpy()
     below = {day for day, unit, mean in zip(run.days, units, average, strict=True) if np.isfinite(mean) and unit < mean}
-    if getattr(rule, "execution", "same") == "next":          # 1.4.0: acted on at the next session
+    if lag_of(rule):                                          # 1.4.0: acted on at the next session
         later = dict(zip(run.days, run.days[1:]))
         below = {later[day] for day in below if day in later}
     return below
@@ -2582,22 +2606,15 @@ def robot31_batch() -> list:
                       factors={"rolling_equal": 1.0}, **common)]
 
 
-def risk_batch() -> list:
-    """2026-10-16 (使用者：深度學習能不能輔助這些策略？): the eight strongest 100%-stock T0 candidates (by final value, the
-    newest engine's run) each with the deep risk overlay — "dl1" (no buy among the riskiest tenth) and "dl1x" (and sell
-    a holding in the riskiest twentieth) — only past the risk model's registered gate (research/model_risk.py)."""
+def strongest_rules(count: int = 8) -> list:
+    """The ``count`` strongest 100%-stock T0 candidates by final value (each rule's newest-engine run), as rules."""
     import json as _json
     from pathlib import Path as _Path
 
     from quant_platform.research.categories import uses_0050
-    from quant_platform.research.model_risk import gate as risk_gate
     from quant_platform.research.registry import TrialRegistry, newest
 
     research = _Path("instance") / "research"
-    check = risk_gate(research / "models")
-    print(f"dl-risk-1.0.0 門檻（2016-2020 大跌 AUC 比波動對照高 0.02）：{check}", flush=True)
-    if not check["passed"]:
-        return []
     latest = newest(TrialRegistry(research / "trials.jsonl").records(),
                     lambda record: record.kind == "candidate" and record.period == "recent"
                     and str((record.metrics or {}).get("engine", "")).startswith("daily-"))
@@ -2610,14 +2627,44 @@ def risk_batch() -> list:
             base = DailyRule.model_validate(spec)
         except (OSError, ValueError, KeyError):
             continue                                  # a blend or an older spec
-        if uses_0050(spec) or base.free or getattr(base, "risk_veto", "none") != "none":
+        if uses_0050(spec) or base.free or getattr(base, "risk_veto", "none") != "none" or base.execution != "same":
             continue
         picked.append(((record.metrics or {}).get("final_value") or 0, base))
+    return [base for _value, base in sorted(picked, key=lambda item: -item[0])[:count]]
+
+
+def _variant(base, word: str, **update):
+    name = f"{base.name[: 79 - len(word) - 1]}＋{word}"
+    return DailyRule.model_validate({**base.model_dump(), "name": name, **update})
+
+
+def risk_batch() -> list:
+    """2026-10-16 (使用者：深度學習能不能輔助這些策略？): the eight strongest 100%-stock T0 candidates each with the deep
+    risk overlay — "dl1" (no buy among the riskiest tenth) and "dl1x" (and sell a holding in the riskiest twentieth) —
+    only past the risk model's registered gate (research/model_risk.py)."""
+    from pathlib import Path as _Path
+
+    from quant_platform.research.model_risk import gate as risk_gate
+
+    check = risk_gate(_Path("instance") / "research" / "models")
+    print(f"dl-risk-1.0.0 門檻（2016-2020 大跌 AUC 比波動對照高 0.02）：{check}", flush=True)
+    if not check["passed"]:
+        return []
     rules = []
-    for _value, base in sorted(picked, key=lambda item: -item[0])[:8]:
-        for mode, word in (("dl1", "深度風險不買最高一成"), ("dl1x", "深度風險不買最高一成、持股進最高 5% 就賣")):
-            name = f"{base.name[: 79 - len(word) - 1]}＋{word}"
-            rules.append(DailyRule.model_validate({**base.model_dump(), "name": name, "risk_veto": mode}))
+    for base in strongest_rules(8):
+        rules.append(_variant(base, "深度風險不買最高一成", risk_veto="dl1"))
+        rules.append(_variant(base, "深度風險不買最高一成、持股進最高 5% 就賣", risk_veto="dl1x"))
+    return rules
+
+
+def timing_batch() -> list:
+    """2026-10-16 (使用者：除了盤後，盤前或盤中買會不會比較好？要怎樣的購買時機): the eight strongest T0 candidates with
+    the other two fills the daily data can test — the next session's closing auction and its opening auction
+    (the rules themselves fill in the same day's after-hours sessions). Intraday timing needs intraday data."""
+    rules = []
+    for base in strongest_rules(8):
+        rules.append(_variant(base, "隔天收盤成交", execution="next"))
+        rules.append(_variant(base, "隔天開盤成交", execution="open"))
     return rules
 
 
@@ -2711,5 +2758,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
-           "robot30": robot30_batch, "robot31": robot31_batch, "worst": worst_batch, "risk": risk_batch, "robot40": robot40_batch,
+           "robot30": robot30_batch, "robot31": robot31_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch}

@@ -86,7 +86,7 @@ def rankings(fp, rule, start: date, end: date, store: DecisionStore | None = Non
     ranks = daily_rankings(fp, rule, start, end, fixed=store.fixed(name), trace=trace)
     if through is not None:
         sessions = [day for day in fp.sessions if start <= day <= end]
-        lag = 1 if getattr(rule, "execution", "same") == "next" else 0
+        lag = 1 if getattr(rule, "execution", "same") in ("next", "open") else 0
         resume = next((day for number, day in enumerate(sessions)            # the first session decided live
                        if number + lag < len(sessions) and sessions[number + lag] > through), None)
         pending = trace["pending"].get(resume) if resume is not None else trace["pending_after"]

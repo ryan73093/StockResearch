@@ -267,3 +267,34 @@ def test_the_deep_risk_overlay_skips_and_sells_the_riskiest():
     assert plain[DAYS[0]] == ["A", "B", "C"] and veto[DAYS[0]] == ["B", "C", "D"]   # A is the riskiest that day
     assert DAYS[2] not in veto and sell[DAYS[2]] == ["C", "D"]                       # B turns risky: dl1x sells it
     assert "risk_veto" not in DailyRule(**base).canonical()
+
+
+def test_the_opening_auction_fills_at_the_open_and_not_at_a_locked_open():
+    """2026-10-16 (使用者：盤前或盤中買會不會比較好？): execution "open" decides on the close and fills at the next
+    session's open; an open at limit-up is not bought."""
+    days = DAYS[:6]
+    data = replace(market(days, {"A.TW": {day: 10.0 for day in days}, "B.TW": {day: 10.0 for day in days}}),
+                   opens={"A.TW": {day: 9.8 for day in days}, "B.TW": {days[1]: 11.0, **{day: 10.0 for day in days[2:]}}})
+    ledger = []
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=3, execution="open")
+    assert daily.lag_of(rule) == 1 and daily.participation(rule) == daily.NEXT_DAY_PARTICIPATION
+    simulate_daily(data, rule, FREE, days[0], days[-1], {days[1]: ["A.TW", "B.TW"]}, SeedPlan(100_000, 0), ledger=ledger)
+    buys = {(row["day"], row["symbol"]): row["price"] for row in ledger if row["side"] == "BUY"}
+    assert buys[(days[1], "A.TW")] == 9.8                                     # the open, not the close
+    assert (days[1], "B.TW") not in buys and any(row["side"] == "BLOCKED" and row["symbol"] == "B.TW" for row in ledger)
+    assert buys[(days[2], "B.TW")] == 10.0                                    # tried again at the next open
+    assert "execution" in rule.canonical()
+
+
+def test_the_ranking_sees_the_open_locks_for_the_opening_auction():
+    from quant_platform.research.daily import FactorPanel
+    from quant_platform.research.stock_rules import Panel as PricePanel
+
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 10))
+    data = replace(market(days, {"1101.TW": {day: 10.0 for day in days}}),
+                   opens={"1101.TW": {**{day: 10.0 for day in days}, days[2]: 11.0}})
+    fp = FactorPanel(PricePanel(data))
+    row = fp.symbols.index("1101.TW")
+    _traded, up_close, _down = fp.market_locks()
+    traded, up_open, _down = fp.market_locks("open")
+    assert not up_close[row, 2] and up_open[row, 2] and traded[row, 2]       # closed at 10, opened at limit-up 11
