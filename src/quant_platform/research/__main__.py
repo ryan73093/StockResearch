@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41"),
+                            "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
@@ -353,6 +353,9 @@ def main() -> int:
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
     parser.add_argument("--require", help="scan：只跑含這個訊號的組（例如新模型 ml_gbm_quality）")
+    parser.add_argument("--step", choices=("select", "models", "holdout"),
+                        help="rolling：每月滾動的哪一步（挑策略／重訓模型／前向測試）")
+    parser.add_argument("--cutoff", help="rolling：截止日（預設：兩個月前的月底）")
     parser.add_argument("--prefilter", action="store_true",
                         help="scan：先在開發期單獨篩每個訊號，只用單獨贏過 0050 的訊號組合（GPU 用來跑 4 個一組）")
     parser.add_argument("--require-new", action="store_true",
@@ -713,6 +716,58 @@ def main() -> int:
         print(job.payload["summary"])
         for year, item in meta["yearly"].items():
             print(year, {key: value for key, value in item.items() if not key.startswith("curve")})
+        return 0
+
+    if args.command == "rolling":
+        # 2026-10-16 (使用者：訓練到兩個月前，後面兩個月拿來做前向測試；模型也要每月更新): research/rolling.py
+        from datetime import date as _date
+
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import model as research_model
+        from quant_platform.research import rolling
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        cutoff = _date.fromisoformat(args.cutoff) if args.cutoff else rolling.cutoff_for(_date.today())
+        path = rolling.folder(RESEARCH) / f"{cutoff.isoformat()}.json"
+        payload = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {
+            "version": rolling.ROLLING_VERSION, "cutoff": cutoff.isoformat(), "graded": [], "holdout": [], "models": []}
+        if args.step == "select":
+            with JobLog(RESEARCH).start(f"每月滾動：用 {cutoff} 以前的資料挑策略（全部規則回測到截止日）", command) as job:
+                def progress(done, total, row):
+                    job.update(done=done, total=total, current=f"{row.get('name', '')[:40]}：{'過' if row.get('passed') else '沒過'}")
+                graded = rolling.select(Path(args.base), RESEARCH, cutoff, args.broker, args.workers, progress)
+                payload.update(graded=graded, selected_at=datetime.now().isoformat(timespec="seconds"),
+                               engine=daily_research.ENGINE_VERSION)
+                rolling.save(RESEARCH, cutoff, payload)
+                job.payload["summary"] = f"{len(graded)} 個規則、{sum(1 for row in graded if row.get('passed'))} 個過截止日門檻"
+            print(job.payload["summary"])
+            return 0
+        if args.step == "models":
+            versions = [spec["version"] for spec in research_model.MODELS.values()
+                        if spec["label"] in ("rank", "excess", "ensemble")
+                        and research_model.model_dir(Path(args.base), spec["version"]).is_dir()]
+            with JobLog(RESEARCH).start(f"每月滾動：用 {cutoff} 以前的資料重訓 {len(versions)} 個模型", command,
+                                        total=len(versions)) as job:
+                _data, fp = daily_research.load(Path(args.base))
+                trained = []
+                for number, version in enumerate(versions):
+                    job.update(done=number, current=version, force=True)
+                    spec = research_model.VERSIONS[version]
+                    trained.append(research_model.train_until(fp, research_model.model_dir(Path(args.base), version), cutoff,
+                                                              spec["label"], version, spec.get("horizon", research_model.HORIZON)))
+                payload["models"] = trained
+                rolling.save(RESEARCH, cutoff, payload)
+                job.payload["summary"] = f"{len(trained)} 個模型重訓到 {cutoff}"
+            print(job.payload["summary"])
+            return 0
+        with JobLog(RESEARCH).start(f"每月滾動：{cutoff} 之後的前向測試（過門檻的策略各用新的 30 萬帳戶）", command) as job:
+            data, fp = daily_research.load(Path(args.base))
+            refreshed = rolling.refresh(RESEARCH, data, fp, broker_costs(args.broker), cutoff)
+            usable = [row for row in (refreshed or {}).get("holdout") or [] if row["usable"]]
+            job.payload["summary"] = (f"{len((refreshed or {}).get('holdout') or [])} 個策略前向測試、{len(usable)} 個贏 0050"
+                                      if refreshed else "這個月還沒挑策略")
+        print(job.payload["summary"])
         return 0
 
     if args.command == "worst-rl":

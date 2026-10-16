@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -517,6 +517,18 @@ switch ($Name) {
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-risk-1.0.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "risk", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+    }
+    "rolling" {
+        # 2026-10-16 (使用者：訓練到兩個月前，後面兩個月做前向測試；模型也要每月更新): the monthly rolling forward test
+        # (research/rolling.py). 1: every rule graded on data up to the cutoff (the end of the month two months back).
+        # 2: the models retrained to the cutoff — after any full rerun on the same models has finished, so one batch
+        # does not mix model sets. 3: the passing rules' fresh accounts from the cutoff to the latest session.
+        Invoke-Step "1-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--workers", "2", "--broker", "cathay")
+        while (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "quant_platform\.research daily --name rerun_all" }) {
+            Start-Sleep -Seconds 120
+        }
+        Invoke-Step "2-models" @("-m", "quant_platform.research", "rolling", "--step", "models")
+        Invoke-Step "3-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
     }
     "timing" {
         # 2026-10-16 (使用者：盤前或盤中買會不會比較好？): the strongest T0 candidates filled at the next session's close

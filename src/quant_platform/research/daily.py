@@ -1781,7 +1781,10 @@ def free_targets(fp: FactorPanel, rule: DailyRule) -> dict[date, dict[str, float
 
 
 def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel,
-             benchmark_cache: dict | None = None) -> dict[str, object]:
+             benchmark_cache: dict | None = None, end: date | None = None) -> dict[str, object]:
+    """The rule from 2015-06 to ``end`` (RECENT_END; 2026-10-16: any earlier day, the monthly rolling selection's
+    cutoff — research/rolling.py)."""
+    end = end or RECENT_END
     if rule.free:                              # 2026-10-16 (RL 4.0): the weights, every session
         targets = free_targets(fp, rule)
         first = min(targets) if targets else RECENT_START
@@ -1789,11 +1792,11 @@ def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostMode
         def free_account(start: date, end: date) -> RunResult:
             return simulate_daily(data, rule, costs, start, end, targets=targets)
 
-        report = account_report(data, free_account, first, costs, benchmark_cache)
+        report = account_report(data, free_account, first, costs, benchmark_cache, end)
         report["parked_sessions"] = 0
         return {"engine": ENGINE_VERSION, "spec": rule.canonical(), "rule_hash": rule.rule_hash, "label": rule.label,
                 **report}
-    ranks = daily_rankings(fp, rule, RECENT_START, RECENT_END)
+    ranks = daily_rankings(fp, rule, RECENT_START, end)
     weights, parked = daily_weights(fp, rule, ranks), account_parking(data, fp, rule, costs)
     first = next((day for day in sorted(ranks) if ranks[day]), RECENT_START)
 
@@ -1802,32 +1805,33 @@ def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostMode
     def account(start: date, end: date) -> RunResult:
         return simulate_daily(data, rule, costs, start, end, ranks, weights=weights, parked=parked, exposure=exposure)
 
-    report = account_report(data, account, first, costs, benchmark_cache)
-    report["parked_sessions"] = len([day for day in parked or () if first <= day <= RECENT_END])
+    report = account_report(data, account, first, costs, benchmark_cache, end)
+    report["parked_sessions"] = len([day for day in parked or () if first <= day <= end])
     return {"engine": ENGINE_VERSION, "spec": rule.canonical(), "rule_hash": rule.rule_hash, "label": rule.label, **report}
 
 
 def account_report(data: LegacyData, account, first: date, costs: CostModel,
-                   benchmark_cache: dict | None = None) -> dict[str, object]:
+                   benchmark_cache: dict | None = None, end: date | None = None) -> dict[str, object]:
     """What every account is judged by: ``account(start, end)`` runs the owner's cash flow from ``start``.
     From ``first`` and from 2020-10, the rolling windows, the monthly gaps, the activity and the curve,
-    each against the same money in 0050."""
+    each against the same money in 0050 — up to ``end`` (RECENT_END)."""
+    end = end or RECENT_END
     cache = benchmark_cache if benchmark_cache is not None else {}
-    run = account(first, RECENT_END)
-    benchmark = simulate_daily(data, None, costs, first, RECENT_END)
-    regime_run = account(REGIME_START, RECENT_END)
-    regime_benchmark = simulate_daily(data, None, costs, REGIME_START, RECENT_END)
+    run = account(first, end)
+    benchmark = simulate_daily(data, None, costs, first, end)
+    regime_run = account(REGIME_START, end)
+    regime_benchmark = simulate_daily(data, None, costs, REGIME_START, end)
     yearly: dict[str, float] = {}
     active = _monthly_active(run, benchmark)
     for month, value in active.items():
         yearly[month[:4]] = yearly.get(month[:4], 0.0) + value
     return {
-        "start": first.isoformat(), "end": RECENT_END.isoformat(),
+        "start": first.isoformat(), "end": end.isoformat(),
         "strategy": run.summary(), "benchmark": benchmark.summary(),
         "full_period_excess": round(_excess(run, benchmark), 6),
         "since_2020": {"start": REGIME_START.isoformat(), "strategy": regime_run.summary(),
                        "benchmark": regime_benchmark.summary(), "excess": round(_excess(regime_run, regime_benchmark), 6)},
-        "windows": {key: account_windows(data, account, costs, months, first, RECENT_END, cache.setdefault(key, {}))
+        "windows": {key: account_windows(data, account, costs, months, first, end, cache.setdefault(key, {}))
                     for key, months in WINDOWS.items()},
         "monthly_active_returns": active, "yearly": {year: round(value, 4) for year, value in sorted(yearly.items())},
         "activity": activity(run), "curve": curve(run, benchmark),

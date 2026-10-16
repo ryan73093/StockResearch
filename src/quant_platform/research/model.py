@@ -378,11 +378,73 @@ def train_year(history: str | Path, version: str, year: int, job=None) -> dict[s
                  version=version, horizon=VERSIONS[version].get("horizon", HORIZON))
 
 
+MONTHLY = "monthly"        # 2026-10-16: the monthly retrains, ``monthly/<cutoff>.pkl`` (research/rolling.py)
+
+
+def train_until(fp, out_dir: str | Path, cutoff, label: str, version: str, horizon: int = HORIZON) -> dict[str, object]:
+    """2026-10-16 (使用者：模型都不用更新？): one model learning every weekly sample whose label ended by ``cutoff``
+    (the last session on or before it), saved as ``monthly/<cutoff>.pkl``; ``scores`` uses it for the sessions after
+    the cutoff. The yearly models stay as they are."""
+    out = Path(out_dir)
+    target = out / MONTHLY
+    target.mkdir(parents=True, exist_ok=True)
+    names = trained_features(out, version)
+    eligible = eligibility(fp)
+    samples = sample_columns(len(fp.sessions))
+    last = max(index for index, day in enumerate(fp.sessions) if day <= cutoff)
+
+    def rows(span: int) -> list[int]:
+        return [index for index, column in enumerate(samples) if column + span <= last]
+
+    x = feature_block(fp, samples, eligible, names)
+    if label == "ensemble":
+        from quant_platform.research.model_ensemble import fit_year
+
+        y20 = label_block(fp, samples, eligible, "excess", HORIZON)
+        rank20 = label_block(fp, samples, eligible, "rank", HORIZON)
+        y60 = label_block(fp, samples, eligible, "excess", 60)
+        model = fit_year(x, y20, rank20, y60, rows(HORIZON), rows(60), PARAMS)
+        count = len(rows(HORIZON))
+    else:
+        y = label_block(fp, samples, eligible, label, horizon)
+        chosen = rows(horizon)
+        model, count = _fit(x[chosen].reshape(-1, x.shape[2]), y[chosen].reshape(-1))
+    (target / f"{cutoff.isoformat()}.pkl").write_bytes(pickle.dumps(model, protocol=5))
+    return {"version": version, "cutoff": cutoff.isoformat(), "samples": count,
+            "label_until": fp.sessions[last].isoformat(), "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
+
+
+def _model_files(folder: Path) -> dict[object, Path]:
+    """The models a version keeps: the yearly ones (key: the year) and the monthly ones (key: the cutoff date)."""
+    from datetime import date as _date
+
+    output: dict[object, Path] = {}
+    if not folder.is_dir():
+        return output
+    for path in folder.glob("*.pkl"):
+        if path.stem.isdigit():
+            output[int(path.stem)] = path
+    for path in (folder / MONTHLY).glob("*.pkl") if (folder / MONTHLY).is_dir() else []:
+        try:
+            output[_date.fromisoformat(path.stem)] = path
+        except ValueError:
+            continue
+    return output
+
+
+def _learned_until(key):
+    """The last day a model's labels could reach: a yearly model of Y, the day before Y; a monthly one, its cutoff."""
+    from datetime import date as _date, timedelta as _timedelta
+
+    return key if isinstance(key, _date) else _date(key, 1, 1) - _timedelta(days=1)
+
+
 def digest(out_dir: str | Path) -> str:
     """The saved models' hash (part of a model rule's trial input)."""
     folder = Path(out_dir)
     output = hashlib.sha256()
-    for path in sorted(folder.glob("*.pkl")) if folder.is_dir() else []:
+    monthly = sorted((folder / MONTHLY).glob("*.pkl")) if (folder / MONTHLY).is_dir() else []
+    for path in (sorted(folder.glob("*.pkl")) if folder.is_dir() else []) + monthly:
         output.update(path.name.encode())
         output.update(hashlib.sha256(path.read_bytes()).digest())
     return output.hexdigest()
@@ -397,16 +459,17 @@ def scores(fp, out_dir: str | Path) -> np.ndarray:
 
         return deep_scores(fp, folder)
     output = np.full((len(fp.sessions), len(fp.symbols)), np.nan, dtype=np.float32)
-    models = {int(path.stem): path for path in folder.glob("*.pkl")} if folder.is_dir() else {}
+    models = _model_files(folder)
     if not models:
         return output
     eligible = eligibility(fp)
     names = trained_features(folder, folder.name)  # gbm-1.0.0 and 1.1.0 learned 30 factors; more came later
-    by_year: dict[int, list[int]] = {}
+    by_year: dict[object, list[int]] = {}
     for column, day in enumerate(fp.sessions):
-        usable = [year for year in models if year <= day.year]
+        # the model whose labels reach latest, all before this session (a yearly one, or a monthly retrain)
+        usable = [key for key in models if _learned_until(key) < day]
         if usable:
-            by_year.setdefault(max(usable), []).append(column)
+            by_year.setdefault(max(usable, key=_learned_until), []).append(column)
     for year, columns in by_year.items():
         model = pickle.loads(models[year].read_bytes())
         for start in range(0, len(columns), 60):
