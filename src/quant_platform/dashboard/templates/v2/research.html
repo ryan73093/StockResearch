@@ -694,11 +694,17 @@
 {% endif %}
 
 {% if research_tab == 'forward' and forward_board %}
+{% if forward_board.common_start != rolling_start %}
+<section class="card" id="forward-board">
+  <div class="card__head"><h2>共同起跑線 <span class="badge">{{ rolling_start }} 起・重算中</span></h2></div>
+  <p class="muted" style="margin:0">這個月的起跑線是 {{ rolling_start }}（只用 {{ rolling_cutoff }} 以前的資料挑規則、重訓模型）。目前存的是 {{ forward_board.common_start }} 起的舊起跑線，已不採用、不顯示；當月名單與模型訓練完後，流程會從 {{ rolling_start }} 起重算所有前向帳戶並重建這張表。</p>
+</section>
+{% else %}
 {% set accounts = {} %}{% for item in stock_forward or [] if not item.stopped %}{% set _ = accounts.update({item.rule_hash: item}) %}{% endfor %}
 <section class="card" id="forward-board">
   <div class="card__head">
     <h2>共同起跑線 <span class="badge">{{ forward_board.common_start }} 起</span></h2>
-    <span class="muted small">每個策略都從研究期結束後的第一天起跑（之後的資料沒有被拿來挑任何策略），30 萬＋每月 1 萬，對同樣的錢買 0050；{{ forward_board.date }} 為止 {{ forward_board.sessions }} 個交易日。和各自回測的月超額比：預期範圍是 90% 區間，時間越短範圍越寬</span>
+    <span class="muted small">每個策略都從當月截止日（{{ rolling_cutoff }}）的下一天起跑（之後的資料沒有被拿來挑任何策略，每月往後推一個月），30 萬＋每月 1 萬，對同樣的錢買 0050；{{ forward_board.date }} 為止 {{ forward_board.sessions }} 個交易日。和各自回測的月超額比：預期範圍是 90% 區間，時間越短範圍越寬</span>
   </div>
   <p class="small" style="margin:0 0 10px">{% for label, count in forward_board.counts.items() if count %}<span class="badge {{ 'badge--bad' if label == '警示' else ('badge--ok' if label == '強於預期' else '') }}">{{ label }} {{ count }}</span> {% endfor %}</p>
   <div class="table-wrap table-wrap--stack">
@@ -724,6 +730,7 @@
   </div>
   <p class="col-help"><b>欄位說明</b>　<b>名次</b>：依「比 0050」排，括號是和 5 個交易日前比的變化（正數是往前）。<b>報酬</b>：這個策略從起跑日以來的報酬（30 萬＋每月 1 萬）。<b>比 0050</b>：減去同樣的錢買 0050 的報酬。<b>回測預期範圍</b>：依這個規則回測的月超額推算，這麼多天 90% 會落在的範圍（天數越少範圍越寬）。<b>狀態</b>：符合／強於／弱於預期或警示，滑過看建議；警示＝落在回測幾乎不會出現的範圍，先查原因，一個月後仍在警示線下就停止追蹤。<b>回撤</b>：起跑以來從高點的最大跌幅。<b>買／賣</b>：起跑以來的買進、賣出筆數；下方連結是近 3 個月的模擬操作。<b>開始實時記錄</b>：這個策略的前向帳戶從哪天起每天 15:30 記錄；在 {{ forward_board.common_start }} 之後才加入的（過門檻那天才加入），共同起跑線上加入以前的部分是用同一套規則補算的，所以和它自己的前向帳戶數字不同。點策略名稱看它的前向帳戶（持股、每一筆交易）。持有方式「月線上續抱」＝掉出前 60 名且跌破 20 日均線才賣（使用者 2026-10-14 起不再追蹤固定持有 20 天的版本）。</p>
 </section>
+{% endif %}
 {% endif %}
 
 {% if research_tab == 'forward' %}

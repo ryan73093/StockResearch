@@ -988,6 +988,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         chart = value_chart({row["date"]: [row["value"], row["benchmark"], row["contributed"]] for row in detail["series"]})
         board = forward_board_load(research_dir) or {}         # 2026-10-17: the same rule on the common start line
         board_row = next((row for row in board.get("rows") or [] if row.get("rule_hash") == rule_hash), None)
+        if board.get("common_start") != forward_common_start(datetime.now(TAIPEI).date()).isoformat():
+            board_row = None                                    # 2026-10-17: last month's start line is not shown
         return render_template("v2/research_forward.html", active_nav="research", forward=detail, chart=chart,
                                board=board, board_row=board_row, research_tab="forward", jobs=JobLog(research_dir).jobs())
 

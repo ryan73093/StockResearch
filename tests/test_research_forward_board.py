@@ -36,9 +36,15 @@ def test_the_forward_tab_shows_the_board(tmp_path):
     from quant_platform.container import build_container
     from quant_platform.dashboard.app import create_app
 
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from quant_platform.research.forward_board import common_start
+
     folder = tmp_path / "research" / "forward" / "stocks"
     folder.mkdir(parents=True)
-    board = {"common_start": "2026-10-01", "date": "2026-10-12", "sessions": 8, "months": 0.38,
+    start = common_start(datetime.now(ZoneInfo("Asia/Taipei")).date()).isoformat()
+    board = {"common_start": start, "date": "2026-10-12", "sessions": 8, "months": 0.38,
              "counts": {"警示": 0, "弱於預期": 0, "符合預期": 1, "強於預期": 0, "沒有回測可比": 0},
              "rows": [{"rule_hash": "h", "name": "T0 共識清單測試", "trial": 1, "since": "2026-10-12", "rank": 1,
                        "rank_change": None, "return": 0.03, "excess": 0.01, "band_low": -0.05, "band_high": 0.07,
@@ -48,6 +54,10 @@ def test_the_forward_tab_shows_the_board(tmp_path):
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
     body = client.get("/research?tab=forward").get_data(as_text=True)
     assert "共同起跑線" in body and "T0 共識清單測試" in body and "符合預期" in body and "/research/rules/h" in body
+    # 2026-10-17: last month's start line is not shown (the page says it is being rebuilt from this month's start)
+    (folder / "board.json").write_text(json.dumps({**board, "common_start": "2020-01-01"}, ensure_ascii=False), encoding="utf-8")
+    body = client.get("/research?tab=forward").get_data(as_text=True)
+    assert "重算中" in body and "T0 共識清單測試" not in body and "2020-01-01 起的舊起跑線" in body
 
 
 def test_the_recent_page_lists_every_order_and_both_periods(tmp_path):
