@@ -18,18 +18,26 @@ FAMILY_FACTORS = {
     "低波動": ("low_volatility_60", "low_volatility_250", "low_max_return", "low_ivol_60"),
     "價值殖利率": ("dividend_yield", "earnings_yield", "book_to_price"),
     "籌碼": ("foreign_holding", "foreign_holding_change", "foreign_buy_20", "trust_buy_20", "margin_growth_20",
-             "short_margin_ratio"),
+             "short_margin_ratio", "dealer_buy_20", "dealer_hedge_20", "trust_quarter_end",
+             # 2026-10-17: the lending and short-selling, day-trading and notice families
+             "low_sbl_short", "sbl_cover_20", "low_day_trade_20", "low_lending_fee_60", "low_lending_20",
+             "lending_fee_not_rising", "low_attention_20", "low_disposition_60"),
+    "公司事件": ("dividend_raise", "no_cash_issue", "low_issuance_250", "dividend_ahead"),
     "營收財報": ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "roe_ttm", "gross_margin", "operating_margin_change", "eps_growth",
                  "low_debt"),
     "成交量規模": ("liquidity", "volume_surge", "market_cap", "low_pv_corr_20"),
 }
 FACTOR_FAMILY = {factor: family for family, factors in FAMILY_FACTORS.items() for factor in factors}
 OPPOSITE = {"趨勢動能": "反轉", "反轉": "趨勢動能"}
-FAMILY_ORDER = ("T0 共識清單", "機器學習", "技術分析機器人", "組合帳戶", "趨勢動能", "反轉", "低波動", "價值殖利率", "籌碼", "營收財報", "成交量規模",
-                "多因子", "其他")
+FAMILY_ORDER = ("T0 共識清單", "機器學習", "深度學習", "RL 機器人", "技術分析機器人", "組合帳戶", "趨勢動能", "反轉", "低波動",
+                "價值殖利率", "籌碼", "公司事件", "營收財報", "成交量規模", "多因子", "反向（學著賠）", "其他")
 FAMILY_NOTES = {
     "機器學習": "把 35 個因子交給逐年滾動訓練的模型打分數",
     "技術分析機器人": "強化學習的交易機器人，只看價格與成交量，自己決定買進和賣出",
+    "深度學習": "深度學習模型（讀每檔最近 40 個交易日）打分數",
+    "RL 機器人": "強化學習決定各訊號的權重，或每天自己決定每檔比重與現金（含它的對照組：同樣訊號平均）",
+    "公司事件": "看股利調升、現金增資、股本膨脹、即將除息等公司事件",
+    "反向（學著賠）": "把訊號反過來用、或學著賠最多（趣味與檢查，不是策略）",
     "T0 共識清單": "所有 T0 候選各自替股票排名，取平均成一張清單，帳戶只交易這一張",
     "組合帳戶": "帳戶分成幾份，各自照不同規則操作",
     "趨勢動能": "買正在漲、站上均線或接近高點的股票",
@@ -48,8 +56,18 @@ def _core(core: float) -> str:
     return "一半放 0050" if abs(core - 0.5) < 1e-9 else (f"{core:.0%} 放 0050" if core else "全部個股")
 
 
+ROBOT_FACTORS = ("rl_blocks", "block_equal", "rl_rolling", "rolling_equal", "rl_all", "all_equal", "rl_free", "rl_free41",
+                 "rl_timing", "tech_equal")
+
+
 def _family(factor: str, weight: float) -> str:
-    if factor.startswith("ml_gbm"):
+    if factor == "rl_worst" or (weight < 0 and (factor.startswith("ml_") or factor in ROBOT_FACTORS)):
+        return "反向（學著賠）"
+    if factor.startswith("ml_deep"):
+        return "深度學習"
+    if factor in ROBOT_FACTORS:
+        return "RL 機器人"
+    if factor.startswith(("ml_gbm", "ml_tech")):
         return "機器學習"
     if factor.endswith("_consensus"):
         return "T0 共識清單"
@@ -75,7 +93,13 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
             factors = {spec["factor"]: 1.0, **(spec.get("extra") or {})}
         factors = factors or {}
         families = list(dict.fromkeys(_family(name, float(weight)) for name, weight in factors.items()))
-        if "機器學習" in families:
+        if "反向（學著賠）" in families:
+            family = "反向（學著賠）"
+        elif "RL 機器人" in families:
+            family = "RL 機器人"
+        elif "深度學習" in families:
+            family = "深度學習"
+        elif "機器學習" in families:
             family = "機器學習"
         elif len(families) > 1:
             family = "多因子"

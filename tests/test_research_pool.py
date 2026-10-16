@@ -90,7 +90,9 @@ def test_pool_and_research_page_show_costs_and_forward_tracking(tmp_path):
     assert rows["stock-both"]["forward_since"] == "2026-10-05" and rows["etf-win"]["forward_since"] is None
     client = create_app(container).test_client()
     page = client.get("/research?tab=forward").get_data(as_text=True)
-    assert "個股規則前向模擬" in page and "台積電" in page and "正常" in page
+    assert "個股規則前向帳戶" in page and "/research/forward/stock-both" in page and "正常" in page
+    detail = client.get("/research/forward/stock-both").get_data(as_text=True)   # 2026-10-17: holdings on its own page
+    assert "台積電" in detail
     pool = client.get("/research/pool?basis=dca").get_data(as_text=True)
     assert "前向觀察中的個股規則" in pool and "費稅佔投入" in pool and "前向觀察 10-05 起" in pool
     payload = client.get("/research/pool.json?basis=dca").get_json()

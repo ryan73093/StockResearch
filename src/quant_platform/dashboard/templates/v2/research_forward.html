@@ -22,6 +22,25 @@
   <div class="kpi"><div class="kpi__label">投入・現金</div><div class="kpi__value">{{ '{:,.0f}'.format(latest.contributed) }}<small>・現金 {{ '{:,.0f}'.format(latest.cash) }}</small></div></div>
 </div>
 
+{% if board_row %}
+<section class="card">
+  <div class="card__head"><h2>共同起跑線上的同一個策略</h2><span class="muted small">{{ board.common_start }} 起，所有策略同一天起跑</span></div>
+  <dl class="facts">
+    <div><dt>名次</dt><dd>{{ board_row.rank or '—' }}{% if board.rows %}／{{ board.rows|selectattr('rank')|list|length }}{% endif %}</dd></div>
+    <div><dt>報酬</dt><dd>{{ '{:+.2%}'.format(board_row['return']) }}</dd></div>
+    <div><dt>比 0050</dt><dd class="{{ 'up' if board_row.excess > 0 else 'down' }}">{{ '{:+.2%}'.format(board_row.excess) }}</dd></div>
+    <div><dt>回撤</dt><dd>{{ '{:.1%}'.format(board_row.max_drawdown) }}</dd></div>
+    <div><dt>買／賣</dt><dd>{{ board_row.buys }}／{{ board_row.sells }}</dd></div>
+  </dl>
+  {% if forward.item.since > board.common_start %}
+  <p class="col-help">這個策略 {{ forward.item.since }} 才過門檻、加入前向，上面的帳戶從那天才開始實時記錄；共同起跑線把它從 {{ board.common_start }} 起用同一套規則補算，所以兩組數字不一樣。比較所有策略時看共同起跑線，看這個策略實際被記錄的持股與交易看上面。</p>
+  {% else %}
+  <p class="col-help">這個策略從 {{ board.common_start }} 就開始實時記錄，兩組數字應該相同（若不同，看上面的對帳與「重算」標記）。</p>
+  {% endif %}
+  <p class="small" style="margin:6px 0 0"><a href="/research/recent/{{ forward.item.rule_hash }}">近 3 個月模擬操作</a>・<a href="/research/rules/{{ forward.item.rule_hash }}">回測紀錄</a></p>
+</section>
+{% endif %}
+
 {% if forward.item.stopped %}
 <section class="card"><p style="margin:0"><span class="badge">已停止</span> {{ forward.item.stopped }} 起不再記錄：{{ forward.item.stop_reason }}。下面是停止前的紀錄。</p></section>
 {% endif %}

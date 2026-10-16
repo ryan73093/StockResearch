@@ -19,54 +19,20 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-ROBOT = {"rl_blocks", "rl_free", "rl_free41", "rl_all", "rl_rolling", "rl_timing", "rl_tech", "rl_tech_weekly", "rl_worst"}
-YARDSTICK = {"block_equal", "all_equal", "rolling_equal", "tech_equal"}
-ORDER = ("機器學習＋因子", "T0 共識清單", "多因子組合", "組合帳戶", "單一因子：趨勢動能", "機器學習", "RL 機器人（學權重）",
-         "RL 對照（同樣訊號平均）", "深度學習", "RL 機器人（完全自由）", "技術分析機器人（學賣點）", "反向（學著賠）")
-NOTES = {
-    "機器學習＋因子": "機器學習模型的分數和其他因子一起排名",
-    "T0 共識清單": "所有 T0 候選各自排名、平均成一張清單",
-    "多因子組合": "2～4 個因子的百分位相加排名（大規模搜尋找出來的）",
-    "組合帳戶": "帳戶分成幾份，各自照不同規則操作",
-    "機器學習": "只用機器學習模型的分數選股",
-    "RL 機器人（學權重）": "強化學習決定各訊號區塊的權重",
-    "RL 對照（同樣訊號平均）": "RL 機器人的對照組：同樣的訊號、權重平均",
-    "深度學習": "深度學習模型的分數選股",
-    "RL 機器人（完全自由）": "強化學習每天自己決定每檔比重與現金",
-    "技術分析機器人（學賣點）": "強化學習決定什麼時候賣",
-    "反向（學著賠）": "把訊號反過來用、或學著賠最多（趣味與檢查）",
-}
+from quant_platform.research.categories import FAMILY_NOTES, FAMILY_ORDER
+
+CLASSIFICATION = "categories-2026-10-17"    # the cached roles are dropped when the classification changes
+ORDER = ()                 # the pool's order (categories.FAMILY_ORDER); kept for callers
+NOTES: dict[str, str] = {}
 _STAMP = re.compile(r"(\d{8}-\d{6})")
 _cache: dict[str, object] = {}
 
 
 def role(spec: dict) -> str:
+    """The rule's category, as the pool shows it (research/categories.py ``classify``) — one classification."""
     from quant_platform.research.categories import classify
 
-    if spec.get("kind") == "blend":
-        return "組合帳戶"
-    factors = spec.get("factors") or {}
-    names = set(factors)
-    if "rl_worst" in names or any(float(weight) < 0 and (name.startswith("ml_") or name in YARDSTICK)
-                                  for name, weight in factors.items()):
-        return "反向（學著賠）"
-    if names & {"rl_free", "rl_free41"}:
-        return "RL 機器人（完全自由）"
-    if names & ROBOT or any(name.startswith("rl_") for name in names):
-        return "RL 機器人（學權重）"
-    if names & YARDSTICK:
-        return "RL 對照（同樣訊號平均）"
-    if any(name.startswith("ml_deep") for name in names):
-        return "深度學習"
-    if any(name.startswith("ml_") for name in names):
-        return "機器學習＋因子" if len(names) > 1 else "機器學習"
-    if any(name.endswith("_consensus") for name in names):
-        return "T0 共識清單"
-    if spec.get("exit_model", "none") != "none":
-        return "技術分析機器人（學賣點）"
-    if len(names) > 1:
-        return "多因子組合"
-    return f"單一因子：{classify(spec)['family']}"
+    return classify(spec)["family"]
 
 
 def _entries(research: Path) -> list[dict]:
@@ -84,8 +50,9 @@ def _entries(research: Path) -> list[dict]:
     roles: dict[str, str | None] = dict(_cache.get("roles") or {})
     if not roles and saved.is_file():
         try:
-            roles = json.loads(saved.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            stored = json.loads(saved.read_text(encoding="utf-8"))
+            roles = stored.get("roles", {}) if stored.get("version") == CLASSIFICATION else {}
+        except (OSError, ValueError, AttributeError):
             roles = {}
     known = len(roles)
     output = []
@@ -108,7 +75,7 @@ def _entries(research: Path) -> list[dict]:
         try:
             saved.parent.mkdir(parents=True, exist_ok=True)
             partial = saved.with_suffix(".partial")
-            partial.write_text(json.dumps(roles, ensure_ascii=False), encoding="utf-8")
+            partial.write_text(json.dumps({"version": CLASSIFICATION, "roles": roles}, ensure_ascii=False), encoding="utf-8")
             partial.replace(saved)
         except OSError:
             pass
@@ -206,14 +173,14 @@ def summary(research_dir: str | Path) -> dict[str, object]:
         view = _view(best["record"])
         previous = _view(before["record"]) if before else None
         change = (view["final"] / previous["final"] - 1) if previous and previous["final"] else None
-        rows.append({"role": name, "note": NOTES.get(name, ""), "now": view, "before": previous, "change": change,
+        rows.append({"role": name, "note": FAMILY_NOTES.get(name, ""), "now": view, "before": previous, "change": change,
                      "first": history[0] if history else None,
                      "growth_total": (view["final"] / history[0]["final"] - 1) if history and history[0]["final"] else None,
                      "last_run": started[last_run], "rules": len(latest), "grades": dict(grades),
                      "history": history[-12:]})
-    rank = {name: index for index, name in enumerate(ORDER)}
+    rank = {name: index for index, name in enumerate(FAMILY_ORDER)}
     rows.sort(key=lambda row: (-(row["now"]["final"] or 0)))
     for row in rows:
-        row["order"] = rank.get(row["role"], len(ORDER))
+        row["order"] = rank.get(row["role"], len(FAMILY_ORDER))
     return {"roles": rows, "latest_run": max(started.values()) if started else None,
             "benchmark": rows[0]["now"]["bench_final"] if rows else None}

@@ -436,7 +436,18 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
             "returns": yearly_returns(report.get("curve") or {}),
             "chart": _svg(report.get("curve") or {}), "report_file": record.report_file,
         })
-    runs.sort(key=lambda run: (PERIOD_ORDER.index(run["period"]) if run["period"] in PERIOD_ORDER else 9, run["created_at"]))
+    # 2026-10-17 (使用者：每個頁面都要合邏輯): within a period the newest engine's run first, the newest first — the
+    # one the pool and the grades use ("current"); older engines' runs follow for the record
+    from quant_platform.research.registry import engine_order
+
+    order = {record.trial_id: engine_order(record) for record in records}
+    runs.sort(key=lambda run: run["created_at"], reverse=True)
+    runs.sort(key=lambda run: (PERIOD_ORDER.index(run["period"]) if run["period"] in PERIOD_ORDER else 9,
+                               tuple(-part for part in order.get(run["trial_id"], ()))))
+    seen_periods: set[str] = set()
+    for run in runs:
+        run["current"] = run["period"] not in seen_periods
+        seen_periods.add(run["period"])
     forward = next((row for row in StockForwardTracker(base).summary() if row["rule_hash"] == spec_hash), None)
     return {"spec_hash": spec_hash, "name": records[-1].spec_name, "spec": spec, "description": describe_rule(spec),
             # 2026-10-14: the daily-decision rules ("daily:" data) are stock rules too (the page said ETF 規則)

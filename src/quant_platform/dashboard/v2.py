@@ -266,8 +266,9 @@ def ml_view(research_dir: Path) -> dict[str, object]:
             tech.append({"version": meta.get("version"), "years": years, "features": meta.get("features") or [],
                          "seeds": meta.get("seeds") or [], "trained_at": (meta.get("trained_at") or "")[:16]})
             continue
-        if str(meta.get("version") or path.parent.name).startswith("exit-"):
-            continue
+        version = str(meta.get("version") or path.parent.name)
+        if version.startswith(("exit-", "block-rl", "free-rl", "factor-rl", "worst-rl")):
+            continue                      # 2026-10-17: the RL robots have their own page (/research/rl), not this table
 
         def average(key: str) -> float | None:
             values = [item.get(key) for item in years.values() if item.get(key) is not None]
@@ -276,7 +277,9 @@ def ml_view(research_dir: Path) -> dict[str, object]:
         models.append({"version": meta.get("version") or path.parent.name, "label": meta.get("label", "rank"),
                        "horizon": meta.get("horizon", 20),
                        "features": len(meta.get("features") or []), "years": years, "ic": average("ic"),
-                       "top20_gain": average("top20_gain"), "trained_at": (meta.get("trained_at") or "")[:16]})
+                       "top20_gain": average("top20_gain"), "trained_at": (meta.get("trained_at") or "")[:16],
+                       # 2026-10-17: the drop-risk model is judged by AUC, not IC (research/model_risk.py)
+                       "auc": average("auc"), "auc_volatility": average("auc_volatility")})
     reports = []
     for path in sorted((research_dir / "rl").glob("*/report.json")) if (research_dir / "rl").is_dir() else []:
         try:
@@ -978,8 +981,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         if detail is None:
             abort(404)
         chart = value_chart({row["date"]: [row["value"], row["benchmark"], row["contributed"]] for row in detail["series"]})
+        board = forward_board_load(research_dir) or {}         # 2026-10-17: the same rule on the common start line
+        board_row = next((row for row in board.get("rows") or [] if row.get("rule_hash") == rule_hash), None)
         return render_template("v2/research_forward.html", active_nav="research", forward=detail, chart=chart,
-                               research_tab="forward", jobs=JobLog(research_dir).jobs())
+                               board=board, board_row=board_row, research_tab="forward", jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/roles")
     def research_roles():

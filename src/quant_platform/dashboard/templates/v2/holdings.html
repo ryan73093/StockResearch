@@ -251,7 +251,8 @@
 {% endif %}
 
 <details class="card card--quiet" id="paper"{% if request.args.get('paper') %} open{% endif %}>
-  <summary><h2>模擬帳戶 <span class="badge">研究用</span>{% set pending = overview.orders|selectattr('status.value', 'equalto', 'pending')|list %}{% if pending %} <span class="badge badge--warn">待成交 {{ pending|length }} 筆</span>{% endif %}</h2></summary>
+  <summary><h2>舊版模擬帳戶 <span class="badge">舊版盤後 AI，2026-10-04 起暫停</span>{% set pending = overview.orders|selectattr('status.value', 'equalto', 'pending')|list %}{% if pending %} <span class="badge badge--warn">待成交 {{ pending|length }} 筆</span>{% endif %}</h2></summary>
+  <p class="note" style="margin:0 0 10px">這是舊版盤後 AI 研究的模擬帳戶（10/04 起暫停，持股是當時留下的），不是你的帳戶，也不是新研究的策略；新研究策略的模擬帳戶在 研究 › 前向觀察。</p>
   <div class="kpis kpis--four">
     <div class="kpi"><div class="kpi__label">權益</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.equity) }}<small>元</small></div></div>
     <div class="kpi"><div class="kpi__label">現金</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.account.cash) }}<small>元</small></div></div>

@@ -458,9 +458,9 @@ class ModelGovernanceService:
             entries=views, policy=self._policy,
             champion_count=sum(item.entry.status == ModelRegistryStatus.CHAMPION for item in views),
             challenger_count=sum(item.entry.status == ModelRegistryStatus.CHALLENGER for item in views),
-            critical_count=sum(item.drift and item.drift.status == DriftStatus.CRITICAL for item in views),
-            warning_count=sum(item.drift and item.drift.status == DriftStatus.WARNING for item in views),
-            stable_count=sum(item.drift and item.drift.status == DriftStatus.STABLE for item in views),
+            critical_count=sum(bool(item.drift and item.drift.status == DriftStatus.CRITICAL) for item in views),
+            warning_count=sum(bool(item.drift and item.drift.status == DriftStatus.WARNING) for item in views),
+            stable_count=sum(bool(item.drift and item.drift.status == DriftStatus.STABLE) for item in views),
         )
 
     def _view(self, entry: ModelRegistryEntry, recommended: bool) -> RegistryEntryView:

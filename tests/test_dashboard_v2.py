@@ -348,7 +348,7 @@ def test_the_home_page_and_the_roles_page_show_how_each_strategy_role_grew(clien
     from quant_platform.research import roles
 
     fake = {"latest_run": "2026-10-16T21:00:00+08:00", "benchmark": 9821414.0, "roles": [{
-        "role": "機器學習＋因子", "note": "", "rules": 205, "grades": {"T0 候選": 15}, "change": 0.25,
+        "role": "機器學習", "note": "", "rules": 205, "grades": {"T0 候選": 15}, "change": 0.25,
         "now": {"trial": 3919, "spec": "abc", "name": "外資持股＋新高次數", "engine": "daily-1.5.0", "tier": "T0 候選",
                 "final": 25910000.0, "bench_final": 9821414.0, "xirr": 0.381, "bench_xirr": 0.247, "excess_full": 9.69,
                 "excess_recent": 2.76, "drawdown": -0.318, "bench_drawdown": -0.340, "calmar": 1.2, "win_1y": 0.68,
@@ -359,7 +359,7 @@ def test_the_home_page_and_the_roles_page_show_how_each_strategy_role_grew(clien
                                                              {"day": "2026-10-16", "final": 25910000.0}]}]}
     monkeypatch.setattr(roles, "summary", lambda _research: fake)
     home = client.get("/").get_data(as_text=True)
-    assert "策略角色成長" in home and "機器學習＋因子" in home and "+25%" in home and "2,591 萬" in home
+    assert "策略角色成長" in home and "機器學習" in home and "+25%" in home and "2,591 萬" in home
     page = client.get("/research/roles").get_data(as_text=True)
     assert "策略角色" in page and "報酬／回撤" in page and "10-09：877" in page and "+195%" in page
 

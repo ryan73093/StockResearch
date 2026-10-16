@@ -19,10 +19,10 @@
   <div class="card__head"><h2>研究現況 <span class="badge">2015-06 起、每天決策</span></h2><span class="muted small">啟動資金 30 萬＋每月 5 日 1 萬，對同樣的錢全部買 0050</span></div>
   {% if overview %}
   <div class="kpis kpis--four">
-    <div class="kpi"><div class="kpi__label">試過的規則</div><div class="kpi__value">{{ overview.daily|length }}<small>（含舊設計共 {{ overview.attempts }}）</small></div></div>
+    <div class="kpi"><div class="kpi__label">試過的規則（新設計）</div><div class="kpi__value">{{ overview.daily|length }}<small>（舊設計另有 {{ overview.attempts }}）</small></div></div>
     <div class="kpi"><div class="kpi__label">T0／T0 候選</div><div class="kpi__value">{{ overview.daily_tiers['T0'] }}／{{ overview.daily_tiers['T0 候選'] }}</div></div>
     <div class="kpi"><div class="kpi__label">T1（贏 0050、波動大）</div><div class="kpi__value">{{ overview.daily_tiers['T1'] }}</div></div>
-    <div class="kpi"><div class="kpi__label">前向觀察中</div><div class="kpi__value">{{ overview.forward_stocks|length }}</div></div>
+    <div class="kpi"><div class="kpi__label">前向觀察中</div><div class="kpi__value">{{ overview.forward_stocks|rejectattr('stopped')|list|length }}<small>（已停止 {{ overview.forward_stocks|selectattr('stopped')|list|length }}）</small></div></div>
   </div>
   {% endif %}
   {% if conclusions %}
@@ -93,11 +93,11 @@
 {% if research_tab == 'factors' %}
 <section class="card" id="factors">
   <div class="card__head">
-    <h2>因子強弱{% if factor_report %} <span class="badge">{{ factor_report.months }} 個月・{{ factor_report.generated_at[:16].replace('T', ' ') }}</span>{% endif %}</h2>
+    <h2>因子強弱{% if factor_report %} <span class="badge">{{ factor_report.months }} {{ '週' if factor_report.design == 'recent' else '個月' }}・{{ factor_report.generated_at[:16].replace('T', ' ') }}</span>{% endif %}</h2>
     <span class="muted small">{{ factor_report.universe if factor_report else '' }}</span>
   </div>
   {% if factor_rows %}
-  <p class="muted small" style="margin:0 0 10px">每月 5 日把合格的上市股票依因子排名，看分數最高的五分之一（規則只買前段）下個月漲多少。每格上面是「比所有合格股票平均」、下面是「比 0050」，一年大約多或少幾個百分點（未扣手續費與稅）。「排序相關」看整體排得準不準，t ≥ 2 才算明顯。</p>
+  <p class="muted small" style="margin:0 0 10px">{% if factor_report and factor_report.design == 'recent' %}每週把合格的上市股票依因子排名一次，看分數最高的五分之一（規則只買前段）之後 20 個交易日漲多少。{% else %}每月 5 日把合格的上市股票依因子排名，看分數最高的五分之一（規則只買前段）下個月漲多少。{% endif %}每格上面是「比所有合格股票平均」、下面是「比 0050」，一年大約多或少幾個百分點（未扣手續費與稅）。「排序相關」看整體排得準不準，t ≥ 2 才算明顯。</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th>因子</th><th>判定</th>{% for key, label in factor_columns %}<th class="num">{{ label }}{% if loop.first %}<br>比平均／比 0050{% endif %}</th>{% endfor %}<th class="num">排序相關<br>{{ factor_columns[0][1] }}（t）</th></tr></thead>
@@ -137,9 +137,9 @@
       {% for item in ml.models %}
         <tr>
           <td data-primary><strong>{{ item.version }}</strong></td>
-          <td data-label="標籤">{{ '報酬排名' if item.label == 'rank' else '超額報酬' }}<span class="muted small">・{{ item.horizon }} 日</span></td>
+          <td data-label="標籤">{{ {'rank': '報酬排名', 'deep': '報酬排名（深度學習）', 'deep_risk': '20 日內跌 15% 以上的機率（深度學習風險）', 'ensemble': '集成：超額報酬'}.get(item.label, '超額報酬') }}<span class="muted small">・{{ item.horizon }} 日</span></td>
           <td class="num" data-label="特徵">{{ item.features }}</td>
-          <td class="num" data-label="IC">{{ '{:+.3f}'.format(item.ic) if item.ic is not none else '—' }}</td>
+          <td class="num" data-label="IC">{% if item.label == 'deep_risk' %}AUC {{ '{:.3f}'.format(item.auc) if item.auc is not none else '—' }}<span class="muted small">（波動 {{ '{:.3f}'.format(item.auc_volatility) if item.auc_volatility is not none else '—' }}）</span>{% else %}{{ '{:+.3f}'.format(item.ic) if item.ic is not none else '—' }}{% endif %}</td>
           <td class="num" data-label="前 20 名">{{ '{:+.2%}'.format(item.top20_gain) if item.top20_gain is not none else '—' }}<span class="muted small">（{{ item.horizon }} 日）</span></td>
           <td class="small" data-label="訓練" data-wide>{{ item.years|length }} 個年度・{{ item.trained_at }}</td>
         </tr>
@@ -694,6 +694,7 @@
 {% endif %}
 
 {% if research_tab == 'forward' and forward_board %}
+{% set accounts = {} %}{% for item in stock_forward or [] if not item.stopped %}{% set _ = accounts.update({item.rule_hash: item}) %}{% endfor %}
 <section class="card" id="forward-board">
   <div class="card__head">
     <h2>共同起跑線 <span class="badge">{{ forward_board.common_start }} 起</span></h2>
@@ -702,12 +703,14 @@
   <p class="small" style="margin:0 0 10px">{% for label, count in forward_board.counts.items() if count %}<span class="badge {{ 'badge--bad' if label == '警示' else ('badge--ok' if label == '強於預期' else '') }}">{{ label }} {{ count }}</span> {% endfor %}</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th class="num">名次</th><th>策略</th><th class="num">報酬</th><th class="num">比 0050</th><th class="num">回測預期範圍</th><th>狀態</th><th class="num">回撤</th><th class="num">買／賣</th></tr></thead>
+      <thead><tr><th class="num">名次</th><th>策略</th><th>開始實時記錄</th><th class="num">報酬</th><th class="num">比 0050</th><th class="num">回測預期範圍</th><th>狀態</th><th class="num">回撤</th><th class="num">買／賣</th></tr></thead>
       <tbody>
       {% for row in forward_board.rows|selectattr('rank')|sort(attribute='rank') %}
         <tr>
           <td class="num" data-label="名次">{{ row.rank }}{% if row.rank_change %}<span class="small {{ 'up' if row.rank_change > 0 else 'down' }}">（{{ '{:+d}'.format(row.rank_change) }}）</span>{% endif %}</td>
-          <td data-primary><a href="/research/rules/{{ row.rule_hash }}">{{ row.name }}</a></td>
+          {% set account = accounts.get(row.rule_hash) %}
+          <td data-primary><a href="{{ '/research/forward/' ~ row.rule_hash if account else '/research/recent/' ~ row.rule_hash }}">{{ row.name }}</a><br><span class="small"><a href="/research/rules/{{ row.rule_hash }}">回測紀錄</a>・<a href="/research/recent/{{ row.rule_hash }}">近 3 個月</a></span></td>
+          <td data-label="開始實時記錄">{% if account %}{{ account.since }}{% if account.since > forward_board.common_start %}<br><span class="muted small">之前是補算</span>{% endif %}{% else %}<span class="muted small">沒有實時帳戶</span>{% endif %}</td>
           <td class="num {{ 'up' if row['return'] > 0 else 'down' }}" data-label="報酬">{{ '{:+.2%}'.format(row['return']) }}</td>
           <td class="num {{ 'up' if row.excess > 0 else 'down' }}" data-label="比 0050">{{ '{:+.2%}'.format(row.excess) }}</td>
           <td class="num small" data-label="預期範圍">{% if row.band_low is not none %}{{ '{:+.1%}'.format(row.band_low) }}～{{ '{:+.1%}'.format(row.band_high) }}{% else %}—{% endif %}</td>
@@ -719,15 +722,15 @@
       </tbody>
     </table>
   </div>
-  <p class="col-help"><b>欄位說明</b>　<b>名次</b>：依「比 0050」排，括號是和 5 個交易日前比的變化（正數是往前）。<b>報酬</b>：這個策略從起跑日以來的報酬（30 萬＋每月 1 萬）。<b>比 0050</b>：減去同樣的錢買 0050 的報酬。<b>回測預期範圍</b>：依這個規則回測的月超額推算，這麼多天 90% 會落在的範圍（天數越少範圍越寬）。<b>狀態</b>：符合／強於／弱於預期或警示，滑過看建議；警示＝落在回測幾乎不會出現的範圍，先查原因，一個月後仍在警示線下就停止追蹤。<b>回撤</b>：起跑以來從高點的最大跌幅。<b>買／賣</b>：起跑以來的買進、賣出筆數；下方連結是近 3 個月的模擬操作。持有方式「月線上續抱」＝掉出前 60 名且跌破 20 日均線才賣（使用者 2026-10-14 起不再追蹤固定持有 20 天的版本）。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>名次</b>：依「比 0050」排，括號是和 5 個交易日前比的變化（正數是往前）。<b>報酬</b>：這個策略從起跑日以來的報酬（30 萬＋每月 1 萬）。<b>比 0050</b>：減去同樣的錢買 0050 的報酬。<b>回測預期範圍</b>：依這個規則回測的月超額推算，這麼多天 90% 會落在的範圍（天數越少範圍越寬）。<b>狀態</b>：符合／強於／弱於預期或警示，滑過看建議；警示＝落在回測幾乎不會出現的範圍，先查原因，一個月後仍在警示線下就停止追蹤。<b>回撤</b>：起跑以來從高點的最大跌幅。<b>買／賣</b>：起跑以來的買進、賣出筆數；下方連結是近 3 個月的模擬操作。<b>開始實時記錄</b>：這個策略的前向帳戶從哪天起每天 15:30 記錄；在 {{ forward_board.common_start }} 之後才加入的（過門檻那天才加入），共同起跑線上加入以前的部分是用同一套規則補算的，所以和它自己的前向帳戶數字不同。點策略名稱看它的前向帳戶（持股、每一筆交易）。持有方式「月線上續抱」＝掉出前 60 名且跌破 20 日均線才賣（使用者 2026-10-14 起不再追蹤固定持有 20 天的版本）。</p>
 </section>
 {% endif %}
 
 {% if research_tab == 'forward' %}
 <section class="card" id="stock-forward">
   <div class="card__head">
-    <h2>個股規則前向模擬 <span class="badge">{{ forward_start.strftime('%Y-%m-%d') }} 起</span></h2>
-    <span class="muted small">兩段期間都贏的規則自動加入、從加入那天起算；啟動資金 30 萬＋每月 5 日投入 1 萬、整個帳戶都能買賣，對同樣的錢全部買 0050；國泰手續費；每個交易日 15:30 記錄，只追加不改寫</span>
+    <h2>個股規則前向帳戶 <span class="badge">各自從加入那天起算</span></h2>
+    <span class="muted small">過全部門檻的規則在過門檻後的下一個交易日自動加入、從那天起算（最早 {{ forward_start.strftime('%Y-%m-%d') }}）；啟動資金 30 萬＋每月 5 日投入 1 萬、整個帳戶都能買賣，對同樣的錢全部買 0050；國泰手續費；每個交易日 15:30 記錄，只追加不改寫</span>
   </div>
   {% if stock_forward %}
   <div class="table-wrap table-wrap--stack">
@@ -755,26 +758,7 @@
     <ul class="reasons">{% for row in stopped %}<li><a href="/research/forward/{{ row.rule_hash }}">{{ row.name }}</a><span class="muted small">（{{ row.since }}～{{ row.stopped }}，{{ row.sessions }} 天）</span></li>{% endfor %}</ul>
   </details>
   {% endif %}
-  {% for row in stock_forward if (row.holdings or row.problems) and not row.stopped %}
-  <details style="margin-top:10px">
-    <summary class="small">{{ row.name }}：{{ row.date }} 持股 {{ row.holdings|length }} 檔、現金 {{ '{:,.0f}'.format(row.cash) }} 元{% if row.last_trade_day %}；最近交易 {{ row.last_trade_day }}（{{ row.last_trades|length }} 筆）{% endif %}</summary>
-    {% if row.problems %}<ul class="reasons">{% for problem in row.problems %}<li>{{ problem }}</li>{% endfor %}</ul>{% endif %}
-    <div class="table-wrap table-wrap--stack">
-      <table class="table--stack">
-        <thead><tr><th>股票</th><th class="num">股數</th><th class="num">收盤</th><th class="num">市值（元）</th></tr></thead>
-        <tbody>
-        {% for item in row.holdings %}
-          <tr><td data-primary><a href="/stock/{{ item.code }}"><strong>{{ item.code }}</strong> {{ item.name }}</a></td><td class="num" data-label="股數">{{ '{:,.2f}'.format(item.units) }}</td><td class="num" data-label="收盤">{{ item.close }}</td><td class="num" data-label="市值">{{ '{:,.0f}'.format(item.value) }}</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% if row.last_trades %}
-    <p class="small" style="margin:8px 0 0">{{ row.last_trade_day }} 的交易：{% for trade in row.last_trades %}{{ '買' if trade.side == 'BUY' else '賣' }} {{ trade.code }} {{ trade.name }} {{ '{:,.0f}'.format(trade.shares) }} 股 @ {{ trade.price }}{% if not loop.last %}；{% endif %}{% endfor %}</p>
-    {% endif %}
-  </details>
-  {% endfor %}
-  <p class="note">相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入。股利以再投入的股數計（和研究回測相同），所以股數會有小數。對帳：每天的股數與現金都要能從前一天加當天的交易算出來，重算過去的日子也要和當天寫下的一致。前向結果只觀察，不拿來挑規則；機器可讀版在<a href="/research/pool.json">選手池 JSON</a> 的 forward_stocks。</p>
+  <p class="note">點規則名稱看它的持股、資產走勢與每一筆交易。相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入。只有整數股；現金股利在發放日入帳、配股在發放日撥入（引擎 1.4.0 起）。對帳：每天的股數與現金都要能從前一天加當天的交易算出來，重算過去的日子也要和當天寫下的一致。前向結果只觀察，不拿來挑規則；機器可讀版在<a href="/research/pool.json">選手池 JSON</a> 的 forward_stocks。</p>
   {% else %}
   <p class="muted" style="margin:0">尚無追蹤中的個股規則。兩段期間都贏的規則會在下一個交易日 15:30 自動加入。</p>
   {% endif %}
