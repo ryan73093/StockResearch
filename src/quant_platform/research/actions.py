@@ -56,8 +56,10 @@ def delisting_dates(base: Path) -> dict[str, list[date]]:
 def dividend_plans(base: Path, codes) -> dict[str, list[tuple[date, date, float]]]:
     """code -> [(announced, cash ex-date, NT$ per share)] from FinMind's policies that carry all three — what the
     market knew from the announcement on (time factor ``dividend_ahead``)."""
+    from quant_platform.research.history.dividends_daily import announcements
     from quant_platform.research.history.finmind import read_rows
 
+    official = announcements(Path(base))      # 2026-10-16: the exchanges' nightly ex-rights tables, after FinMind's
     output: dict[str, list[tuple[date, date, float]]] = {}
     for code in codes:
         items = []
@@ -66,6 +68,10 @@ def dividend_plans(base: Path, codes) -> dict[str, list[tuple[date, date, float]
             cash = _number(row.get("CashEarningsDistribution")) + _number(row.get("CashStatutorySurplus"))
             if announced and ex_day and cash > 0 and announced <= ex_day:
                 items.append((announced, ex_day, cash))
+        known = {ex_day for _announced, ex_day, _cash in items}
+        for event in official.get(code, []):
+            if event["cash_announced"] and event["ex_date"] not in known and event["cash_announced"] <= event["ex_date"]:
+                items.append((event["cash_announced"], event["ex_date"], float(event["cash"])))
         if items:
             output[code] = items
     return output

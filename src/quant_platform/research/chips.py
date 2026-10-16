@@ -157,8 +157,11 @@ def build(history: str | Path, job=None) -> dict[str, int]:
                         columns[name].append(float(value) if isinstance(value, (int, float)) else None)
         elif dataset == CORPORATE:            # one row per announcement: a dividend change or new shares
             columns.update({"dividend_change": [], "cash_issue_shares": []})
-            for code, rows in _rows(raw, "TaiwanStockDividend"):
-                for day, change, shares in corporate_events(rows):
+            policies = {code: rows for code, rows in _rows(raw, "TaiwanStockDividend")}
+            for code, rows in _official_policies(base, out, policies).items():   # 2026-10-16: the nightly tables
+                policies[code] = policies.get(code, []) + rows
+            for code in sorted(policies):
+                for day, change, shares in corporate_events(policies[code]):
                     columns["date"].append(day)
                     columns["code"].append(code)
                     columns["dividend_change"].append(change)
@@ -223,6 +226,42 @@ def build(history: str | Path, job=None) -> dict[str, int]:
         job.update(done=len(steps), force=True)
         job.payload["summary"] = "、".join(f"{name.removeprefix('TaiwanStock')} {rows:,} 列" for name, rows in written.items())
     return written
+
+
+def _official_policies(base: Path, out: Path, policies: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """2026-10-16 (research/history/dividends_daily.py): the announcements in the exchanges' nightly ex-rights tables
+    that FinMind's one-time download does not have (its ex-dates left out), as FinMind-shaped policy rows."""
+    from quant_platform.research.history.dividends_daily import announcements, policy_rows
+
+    official = announcements(base)
+    if not official:
+        return {}
+    path = out / "TaiwanStockShareholding.parquet"
+    table = (pq.read_table(path, columns=["date", "code", "NumberOfSharesIssued"]).to_pandas()
+             if path.is_file() else pd.DataFrame(columns=["date", "code", "NumberOfSharesIssued"]))
+    table = table[table["code"].isin(official)].dropna().sort_values("date")
+    issued = {code: frame for code, frame in table.groupby("code")}
+
+    def shares_of(code: str):
+        def at(day: date) -> float | None:
+            frame = issued.get(code)
+            before = frame[frame["date"] <= day] if frame is not None else None
+            return float(before["NumberOfSharesIssued"].iloc[-1]) if before is not None and len(before) else None
+        return at
+
+    output = {}
+    for code, events in official.items():
+        known = set()
+        for row in policies.get(code, []):
+            for name in ("CashExDividendTradingDate", "StockExDividendTradingDate"):
+                try:
+                    known.add(date.fromisoformat(str(row.get(name) or "")[:10]))
+                except ValueError:
+                    pass
+        rows = policy_rows(events, known, shares_of(code))
+        if rows:
+            output[code] = rows
+    return output
 
 
 def corporate_events(rows: list[dict]) -> list[tuple[date, float | None, float | None]]:

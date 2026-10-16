@@ -209,11 +209,16 @@ def test_accounts_that_hold_0050_stop_and_new_ones_are_not_tracked(tmp_path):
                                                     ensure_ascii=False), encoding="utf-8")
     tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
     added = tracker.sync(date(2026, 10, 9))
-    assert [item["rule_hash"] for item in added] == [pure.rule_hash]            # the half-0050 rule is not added
+    # the half-0050 rule is not added; the pure one (a fixed 20-session holding) as its trend version (2026-10-16)
+    from quant_platform.research.stock_forward import trend_version
+
+    trend = trend_version(pure)
+    assert [item["rule_hash"] for item in added] == [trend.rule_hash] and "月線上續抱" in added[0]["reason"]
+    assert tracker.sync(date(2026, 10, 12)) == []                                # not again
     old = next(item for item in tracker.tracked() if item["rule_hash"] == "old-half")
     assert old["stopped"] == "2026-10-09" and "0050" in old["stop_reason"]
     written = tracker.record(date(2026, 10, 9), now=at(date(2026, 10, 9)))
-    assert {record["rule_hash"] for record in written} == {pure.rule_hash}
+    assert {record["rule_hash"] for record in written} == {trend.rule_hash}
 
 
 def test_fixed_holding_rules_give_way_to_their_trend_versions(tmp_path):

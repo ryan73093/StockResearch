@@ -406,6 +406,12 @@ def update_chips(container: "Container", now: datetime | None = None) -> object 
                 alerts.build(base)
             except Exception:  # nor a failed announcement list
                 logger.exception("Attention and disposition lists failed")
+        try:                    # 2026-10-16: tonight's ex-rights tables (dividends and cash capital increases)
+            from quant_platform.research.history import dividends_daily
+
+            fetched["dividends"] = dividends_daily.fetch(client, local_now.date())
+        except Exception:  # nor the ex-rights tables
+            logger.exception("Ex-rights tables failed")
         job.update(done=1, current="重建籌碼檔", force=True)
         written = build(base)
         job.update(done=2, force=True)
