@@ -173,7 +173,7 @@ def test_an_old_scan_gets_its_effective_trials_from_a_sample(tmp_path):
     folder = tmp_path / "scans" / "scan-1.0.0-x"
     scan.prepare(data, fp, FREE, folder / "arrays")
     items = scan.candidates(["momentum_6", "momentum_12_1", "trend_200", "reversal_1"], largest=2)
-    rows = scan.screen(folder / "arrays", items, FREE, 0, folder)
+    rows = scan.screen(folder / "arrays", items, FREE, 0, folder, gpu=False)   # an old scan: one CPU file
     (folder / "screen-0.jsonl").write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
     found = scan.sample_effective(folder, FREE, sample=20, workers=0)
     assert found["screened"] == len(rows) and 1 <= found["groups_090"] <= found["sample"] <= 20

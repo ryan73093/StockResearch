@@ -351,8 +351,19 @@ def _work(folder: str, chunk: list[dict], out: str, costs) -> int:
     return len(chunk)
 
 
-def screen(arrays_folder: Path, items: list[dict], costs, workers: int, out_folder: Path, progress=None) -> list[dict]:
-    """Stage 1 over ``items`` in ``workers`` processes (0 = here); every result is written as it is made."""
+def screen(arrays_folder: Path, items: list[dict], costs, workers: int, out_folder: Path, progress=None,
+           gpu: bool | None = None) -> list[dict]:
+    """Stage 1 over ``items`` in ``workers`` processes (0 = here); every result is written as it is made. On the GPU
+    when there is one (2026-10-16, research/scan_gpu.py: thousands of candidates at once; ``gpu=False`` forces the
+    CPU)."""
+    if gpu is None:
+        from quant_platform.research.gpu import device
+
+        gpu = device().type == "cuda"
+    if gpu and items:
+        from quant_platform.research.scan_gpu import screen_gpu
+
+        return screen_gpu(arrays_folder, items, costs, out_folder, progress)
     out_folder.mkdir(parents=True, exist_ok=True)
     if workers <= 0:                             # here, one chunk (the same files as a worker writes)
         path = out_folder / "screen-0.jsonl"

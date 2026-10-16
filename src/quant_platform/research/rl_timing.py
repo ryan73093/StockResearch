@@ -163,6 +163,8 @@ class Timeline:
 
     def rewards(self, weights: np.ndarray, decisions: list[int]) -> np.ndarray:
         """decision × rollout: log return over the next STEP sessions minus 0050's, less the swaps' cost."""
+        if _on_gpu():
+            return _gpu_rewards(self, weights, decisions)
         output = np.zeros((len(decisions), weights.shape[1]))
         previous = None
         for index, decision in enumerate(decisions):
@@ -174,6 +176,56 @@ class Timeline:
             output[index] = np.log1p(np.clip(gross - cost, -0.9, None)) - np.log1p(self.bench[decision])
             previous = chosen
         return output
+
+
+def _on_gpu() -> bool:
+    from quant_platform.research.gpu import device
+
+    return device().type == "cuda"
+
+
+def _gpu_rewards(timeline, weights: np.ndarray, decisions: list[int]) -> np.ndarray:
+    """``Timeline.rewards`` on the GPU (2026-10-16): every rollout of a batch of decisions at once — the weighted
+    percentiles, the TOP picks, their mean forward return, the swaps against the decision before."""
+    import torch
+
+    from quant_platform.research.gpu import device
+
+    where = device()
+    cached = timeline.__dict__.get("_gpu")
+    if cached is None:
+        cached = timeline.__dict__["_gpu"] = (
+            torch.from_numpy(np.ascontiguousarray(timeline.percentiles)).to(where),
+            torch.from_numpy(np.nan_to_num(timeline.forward)).to(where),
+            torch.from_numpy(np.isfinite(timeline.forward)).to(where),
+            torch.from_numpy(np.asarray(timeline.bench, dtype=np.float64)).to(where))
+    percentiles, forward, known, bench = cached
+    count, rollouts = len(decisions), weights.shape[1]
+    symbols = percentiles.shape[2]
+    every = torch.as_tensor(np.asarray(decisions, dtype=np.int64), device=where)
+    chosen_weights = torch.as_tensor(np.asarray(weights, dtype=np.float32), device=where)
+    output = torch.empty((count, rollouts), dtype=torch.float64, device=where)
+    step = max(1, int(2e8 // max(1, rollouts * symbols)))
+    previous = None
+    for start in range(0, count, step):
+        index = every[start:start + step]
+        score = torch.einsum("drk,dks->drs", chosen_weights[start:start + step], percentiles[index])
+        score = score.masked_fill(~known[index][:, None, :], float("-inf"))
+        top = torch.topk(score, TOP, dim=2).indices                                   # d × rollout × TOP
+        moves = torch.gather(forward[index][:, None, :].expand(-1, rollouts, -1), 2, top)
+        valid = torch.gather(known[index][:, None, :].expand(-1, rollouts, -1), 2, top)
+        gross = (moves * valid).sum(2) / valid.sum(2).clamp(min=1)
+        held = torch.zeros((len(index), rollouts, symbols), dtype=torch.bool, device=where)
+        held.scatter_(2, top, True)
+        before = torch.cat([previous[None], held[:-1]]) if previous is not None else held[:-1]
+        overlap = (held[-len(before):] & before).sum(2) if len(before) else torch.zeros((0, rollouts), device=where)
+        swapped = torch.full((len(index), rollouts), float(TOP), dtype=torch.float64, device=where)
+        swapped[len(index) - len(before):] = TOP - overlap.double()
+        cost = swapped / TOP * COST_SWAP
+        output[start:start + step] = (torch.log1p(torch.clamp(gross - cost, min=-0.9))
+                                      - torch.log1p(bench[index])[:, None])
+        previous = held[-1]
+    return output.cpu().numpy()
 
 
 class Slotted:

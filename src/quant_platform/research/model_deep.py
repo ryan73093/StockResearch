@@ -67,11 +67,16 @@ def _network(features: int):
 
 
 def _windows(data: np.ndarray, pairs: np.ndarray):
-    """batch × LENGTH × feature for (session, symbol) pairs."""
+    """batch × LENGTH × feature for (session, symbol) pairs, on the GPU when there is one (2026-10-16)."""
     import torch
 
+    from quant_platform.research.gpu import device
+
     steps = pairs[:, 0][:, None] + np.arange(-LENGTH + 1, 1)[None, :]
-    return torch.from_numpy(data[steps, pairs[:, 1][:, None], :].astype(np.float32))
+    if isinstance(data, torch.Tensor):           # the sequences already on the device: index them there
+        where = data.device
+        return data[torch.as_tensor(steps, device=where), torch.as_tensor(pairs[:, 1][:, None], device=where), :].float()
+    return torch.from_numpy(data[steps, pairs[:, 1][:, None], :].astype(np.float32)).to(device())
 
 
 def _score(network, data: np.ndarray, pairs: np.ndarray) -> np.ndarray:
@@ -80,7 +85,7 @@ def _score(network, data: np.ndarray, pairs: np.ndarray) -> np.ndarray:
     output = []
     with torch.no_grad():
         for start in range(0, len(pairs), BATCH * 4):
-            output.append(network(_windows(data, pairs[start:start + BATCH * 4])).numpy())
+            output.append(network(_windows(data, pairs[start:start + BATCH * 4])).cpu().numpy())
     return np.concatenate(output) if output else np.zeros(0)
 
 
@@ -97,11 +102,16 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
         training_columns,
     )
 
+    from quant_platform.research.gpu import device
+    from quant_platform.research.gpu import name as device_name
+
     torch.set_num_threads(4)
+    on = device()
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     eligible = eligibility(fp)
     data = sequences(fp, eligible)
+    data = torch.from_numpy(data).to(on)             # session × symbol × feature, float16, on the GPU (about 150 MB)
     samples = [column for column in sample_columns(len(fp.sessions)) if column >= LENGTH]
     ranks = label_block(fp, samples, eligible, "rank", HORIZON)                  # sample × symbol
     gains = label_block(fp, samples, eligible, "excess", HORIZON)
@@ -125,7 +135,7 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
         for seed in SEEDS:
             torch.manual_seed(seed)
             rng = np.random.default_rng(seed)
-            network = _network(data.shape[2])
+            network = _network(data.shape[2]).to(on)
             optimiser = torch.optim.Adam(network.parameters(), lr=LEARNING_RATE)
             best, curve = (-np.inf, None), []
             for _epoch in range(EPOCHS):
@@ -133,7 +143,7 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
                 for start in range(0, len(order), BATCH):
                     chosen = order[start:start + BATCH]
                     loss = torch.nn.functional.mse_loss(network(_windows(data, pairs[chosen])),
-                                                        torch.from_numpy(labels[chosen]))
+                                                        torch.from_numpy(labels[chosen]).to(on))
                     optimiser.zero_grad()
                     loss.backward()
                     optimiser.step()
@@ -182,7 +192,8 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
                         scores=np.stack([scores[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0)))
     meta = {"version": VERSION, "label": "deep", "features": ["return", "turnover_change", *FACTORS],
             "length": LENGTH, "hidden": HIDDEN, "epochs": EPOCHS, "seeds": list(SEEDS), "held_out": HELD_OUT,
-            "horizon": HORIZON, "years": diagnostics, "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
+            "horizon": HORIZON, "years": diagnostics, "device": device_name(),
+            "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     return meta
 
@@ -226,9 +237,11 @@ def _score_later(fp, folder: Path, positions: list[int], output: np.ndarray) -> 
     networks = []
     eligible = eligibility(fp)
     data = sequences(fp, eligible)
+    from quant_platform.research.gpu import device
+
     for path in [path for path in saved if path.stem.startswith(f"{year}-")]:
-        network = _network(data.shape[2])
-        network.load_state_dict(torch.load(path, weights_only=True))
+        network = _network(data.shape[2]).to(device())
+        network.load_state_dict(torch.load(path, weights_only=True, map_location=device()))
         network.eval()
         networks.append(network)
     for position in positions:

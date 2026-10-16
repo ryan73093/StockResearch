@@ -184,3 +184,23 @@ def test_the_robot_31_trains_per_year_on_its_chosen_slots_and_scores_with_them(m
     alike = rl_timing.scores(fp, tmp_path, "equal", rl_timing.ROLLING_VERSION)
     first = fp.index[min(date.fromisoformat(day) for day in meta["weights"])]
     assert np.isnan(robot[first - 1]).all() and np.isfinite(robot[first]).sum() > 10 and np.isfinite(alike[first]).sum() > 10
+
+
+def test_the_gpu_rewards_match_the_cpu_rewards(monkeypatch):
+    """2026-10-16 (使用者：先把 GPU 用起來): the same rewards, every rollout of a batch at once on the GPU."""
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("no GPU")
+    rng = np.random.default_rng(5)
+    stub = type("T", (), {"picks": rl_timing.Timeline.picks})()
+    stub.percentiles = rng.random((12, 4, 60)).astype(np.float32)
+    stub.forward = rng.normal(0.01, 0.05, (12, 60))
+    stub.forward[:, :5] = np.nan                                             # no forward return: never picked
+    stub.bench = rng.normal(0.005, 0.02, 12)
+    weights = rng.random((7, 9, 4)).astype(np.float32)
+    decisions = [0, 2, 3, 5, 8, 9, 11]
+    monkeypatch.setattr(rl_timing, "TOP", 6)
+    gpu = rl_timing._gpu_rewards(stub, weights, decisions)
+    monkeypatch.setattr(rl_timing, "_on_gpu", lambda: False)
+    cpu = rl_timing.Timeline.rewards(stub, weights, decisions)
+    assert gpu.shape == cpu.shape == (7, 9) and np.allclose(gpu, cpu, atol=1e-9)
