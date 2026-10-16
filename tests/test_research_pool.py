@@ -15,6 +15,18 @@ BAD = {**GOOD, "windows": {"3y": {"count": 100, "win_ratio": 0.3, "median_excess
        "full_period_excess": -0.3}
 
 
+
+def _start() -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from quant_platform.research.forward_board import common_start
+
+    return common_start(datetime.now(ZoneInfo("Asia/Taipei")).date()).isoformat()
+
+
+START = _start()                    # 2026-10-17: the forward page shows the accounts on this month's rolling start
+
 def seed(research):
     registry = TrialRegistry(research / "trials.jsonl")
     add = lambda **kw: registry.register(kind="candidate", report_file="r.json", **kw)  # noqa: E731
@@ -75,10 +87,10 @@ def test_pool_and_research_page_show_costs_and_forward_tracking(tmp_path):
     folder.mkdir(parents=True)
     rule = StockRule(name="個股 52 週高點", factor="high_52w", top=30, buffer=3)
     (folder / "tracked.json").write_text(json.dumps([{
-        "rule_hash": "stock-both", "name": rule.name, "rule": rule.model_dump(mode="json"), "since": "2026-10-05",
+        "rule_hash": "stock-both", "name": rule.name, "rule": rule.model_dump(mode="json"), "since": START,
         "reason": "兩段期間都贏"}], ensure_ascii=False), encoding="utf-8")
     (folder / "log.jsonl").write_text(json.dumps({
-        "date": "2026-10-05", "rule_hash": "stock-both", "name": rule.name, "since": "2026-10-05", "value": 9_990.0,
+        "date": "2026-10-05", "rule_hash": "stock-both", "name": rule.name, "since": START, "value": 9_990.0,
         "cash": 90.0, "contributed": 10_000.0, "benchmark_value": 9_995.0, "excess": -0.0005,
         "holdings": [{"code": "2330", "name": "台積電", "units": 9.0, "close": 1_100.0, "value": 9_900.0}],
         "trades_today": [{"code": "2330", "name": "台積電", "side": "BUY", "shares": 9, "price": 1_100.0, "fee": 14, "tax": 0}],
@@ -87,14 +99,14 @@ def test_pool_and_research_page_show_costs_and_forward_tracking(tmp_path):
 
     rows = {row["spec_hash"]: row for row in rule_rows(research, "dca")}
     assert rows["stock-old"]["development"]["cost_share"] == 0.1
-    assert rows["stock-both"]["forward_since"] == "2026-10-05" and rows["etf-win"]["forward_since"] is None
+    assert rows["stock-both"]["forward_since"] == START and rows["etf-win"]["forward_since"] is None
     client = create_app(container).test_client()
     page = client.get("/research?tab=forward").get_data(as_text=True)
     assert "個股規則前向帳戶" in page and "/research/forward/stock-both" in page and "正常" in page
     detail = client.get("/research/forward/stock-both").get_data(as_text=True)   # 2026-10-17: holdings on its own page
     assert "台積電" in detail
     pool = client.get("/research/pool?basis=dca").get_data(as_text=True)
-    assert "前向觀察中的個股規則" in pool and "費稅佔投入" in pool and "前向觀察 10-05 起" in pool
+    assert "前向觀察中的個股規則" in pool and "費稅佔投入" in pool and f"前向觀察 {START[5:]} 起" in pool
     payload = client.get("/research/pool.json?basis=dca").get_json()
     assert payload["forward_stocks"][0]["sessions"] == 1 and payload["forward_stocks"][0]["problems"] == []
 
@@ -113,7 +125,7 @@ def test_final_validation_result_shows_on_pool_and_forward_rows(tmp_path):
     folder.mkdir(parents=True)
     rule = StockRule(name="個股 52 週高點", factor="high_52w", top=30, buffer=3)
     (folder / "tracked.json").write_text(json.dumps([{"rule_hash": "stock-both", "name": rule.name,
-                                                       "rule": rule.model_dump(mode="json"), "since": "2026-10-03"}],
+                                                       "rule": rule.model_dump(mode="json"), "since": START}],
                                                      ensure_ascii=False), encoding="utf-8")
     rows = {row["spec_hash"]: row for row in rule_rows(research, "dca")}
     assert rows["stock-both"]["status"] == "holdout_failed" and rows["stock-both"]["holdout"]["excess"] == -0.71

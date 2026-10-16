@@ -744,7 +744,7 @@
     <table class="table--stack">
       <thead><tr><th>規則</th><th class="num">已記錄交易日</th><th class="num">投入（元）</th><th class="num">目前資產</th><th class="num">0050 定期定額</th><th class="num">相對 0050</th><th class="num">持股／費稅</th><th>對帳</th></tr></thead>
       <tbody>
-      {% for row in stock_forward if not row.stopped %}
+      {% for row in stock_forward if not row.stopped and row.since == rolling_start %}
         <tr>
           <td data-primary><strong><a href="/research/forward/{{ row.rule_hash }}">{{ row.name }}</a></strong><span class="muted small"> {{ row.since }} 起</span>{% if row.final %} <span class="badge {{ 'badge--ok' if row.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if row.final.passed else '未通過' }} {{ '{:+.0%}'.format(row.final.excess) }}</span>{% endif %}</td>
           <td class="num" data-label="已記錄交易日">{{ row.sessions }}{% if row.late %}<span class="muted small">（補記 {{ row.late }}）</span>{% endif %}</td>
@@ -759,6 +759,10 @@
       </tbody>
     </table>
   </div>
+  {% set waiting = stock_forward|rejectattr('stopped')|rejectattr('since', 'equalto', rolling_start)|list %}
+  {% if waiting %}
+  <p class="col-help">還有 {{ waiting|length }} 個帳戶是舊起點（{{ waiting|map(attribute='since')|unique|sort|join('、') }} 起），數字不顯示：這個月的名單（只用 {{ rolling_cutoff }} 以前的資料挑）與重訓到 {{ rolling_cutoff }} 的模型完成後，全部改成從 {{ rolling_start }} 起重算、補記到最新交易日；不在名單裡的停止（紀錄保留）。</p>
+  {% endif %}
   {% set stopped = stock_forward|selectattr('stopped')|list %}
   {% if stopped %}
   <details style="margin-top:10px"><summary class="small">已停止的 {{ stopped|length }} 個帳戶（含 0050，你自己另外持有 0050；紀錄保留）</summary>
