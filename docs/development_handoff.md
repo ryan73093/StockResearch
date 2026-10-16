@@ -1,6 +1,6 @@
 # 交易研究分析平台 — 當前開發交接
 
-記錄時間：2026-10-17 03:xx（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前狀態與下一步；做完的寫進 `DEVELOPMENT_HISTORY.md`。網站側邊欄「專案資訊」可以直接看本檔、路線圖、開發歷程與研究方法。
+記錄時間：2026-10-17 03:05（Asia/Taipei）。交接模型：Claude（Opus 5.5）。本檔只留當前狀態與下一步；做完的寫進 `DEVELOPMENT_HISTORY.md`。網站側邊欄「專案資訊」可以直接看本檔、路線圖、開發歷程與研究方法。
 
 ## 接手前必讀
 
@@ -18,7 +18,7 @@
 
 ## 背景執行中
 
-- `deep2cost`（03:3x 開始）：階段 0 診斷 → 三個成本換股規則 → 統計。之前停掉的 dealer2、dealermodel、rebuild143 已標成 stopped（不會在重開機後被自動重啟）。
+- `deep2cost`（03:05 開始）：階段 0 診斷 → 三個成本換股規則 → 統計。之前停掉的 dealer2、dealermodel、rebuild143 已標成 stopped（不會在重開機後被自動重啟）。
 
 ## 下一步（依優先）
 
