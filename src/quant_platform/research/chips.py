@@ -40,6 +40,13 @@ CHIP_FACTORS = {
     "revenue_yoy_3m": "近 3 個月營收年增率",
     "market_cap": "市值（大型股）",
 }
+# 2026-10-16 (自營商): the securities dealers' own trading and their hedging (mostly of the call warrants they
+# issued, so it follows retail warrant buying), 20 sessions against the shares issued — separate since 2014-12 in
+# FinMind, used from the next session. Kept apart from the 2026-10-04 chip batch.
+DEALER_FACTORS = {
+    "dealer_buy_20": "自營商自行買賣買超（20 日，佔發行股數）",
+    "dealer_hedge_20": "自營商避險買超（20 日，佔發行股數；多半是權證避險）",
+}
 # 2026-10-09: an event factor, fresh revenue news only. Quantified fundamental news drifts for weeks after
 # it is public while the 70-day revenue_yoy holds stale months (AI-methods review); this one exists only in
 # the 20 sessions after a monthly revenue is announced. Kept apart so the 2026-10-04 chip batch stays as run.
@@ -199,22 +206,28 @@ def build(history: str | Path, job=None) -> dict[str, int]:
                     columns["LendingVolume"].append(days[day][0])
                     columns["FeeVolume"].append(days[day][1])
         elif dataset == "TaiwanStockInstitutionalInvestorsBuySell":
-            columns.update({"foreign_net": [], "trust_net": []})
+            columns.update({"foreign_net": [], "trust_net": [], "dealer_self_net": [], "dealer_hedge_net": []})
             for code, rows in _rows(raw, dataset):
-                net: dict[str, list[float]] = {}
+                net: dict[str, list] = {}
                 for row in rows:
                     who = row.get("name") or ""
-                    slot = net.setdefault(row["date"], [0.0, 0.0])
+                    slot = net.setdefault(row["date"], [0.0, 0.0, None, None])
                     amount = float(row.get("buy") or 0) - float(row.get("sell") or 0)
                     if who in ("Foreign_Investor", "Foreign_Dealer_Self"):
                         slot[0] += amount
                     elif who == "Investment_Trust":
                         slot[1] += amount
-                for day, (foreign, trust) in net.items():
+                    elif who == "Dealer_self":         # 2026-10-16: the dealers, split since 2014-12 ("Dealer"
+                        slot[2] = (slot[2] or 0.0) + amount                      # before that is left out)
+                    elif who == "Dealer_Hedging":
+                        slot[3] = (slot[3] or 0.0) + amount
+                for day, (foreign, trust, own, hedge) in net.items():
                     columns["date"].append(date.fromisoformat(day))
                     columns["code"].append(code)
                     columns["foreign_net"].append(foreign)
                     columns["trust_net"].append(trust)
+                    columns["dealer_self_net"].append(own)
+                    columns["dealer_hedge_net"].append(hedge)
         else:  # monthly revenue: the month it is for and the day it became public
             columns.update({"available": [], "revenue": [], "year": [], "month": []})
             for code, rows in _rows(raw, dataset):
@@ -399,6 +412,10 @@ class ChipStore:
         frame.loc[frame.index <= first] = np.nan  # before the first announcement nothing is known
         return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
 
+    def dealer_available(self) -> bool:
+        path = self._folder / "TaiwanStockInstitutionalInvestorsBuySell.parquet"
+        return path.is_file() and "dealer_self_net" in pq.read_schema(path).names
+
     def issuance_available(self) -> bool:
         return (self._folder / f"{STOCK_DIVIDENDS}.parquet").is_file()
 
@@ -559,9 +576,11 @@ class ChipStore:
         elif factor == "foreign_holding_change":
             level = self._daily("TaiwanStockShareholding", "ForeignInvestmentSharesRatio")
             frame = level - level.shift(20)
-        elif factor in ("foreign_buy_20", "trust_buy_20"):
+        elif factor in ("foreign_buy_20", "trust_buy_20", "dealer_buy_20", "dealer_hedge_20"):
             shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued")
-            flow = self._flow("foreign_net" if factor == "foreign_buy_20" else "trust_net", 20)
+            field = {"foreign_buy_20": "foreign_net", "trust_buy_20": "trust_net", "dealer_buy_20": "dealer_self_net",
+                     "dealer_hedge_20": "dealer_hedge_net"}[factor]
+            flow = self._flow(field, 20)
             frame = flow / shares.where(shares > 0)
         elif factor == "margin_growth_20":
             balance = self._daily("TaiwanStockMarginPurchaseShortSale", "MarginPurchaseTodayBalance")

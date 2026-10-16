@@ -83,13 +83,15 @@ def test_every_report_parses_into_the_chip_columns():
     assert parse("twse", "margin", TWSE["margin"], DAY) == [
         {"date": DAY, "code": "2330", "MarginPurchaseTodayBalance": 30_939, "ShortSaleTodayBalance": 18}]
     assert parse("twse", "insti", TWSE["insti"], DAY) == [
-        {"date": DAY, "code": "2330", "foreign_net": -5_913_874, "trust_net": 253_678}]
+        {"date": DAY, "code": "2330", "foreign_net": -5_913_874, "trust_net": 253_678, "dealer_self_net": None,
+         "dealer_hedge_net": None}]                                                  # an old 11-field reply
     assert parse("tpex", "holding", TPEX["holding"], DAY)[0]["ForeignInvestmentSharesRatio"] == 40.0
     assert parse("tpex", "per", TPEX["per"], DAY)[0]["PBR"] == 2.1
     assert parse("tpex", "margin", TPEX["margin"], DAY)[0] == {
         "date": DAY, "code": "6488", "MarginPurchaseTodayBalance": 9_519, "ShortSaleTodayBalance": 15}
     assert parse("tpex", "insti", TPEX["insti"], DAY)[0] == {"date": DAY, "code": "6488", "foreign_net": -862_867,
-                                                             "trust_net": 105_839}
+                                                             "trust_net": 105_839, "dealer_self_net": None,
+                                                             "dealer_hedge_net": None}
     assert parse("twse", "per", {"stat": "很抱歉，沒有符合條件的資料!"}, DAY) == []
     assert parse("twse", "sbl", TWSE["sbl"], DAY) == [
         {"date": DAY, "code": "2330", "SBLShortSalesCurrentDayBalance": 12_031_514, "MarginShortSalesCurrentDayBalance": 23_000}]
@@ -179,3 +181,20 @@ def test_monthly_revenue_tables_keep_the_first_day_each_company_appears(tmp_path
     assert rows["1101"]["available"] == date(2026, 9, 17) and rows["1101"]["revenue"] == 13_515_534_000
     assert rows["1102"]["available"] == date(2026, 9, 20)                 # a late reporter: its first table
     assert rows["6488"]["revenue"] == 4_764_363_000
+
+
+def test_the_dealers_own_trading_and_hedging_come_from_the_full_reports():
+    """2026-10-16: T86 columns 14 and 17, dailyTrade 16 and 19 (TSMC and 環球晶 on 10-15)."""
+    t86 = {"stat": "OK", "fields": ["證券代號", "證券名稱"] + [f"f{i}" for i in range(2, 19)],
+           "data": [["2330", "台積電", "13,293,478", "47,404,843", "-34,111,365", "0", "0", "0", "3,305,000", "70,000",
+                     "3,235,000", "7,415,881", "150,838", "215,953", "-65,115", "8,874,320", "1,393,324", "7,480,996",
+                     "-23,460,484"]]}
+    row = parse("twse", "insti", t86, DAY)[0]
+    assert row["dealer_self_net"] == -65_115 and row["dealer_hedge_net"] == 7_480_996 and row["trust_net"] == 3_235_000
+    daily = {"stat": "ok", "tables": [{"fields": ["代號", "名稱"] + ["買進股數", "賣出股數", "買賣超股數"] * 7 + ["合計"],
+                                        "data": [["6488", "環球晶", "6,097,707", "8,211,537", "-2,113,830", "0", "0", "0",
+                                                  "6,097,707", "8,211,537", "-2,113,830", "306,600", "28,000", "278,600",
+                                                  "206,548", "388,030", "-181,482", "1,491,683", "1,589,873", "-98,190",
+                                                  "1,698,231", "1,977,903", "-279,672", "-2,114,902"]]}]}
+    row = parse("tpex", "insti", daily, DAY)[0]
+    assert row["dealer_self_net"] == -181_482 and row["dealer_hedge_net"] == -98_190 and row["trust_net"] == 278_600

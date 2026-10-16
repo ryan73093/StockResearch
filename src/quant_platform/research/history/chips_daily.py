@@ -178,11 +178,17 @@ def parse(exchange: str, dataset: str, payload: object, day: date) -> list[dict[
             elif dataset == "daytrade":
                 row.update(BuyAmount=_value(item[bought_at]), Volume=_value(item[volume_at]))
             elif exchange == "twse":
-                # T86: foreign excluding their dealers (net at 4), foreign dealers (7), investment trust (10)
-                row.update(foreign_net=(_value(item[4]) or 0.0) + (_value(item[7]) or 0.0), trust_net=_value(item[10]) or 0.0)
+                # T86: foreign excluding their dealers (net at 4), foreign dealers (7), investment trust (10), the
+                # dealers' own trading (14) and hedging (17) — checked 2026-10-16, TSMC −65,115 + 7,480,996
+                row.update(foreign_net=(_value(item[4]) or 0.0) + (_value(item[7]) or 0.0), trust_net=_value(item[10]) or 0.0,
+                           dealer_self_net=_value(item[14]) if len(fields) > 17 else None,
+                           dealer_hedge_net=_value(item[17]) if len(fields) > 17 else None)
             else:
-                # dailyTrade: foreign excl. dealers 2-4, foreign dealers 5-7, foreign total 8-10, trust 11-13
-                row.update(foreign_net=_value(item[10]) or 0.0, trust_net=_value(item[13]) or 0.0)
+                # dailyTrade: foreign excl. dealers 2-4, foreign dealers 5-7, foreign total 8-10, trust 11-13,
+                # dealers' own 14-16, hedging 17-19, dealers 20-22
+                row.update(foreign_net=_value(item[10]) or 0.0, trust_net=_value(item[13]) or 0.0,
+                           dealer_self_net=_value(item[16]) if len(fields) > 22 else None,
+                           dealer_hedge_net=_value(item[19]) if len(fields) > 22 else None)
             rows.append(row)
         if rows:
             break

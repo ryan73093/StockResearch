@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -450,6 +450,26 @@ switch ($Name) {
         Invoke-Step "4-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "5-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
         Invoke-Step "6-leakcheck" @("-m", "quant_platform.research", "leakcheck")
+    }
+    "dealermodel" {
+        # 2026-10-16: the chip tables rebuilt with the dealers' own trading and hedging, the factors' strength, model G
+        # (gbm-2.2.0: the ensemble on every factor family but monthly revenue), every 1-4 signal set with a dealer
+        # factor that passes the novelty gate; then — only if model G passes its registered gate against gbm-2.0.0 —
+        # its rule and every set with it; the statistics, the board and the leak check. Keeps out of 12:00–14:45 and
+        # 19:30–22:15 (the 21:30 chip update rewrites the same files).
+        while (((Get-Date).TimeOfDay -ge [TimeSpan]"12:00" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:45") -or
+               ((Get-Date).TimeOfDay -ge [TimeSpan]"15:00" -and (Get-Date).TimeOfDay -lt [TimeSpan]"22:15")) {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-chips" @("-m", "quant_platform.research.history", "chips")
+        Invoke-Step "2-factors" @("-m", "quant_platform.research", "factors", "--recent")
+        Invoke-Step "3-model-g" @("-m", "quant_platform.research", "model", "--model-version", "gbm-2.2.0")
+        Invoke-Step "4-scan-dealer" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "80", "--pool", "5000", "--signals-min", "1", "--signals-max", "4", "--require-dealer")
+        Invoke-Step "5-rule-g" @("-m", "quant_platform.research", "daily", "--name", "modelg", "--broker", "cathay")
+        Invoke-Step "6-scan-g" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "80", "--pool", "5000", "--signals-min", "1", "--signals-max", "4", "--require", "ml_gbm_ext")
+        Invoke-Step "7-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "8-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+        Invoke-Step "9-leakcheck" @("-m", "quant_platform.research", "leakcheck")
     }
     "rebuild141" {
         # 2026-10-14 夜（使用者：到底還有哪些東西是用舊的方式？）: every trained model again on the corrected data —

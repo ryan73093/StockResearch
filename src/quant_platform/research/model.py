@@ -44,7 +44,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_gbm_ens": {"version": "gbm-2.0.0", "label": "ensemble", "features": "no_revenue_quality"},
           # 2026-10-13 (the technical robot, second version, step 1): the same ensemble on the robot's 20 price
           # and volume factors only — a supervised technical ranker the RL robot must at least match
-          "ml_tech_ens": {"version": "gbm-2.1.0", "label": "ensemble", "features": "technical"}}
+          "ml_tech_ens": {"version": "gbm-2.1.0", "label": "ensemble", "features": "technical"},
+          # 2026-10-16: the same ensemble on every rule factor but monthly revenue — the families added since
+          # (lending and short selling, notices, lending fees, dividends and new shares, issuance, dealers) included
+          "ml_gbm_ext": {"version": "gbm-2.2.0", "label": "ensemble", "features": "extended"}}
 MONTHLY_REVENUE = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel")
 VERSIONS = {spec["version"]: spec for spec in MODELS.values()}
 LATEST = "gbm-1.2.0"
@@ -60,13 +63,14 @@ def features() -> tuple[str, ...]:
     """The model's inputs: every rule factor except the 2026-10-10 trend-quality ones, which a later model
     version would add on purpose (a saved version keeps its own list, ``trained_features``)."""
     from quant_platform.research.daily import (
-        ALERT_FACTORS, CORPORATE_FACTORS, FACTOR_LABELS, ISSUANCE_FACTORS, LENDING_FACTORS, RAW_V2, SHORT_FACTORS,
-        TIME_FACTORS, TREND_QUALITY,
+        ALERT_FACTORS, CORPORATE_FACTORS, DEALER_FACTORS, FACTOR_LABELS, ISSUANCE_FACTORS, LENDING_FACTORS, RAW_V2,
+        SHORT_FACTORS, TIME_FACTORS, TREND_QUALITY,
     )
 
     return tuple(name for name in FACTOR_LABELS if name not in TREND_QUALITY and name not in RAW_V2
                  and name not in TIME_FACTORS and name not in SHORT_FACTORS and name not in ALERT_FACTORS
-                 and name not in LENDING_FACTORS and name not in CORPORATE_FACTORS and name not in ISSUANCE_FACTORS)
+                 and name not in LENDING_FACTORS and name not in CORPORATE_FACTORS and name not in ISSUANCE_FACTORS
+                 and name not in DEALER_FACTORS)
 
 
 def models_root(history: str | Path) -> Path:
@@ -98,6 +102,7 @@ def version_features(version: str | None) -> tuple[str, ...]:
     from quant_platform.research.daily import (
         ALERT_FACTORS,
         CORPORATE_FACTORS,
+        DEALER_FACTORS,
         FACTOR_LABELS,
         ISSUANCE_FACTORS,
         LENDING_FACTORS,
@@ -106,6 +111,8 @@ def version_features(version: str | None) -> tuple[str, ...]:
         TIME_FACTORS,
     )
 
+    if version and VERSIONS.get(version, {}).get("features") == "extended":
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE)
     if version and VERSIONS.get(version, {}).get("features") == "technical":
         from quant_platform.research.tech_rl import TECH_FEATURES
 
@@ -114,7 +121,7 @@ def version_features(version: str | None) -> tuple[str, ...]:
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in RAW_V2
                      and name not in TIME_FACTORS and name not in SHORT_FACTORS and name not in ALERT_FACTORS
                      and name not in LENDING_FACTORS and name not in CORPORATE_FACTORS
-                     and name not in ISSUANCE_FACTORS)
+                     and name not in ISSUANCE_FACTORS and name not in DEALER_FACTORS)
     return features()
 
 

@@ -324,7 +324,7 @@ def main() -> int:
                         help="rl-sleeves：版本（1.1.0 隨機起點；2.0.0 第三個位置是現金、回撤懲罰加倍）")
     parser.add_argument("--model-version", default="gbm-1.2.0",
                         choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0", "gbm-2.0.0",
-                                 "gbm-2.1.0"),
+                                 "gbm-2.1.0", "gbm-2.2.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
@@ -357,6 +357,8 @@ def main() -> int:
                         help="scan：只跑至少含一個 2026-10-13 新價量因子的組（先過新穎性閘門）")
     parser.add_argument("--require-time", action="store_true",
                         help="scan：只跑至少含一個 2026-10-14 時間因子的組（先過新穎性閘門）")
+    parser.add_argument("--require-dealer", action="store_true",
+                        help="scan：只跑至少含一個自營商因子的組（先過新穎性閘門）")
     parser.add_argument("--require-issuance", action="store_true",
                         help="scan：只跑至少含「股本沒有膨脹」的組（先過新穎性閘門）")
     parser.add_argument("--require-corporate", action="store_true",
@@ -816,23 +818,25 @@ def main() -> int:
         from quant_platform.research import scan
         from quant_platform.research.jobs import JobLog
 
-        if args.require == "ml_gbm_ens":           # 2026-10-12: only after gbm-2.0.0 passed its registered gate
+        if args.require in ("ml_gbm_ens", "ml_gbm_ext"):   # only after the ensemble passed its registered gate
             from quant_platform.research.model_ensemble import gate
 
-            check = gate(RESEARCH / "models")
-            print(f"gbm-2.0.0 門檻：{check}", flush=True)
+            check = (gate(RESEARCH / "models") if args.require == "ml_gbm_ens"
+                     else gate(RESEARCH / "models", "gbm-2.2.0", "gbm-2.0.0"))       # 2026-10-16: model G
+            print(f"{check['version']} 門檻：{check}", flush=True)
             if not check["passed"]:
                 return 0
         require = args.require
         if (args.require_new or args.require_time or args.require_short or args.require_lending
-                or args.require_corporate or args.require_issuance):     # a new family, after the novelty gate
+                or args.require_corporate or args.require_issuance or args.require_dealer):   # after the novelty gate
             from quant_platform.research import daily as daily_research
 
             family = (daily_research.TIME_FACTORS if args.require_time else
                       {**daily_research.SHORT_FACTORS, **daily_research.ALERT_FACTORS} if args.require_short
                       else daily_research.LENDING_FACTORS if args.require_lending
                       else daily_research.CORPORATE_FACTORS if args.require_corporate
-                      else daily_research.ISSUANCE_FACTORS if args.require_issuance else daily_research.RAW_V2)
+                      else daily_research.ISSUANCE_FACTORS if args.require_issuance
+                      else daily_research.DEALER_FACTORS if args.require_dealer else daily_research.RAW_V2)
             _data, novelty_fp = daily_research.load(Path(args.base))
             gate = scan.novelty(novelty_fp, list(family))
             print(f"新穎性閘門：{gate}", flush=True)
@@ -841,7 +845,8 @@ def main() -> int:
                                    "novelty-short.json" if args.require_short else
                                    "novelty-lending.json" if args.require_lending else
                                    "novelty-corporate.json" if args.require_corporate else
-                                   "novelty-issuance.json" if args.require_issuance else "novelty-raw-v2.json")).write_text(
+                                   "novelty-issuance.json" if args.require_issuance else
+                                   "novelty-dealer.json" if args.require_dealer else "novelty-raw-v2.json")).write_text(
                 json.dumps(gate, ensure_ascii=False, indent=1), encoding="utf-8")
             require = [name for name, item in gate.items() if item["kept"]]
             del novelty_fp, _data

@@ -61,13 +61,14 @@ SHORT = {
     "earnings_yield": "本益比低", "book_to_price": "淨值比低", "roe_ttm": "ROE", "gross_margin": "毛利率",
     "operating_margin_change": "營益率增", "eps_growth": "EPS 成長", "low_debt": "負債低", "fip_12": "趨勢連續",
     "imom_12": "日內動能", "resid_mom_12": "殘差動能", "ml_gbm": "模型A", "ml_gbm_excess": "模型B",
-    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "rl_tech": "技術機器人",
+    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "ml_gbm_ext": "模型G", "rl_tech": "技術機器人",
     "high_52w_count_60": "新高次數", "range_position_60": "區間位置", "low_ivol_60": "特質低波",
     "low_pv_corr_20": "量價背離", "overnight_reversal_12": "隔夜反轉", "rl_tech_weekly": "技術機器人週",
     "season_month": "同月季節性", "dividend_ahead": "即將除息", "trust_quarter_end": "投信季底作帳",
     "low_sbl_short": "借券賣出低", "sbl_cover_20": "借券回補", "low_day_trade_20": "當沖比例低",
     "low_lending_fee_60": "借券費率低", "low_lending_20": "新借券少", "lending_fee_not_rising": "借券費率未升",
     "dividend_raise": "股利調升", "no_cash_issue": "沒有現增", "low_issuance_250": "股本沒膨脹",
+    "dealer_buy_20": "自營商自行買超", "dealer_hedge_20": "自營商避險買超",
     "low_attention_20": "不過熱", "low_disposition_60": "未被處置",
 }
 

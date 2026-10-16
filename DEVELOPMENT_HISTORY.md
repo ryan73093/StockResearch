@@ -2,6 +2,13 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-16 下午 — 前向第一天驗收；自營商因子；模型 G
+
+- 驗收（使用者：繼續）：13:50～13:54 盤後單 85 個策略、49 筆單、0 錯誤；15:30 前向紀錄 92 筆，對帳 0 個問題；從 10/01 起跑的 48 個帳戶，13:50 盤後單的持股和 15:30 紀錄完全相同（已做過的決定固定、盤後單寫下當天決定都運作）；自動加入 7 個新規則（#3826 以月線上續抱版本）。
+- 使用者問 RL、技術機器人、機器學習與各策略的現況：已回報（RL 全部結案；純機器學習回撤 −41%～−51%，含模型分數的組合有 20 個 T0 候選；前向 11 個交易日 0050 −3.5%，92 個中 78 個領先，都還在預期範圍內）。
+- 自營商因子（`chips.py` `DEALER_FACTORS`，三大法人表多兩欄 `dealer_self_net`、`dealer_hedge_net`；`chips_daily.py` 解析 T86 與櫃買日報的自營商欄位）與模型 G（`model.py` `ml_gbm_ext`／gbm-2.2.0，`daily.model_g_batch`、`scan --require ml_gbm_ext` 都要先過門檻）。機器人 2.1 的因子清單排除模型 G。`scan --require-dealer`，流程 `dealermodel`。
+- 測試：自營商兩種買超的建表與隔天才用、兩份日報的欄位、模型 G 的特徵含新家族不含月營收。全部 720 通過、1 略過。16:3x 部署並排好流程。
+
 ## 2026-10-16 上午 — 股本膨脹因子
 
 - 新因子 `low_issuance_250`（`chips.py` `ISSUANCE_FACTORS`、`stock_dividends`、`ChipStore.issuance_matrix`；籌碼表多一張 `StockDividends.parquet`）：250 個交易日內新增股數佔發行股數，扣掉配股、不計減少，反向；不是模型特徵。除權除息預告表的解析多了無償配股率。`scan --require-issuance`，流程 `issuance`。真實資料檢查見研究方法第 7 節（配股 87% 對得上股數跳動）。
