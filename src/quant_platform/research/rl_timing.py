@@ -46,11 +46,32 @@ PENALTY = 0.05               # pulls the outputs to 0, i.e. equal weights
 EPOCHS, ROLLOUTS, LEARNING_RATE = 300, 64, 0.02
 SEEDS = (0, 1, 2)
 FIRST_TEST_YEAR = 2018
+# 3.0.0 (2026-10-16; 使用者：多因子都能有 T0，RL 找不到？是學習策略有問題，還是給它的因子不夠多？): 2.0 and 2.1 learned
+# the training years and not the next one — 2.1's training reward rose to +3% to +4% over 0050 every 20 sessions while
+# its nine test years summed to −37% (equal weights −40%); its policy had about 2,300 numbers to fit from 41 to 139
+# decisions a year, and its weights jumped from year to year (63% on one factor in 2021, 62% on another in 2026). More
+# factors made it worse, not better. The third robot changes the learning, not the game:
+# - eight blocks instead of 47 factors — each family's strongest signal by its top fifth in 2015-06..2020-10 (the
+#   development period only): the 52-week high, above the 200-session average, KD, three-month momentum, margin
+#   growth, little lent-and-sold stock, EPS growth, and model F (the walk-forward ensemble); about 100 numbers;
+# - four times the decisions: the same 20-session game started on four offsets (0, 5, 10, 15 sessions);
+# - the last fifth of each year's training decisions held out: training stops at the epoch the held-out reward is
+#   best, and when even that does not beat the eight blocks alike the robot uses them alike for the year (abstains);
+# - a stronger pull to equal weights, five seeds, and every year's learning curves kept (the research page shows them).
+BLOCK_VERSION = "block-rl-3.0.0"
+BLOCKS = ("high_52w", "trend_200", "kd_k", "momentum_3", "margin_growth_20", "low_sbl_short", "eps_growth", "ml_gbm_ens")
+PHASES = (0, 5, 10, 15)
+HELD_OUT = 0.2
+BLOCK_PENALTY = 0.2
+BLOCK_SEEDS = (0, 1, 2, 3, 4)
+CHECK_EVERY = 10
 
 
 def factor_names(version: str = VERSION) -> list[str]:
     from quant_platform.research.tech_rl import TECH_FEATURES
 
+    if version == BLOCK_VERSION:
+        return list(BLOCKS)
     if version == ALL_VERSION:
         from quant_platform.research.chips import (
             ALERT_FACTORS,
@@ -72,7 +93,7 @@ def factor_names(version: str = VERSION) -> list[str]:
 class Timeline:
     """The decisions: their positions, states, factor percentiles, forward returns and 0050's."""
 
-    def __init__(self, fp, benchmark: np.ndarray, version: str = VERSION) -> None:
+    def __init__(self, fp, benchmark: np.ndarray, version: str = VERSION, offset: int = 0) -> None:
         from quant_platform.research.factor_timing import records
         from quant_platform.research.model import eligibility
 
@@ -83,7 +104,7 @@ class Timeline:
         values = realised.to_numpy()
         ready = np.flatnonzero(np.isfinite(values).sum(axis=1) >= len(names) // 2)   # most factors have a record
         start = int(ready[0]) if len(ready) else sessions
-        self.positions = list(range(start, sessions - STEP, STEP))
+        self.positions = list(range(start + offset, sessions - STEP, STEP))
         self.days = [fp.sessions[position] for position in self.positions]
         market = fp.market if fp.market is not None else np.full(sessions, np.nan)
         taiex = pd.Series(market)
@@ -204,6 +225,117 @@ def walk_forward(fp, benchmark: np.ndarray, out_dir: Path, job=None, version: st
     meta = {"version": version, "factors": timeline.names, "weights": weights, "yearly": yearly,
             "config": {"step": STEP, "top": TOP, "cost_swap": COST_SWAP, "sigma": SIGMA, "penalty": PENALTY,
                        "epochs": EPOCHS, "rollouts": ROLLOUTS, "learning_rate": LEARNING_RATE, "seeds": list(SEEDS)},
+            "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    return meta
+
+
+def _rewards_of(pairs: list, logits: np.ndarray) -> np.ndarray:
+    """decision × rollout rewards of ``logits`` (decision × rollout × factor) over (timeline, decisions) pairs."""
+    output, start = [], 0
+    for timeline, decisions in pairs:
+        part = logits[start:start + len(decisions)]
+        output.append(timeline.rewards(_softmax(part), decisions))
+        start += len(decisions)
+    return np.concatenate(output) if output else np.zeros((0, logits.shape[1]))
+
+
+def train_held_out(train_pairs: list, held_pairs: list, seed: int, epochs: int | None = None,
+                   penalty: float | None = None) -> dict[str, object]:
+    """The linear policy by REINFORCE on ``train_pairs``, kept at the epoch whose held-out reward (no exploration) is
+    best; returns the kept weights and the curves (every CHECK_EVERY epochs)."""
+    import torch
+
+    epochs = epochs or EPOCHS
+    penalty = BLOCK_PENALTY if penalty is None else penalty
+
+    torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
+    states = torch.from_numpy(np.concatenate([timeline.states[decisions] for timeline, decisions in train_pairs]))
+    held_states = np.concatenate([timeline.states[decisions] for timeline, decisions in held_pairs])
+    count = len(train_pairs[0][0].names)
+    weight = torch.zeros((states.shape[1], count), requires_grad=True)
+    bias = torch.zeros(count, requires_grad=True)
+    optimiser = torch.optim.Adam([weight, bias], lr=LEARNING_RATE)
+    curve_train, curve_held = [], []
+    best = (-np.inf, 0, weight.detach().numpy().copy(), bias.detach().numpy().copy())
+    for epoch in range(epochs):
+        mean = states @ weight + bias
+        noise = rng.normal(0, SIGMA, (states.shape[0], ROLLOUTS, count)).astype(np.float32)
+        actions = mean.detach().numpy()[:, None, :] + noise
+        rewards = _rewards_of(train_pairs, actions)
+        advantage = torch.from_numpy(((rewards - rewards.mean(axis=1, keepdims=True))
+                                      / (rewards.std(axis=1, keepdims=True) + 1e-8)).astype(np.float32))
+        log_prob = -(((torch.from_numpy(actions) - mean[:, None, :]) ** 2).sum(-1)) / (2 * SIGMA ** 2)
+        loss = -(advantage * log_prob).mean() + penalty * (mean ** 2).mean()
+        optimiser.zero_grad()
+        loss.backward()
+        optimiser.step()
+        if epoch % CHECK_EVERY == CHECK_EVERY - 1:
+            w, b = weight.detach().numpy(), bias.detach().numpy()
+            held = float(_rewards_of(held_pairs, (held_states @ w + b)[:, None, :]).mean())
+            curve_train.append(round(float(rewards.mean()), 5))
+            curve_held.append(round(held, 5))
+            if held > best[0]:
+                best = (held, epoch + 1, w.copy(), b.copy())
+    return {"weight": best[2], "bias": best[3], "held_reward": best[0], "best_epoch": best[1],
+            "train": curve_train, "held": curve_held}
+
+
+def walk_forward_blocks(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> dict[str, object]:
+    """The robot 3.0: per test year, trained on the decisions (all four offsets) realised before the year, the last
+    fifth of them held out; the test decisions are offset 0's, as the rule decides."""
+    timelines = [Timeline(fp, benchmark, BLOCK_VERSION, offset) for offset in PHASES]
+    main = timelines[0]
+    names = main.names
+    equal = np.full(len(names), 1 / len(names))
+    years = sorted({day.year for day in main.days if day.year >= FIRST_TEST_YEAR})
+    weights: dict[str, list[float]] = {}
+    yearly = {}
+    for number, year in enumerate(years):
+        first_session = next(day for day in fp.sessions if day.year == year)
+        before = [[index for index, position in enumerate(timeline.positions)
+                   if fp.sessions[min(position + STEP, len(fp.sessions) - 1)] < first_session] for timeline in timelines]
+        dated = sorted(timeline.days[index] for timeline, indexes in zip(timelines, before) for index in indexes)
+        test_at = [index for index, day in enumerate(main.days) if day.year == year]
+        if len(dated) < 40 or not test_at:
+            continue
+        cut = dated[int(len(dated) * (1 - HELD_OUT))]
+        train_pairs = [(timeline, [index for index in indexes if timeline.days[index] < cut])
+                       for timeline, indexes in zip(timelines, before)]
+        held_pairs = [(timeline, [index for index in indexes if timeline.days[index] >= cut])
+                      for timeline, indexes in zip(timelines, before)]
+        train_pairs = [pair for pair in train_pairs if pair[1]]
+        held_pairs = [pair for pair in held_pairs if pair[1]]
+        runs = [train_held_out(train_pairs, held_pairs, seed) for seed in BLOCK_SEEDS]
+        held_states = np.concatenate([timeline.states[decisions] for timeline, decisions in held_pairs])
+        held_equal = float(_rewards_of(held_pairs, np.repeat(np.zeros((1, 1, len(names))), len(held_states), axis=0)).mean())
+        logits = np.mean([main.states[test_at] @ run["weight"] + run["bias"] for run in runs], axis=0)
+        held_robot = float(np.mean([run["held_reward"] for run in runs]))
+        abstain = held_robot <= held_equal
+        chosen = np.repeat(equal[None, :], len(test_at), axis=0) if abstain else _softmax(logits)
+        for index, row in zip(test_at, chosen):
+            weights[main.days[index].isoformat()] = [round(float(value), 6) for value in row]
+        robot = main.rewards(chosen[:, None, :], test_at)[:, 0]
+        alike = main.rewards(np.repeat(equal[None, None, :], len(test_at), axis=0), test_at)[:, 0]
+        yearly[str(year)] = {
+            "decisions": len(test_at), "train_decisions": sum(len(pair[1]) for pair in train_pairs),
+            "held_decisions": sum(len(pair[1]) for pair in held_pairs), "held_from": cut.isoformat(),
+            "held_robot": round(held_robot, 5), "held_equal": round(held_equal, 5), "abstained": bool(abstain),
+            "best_epochs": [run["best_epoch"] for run in runs],
+            "curve_train": [round(float(value), 5) for value in np.mean([run["train"] for run in runs], axis=0)],
+            "curve_held": [round(float(value), 5) for value in np.mean([run["held"] for run in runs], axis=0)],
+            "robot_excess": round(float(robot.sum()), 4), "equal_excess": round(float(alike.sum()), 4),
+            "heaviest": [[name, round(float(share), 4)] for name, share in
+                         sorted(zip(names, chosen.mean(axis=0)), key=lambda item: -item[1])[:3]]}
+        if job:
+            job.update(done=number + 1, total=len(years),
+                       current=f"{year}：{'不押（用平均）' if abstain else '機器人'} {robot.sum():+.3f}、平均 {alike.sum():+.3f}")
+    meta = {"version": BLOCK_VERSION, "factors": names, "weights": weights, "yearly": yearly,
+            "config": {"step": STEP, "top": TOP, "cost_swap": COST_SWAP, "sigma": SIGMA, "penalty": BLOCK_PENALTY,
+                       "epochs": EPOCHS, "rollouts": ROLLOUTS, "learning_rate": LEARNING_RATE, "seeds": list(BLOCK_SEEDS),
+                       "phases": list(PHASES), "held_out": HELD_OUT, "check_every": CHECK_EVERY},
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")

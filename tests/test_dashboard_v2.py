@@ -319,3 +319,25 @@ def test_plan_market_and_stock_sections_are_tabs(client):
     assert "grid--main-side" not in plan and 'id="plan-form" data-tab-default' in plan
     market = client.get("/market").get_data(as_text=True)
     assert market.count("data-tab=") in (0, 2)          # the grids are tabs whenever the snapshot exists
+
+
+def test_the_rl_page_shows_each_robots_years(client, tmp_path):
+    """2026-10-16 (使用者：我要怎麼看到學習的狀況？)."""
+    import json
+
+    folder = tmp_path / "research" / "models" / "block-rl-3.0.0"
+    folder.mkdir(parents=True)
+    (folder / "meta.json").write_text(json.dumps({
+        "version": "block-rl-3.0.0", "factors": ["high_52w", "trend_200"], "trained_at": "2026-10-16T15:00:00+00:00",
+        "weights": {"2019-01-02": [0.7, 0.3], "2020-01-02": [0.5, 0.5]},
+        "yearly": {"2019": {"decisions": 12, "train_decisions": 120, "held_decisions": 30, "held_robot": 0.01,
+                            "held_equal": 0.005, "abstained": False, "best_epochs": [40, 60], "curve_train": [0.0, 0.01, 0.02],
+                            "curve_held": [0.0, 0.004, 0.002], "robot_excess": 0.12, "equal_excess": 0.05,
+                            "heaviest": [["high_52w", 0.7]]},
+                   "2020": {"decisions": 12, "train_decisions": 150, "held_decisions": 36, "held_robot": -0.01,
+                            "held_equal": 0.0, "abstained": True, "best_epochs": [10, 10], "curve_train": [0.0, 0.01, 0.02],
+                            "curve_held": [-0.01, -0.02, -0.03], "robot_excess": -0.02, "equal_excess": -0.02,
+                            "heaviest": [["high_52w", 0.5]]}}}, ensure_ascii=False), encoding="utf-8")
+    body = client.get("/research/rl").get_data(as_text=True)
+    assert "RL 機器人 3.0" in body and "不押，用平均" in body and "照機器人" in body and "接近 52 週高點" in body
+    assert "1<small> 年／2 年" in body and 'href="/research/rl"' in client.get("/research?tab=ml").get_data(as_text=True)

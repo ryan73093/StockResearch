@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21"),
+                            "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
@@ -682,6 +682,28 @@ def main() -> int:
         print(job.payload["summary"])
         for year, item in meta["yearly"].items():
             print(year, item)
+        return 0
+
+    if args.command == "block-rl3":
+        # 2026-10-16: the robot 3.0 — eight blocks, four offsets, a held-out fifth (research/rl_timing.py)
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import rl_timing
+        from quant_platform.research.jobs import JobLog
+        from quant_platform.research.model import models_root
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("RL 機器人 3.0：逐年滾動訓練（8 個強訊號區塊的權重，驗證沒贏平均就不押）", command) as job:
+            data, fp = daily_research.load(Path(args.base))
+            meta = rl_timing.walk_forward_blocks(fp, rl_timing.benchmark_units(data, fp.sessions),
+                                                 models_root(Path(args.base)) / rl_timing.BLOCK_VERSION, job=job)
+            robot = sum(item["robot_excess"] for item in meta["yearly"].values())
+            alike = sum(item["equal_excess"] for item in meta["yearly"].values())
+            abstained = sum(1 for item in meta["yearly"].values() if item["abstained"])
+            job.payload["summary"] = (f"{len(meta['yearly'])} 年樣本外：機器人比 0050 {robot:+.3f}、平均 {alike:+.3f}"
+                                      f"（對數報酬加總）；{abstained} 年驗證沒贏平均、不押")
+        print(job.payload["summary"])
+        for year, item in meta["yearly"].items():
+            print(year, {key: value for key, value in item.items() if not key.startswith("curve")})
         return 0
 
     if args.command == "trade-audit":

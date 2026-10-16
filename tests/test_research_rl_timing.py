@@ -112,3 +112,41 @@ def test_the_robot_21_sees_every_full_history_factor_and_the_model_scores():
     assert not (set(daily.TIME_FACTORS) | set(daily.SHORT_FACTORS) | set(daily.ALERT_FACTORS)) & set(names)
     rules = daily.robot21_batch()
     assert [rule.factors for rule in rules] == [{"rl_all": 1.0}, {"all_equal": 1.0}]
+
+
+def _blocks_market(monkeypatch):
+    monkeypatch.setattr(rl_timing, "EPOCHS", 40)
+    monkeypatch.setattr(rl_timing, "ROLLOUTS", 16)
+    monkeypatch.setattr(rl_timing, "BLOCK_SEEDS", (0, 1))
+    monkeypatch.setattr(rl_timing, "TOP", 5)
+    monkeypatch.setattr(rl_timing, "FIRST_TEST_YEAR", 2019)
+    monkeypatch.setattr(rl_timing, "BLOCKS", ("momentum_3", "reversal_1", "low_volatility_60", "kd_k"))
+    from quant_platform.research import factor_timing
+
+    monkeypatch.setattr(factor_timing, "WINDOW", 120)
+    monkeypatch.setattr(factor_timing, "LEAST", 60)
+    days = weekdays(date(2015, 1, 1), date(2019, 12, 31))
+    return market(days)
+
+
+def test_the_robot_30_keeps_its_learning_curves_and_trains_on_four_offsets(monkeypatch, tmp_path):
+    """2026-10-16 (使用者：RL 找不到 T0？是學習策略有問題？我要怎麼看到學習的狀況？)."""
+    data, fp = _blocks_market(monkeypatch)
+    meta = rl_timing.walk_forward_blocks(fp, rl_timing.benchmark_units(data, fp.sessions), tmp_path)
+    year = meta["yearly"]["2019"]
+    assert meta["factors"] == ["momentum_3", "reversal_1", "low_volatility_60", "kd_k"] and meta["config"]["phases"] == [0, 5, 10, 15]
+    assert len(year["curve_train"]) == len(year["curve_held"]) == 40 // rl_timing.CHECK_EVERY
+    assert year["train_decisions"] > 40 and year["held_decisions"] > 0                 # four offsets, a held-out fifth
+    assert isinstance(year["abstained"], bool) and len(year["best_epochs"]) == 2
+    assert min(date.fromisoformat(day) for day in meta["weights"]).year == 2019
+    assert json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))["version"] == rl_timing.BLOCK_VERSION
+
+
+def test_the_robot_30_uses_the_blocks_alike_when_its_held_out_reward_does_not_beat_them(monkeypatch, tmp_path):
+    data, fp = _blocks_market(monkeypatch)
+    monkeypatch.setattr(rl_timing, "train_held_out", lambda train, held, seed, **_: {
+        "weight": np.ones((train[0][0].states.shape[1], 4), dtype=np.float32), "bias": np.array([5.0, 0, 0, 0]),
+        "held_reward": -1.0, "best_epoch": 10, "train": [0.0], "held": [-1.0]})
+    meta = rl_timing.walk_forward_blocks(fp, rl_timing.benchmark_units(data, fp.sessions), tmp_path)
+    assert meta["yearly"]["2019"]["abstained"] is True
+    assert all(np.allclose(row, 0.25) for row in meta["weights"].values())             # the four alike
