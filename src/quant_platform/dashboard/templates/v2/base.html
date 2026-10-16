@@ -1,5 +1,5 @@
 {% from "v2/_icons.html" import icon, brand_mark %}
-{% from "v2/_nav.html" import research_pages, system_pages %}
+{% from "v2/_nav.html" import research_pages, system_pages, project_pages %}
 <!doctype html>
 <html lang="zh-Hant" data-theme="{{ theme }}">
 <head>
@@ -39,6 +39,14 @@
           {% endif %}
         {% endfor %}
       </nav>
+      <nav class="sidenav sidenav--sub" aria-label="專案資訊">
+        <a href="/project"{% if active_nav == 'project' %} aria-current="page"{% endif %}>{{ icon('project') }}<span>專案資訊</span></a>
+        <div class="sidegroup" role="group" aria-label="專案資訊">
+          {% for sub, text, link in project_pages %}
+          <a href="{{ link }}"{% if active_nav == 'project' and doc_key == sub %} aria-current="true"{% endif %}>{{ text }}</a>
+          {% endfor %}
+        </div>
+      </nav>
       <nav class="sidenav sidenav--sub" aria-label="市場與個股">
         <a href="/market"{% if active_nav == 'market' %} aria-current="page"{% endif %}>{{ icon('market') }}<span>市場總覽</span></a>
       </nav>
@@ -70,6 +78,7 @@
         <span class="session session--{{ market_session.tone }}" title="{{ market_session.detail }}"><span class="session__dot"></span><span class="session__short">{{ market_session.short }}</span></span>
         <a class="icon-btn" href="/market" aria-label="市場總覽"{% if active_nav == 'market' %} aria-current="page"{% endif %}>{{ icon('market') }}</a>
         <a class="icon-btn" href="/stock" aria-label="查個股"{% if active_nav == 'stock' %} aria-current="page"{% endif %}>{{ icon('search') }}</a>
+        <a class="icon-btn" href="/project" aria-label="專案資訊"{% if active_nav == 'project' %} aria-current="page"{% endif %}>{{ icon('project') }}</a>
         <a class="icon-btn" href="/help" aria-label="使用教學">{{ icon('help') }}</a>
         <button type="button" class="icon-btn" data-theme-toggle aria-label="切換深色或淺色主題">
           <span class="when-dark">{{ icon('sun') }}</span><span class="when-light">{{ icon('moon') }}</span>

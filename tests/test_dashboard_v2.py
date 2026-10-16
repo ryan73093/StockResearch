@@ -83,6 +83,19 @@ def test_project_docs_are_served_from_the_repository(client):
     assert client.get("/system/docs/unknown").status_code == 404
 
 
+def test_the_sidebar_always_lists_the_project_documents(client):
+    """2026-10-17 (使用者：要在 sidebar 看到專案資訊——路線圖、專案紀錄、開發歷程)."""
+    for path in ("/", "/research", "/holdings"):
+        body = client.get(path).get_data(as_text=True)
+        for link in ("/project/roadmap", "/project/handoff", "/project/history", "/project/research_method"):
+            assert f'href="{link}"' in body
+    page = client.get("/project/history").get_data(as_text=True)
+    assert 'data-doc-key="history"' in page and 'href="/project/history" aria-current="true"' in page
+    assert 'data-doc-key="roadmap"' in client.get("/project").get_data(as_text=True)        # the roadmap first
+    assert client.get("/project/unknown").status_code == 404
+    assert client.get("/system/docs/dl_review").get_json()["path"] == "docs/research_dl_exits_review.md"
+
+
 def test_market_overview_is_new_and_the_legacy_one_moved(client):
     response = client.get("/market")
     assert response.status_code == 200 and "市場總覽" in response.get_data(as_text=True)

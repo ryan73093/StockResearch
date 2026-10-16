@@ -147,52 +147,11 @@
 </details>
 
 <section class="card" id="project">
-  <div class="card__head"><h2>專案資訊</h2></div>
-  <div class="doc-layout">
-    <div class="doc-tabs" role="tablist" aria-label="專案文件">
-      {% for key, label in doc_tabs %}
-        <button type="button" role="tab" data-doc="{{ key }}" aria-selected="{{ 'true' if loop.first else 'false' }}">{{ label }}</button>
-      {% endfor %}
-    </div>
-    <article class="doc" id="doc-body" role="tabpanel"><p class="muted">載入中…</p></article>
+  <div class="card__head"><h2>專案資訊</h2><span class="muted small">側邊欄「專案資訊」也能直接打開</span></div>
+  <div class="tool-grid">
+    {% for key, label in project_docs %}
+      <a class="tool" href="/project/{{ key }}"><span class="tool__text"><strong>{{ label }}</strong></span>{{ icon('arrow') }}</a>
+    {% endfor %}
   </div>
 </section>
-{% endblock %}
-{% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-<script>
-(() => {
-  const body = document.getElementById('doc-body');
-  const buttons = [...document.querySelectorAll('[data-doc]')];
-  const escapeHtml = (text) => text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-  let current = null;
-  const mermaidTheme = () => (document.documentElement.dataset.theme === 'light' ? 'default' : 'dark');
-  async function show(key) {
-    current = key;
-    buttons.forEach((button) => button.setAttribute('aria-selected', String(button.dataset.doc === key)));
-    body.innerHTML = '<p class="muted">載入中…</p>';
-    const response = await fetch(`/system/docs/${key}`, { credentials: 'same-origin' });
-    if (!response.ok) { body.innerHTML = '<p class="muted">文件讀取失敗</p>'; return; }
-    const payload = await response.json();
-    const renderer = new marked.Renderer();
-    const baseCode = renderer.code.bind(renderer);
-    renderer.code = (code, language) => {
-      const source = typeof code === 'object' ? code.text : code;
-      const lang = typeof code === 'object' ? code.lang : language;
-      return lang === 'mermaid' ? `<pre class="mermaid">${escapeHtml(source)}</pre>` : baseCode(code, language);
-    };
-    body.innerHTML = `<p class="doc__meta">${payload.path} · 更新 ${payload.modified}</p>` + marked.parse(payload.markdown, { renderer });
-    if (window.mermaid) {
-      mermaid.initialize({ startOnLoad: false, theme: mermaidTheme() });
-      await mermaid.run({ nodes: body.querySelectorAll('.mermaid') });
-    }
-    history.replaceState(null, '', `#${key}`);
-  }
-  buttons.forEach((button) => button.addEventListener('click', () => show(button.dataset.doc)));
-  window.addEventListener('themechange', () => { if (current) show(current); });
-  const initial = buttons.find((button) => `#${button.dataset.doc}` === location.hash) || buttons[0];
-  if (initial) show(initial.dataset.doc);
-})();
-</script>
 {% endblock %}

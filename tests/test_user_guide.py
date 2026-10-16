@@ -27,7 +27,7 @@ def test_guide_page_embeds_the_user_guide_and_every_page_links_to_it(setup):
         assert 'href="/help"' in client.get(path).get_data(as_text=True)
     assert "使用指南" in client.get("/guide").get_data(as_text=True)          # the legacy guide is untouched
     system = client.get("/system").get_data(as_text=True)
-    assert system.index('data-doc="guide"') < system.index('data-doc="roadmap"')   # the first tab
+    assert 'href="/project/guide"' in system and 'href="/project/roadmap"' in system   # 2026-10-17: own pages
     assert "第一次使用" in client.get("/system/docs/guide").get_json()["markdown"]
 
 

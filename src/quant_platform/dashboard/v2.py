@@ -74,14 +74,18 @@ DOCS = {
     "roadmap": ("路線圖", "docs/development_roadmap.md"),
     "architecture": ("架構", "docs/system_architecture.md"),
     "requirements": ("需求", "REQUIREMENTS.md"),
-    "handoff": ("交接", "docs/development_handoff.md"),
+    "handoff": ("目前工作（交接）", "docs/development_handoff.md"),
     "history": ("開發歷程", "DEVELOPMENT_HISTORY.md"),
     "line": ("LINE 設定", "docs/line-notifications.md"),
     "research_method": ("研究方法", "docs/research_method.md"),
+    "dl_review": ("文獻：深度學習與出場", "docs/research_dl_exits_review.md"),
     "ai_methods": ("AI 方法評估", "reports/AI 交易方法 實證與架構.md"),
     "taiwan_quant": ("台股量化做法", "reports/台股量化 開源專案與實證.md"),
     "ai_full": ("AI 與程式交易全面研究", "reports/AI 與程式交易可行方法全面研究.md"),
 }
+# 2026-10-17 (使用者：要在 sidebar 看到專案資訊——路線圖、專案紀錄、開發歷程): the project pages, in this order
+PROJECT_DOCS = ("roadmap", "handoff", "history", "research_method", "requirements", "architecture", "dl_review",
+                "ai_methods", "taiwan_quant", "ai_full", "line", "guide")
 JOB_LABELS = {
     "daily_market_data": "日線行情",
     "taiwan_research_data": "台股籌碼與基本面",
@@ -459,7 +463,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
              "done": deposited},
             {"label": "回報已持有的 ETF", "hint": "沒有持股可略過", "href": "/holdings", "done": bool(account.trades),
              "optional": True},
-            {"label": "設定 LINE 通知", "hint": "系統 › 專案資訊 › LINE 設定", "href": "/system#line", "done": line_ready,
+            {"label": "設定 LINE 通知", "hint": "專案資訊 › LINE 設定", "href": "/project/line", "done": line_ready,
              "optional": True},
         ]
         return {
@@ -472,7 +476,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         status = dependencies.notification_service.status()
         if not status["configured"]:
             return {"label": "LINE 通知", "state": "未設定", "badge": "",
-                    "detail": ".env 填入 LINE 的 token 與 user ID（步驟見下方專案資訊「LINE 設定」）"}
+                    "detail": ".env 填入 LINE 的 token 與 user ID（步驟見專案資訊「LINE 設定」）"}
         if not status["enabled"]:
             return {"label": "LINE 通知", "state": "已關閉", "badge": "badge--warn", "detail": "LINE_ENABLED=false"}
         last = status["last"]
@@ -1244,7 +1248,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             quality=quality,
             tool_groups=TOOL_GROUPS,
             checked_at=_taipei_text(now),
-            doc_tabs=[(key, label) for key, (label, _) in DOCS.items()],
+            project_docs=[(key, DOCS[key][0]) for key in PROJECT_DOCS],
             line_enabled=dependencies.notification_service.enabled,
         )
 
@@ -1263,6 +1267,15 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         text, category = messages.get(status, (status, "error"))
         flash(text, category)
         return redirect(url_for("v2.system"))
+
+    @blueprint.get("/project")
+    @blueprint.get("/project/<key>")
+    def project(key: str = PROJECT_DOCS[0]):
+        """2026-10-17: the project's documents (roadmap, current work, history, method…), one per tab, read live."""
+        if key not in PROJECT_DOCS:
+            abort(404)
+        return render_template("v2/project.html", active_nav="project", doc_key=key, doc_label=DOCS[key][0],
+                               project_docs=[(name, DOCS[name][0]) for name in PROJECT_DOCS])
 
     @blueprint.get("/system/docs/<key>")
     def system_doc(key: str):

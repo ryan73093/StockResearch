@@ -19,7 +19,17 @@
   ('quality', '資料品質', '/system#quality'),
   ('timing', '收盤資料時效', '/system#timing'),
   ('legacy', '舊版頁面', '/system#legacy-tools'),
-  ('project', '專案資訊', '/system#project'),
+  ('project', '專案資訊', '/project'),
+] %}
+{# 2026-10-17 (使用者：要在 sidebar 看到專案資訊): always in the sidebar, each document one link #}
+{% set project_pages = [
+  ('roadmap', '路線圖', '/project/roadmap'),
+  ('handoff', '目前工作（交接）', '/project/handoff'),
+  ('history', '開發歷程', '/project/history'),
+  ('research_method', '研究方法', '/project/research_method'),
+  ('requirements', '需求', '/project/requirements'),
+  ('architecture', '架構', '/project/architecture'),
+  ('dl_review', '文獻與研究報告', '/project/dl_review'),
 ] %}
 {% set market_pages = [
   ('market', '市場總覽', '/market'),
