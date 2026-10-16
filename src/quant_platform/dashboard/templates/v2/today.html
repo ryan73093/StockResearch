@@ -1,6 +1,6 @@
 {% extends "v2/base.html" %}
 {% from "v2/_icons.html" import icon %}
-{% from "v2/_roles_card.html" import roles_card %}
+{% from "v2/_roles_card.html" import roles_card, rolling_card %}
 {% macro onboarding_card(onboarding, extra_class='') %}
 <section class="card card--highlight {{ extra_class }}" id="onboarding">
   <div class="card__head">
@@ -51,6 +51,7 @@
     <div class="kpi"><div class="kpi__label">每月投入</div><div class="kpi__value">{{ '{:,.0f}'.format(plan_card.amount) if plan_card else '—' }}<small>元</small></div></div>
   </div>
 </section>
+{{ rolling_card(rolling) }}
 {{ roles_card(growth) }}
 
 <div class="grid grid--main-side">
@@ -172,6 +173,7 @@
     </div>
   </div>
 </section>
+{{ rolling_card(rolling) }}
 {{ roles_card(growth) }}
 <section class="card">
   <div class="card__head"><h2>資料狀態</h2></div>
@@ -202,6 +204,7 @@
     <div class="kpi"><div class="kpi__label">可用現金</div><div class="kpi__value">{{ '{:,.0f}'.format(plan.cash) }}<small>元</small></div></div>
   </div>
 </section>
+{{ rolling_card(rolling) }}
 {{ roles_card(growth) }}
 
 <div class="grid grid--main-side">

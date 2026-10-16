@@ -1,5 +1,5 @@
 {% extends "v2/base.html" %}
-{% from "v2/_roles_card.html" import roles_card %}
+{% from "v2/_roles_card.html" import roles_card, rolling_card %}
 {% block title %}策略角色 · 交易研究分析平台{% endblock %}
 {% block heading %}
 <header class="page-head">
@@ -16,6 +16,7 @@
 <section class="card"><p class="muted" style="margin:0">還沒有試驗紀錄。</p></section>
 {% else %}
 {{ roles_card(growth, 50, "成長") }}
+{{ rolling_card(rolling, 100, "本月可用") }}
 <section class="card" data-tab="全部指標">
   <div class="card__head"><h2>每個角色最好的那一個規則</h2></div>
   <div class="table-wrap">

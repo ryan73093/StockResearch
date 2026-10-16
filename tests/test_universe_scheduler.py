@@ -371,6 +371,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "chips_update",
             "model_retrain",
             "statements_refresh",
+            "rolling_forward",
             "line_plan_advice",
             "research_agent",
             "daily_researcher",

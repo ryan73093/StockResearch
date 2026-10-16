@@ -176,6 +176,16 @@ def refresh(research: str | Path, data, fp, costs, cutoff: date | None = None) -
     return payload
 
 
+def pending(research: str | Path) -> dict | None:
+    """The month started and not graded yet (a marker, no result): what the pages say meanwhile."""
+    started = sorted(folder(research).glob("*.started")) if folder(research).is_dir() else []
+    months = [path.stem for path in started if not path.stem.startswith("holdout-")]
+    if not months:
+        return None
+    return {"cutoff": months[-1], "holdout_start": None, "data_through": None, "graded": 0, "passed": 0, "errors": 0,
+            "usable": [], "holdout": [], "models": []}
+
+
 def summary(payload: dict | None) -> dict | None:
     """What the pages show: the month, how many rules were graded and passed, the usable ones."""
     if not payload:

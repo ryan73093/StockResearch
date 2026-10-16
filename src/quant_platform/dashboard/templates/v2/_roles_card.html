@@ -30,3 +30,48 @@
 </section>
 {% endif %}
 {% endmacro %}
+
+{# 2026-10-16 (使用者：訓練到兩個月前、最近兩個月做前向測試): this month's rolling forward test. #}
+{% macro rolling_card(rolling, limit=6, tab=none) %}
+{% if rolling %}
+<section class="card" id="rolling"{% if tab %} data-tab="{{ tab }}"{% endif %}>
+  <div class="card__head">
+    <h2>本月可用策略（滾動前向測試）</h2>
+    <a class="small" href="/research/roles#rolling">全部結果</a>
+  </div>
+  <p class="muted small" style="margin:0 0 8px">只用 {{ rolling.cutoff }} 以前的資料挑策略與訓練模型；{{ rolling.holdout_start or '截止日之後' }} 起到 {{ rolling.data_through or '最新交易日' }} 是挑的時候沒看過的資料，每個策略用新的 30 萬帳戶（每月 5 日加 1 萬）跑，和同樣的錢買 0050 比。</p>
+  {% if not rolling.graded %}
+    <p class="muted" style="margin:0">這個月的挑選進行中（全部規則回測到 {{ rolling.cutoff }}）。</p>
+  {% else %}
+  <div class="kpis kpis--four">
+    <div class="kpi"><div class="kpi__label">回測到截止日的規則</div><div class="kpi__value">{{ rolling.graded }}</div></div>
+    <div class="kpi"><div class="kpi__label">過截止日門檻</div><div class="kpi__value">{{ rolling.passed }}</div></div>
+    <div class="kpi"><div class="kpi__label">前向測試贏 0050</div><div class="kpi__value">{{ rolling.usable|length }}<small>／{{ rolling.holdout|length }}</small></div></div>
+    <div class="kpi"><div class="kpi__label">前向測試天數</div><div class="kpi__value">{{ rolling.holdout[0].sessions if rolling.holdout else '—' }}<small> 個交易日</small></div></div>
+  </div>
+  {% if rolling.holdout %}
+  <div class="table-wrap table-wrap--stack" style="margin-top:10px">
+    <table class="table--stack">
+      <thead><tr><th>策略</th><th class="num">前向測試期末</th><th class="num">0050</th><th class="num">報酬（0050）</th><th class="num">回撤</th><th>可用</th></tr></thead>
+      <tbody>
+      {% for row in rolling.holdout[:limit] %}
+        <tr>
+          <td data-primary class="name">{{ row.name }}</td>
+          <td class="num" data-label="前向測試期末">{{ '{:,.0f}'.format(row.value) }}</td>
+          <td class="num" data-label="0050">{{ '{:,.0f}'.format(row.benchmark_value) }}</td>
+          <td class="num {{ 'up' if (row['return'] or 0) > (row.benchmark_return or 0) else 'down' }}" data-label="報酬（0050）">{{ '{:+.1%}'.format(row['return']) if row['return'] is not none else '—' }}（{{ '{:+.1%}'.format(row.benchmark_return) if row.benchmark_return is not none else '—' }}）</td>
+          <td class="num" data-label="回撤">{{ '{:.1%}'.format(row.drawdown) }}</td>
+          <td data-label="可用">{% if row.usable %}<span class="badge badge--ok">贏 0050</span>{% else %}<span class="badge">沒贏</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin:8px 0 0">前向測試還沒跑（模型重訓完才跑）。</p>
+  {% endif %}
+  {% endif %}
+  <p class="col-help">每個月滾動一次：截止日是兩個月前的月底，下個月用新的截止日重挑、重訓、重測。前向測試只有一兩個月，只能排除明顯不行的，不能證明一定行；實時前向紀錄滿 60 個交易日再升 T0。</p>
+</section>
+{% endif %}
+{% endmacro %}

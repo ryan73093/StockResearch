@@ -83,3 +83,27 @@ def test_a_monthly_model_scores_only_the_sessions_after_its_cutoff(monkeypatch, 
     assert np.allclose(np.nan_to_num(before[: cut + 1]), np.nan_to_num(after[: cut + 1]))   # on and before: the yearly model
     assert not np.allclose(np.nan_to_num(before[cut + 1:]), np.nan_to_num(after[cut + 1:]))  # after: the monthly one
     assert model.digest(out) != "" and "monthly" in str(sorted(out.rglob("*.pkl")))
+
+
+def test_the_worker_starts_the_month_once_then_refreshes_the_holdout_each_trading_day(tmp_path):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.scheduler.runner import start_rolling
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'r.db'}"))
+    zone = ZoneInfo("Asia/Taipei")
+    started = []
+    friday = datetime(2026, 10, 16, 22, 30, tzinfo=zone)
+    assert start_rolling(container, friday, launch=started.append) == "rolling"
+    assert start_rolling(container, friday, launch=started.append) is None          # the month is running, not done
+    (tmp_path / "research" / "rolling" / "2026-08-31.json").write_text("{}", encoding="utf-8")
+    monday = datetime(2026, 10, 19, 22, 30, tzinfo=zone)
+    assert start_rolling(container, monday, launch=started.append) == "rolling-holdout"
+    assert start_rolling(container, monday, launch=started.append) is None          # once a day
+    assert start_rolling(container, datetime(2026, 10, 24, 22, 30, tzinfo=zone), launch=started.append) is None  # Saturday
+    november = datetime(2026, 11, 2, 22, 30, tzinfo=zone)
+    assert start_rolling(container, november, launch=started.append) == "rolling"   # a new cutoff: 2026-09-30
+    assert started == ["rolling", "rolling-holdout", "rolling"]

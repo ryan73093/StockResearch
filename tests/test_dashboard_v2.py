@@ -362,3 +362,25 @@ def test_the_home_page_and_the_roles_page_show_how_each_strategy_role_grew(clien
     assert "策略角色成長" in home and "機器學習＋因子" in home and "+25%" in home and "2,591 萬" in home
     page = client.get("/research/roles").get_data(as_text=True)
     assert "策略角色" in page and "報酬／回撤" in page and "10-09：877" in page and "+195%" in page
+
+
+def test_the_home_page_shows_this_months_rolling_forward_test(client, monkeypatch):
+    """2026-10-16 (使用者：訓練到兩個月前，最近兩個月拿來做前向測試)."""
+    from quant_platform.research import rolling
+
+    payload = {"cutoff": "2026-08-31", "data_through": "2026-10-16", "models": [],
+               "graded": [{"trial": 1, "name": "甲", "passed": True}, {"trial": 2, "name": "乙", "passed": False}],
+               "holdout": [{"trial": 1, "rule_hash": "h", "name": "甲策略", "start": "2026-09-01", "end": "2026-10-16",
+                            "sessions": 33, "value": 345000.0, "benchmark_value": 330000.0, "contributed": 320000.0,
+                            "excess": 0.047, "return": 0.08, "benchmark_return": 0.03, "drawdown": -0.05, "trades": 40,
+                            "usable": True}]}
+    monkeypatch.setattr(rolling, "latest", lambda _research: payload)
+    home = client.get("/").get_data(as_text=True)
+    assert "本月可用策略" in home and "甲策略" in home and "2026-08-31" in home and "贏 0050" in home
+    page = client.get("/research/roles").get_data(as_text=True)
+    assert "本月可用策略" in page or "還沒有試驗紀錄" in page
+    monkeypatch.setattr(rolling, "latest", lambda _research: None)
+    monkeypatch.setattr(rolling, "pending", lambda _research: {"cutoff": "2026-08-31", "holdout_start": None,
+                                                                "data_through": None, "graded": 0, "passed": 0,
+                                                                "errors": 0, "usable": [], "holdout": [], "models": []})
+    assert "這個月的挑選進行中" in client.get("/").get_data(as_text=True)

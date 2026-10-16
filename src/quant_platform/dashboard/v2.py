@@ -653,17 +653,25 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             if books.trades:
                 dividends_due = len(dependencies.dividend_calendar.account_view(books.flows, books.trades, day)["due"])
             drawdown_note = drawdown_alert(books, investment_plan.max_drawdown_tolerance)
-        growth = None
+        growth = rolling = None
         try:                      # 2026-10-16: the strategy roles' growth on the home page (never breaks the page)
             from quant_platform.research.roles import summary as roles_summary
 
             growth = roles_summary(_instance_dir(dependencies.settings.database_url) / "research")
         except Exception:  # noqa: BLE001
             logger.exception("Strategy roles failed")
+        try:                      # 2026-10-16: this month's rolling forward test
+            from quant_platform.research import rolling as rolling_test
+
+            research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+            rolling = rolling_test.summary(rolling_test.latest(research_dir)) or rolling_test.pending(research_dir)
+        except Exception:  # noqa: BLE001
+            logger.exception("Rolling forward test failed")
         return render_template(
             "v2/today.html",
             active_nav="today",
             growth=growth,
+            rolling=rolling,
             dividends_due=dividends_due,
             drawdown_note=drawdown_note,
             onboarding=onboarding_steps(investment_plan),
@@ -976,11 +984,13 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     @blueprint.get("/research/roles")
     def research_roles():
         """2026-10-16 (使用者：策略是我的角色，我要知道每個角色成長了多少): every strategy role, its growth and metrics."""
+        from quant_platform.research import rolling as rolling_test
         from quant_platform.research.roles import summary
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        rolling = rolling_test.summary(rolling_test.latest(research_dir)) or rolling_test.pending(research_dir)
         return render_template("v2/research_roles.html", active_nav="research", research_tab="roles",
-                               growth=summary(research_dir), jobs=JobLog(research_dir).jobs())
+                               growth=summary(research_dir), rolling=rolling, jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/rl")
     def research_rl():

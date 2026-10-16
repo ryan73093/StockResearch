@@ -458,6 +458,44 @@ def start_statements_refresh(container: "Container", now: datetime | None = None
     return due
 
 
+def start_rolling(container: "Container", now: datetime | None = None, launch=None) -> str | None:
+    """2026-10-16 (使用者：每個月訓練到兩個月前、最近兩個月做前向測試): every evening at 22:30 — once per month's cutoff,
+    the monthly rolling run (scripts/start-research.ps1 -Name rolling: select, retrain the models, the holdout); on
+    trading days after it, the holdout refreshed through the day (-Name rolling-holdout). Marker files under
+    research/rolling keep each to once."""
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.rolling import cutoff_for
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    research = _instance_dir(container.settings.database_url) / "research"
+    folder = research / "rolling"
+    folder.mkdir(parents=True, exist_ok=True)
+    cutoff = cutoff_for(local_now.date())
+    monthly = folder / f"{cutoff.isoformat()}.started"
+    if not monthly.is_file():
+        name = "rolling"
+        monthly.write_text(local_now.isoformat(timespec="seconds"), encoding="utf-8")
+    else:
+        done = folder / f"{cutoff.isoformat()}.json"
+        daily = folder / f"holdout-{local_now.date().isoformat()}.started"
+        if local_now.weekday() >= 5 or daily.is_file() or not done.is_file():
+            return None
+        name = "rolling-holdout"
+        daily.write_text(local_now.isoformat(timespec="seconds"), encoding="utf-8")
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch(name)
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Name", name],
+                       check=False, timeout=120)
+    logger.info("Rolling %s started (cutoff %s)", name, cutoff)
+    return name
+
+
 def retrain_models(container: "Container", now: datetime | None = None) -> object | None:
     """Every trading day at 22:45: a model that a forward-observed rule uses and that has no model for this
     year yet gets one (trained on everything before the year's first session). Once a year in practice."""
@@ -803,6 +841,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         trigger=CronTrigger(hour=22, minute=15, timezone=timezone),
         id="statements_refresh",
         name="財報季更新（每晚 22:15 檢查，法定期限過後每季一次，背景啟動）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
+    )
+    scheduler.add_job(
+        start_rolling,
+        args=[container],
+        trigger=CronTrigger(hour=22, minute=30, timezone=timezone),
+        id="rolling_forward",
+        name="每月滾動前向測試（每晚 22:30：每個截止日一次挑策略與重訓；之後每個交易日更新前向測試，背景啟動）",
         replace_existing=True,
         coalesce=True,
         max_instances=1,
