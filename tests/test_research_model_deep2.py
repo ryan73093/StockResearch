@@ -96,3 +96,21 @@ def test_the_development_years_first_and_the_rest_only_past_the_gate(monkeypatch
     monkeypatch.setattr(model_deep2, "GATE_COUNT", 1)
     meta = model.train(fp, tmp_path / "dl-2.1.0", years=[2017, 2018], label="deep2", version="dl-2.1.0")
     assert meta["loss"] == "top10" and meta["gate"]["passed"] and "2018" in meta["years"] and "stopped" not in meta
+    # stage 0 (free): the two models side by side, written next to the model
+    result = model_deep2.diagnose(fp, tmp_path, "dl-2.1.0", against="dl-2.0.0")
+    row = result["years"]["2017"]
+    assert -1 <= row["correlation"] <= 1 and 0 <= row["overlap"] <= 1 and 0 <= row["turnover_mine"] <= 1
+    assert row["gain_blend"] is not None and result["development"]["overlap"] == row["overlap"]
+    assert (tmp_path / "dl-2.1.0" / "diagnostics.json").is_file()
+
+
+def test_the_cost_aware_rules_wait_for_the_gate(monkeypatch):
+    from quant_platform.research import daily
+
+    monkeypatch.setattr(model_deep2, "gate", lambda root, version: {"passed": False})
+    assert daily.deep2_cost_batch() == []
+    monkeypatch.setattr(model_deep2, "gate", lambda root, version: {"passed": True})
+    rules = daily.deep2_cost_batch()
+    assert [rule.factors for rule in rules] == [{"ml_deep2_top": 1.0}, {"ml_gbm_ext": 1.0},
+                                                {"ml_deep2_top": 0.5, "ml_gbm_ext": 0.5}]
+    assert all(rule.switching == "cost1" and rule.hold == "days" and rule.min_hold == 0 for rule in rules)

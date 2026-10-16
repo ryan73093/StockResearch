@@ -454,3 +454,65 @@ def scores(fp, folder: str | Path) -> np.ndarray:
                 pairs = np.stack([np.full(live.size, position), live], axis=1)
                 output[position, live] = _rank_average([inputs.score(network, pairs) for network in networks])
     return output
+
+
+def _top(scores: np.ndarray, count: int = 20) -> set[int]:
+    known = np.flatnonzero(np.isfinite(scores))
+    return set(known[np.argsort(-scores[known])[:count]].tolist()) if known.size >= count else set()
+
+
+def diagnose(fp, models_root: str | Path, version: str = "dl-2.1.0", against: str = AGAINST) -> dict[str, object]:
+    """Stage 0 of the review (§2.4; free, not a trial): per year, on the weekly samples — the two models' rank
+    correlation, how many of their top 20 are the same, the top-20 gain of each and of the 50/50 rank blend, and
+    the share of each model's top 20 replaced from one week to the next (what the rule's costs come from)."""
+    from quant_platform.research.model import (
+        HORIZON,
+        _spearman,
+        eligibility,
+        label_block,
+        sample_columns,
+    )
+    from quant_platform.research.model import scores as model_scores
+
+    root = Path(models_root)
+    mine, theirs = model_scores(fp, root / version), model_scores(fp, root / against)
+    eligible = eligibility(fp)
+    columns = sample_columns(len(fp.sessions))
+    gains = label_block(fp, columns, eligible, "excess", HORIZON)
+    years: dict[str, dict[str, list[float]]] = {}
+    previous: dict[str, set[int]] = {}
+    for slot, column in enumerate(columns):
+        both = np.isfinite(mine[column]) & np.isfinite(theirs[column]) & eligible[:, column]
+        if both.sum() < 50:
+            continue
+        a = np.where(both, mine[column], np.nan)
+        b = np.where(both, theirs[column], np.nan)
+        blend = (pd.Series(a).rank(pct=True) + pd.Series(b).rank(pct=True)).to_numpy() / 2
+        item = years.setdefault(str(fp.sessions[column].year), {key: [] for key in (
+            "correlation", "overlap", "gain_mine", "gain_theirs", "gain_blend", "turnover_mine", "turnover_theirs")})
+        correlation = _spearman(a, b)
+        if correlation is not None:
+            item["correlation"].append(correlation)
+        tops = {"mine": _top(a), "theirs": _top(b), "blend": _top(blend)}
+        item["overlap"].append(len(tops["mine"] & tops["theirs"]) / 20)
+        outcome = gains[slot]
+        if np.isfinite(outcome[both]).sum() >= 50:
+            known = both & np.isfinite(outcome)
+            for name in ("mine", "theirs", "blend"):
+                chosen = [row for row in tops[name] if np.isfinite(outcome[row])]
+                if chosen:
+                    item[f"gain_{name}"].append(float(outcome[chosen].mean() - outcome[known].mean()))
+        for name in ("mine", "theirs"):
+            if previous.get(name):
+                item[f"turnover_{name}"].append(1 - len(tops[name] & previous[name]) / 20)
+            previous[name] = tops[name]
+    table = {year: {key: round(float(np.mean(values)), 4) if values else None for key, values in item.items()}
+             for year, item in sorted(years.items())}
+    summary = {key: round(float(np.mean([row[key] for year, row in table.items() if int(year) in GATE_YEARS
+                                        and row[key] is not None])), 4)
+               for key in ("correlation", "overlap", "gain_mine", "gain_theirs", "gain_blend", "turnover_mine",
+                           "turnover_theirs")}
+    result = {"version": version, "against": against, "development": summary, "years": table,
+              "built_at": datetime.now(UTC).isoformat(timespec="seconds")}
+    (root / version / "diagnostics.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+    return result

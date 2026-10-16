@@ -18,7 +18,7 @@
 
 ## 背景執行中
 
-- 沒有長時間程式在跑（03:00 確認）。之前停掉的 dealer2、dealermodel、rebuild143 已標成 stopped（不會在重開機後被自動重啟）。
+- `deep2cost`（03:3x 開始）：階段 0 診斷 → 三個成本換股規則 → 統計。之前停掉的 dealer2、dealermodel、rebuild143 已標成 stopped（不會在重開機後被自動重啟）。
 
 ## 下一步（依優先）
 

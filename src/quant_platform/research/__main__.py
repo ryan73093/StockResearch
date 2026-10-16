@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
+                            "forward-board", "deep2-diagnose", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
@@ -649,6 +649,18 @@ def main() -> int:
             job.payload["summary"] = "；".join(f"{item['text'][:20]}→{item.get('verdict', item['status'])}" for item in done)
         for item in done:
             print(f"{item['text']}：{item.get('verdict', item['status'])}；{item.get('reason', '')}", flush=True)
+        return 0
+
+    if args.command == "deep2-diagnose":    # 2026-10-17: stage 0 of the review, free (research/model_deep2.py)
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research.model import models_root
+        from quant_platform.research.model_deep2 import diagnose
+
+        _data, fp = daily_research.load(Path(args.base))
+        result = diagnose(fp, models_root(Path(args.base)))
+        print(json.dumps(result["development"], ensure_ascii=False), flush=True)
+        for year, row in result["years"].items():
+            print(year, json.dumps(row, ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "forward-board":
