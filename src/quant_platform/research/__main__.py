@@ -324,7 +324,7 @@ def main() -> int:
                         help="rl-sleeves：版本（1.1.0 隨機起點；2.0.0 第三個位置是現金、回撤懲罰加倍）")
     parser.add_argument("--model-version", default="gbm-1.2.0",
                         choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0", "gbm-2.0.0",
-                                 "gbm-2.1.0", "gbm-2.2.0"),
+                                 "gbm-2.1.0", "gbm-2.2.0", "dl-1.0.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
@@ -596,8 +596,8 @@ def main() -> int:
             ics = [item["ic"] for item in meta["years"].values() if item.get("ic") is not None]
             job.payload["summary"] = f"{len(meta['years'])} 個年度模型；樣本外 IC 平均 {np.mean(ics):+.3f}" if ics else "沒有模型"
         for year, item in meta["years"].items():
-            print(f"{year}：訓練 {item['train_rows']:,} 筆（標籤到 {item['train_until']}）、樣本外 IC {item['ic']}、"
-                  f"IC 為正的週 {item['ic_positive']}、前五分之一排名多 {item['top_fifth_rank_gap']}、"
+            print(f"{year}：訓練 {item.get('train_rows', item.get('train_samples'))} 筆、樣本外 IC {item.get('ic')}、"
+                  f"IC 為正的週 {item.get('ic_positive')}、前五分之一排名多 {item.get('top_fifth_rank_gap')}、"
                   f"20 日報酬比中位數多：前五分之一 {item.get('top_fifth_gain')}、前 20 名 {item.get('top20_gain')}",
                   flush=True)
         return 0
@@ -861,11 +861,12 @@ def main() -> int:
         from quant_platform.research import scan
         from quant_platform.research.jobs import JobLog
 
-        if args.require in ("ml_gbm_ens", "ml_gbm_ext"):   # only after the ensemble passed its registered gate
+        if args.require in ("ml_gbm_ens", "ml_gbm_ext", "ml_deep"):   # only past the model's registered gate
             from quant_platform.research.model_ensemble import gate
 
             check = (gate(RESEARCH / "models") if args.require == "ml_gbm_ens"
-                     else gate(RESEARCH / "models", "gbm-2.2.0", "gbm-2.0.0"))       # 2026-10-16: model G
+                     else gate(RESEARCH / "models", "gbm-2.2.0", "gbm-2.0.0") if args.require == "ml_gbm_ext"
+                     else gate(RESEARCH / "models", "dl-1.0.0", "gbm-2.0.0"))           # 2026-10-16: G, the deep model
             print(f"{check['version']} 門檻：{check}", flush=True)
             if not check["passed"]:
                 return 0

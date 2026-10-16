@@ -107,7 +107,7 @@ def test_the_robot_21_sees_every_full_history_factor_and_the_model_scores():
 
     names = rl_timing.factor_names(rl_timing.ALL_VERSION)
     # the seven model scores it was trained on; model G (2026-10-16) came later and is not one of them
-    assert set(daily.MODEL_FACTORS) - {"ml_gbm_ext"} <= set(names) and set(rl_timing.factor_names()) <= set(names)
+    assert set(daily.MODEL_FACTORS) - {"ml_gbm_ext", "ml_deep"} <= set(names) and set(rl_timing.factor_names()) <= set(names)
     assert not {"revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap"} & set(names)
     assert not (set(daily.TIME_FACTORS) | set(daily.SHORT_FACTORS) | set(daily.ALERT_FACTORS)) & set(names)
     rules = daily.robot21_batch()

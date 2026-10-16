@@ -47,7 +47,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_tech_ens": {"version": "gbm-2.1.0", "label": "ensemble", "features": "technical"},
           # 2026-10-16: the same ensemble on every rule factor but monthly revenue — the families added since
           # (lending and short selling, notices, lending fees, dividends and new shares, issuance, dealers) included
-          "ml_gbm_ext": {"version": "gbm-2.2.0", "label": "ensemble", "features": "extended"}}
+          "ml_gbm_ext": {"version": "gbm-2.2.0", "label": "ensemble", "features": "extended"},
+          # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
+          # (research/model_deep.py)
+          "ml_deep": {"version": "dl-1.0.0", "label": "deep"}}
 MONTHLY_REVENUE = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel")
 VERSIONS = {spec["version"]: spec for spec in MODELS.values()}
 LATEST = "gbm-1.2.0"
@@ -208,6 +211,10 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
           job=None, label: str = "rank", version: str = MODEL_VERSION, horizon: int = HORIZON) -> dict[str, object]:
     """Fit and save one model per year; returns the out-of-sample diagnostics. A version keeps the feature
     list it was first trained with (a later year of the same version uses the same features)."""
+    if label == "deep":                      # 2026-10-16: the recurrent network (research/model_deep.py)
+        from quant_platform.research.model_deep import train as train_deep
+
+        return train_deep(fp, out_dir, years, job)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     names = trained_features(out, version)
@@ -378,6 +385,10 @@ def scores(fp, out_dir: str | Path) -> np.ndarray:
     """sessions × symbols: each session scored by the model of its year (the latest model after the last
     trained year); NaN where the stock is not eligible or no model exists yet."""
     folder = Path(out_dir)
+    if (folder / "deep.npz").is_file():      # 2026-10-16: the deep model keeps its scores, not pickled models
+        from quant_platform.research.model_deep import scores as deep_scores
+
+        return deep_scores(fp, folder)
     output = np.full((len(fp.sessions), len(fp.symbols)), np.nan, dtype=np.float32)
     models = {int(path.stem): path for path in folder.glob("*.pkl")} if folder.is_dir() else {}
     if not models:

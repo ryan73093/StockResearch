@@ -200,7 +200,8 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_quality": "機器學習綜合分數（36 個因子含財報與趨勢品質、不含月營收、超額報酬標籤、逐年滾動訓練）",
                  "ml_gbm_ens": "機器學習集成（多種子提升樹、前五分之一分類器、脊迴歸、60 日標籤，36 個因子、逐年滾動訓練）",
                  "ml_tech_ens": "技術模型（同樣的集成，只用 20 個價量技術因子、逐年滾動訓練）",
-                 "ml_gbm_ext": "機器學習集成 G（同模型 F 的集成，特徵加上後來的借券、注意處置、借券費率、股利與現增、股本、自營商因子，不含月營收）"}
+                 "ml_gbm_ext": "機器學習集成 G（同模型 F 的集成，特徵加上後來的借券、注意處置、借券費率、股利與現增、股本、自營商因子，不含月營收）",
+                 "ml_deep": "深度學習（GRU 讀每檔最近 40 個交易日的報酬、成交值與 12 個因子名次，逐年滾動訓練）"}
 # 2026-10-10 (使用者：純技術分析的 RL 機器人): research/tech_rl.py — sees only price and volume.
 TECH_FACTORS = {"rl_tech": "技術分析 RL 機器人：沒持有時想進場的機率（只看價格與成交量）",
                 "rl_tech_weekly": "技術分析 RL 機器人（每週決策版）：沒持有時想進場的機率（只看價格與成交量）"}
@@ -2182,6 +2183,20 @@ def model_f_batch() -> list[DailyRule]:
                       check="weekly", industry_cap=0.3)]
 
 
+def deep_batch() -> list[DailyRule]:
+    """2026-10-16: the deep model as a rule — only if its development years' top-20 gain is at least gbm-2.0.0's."""
+    from quant_platform.research.model_ensemble import gate
+
+    check = gate(Path("instance") / "research" / "models", "dl-1.0.0", "gbm-2.0.0")
+    print(f"dl-1.0.0 門檻（2016-2020 前 20 名多賺，對 gbm-2.0.0）：{check}", flush=True)
+    if not check["passed"]:
+        return []
+    return [DailyRule(name="深度學習模型：前 20 名、同產業最多 3 成、每週決策、月線上續抱", factors={"ml_deep": 1.0},
+                      check="weekly", industry_cap=0.3, hold="trend", min_hold=0),
+            DailyRule(name="深度學習模型：前 20 名、同產業最多 3 成、每天決策、月線上續抱", factors={"ml_deep": 1.0},
+                      check="daily", industry_cap=0.3, hold="trend", min_hold=0)]
+
+
 def model_g_batch() -> list[DailyRule]:
     """2026-10-16: gbm-2.2.0 as a rule — only if its development years' top-20 gain is at least gbm-2.0.0's (the
     same registered gate as model F's against gbm-1.4.0)."""
@@ -2440,7 +2455,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
