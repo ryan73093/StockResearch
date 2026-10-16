@@ -196,3 +196,22 @@ def test_an_equal_screen_score_goes_to_the_more_liquid_stock():
     _returns, _entries, plain = scan.account(score, np.ones(sessions, dtype=bool), np.arange(stocks), np.zeros((stocks, sessions)),
                                              None, 0.0, 0.0, record=True)
     assert sorted(plain[0]) == list(range(scan.TOP))                  # without it, the first rows (the old way)
+
+
+def test_the_prefilter_keeps_only_signals_that_beat_0050_alone(tmp_path, monkeypatch):
+    """2026-10-16 (GPU): every signal alone first (development period), the sets only of those that beat 0050 alone."""
+    import json
+
+    from quant_platform.research import daily
+
+    data, fp = planted()
+    monkeypatch.setattr(scan, "signals", lambda: ["momentum_6", "momentum_12_1", "trend_200", "reversal_1"])
+    monkeypatch.setattr(daily, "load", lambda _base: (data, fp))
+    monkeypatch.setattr(daily, "fingerprint", lambda _base: "daily:test")
+    research = tmp_path / "research"
+    summary = scan.run_scan(tmp_path, research, FREE, workers=0, count=0, largest=2, smallest=2, prefilter=True)
+    kept = summary["prefilter"]["kept"]
+    assert summary["prefilter"]["singles"] == 4 * 8 and set(kept) <= {"momentum_6", "momentum_12_1", "trend_200", "reversal_1"}
+    assert summary["candidates"] == len(kept) * (len(kept) - 1) // 2 * 8
+    folder = next((research / "scans").glob("scan-*"))
+    assert json.loads((folder / "prefilter.json").read_text(encoding="utf-8"))["kept"] == kept

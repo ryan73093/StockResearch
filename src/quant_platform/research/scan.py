@@ -555,7 +555,7 @@ def earlier_finalists(research: Path) -> list[dict]:
 
 def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 80, largest: int = 3,
              names: list[str] | None = None, job=None, smallest: int = 1, require: str | None = None,
-             resume: Path | None = None, pool: int = 600, stable: bool = True) -> dict:
+             resume: Path | None = None, pool: int = 600, stable: bool = True, prefilter: bool = False) -> dict:
     """Both stages; returns the summary written next to the screen results. With ``resume`` (an earlier
     scan's folder whose first stage finished) only the second stage runs, on that folder's arrays and rows."""
     from quant_platform.research import daily
@@ -580,7 +580,16 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                        force=True)
     else:
         arrays = prepare(data, fp, costs, folder / "arrays")
-        items = candidates(names, largest, smallest, require)
+        kept_signals = None
+        if prefilter:      # 2026-10-16 (GPU): every signal alone first; the sets only of those that beat 0050 alone in
+            singles = candidates(names, 1, 1, None)         # some variant over the development period (no later data)
+            alone = screen(folder / "arrays", singles, costs, workers, folder / "singles")
+            kept_signals = sorted({name for row in alone if row["excess"] > 0 for name in row["factors"]})
+            (folder / "prefilter.json").write_text(json.dumps({"singles": len(singles), "kept": kept_signals},
+                                                              ensure_ascii=False, indent=1), encoding="utf-8")
+            if job:
+                job.update(current=f"單一訊號篩選：{len(kept_signals)} 個訊號單獨贏過 0050（開發期）", force=True)
+        items = candidates(kept_signals or names, largest, smallest, require)
         if job:
             job.update(done=0, total=len(items) + count, current=f"第一階段：{len(items):,} 個候選（2015-06～2020-09）",
                        force=True)
@@ -607,6 +616,8 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                         "reasons": reasons, "tier": daily.tier(record.metrics)[0]})
     summary = {"version": SCAN_VERSION, "stamp": stamp, "development": [str(arrays.days[0]), str(DEV_END)],
                "signals": arrays.names, "sizes": [smallest, largest], "require": require,
+               "prefilter": json.loads((folder / "prefilter.json").read_text(encoding="utf-8"))
+               if (folder / "prefilter.json").is_file() else None,
                "selection": "stability" if stable else "excess", "effective_trials": effective,
                "earlier_finalists": len(seeds),
                "candidates": len(items), "passed_screen": sum(passes(row) for row in rows),

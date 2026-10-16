@@ -353,6 +353,8 @@ def main() -> int:
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
     parser.add_argument("--require", help="scan：只跑含這個訊號的組（例如新模型 ml_gbm_quality）")
+    parser.add_argument("--prefilter", action="store_true",
+                        help="scan：先在開發期單獨篩每個訊號，只用單獨贏過 0050 的訊號組合（GPU 用來跑 4 個一組）")
     parser.add_argument("--require-new", action="store_true",
                         help="scan：只跑至少含一個 2026-10-13 新價量因子的組（先過新穎性閘門）")
     parser.add_argument("--require-time", action="store_true",
@@ -945,9 +947,12 @@ def main() -> int:
             if not require:
                 return 0
         count = (sum(1 for path in Path(args.resume).glob("screen-*.jsonl") for _line in open(path, "rb"))
-                 if args.resume else len(scan.candidates(None, args.signals_max, args.signals_min, require)))
+                 if args.resume else 0 if args.prefilter
+                 else len(scan.candidates(None, args.signals_max, args.signals_min, require)))
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         title = (f"大規模策略搜尋：接著跑第二階段（第一階段 {count:,} 個已完成）" if args.resume else
+                 f"大規模策略搜尋（GPU：先篩單一訊號，再 {args.signals_min}～{args.signals_max} 個一組，第一階段 2015-06～2020-09）"
+                 if args.prefilter else
                  f"大規模策略搜尋（{args.signals_min}～{args.signals_max} 個訊號一組，{count:,} 個候選，第一階段 2015-06～2020-09）")
         with JobLog(RESEARCH).start(title,
                                     command, total=count + args.finalists) as job:
@@ -955,7 +960,7 @@ def main() -> int:
                                     count=args.finalists, job=job, largest=args.signals_max,
                                     smallest=args.signals_min, require=require,
                                     resume=Path(args.resume) if args.resume else None, pool=args.pool,
-                                    stable=not args.by_excess)
+                                    stable=not args.by_excess, prefilter=args.prefilter)
             job.payload["summary"] = (f"{summary['candidates']:,} 個候選、{summary['passed_screen']:,} 個過第一階段、"
                                       f"{summary['finalists']} 個完整回測：{summary['tiers']}")
         for item in summary["results"]:
