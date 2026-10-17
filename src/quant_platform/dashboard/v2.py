@@ -281,7 +281,8 @@ def ml_view(research_dir: Path) -> dict[str, object]:
             return sum(values) / len(values) if values else None
 
         models.append({"version": meta.get("version") or path.parent.name, "label": meta.get("label", "rank"),
-                       "horizon": meta.get("horizon", 20),
+                       "horizon": meta.get("horizon", 20), "loss": meta.get("loss"), "stopped": meta.get("stopped"),
+                       "gate": _model_gate(folder, version, meta),
                        "features": len(meta.get("features") or []), "years": years, "ic": average("ic"),
                        "top20_gain": average("top20_gain"), "trained_at": (meta.get("trained_at") or "")[:16],
                        # 2026-10-17: the drop-risk model is judged by AUC, not IC (research/model_risk.py)
@@ -316,7 +317,46 @@ def ml_view(research_dir: Path) -> dict[str, object]:
         report["chart"] = {"points": points, "width": width, "height": height,
                            "first": days[0] if days else "", "last": days[-1] if days else ""}
         reports.append(report)
-    return {"models": models, "rl": reports, "tech": tech}
+    diagnostics = None                         # 2026-10-17: dl-2.1.0 against model G (stage 0, free)
+    path = folder / "dl-2.1.0" / "diagnostics.json"
+    if path.is_file():
+        try:
+            diagnostics = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            diagnostics = None
+    return {"models": models, "rl": reports, "tech": tech, "diagnostics": diagnostics}
+
+
+def _model_gate(folder: Path, version: str, meta: dict) -> dict[str, object] | None:
+    """2026-10-17 (UI review): each model's registered gate and its outcome, for the model table (no printing)."""
+    try:
+        if meta.get("label") == "deep2":
+            from quant_platform.research.model_deep2 import gate as deep2_gate
+
+            check = deep2_gate(folder, version)
+            if "top20_gain" not in check:
+                return None
+            return {"passed": check["passed"], "text": f"2016～2020 前 20 名 {check['top20_gain']:+.2%}，模型 G "
+                    f"{check['against_top20_gain']:+.2%}；≥ +0.6% 的年 {check['years_above_floor']}／5"}
+        if meta.get("label") == "deep_risk":
+            from quant_platform.research.model_risk import gate as risk_gate
+
+            check = risk_gate(folder)
+            if check.get("auc") is None:
+                return None
+            return {"passed": check["passed"], "text": f"AUC {check['auc']:.3f}，要比波動 {check['auc_volatility']:.3f} 高 0.02"}
+        against = {"gbm-2.0.0": "gbm-1.4.0", "gbm-2.2.0": "gbm-2.0.0", "dl-1.0.0": "gbm-2.0.0"}.get(version)
+        if against:
+            from quant_platform.research.model_ensemble import gate as top_gate
+
+            check = top_gate(folder, version, against)
+            if check.get("top20_gain") is None or check.get("against_top20_gain") is None:
+                return None
+            return {"passed": check["passed"], "text": f"2016～2020 前 20 名 {check['top20_gain']:+.2%}，"
+                    f"{against} {check['against_top20_gain']:+.2%}"}
+    except (OSError, ValueError, KeyError):
+        return None
+    return None
 
 
 def _default_basis(research_dir: Path) -> str:
@@ -1015,8 +1055,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         from quant_platform.research.rl_status import engine, labels, view
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        robots = view(models_root(research_dir / "history"))
+        early = ml_view(research_dir)            # 2026-10-17: the early RL work, moved here from the model page
+        shown = {robot.get("version") for robot in robots}
+        early = {"tech": [robot for robot in early["tech"] if robot.get("version") not in shown], "rl": early["rl"]}
         return render_template("v2/research_rl.html", active_nav="research", research_tab="rl",
-                               robots=view(models_root(research_dir / "history")), labels=labels(),
+                               robots=robots, labels=labels(), early=early,
                                engine=engine(research_dir), jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/recent/<rule_hash>")

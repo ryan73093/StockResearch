@@ -234,6 +234,8 @@ a.theme-toggle[aria-current="page"] { color: var(--accent); border-color: var(--
   .sidegroup a { display: block; padding: 5px 10px; border-radius: 8px; font-size: 13.5px; color: var(--text-2); }
   .sidegroup a:hover { text-decoration: none; background: var(--surface-2); color: var(--text); }
   .sidegroup a[aria-current="true"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  .sidegroup__caption { display: block; padding: 8px 10px 2px; font-size: 11.5px; color: var(--muted); letter-spacing: .04em; }
+  .sidegroup__caption:first-child { padding-top: 2px; }
   .subtabs.subtabs--grouped { display: none; }      /* the sidebar group lists them */
   .sidebar .session__short { display: none; }
   .sidebar .session__text { display: block; }

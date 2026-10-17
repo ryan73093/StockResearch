@@ -27,6 +27,9 @@ def _digest(payload: dict[str, object]) -> str:
     ).hexdigest()
 
 
+_PARSED: dict[str, object] = {}       # the last file parsed by ``TrialRegistry.records``
+
+
 @dataclass(frozen=True, slots=True)
 class TrialRecord:
     trial_id: int
@@ -155,12 +158,18 @@ class TrialRegistry:
         return self._path
 
     def records(self) -> list[TrialRecord]:
+        """Every record; parsed once per version of the file (2026-10-17: a research page read the 5,000-line
+        file 40 times — 6 s). A new list each call; the records themselves are shared, read them only."""
         if not self._path.is_file():
             return []
-        return [
-            TrialRecord(**json.loads(line))
-            for line in self._path.read_text(encoding="utf-8").splitlines() if line.strip()
-        ]
+        stat = self._path.stat()
+        key = (str(self._path.resolve()), stat.st_mtime_ns, stat.st_size)
+        if _PARSED.get("key") != key:
+            _PARSED.update(key=key, records=[
+                TrialRecord(**json.loads(line))
+                for line in self._path.read_text(encoding="utf-8").splitlines() if line.strip()
+            ])
+        return list(_PARSED["records"])
 
     def find(self, kind: str, period: str, input_hash: str) -> TrialRecord | None:
         return next(

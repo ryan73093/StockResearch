@@ -64,8 +64,28 @@ def _activity(metrics: dict) -> dict[str, object]:
     return {"cost_share": share, "turnover": metrics.get("turnover"), "orders_per_month": metrics.get("orders_per_month")}
 
 
+_SOURCES: dict[str, object] = {}
+
+
 def _sources(research_dir: Path) -> dict[str, str]:
-    """spec_hash → where the rule came from (批次名稱 or AI 研究員)."""
+    """spec_hash → where the rule came from (批次名稱 or AI 研究員). 2026-10-17: rebuilt only when the trial registry
+    or the AI researcher's journal changed (every batch is rebuilt to know its rules — seconds, and the batches that
+    check a gate print it); the batches' printing is kept off the page server's log."""
+    import contextlib
+    import io
+
+    marks = []
+    for name in ("trials.jsonl", "journal.jsonl"):
+        path = Path(research_dir) / name
+        marks.append((path.stat().st_mtime_ns, path.stat().st_size) if path.is_file() else None)
+    key = (str(Path(research_dir).resolve()), tuple(marks))
+    if _SOURCES.get("key") != key:
+        with contextlib.redirect_stdout(io.StringIO()):
+            _SOURCES.update(key=key, origin=_build_sources(Path(research_dir)))
+    return dict(_SOURCES["origin"])
+
+
+def _build_sources(research_dir: Path) -> dict[str, str]:
     from quant_platform.research.batches import BATCHES
     from quant_platform.research.daily import BATCHES as DAILY_BATCHES
     from quant_platform.research.stock_rules import BATCHES as STOCK_BATCHES

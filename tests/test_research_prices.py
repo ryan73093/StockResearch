@@ -113,3 +113,21 @@ def test_research_bars_carry_open_and_volume_and_fill_the_paper_account(tmp_path
     service.submit_order("2330", "BUY", 100, now=datetime(2025, 1, 2, 7, tzinfo=UTC))
     assert service.process_pending(datetime(2025, 1, 3, 7, tzinfo=UTC)).filled == 1
     assert service.overview(datetime(2025, 1, 3, 7, tzinfo=UTC)).fills[0].price == Decimal("110.110000")
+
+
+def test_only_the_latest_session_looks_for_the_close_jobs_payload(tmp_path, monkeypatch):
+    """2026-10-17 (the holdings page took 5–60 s): older sessions without an open did a file lookup each."""
+    history = tmp_path / "history"
+    days = [date(2023, 12, 28), date(2023, 12, 29), date(2024, 12, 30), date(2024, 12, 31), date(2025, 1, 2), date(2025, 1, 3)]
+    for year, chosen in ((2023, days[:2]), (2024, days[2:4])):   # 2023: older than the two files the opens come from
+        write_year([{"date": day, "code": "2330", "name": "台積電", "open": 100.0, "high": 101.0, "low": 99.0,
+                     "close": 100.0, "volume": 0, "turnover": 1, "trades": 1} for day in chosen],
+                   history / "stocks" / "twse" / f"{year}.parquet")
+    write_year([{"date": day, "code": "2330", "name": "台積電", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0,
+                 "volume": 5, "turnover": 1, "trades": 1} for day in days[4:]], history / "stocks" / "twse" / "2025.parquet")
+    prices = ResearchPrices(history)
+    looked: list[date] = []
+    real = prices.today_rows
+    monkeypatch.setattr(prices, "today_rows", lambda day: looked.append(day) or real(day))
+    bars = prices.list_bars("2330.TW", as_of=datetime(2025, 1, 6, 9, tzinfo=TAIPEI))
+    assert len(bars) == 6 and len(looked) <= 1

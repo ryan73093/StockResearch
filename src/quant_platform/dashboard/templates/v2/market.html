@@ -73,6 +73,7 @@
     <div class="card__head"><h2>{{ title }}</h2><span class="muted small">只列符合規則基本資格的股票</span></div>
     <div class="table-wrap">
       <table>
+        <thead><tr><th>股票</th><th>產業</th><th class="num">今天</th></tr></thead>
         <tbody>
         {% for row in rows %}
           <tr><td><a class="symbol" href="/stock/{{ row.code }}"><strong>{{ row.code }}</strong><span>{{ row.name }}</span></a></td>
@@ -90,6 +91,7 @@
   <div class="card__head"><h2>成交值最大（近 20 日日均）</h2></div>
   <div class="table-wrap">
     <table>
+      <thead><tr><th>股票</th><th class="num">20 日日均成交值</th><th class="num">今天</th></tr></thead>
       <tbody>
       {% for row in market.active %}
         <tr><td><a class="symbol" href="/stock/{{ row.code }}"><strong>{{ row.code }}</strong><span>{{ row.name }}</span></a>

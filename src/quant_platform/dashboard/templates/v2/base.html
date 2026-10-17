@@ -1,5 +1,5 @@
 {% from "v2/_icons.html" import icon, brand_mark %}
-{% from "v2/_nav.html" import research_pages, system_pages, project_pages %}
+{% from "v2/_nav.html" import research_pages, research_groups, system_pages, project_pages %}
 <!doctype html>
 <html lang="zh-Hant" data-theme="{{ theme }}">
 <head>
@@ -28,11 +28,14 @@
           <a href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span></a>
           {% if key == 'research' %}
           <div class="sidegroup" role="group" aria-label="研究">
-            {% for sub, text, link in research_pages %}
+            {% for caption, keys in research_groups %}
+            <span class="sidegroup__caption">{{ caption }}</span>
+            {% for sub, text, link in research_pages if sub in keys %}
             <a href="{{ link }}"{% if active_nav == 'research' and research_tab == sub %} aria-current="true"{% endif %}>{{ text }}{% if sub == 'jobs' and running_jobs %} <span class="badge badge--warn">{{ running_jobs }}</span>{% endif %}</a>
             {% endfor %}
+            {% endfor %}
           </div>
-          {% elif key == 'system' and active_nav == 'system' %}
+          {% elif key == 'system' %}
           <div class="sidegroup" role="group" aria-label="系統">
             {% for sub, text, link in system_pages %}<a href="{{ link }}">{{ text }}</a>{% endfor %}
           </div>

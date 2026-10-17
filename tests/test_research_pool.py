@@ -106,7 +106,7 @@ def test_pool_and_research_page_show_costs_and_forward_tracking(tmp_path):
     detail = client.get("/research/forward/stock-both").get_data(as_text=True)   # 2026-10-17: holdings on its own page
     assert "台積電" in detail
     pool = client.get("/research/pool?basis=dca").get_data(as_text=True)
-    assert "前向觀察中的個股規則" in pool and "費稅佔投入" in pool and f"前向觀察 {START[5:]} 起" in pool
+    assert "費稅佔投入" in pool and f"前向觀察 {START[5:]} 起" in pool      # 2026-10-17: the accounts are on 前向觀察
     payload = client.get("/research/pool.json?basis=dca").get_json()
     assert payload["forward_stocks"][0]["sessions"] == 1 and payload["forward_stocks"][0]["problems"] == []
 

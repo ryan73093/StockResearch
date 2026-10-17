@@ -709,8 +709,8 @@ def create_app(container: Container | None = None) -> Flask:
         return response
 
     @app.get("/roadmap")
-    def development_roadmap() -> str:
-        return project_progress()
+    def development_roadmap():
+        return redirect("/project/roadmap")       # 2026-10-17: one roadmap (docs/development_roadmap.md)
 
     @app.get("/progress")
     def project_progress() -> str:

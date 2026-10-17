@@ -168,9 +168,14 @@ class ResearchPrices:
         if not closes:
             return []
         rows = self._ohlcv(code, "tpex" if suffix == "TWO" else "twse")
+        last = closes[-1][0]
         bars = []
         for day, close in closes:
-            open_, volume = rows.get(day) or (self.today_rows(day).get(code) or (None, close, 0.0))[::2]
+            # 2026-10-17 (the holdings page took 5–60 s): only the latest session can come from the close job's
+            # payload; looking for one on every older day stat-ed a file per day per symbol
+            found = rows.get(day) or ((self.today_rows(day).get(code) or (None, close, 0.0))[::2] if day == last
+                                      else (None, 0.0))
+            open_, volume = found
             bars.append(Bar(symbol.upper(), _at(day, CLOSE), _at(day, PUBLISHED), close, open=open_, volume=volume))
         return bars
 

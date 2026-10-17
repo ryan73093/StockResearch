@@ -1,12 +1,12 @@
 {% extends "v2/base.html" %}
-{% block title %}RL 學習狀況 · 交易研究分析平台{% endblock %}
+{% block title %}強化學習（RL） · 交易研究分析平台{% endblock %}
 {% block heading %}
 <header class="page-head">
   <div>
-    <h1>RL 學習狀況</h1>
+    <h1>強化學習（RL）</h1>
     <p class="page-head__sub">每個機器人每一年：訓練時贏多少、沒看過的那一年實際贏多少、權重押在哪裡。數字是比 0050 多的對數報酬。</p>
   </div>
-  <div class="page-head__meta"><a href="/research?tab=ml">回機器學習與 RL</a></div>
+  <div class="page-head__meta"><a href="/research?tab=ml">機器學習模型</a></div>
 </header>
 {% endblock %}
 {% block content %}
@@ -99,6 +99,12 @@
   {% endif %}
 </section>
 {% endfor %}
+{% if early and (early.tech or early.rl) %}
+<div data-tab="早期版本（1.x、分配器）" id="early">
+{% with ml = early %}{% include "v2/_rl_early.html" %}{% endwith %}
+</div>
+{% endif %}
+
 <section class="card" data-tab="怎麼看">
   <div class="card__head"><h2>怎麼看這一頁</h2></div>
   <ul class="rules">

@@ -212,7 +212,9 @@ def test_ml_tab_shows_the_models_and_the_rl_report(tmp_path):
                                                  scheduler_in_web=False))).test_client()
     body = client.get("/research?tab=ml").get_data(as_text=True)
     assert "gbm-1.1.0" in body and "+0.050" in body and "+3.00%" in body
-    assert "rl-overlay-1.0.0" in body and "RL 調整部位" in body and "平均 60%" in body and "3 次" in body
+    assert "rl-overlay-1.0.0" not in body                       # 2026-10-17: the RL work is on the RL page
+    rl = client.get("/research/rl").get_data(as_text=True)
+    assert "rl-overlay-1.0.0" in rl and "RL 調整部位" in rl and "平均 60%" in rl and "3 次" in rl and "早期版本" in rl
 
 
 def test_research_overview_is_the_new_design_and_the_old_tabs_became_one_record(client):
@@ -397,3 +399,16 @@ def test_the_home_page_shows_this_months_rolling_forward_test(client, monkeypatc
                                                                 "data_through": None, "graded": 0, "passed": 0,
                                                                 "errors": 0, "usable": [], "holdout": [], "models": []})
     assert "這個月的挑選進行中" in client.get("/").get_data(as_text=True)
+
+
+def test_the_sidebar_groups_research_and_always_lists_system(client):
+    """2026-10-17 (使用者：分類到底有沒有好好分類、sidebar 的內容是否還有缺的)."""
+    body = client.get("/").get_data(as_text=True)
+    for caption in ("每天看", "策略", "方法與模型", "程式與紀錄"):
+        assert f'<span class="sidegroup__caption">{caption}</span>' in body
+    assert "機器學習模型" in body and "強化學習（RL）" in body and "機器學習與 RL" not in body
+    for link in ("/system#runs", "/system#quality", "/system#timing", "/system#legacy-tools"):
+        assert f'href="{link}"' in body                               # 系統's pages on every page, as 研究's
+    assert body.count('href="/project"') >= 1 and 'href="/system#project"' not in body
+    redirect = client.get("/roadmap")
+    assert redirect.status_code == 302 and redirect.headers["Location"].endswith("/project/roadmap")
