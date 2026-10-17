@@ -132,23 +132,21 @@
   {% if ml.models %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>版本</th><th>標籤</th><th class="num">特徵</th><th class="num">樣本外 IC（平均）</th><th class="num">前 20 名比中位數多（預測期）</th><th>事先登錄的門檻（2016～2020）</th><th>訓練</th></tr></thead>
+      <thead><tr><th>模型</th><th class="num">樣本外 IC</th><th class="num">前 20 名多</th><th>事先登錄的門檻（2016～2020）</th><th>訓練</th></tr></thead>
       <tbody>
       {% for item in ml.models %}
         <tr>
-          <td data-primary><strong>{{ item.version }}</strong></td>
-          <td data-label="標籤">{{ {'rank': '報酬排名', 'excess': '超額報酬', 'deep': '報酬排名（深度學習）', 'deep2': ('深度第二版：前一成' if item.loss == 'top10' else '深度第二版：超額報酬'), 'deep_risk': '20 日內跌 15% 以上的機率', 'ensemble': '集成：超額報酬'}.get(item.label, '超額報酬') }}<span class="muted small">・{{ item.horizon }} 日</span></td>
-          <td class="num" data-label="特徵">{{ item.features }}</td>
-          <td class="num" data-label="IC">{% if item.label == 'deep_risk' %}AUC {{ '{:.3f}'.format(item.auc) if item.auc is not none else '—' }}<span class="muted small">（波動 {{ '{:.3f}'.format(item.auc_volatility) if item.auc_volatility is not none else '—' }}）</span>{% else %}{{ '{:+.3f}'.format(item.ic) if item.ic is not none else '—' }}{% endif %}</td>
-          <td class="num" data-label="前 20 名">{{ '{:+.2%}'.format(item.top20_gain) if item.top20_gain is not none else '—' }}<span class="muted small">（{{ item.horizon }} 日）</span></td>
+          <td data-primary><strong>{{ item.version }}</strong><br><span class="muted small">{{ {'rank': '報酬排名', 'excess': '超額報酬', 'deep': '報酬排名（深度學習）', 'deep2': ('深度第二版：前一成' if item.loss == 'top10' else '深度第二版：超額報酬'), 'deep_risk': '20 日內跌 15% 以上的機率', 'ensemble': '集成：超額報酬'}.get(item.label, '超額報酬') }}・{{ item.horizon }} 日・{{ item.features }} 個特徵</span></td>
+          <td class="num" data-label="IC">{% if item.label == 'deep_risk' %}AUC {{ '{:.3f}'.format(item.auc) if item.auc is not none else '—' }}{% else %}{{ '{:+.3f}'.format(item.ic) if item.ic is not none else '—' }}{% endif %}</td>
+          <td class="num" data-label="前 20 名多">{{ '{:+.2%}'.format(item.top20_gain) if item.top20_gain is not none else '—' }}</td>
           <td data-label="門檻">{% if item.gate %}<span class="badge {{ 'badge--ok' if item.gate.passed else 'badge--bad' }}">{{ '過' if item.gate.passed else '沒過' }}</span> <span class="muted small">{{ item.gate.text }}</span>{% else %}<span class="muted small">—</span>{% endif %}</td>
-          <td class="small" data-label="訓練" data-wide><span style="white-space:nowrap">{{ item.years|length }} 年・{{ item.trained_at[5:] }}</span>{% if item.stopped %}<br><span class="muted">沒過門檻，其他年度沒訓練</span>{% endif %}</td>
+          <td class="small" data-label="訓練">{{ item.years|length }} 年・{{ item.trained_at[5:10] }}{% if item.stopped %}<br><span class="muted">沒過門檻，其他年度沒訓練</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="note">每年一個模型，只用標籤在那一年之前就結束的資料訓練；IC 是分數和之後報酬（各版本的預測期，多數是 20 個交易日、gbm-1.3.0 是 60 個）排名的相關（0 代表沒有預測力）。模型分數當成因子給規則用，規則的結果在選手池。</p>
+  <p class="col-help"><b>欄位說明</b>　每年一個模型，只用標籤在那一年之前就結束的資料訓練。<b>模型</b>：版本、學什麼、預測期、幾個特徵。<b>樣本外 IC</b>：分數和之後報酬排名的相關，各年平均（0＝沒有預測力；風險模型是 AUC，0.5＝亂猜）。<b>前 20 名多</b>：分數最高的 20 檔之後的報酬比當天合格股票平均多多少，各年平均。<b>門檻</b>：訓練前登錄的門檻，2016～2020 的結果，沒過的模型不做規則。IC 高不代表前 20 名好（第一版深度學習就是這樣）。模型分數當成因子給規則用，規則的結果在選手池。</p>
   {% else %}<p class="muted">還沒有訓練過的模型。</p>{% endif %}
 </section>
 
