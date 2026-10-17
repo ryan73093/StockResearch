@@ -153,3 +153,16 @@ def test_the_large_cap_rules_rank_only_the_largest(monkeypatch):
     rules = daily.deep2_large_batch()
     assert len(rules) == 3 and all(rule.large_caps == 100 and rule.switching == "cost1" for rule in rules)
     assert all("市值前 100 大挑 20 名" in rule.name for rule in rules)
+
+
+def test_the_core_satellite_account_is_fixed_before_the_run():
+    """2026-10-17: the T0 consensus (cost-aware) 63% + the deep rule 37%, shares by risk parity on the development
+    period, fixed in the code; 100% stocks."""
+    from quant_platform.research import daily
+    from quant_platform.research.categories import uses_0050
+
+    blend = daily.core_satellite_batch()[0]
+    shares = [sleeve.share for sleeve in blend.sleeves]
+    assert shares == [daily.CORE_SHARE, 1 - daily.CORE_SHARE] and blend.core == 0.0 and len(blend.name) <= 80
+    assert [sleeve.rule.factors for sleeve in blend.sleeves] == [{"t0_consensus": 1.0}, {"ml_deep2_top": 1.0}]
+    assert not any(uses_0050(sleeve.rule.canonical()) for sleeve in blend.sleeves)

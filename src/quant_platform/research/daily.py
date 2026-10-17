@@ -2594,6 +2594,27 @@ def deep2_large_batch() -> list[DailyRule]:
             for rule in deep2_cost_batch()]
 
 
+CORE_SHARE = 0.63          # core_satellite_batch: risk parity on 2015-06..2020-09 monthly volatility (fixed before)
+
+
+def core_satellite_batch() -> list:
+    """2026-10-17 (使用者：繼續): the deep rule's drawdown (#4916, −54%) is the stocks it holds, not a stock it picks;
+    an account split between the T0 consensus with cost-aware switching (#4316, a T0 candidate, −36.6%) and the deep
+    rule, each sleeve run on its own share of the money (research/blend.py), the shares set by risk parity on the
+    development period's monthly volatility (0.63 / 0.37, fixed before the run). Registered (research_method §7):
+    passes if it is a T0 candidate and ends above #4316 alone from 2015-06 and from 2020-10."""
+    from quant_platform.research.blend import BlendRule, Sleeve
+
+    core = DailyRule(name="T0 共識清單（25 個 T0 候選投票）：前 20 名、同產業最多 3 成、每週決策、看成本才換股",
+                     factors={"t0_consensus": 1.0}, check="weekly", keep=3, min_hold=20, industry_cap=0.3,
+                     switching="cost1")
+    satellite = DailyRule(name="深度學習第二版・前一成：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股、依預測下跌機率配置",
+                          factors={"ml_deep2_top": 1.0}, check="weekly", keep=3, min_hold=0, industry_cap=0.3,
+                          weighting="inverse_risk", switching="cost1")
+    return [BlendRule(name="組合：T0 共識清單（看成本換股）63%＋深度學習第二版（依下跌機率配置）37%",
+                      sleeves=(Sleeve(rule=core, share=CORE_SHARE), Sleeve(rule=satellite, share=1 - CORE_SHARE)))]
+
+
 def model_g_batch() -> list[DailyRule]:
     """2026-10-16: gbm-2.2.0 as a rule — only if its development years' top-20 gain is at least gbm-2.0.0's (the
     same registered gate as model F's against gbm-1.4.0)."""
@@ -2943,7 +2964,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
