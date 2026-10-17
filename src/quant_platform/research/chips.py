@@ -417,17 +417,21 @@ class ChipStore:
         # announced on day d (after its close, or on a holiday): used from the first session after d
         table = table.assign(at=sessions.searchsorted(pd.to_datetime(table["date"]).to_numpy(), side="right"))
         table = table[(table["at"] < len(sessions)) & table["code"].isin(self._codes)]
-        frame = pd.DataFrame(np.nan, index=sessions, columns=self._codes)
+        # 2026-10-18: one column per code first — on the listed-and-TPEx panel a stock that moved from TPEx to the
+        # exchange is two symbols with one code, and writing into repeated columns failed — then one per symbol
+        frame = pd.DataFrame(np.nan, index=sessions, columns=list(dict.fromkeys(self._codes)))
         if len(table):
             values = table.groupby(["at", "code"])[field].sum().unstack()
             frame.loc[sessions[values.index], values.columns] = values.to_numpy()
-        if factor == "dividend_raise":           # NT$ per share against the close of the session it is used from
-            close = pd.DataFrame(self._close.T, index=sessions, columns=self._codes)
-            frame = frame / close.where(close > 0)
-        else:                                     # new shares against the shares issued, reversed
-            shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued").set_axis(sessions)
-            frame = -frame / shares.where(shares > 0)
-        frame = frame.ffill(limit=CORPORATE_SESSIONS - 1).fillna(0.0)
+        announced = frame.reindex(columns=self._codes).to_numpy(dtype=np.float64)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            if factor == "dividend_raise":       # NT$ per share against the close of the session it is used from
+                close = self._close.T
+                share = announced / np.where(close > 0, close, np.nan)
+            else:                                 # new shares against the shares issued, reversed
+                shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued").to_numpy(dtype=np.float64)
+                share = -announced / np.where(shares > 0, shares, np.nan)
+        frame = pd.DataFrame(share, index=sessions).ffill(limit=CORPORATE_SESSIONS - 1).fillna(0.0)
         frame.loc[frame.index <= first] = np.nan  # before the first announcement nothing is known
         return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
 

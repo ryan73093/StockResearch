@@ -75,6 +75,11 @@ def test_a_value_holds_250_sessions_from_the_session_after_the_announcement(tmp_
     assert cut.corporate_matrix("no_cash_issue")[0, start] == pytest.approx(-0.05)        # announced before the cut
     early = ChipStore(tmp_path, days, ["1101.TW", "2330.TW"], close, until=date(2024, 5, 31))
     assert early.corporate_matrix("no_cash_issue")[0, start] == 0.0                         # not yet announced
+    # 2026-10-18: on the listed-and-TPEx panel a stock that moved markets is two symbols with one code
+    both = ChipStore(tmp_path, days, ["1101.TW", "2330.TW", "1101.TWO"], np.full((3, len(days)), 25.0))
+    matrix = both.corporate_matrix("dividend_raise")
+    assert matrix.shape == (3, len(days)) and matrix[0, start] == matrix[2, start] == pytest.approx(0.02)
+    assert both.corporate_matrix("no_cash_issue")[2, start] == pytest.approx(-0.05)
 
 
 def test_corporate_factors_are_rule_factors_but_not_model_features():
