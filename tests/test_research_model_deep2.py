@@ -166,3 +166,48 @@ def test_the_core_satellite_account_is_fixed_before_the_run():
     assert shares == [daily.CORE_SHARE, 1 - daily.CORE_SHARE] and blend.core == 0.0 and len(blend.name) <= 80
     assert [sleeve.rule.factors for sleeve in blend.sleeves] == [{"t0_consensus": 1.0}, {"ml_deep2_top": 1.0}]
     assert not any(uses_0050(sleeve.rule.canonical()) for sleeve in blend.sleeves)
+
+
+def test_the_attention_version_sees_the_day_and_its_own_gate(monkeypatch, tmp_path):
+    """2026-10-17 (D3): dl-3.0.0's stocks of one day attend to each other; scoring keeps days whole; its gate is
+    against dl-2.1.0 (0.2 points more on average, better in 4 of 5 years)."""
+    import torch
+
+    network = model_deep2._network(3, 2, "attention")
+    network.eval()
+    steps, now, market = torch.randn(6, 5, 3), torch.randn(6, 2), torch.zeros(6, 3)
+    together = network(steps, now, market, [(0, 6)])
+    apart = network(steps, now, market, [(0, 3), (3, 6)])
+    assert together.shape == (6,) and not torch.allclose(together, apart)    # the day's others change a score
+    assert model_deep2._runs(np.array([5, 5, 6, 6, 6, 9])) == [(0, 2), (2, 5), (5, 6)]
+
+    def meta(version, gains):
+        return {"version": version, "years": {str(year): {"top20_gain": gain} for year, gain in zip(range(2016, 2021), gains)}}
+
+    d1 = meta("dl-2.1.0", [0.010, 0.017, -0.001, 0.016, 0.033])
+    assert model_deep2.gate_check_d3(meta("dl-3.0.0", [0.013, 0.020, 0.002, 0.019, 0.032]), d1)["passed"]
+    assert not model_deep2.gate_check_d3(meta("dl-3.0.0", [0.011, 0.018, 0.0, 0.017, 0.034]), d1)["passed"]  # +0.1
+    assert not model_deep2.gate_check_d3(meta("dl-3.0.0", [0.03, 0.03, -0.01, 0.01, 0.02]), d1)["passed"]   # 2 of 5
+    (tmp_path / "dl-2.1.0").mkdir()
+    (tmp_path / "dl-2.1.0" / "meta.json").write_text(__import__("json").dumps(d1), encoding="utf-8")
+    (tmp_path / "dl-3.0.0").mkdir()
+    (tmp_path / "dl-3.0.0" / "meta.json").write_text(
+        __import__("json").dumps(meta("dl-3.0.0", [0.013, 0.020, 0.002, 0.019, 0.032])), encoding="utf-8")
+    assert model_deep2.gate(tmp_path, "dl-3.0.0")["against"] == "dl-2.1.0"
+
+
+def test_the_attention_version_trains(monkeypatch, tmp_path):
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "GATE_YEARS", (2017,))
+    snapshot = tmp_path / "gbm-2.2.0"
+    snapshot.mkdir()
+    (snapshot / "meta.json").write_text(__import__("json").dumps({"version": "gbm-2.2.0", "features": ["momentum_3"]}),
+                                        encoding="utf-8")
+    _data, fp = _panel()
+    meta = model.train(fp, tmp_path / "dl-3.0.0", years=[2017], label="deep2", version="dl-3.0.0")
+    assert meta["architecture"] == "attention" and meta["years"]["2017"]["top20_gain"] is not None
+    scores = model.scores(fp, tmp_path / "dl-3.0.0")
+    later = [position for position, day in enumerate(fp.sessions) if day.year == 2018]
+    assert np.isfinite(scores[later[-1]]).sum() >= 50

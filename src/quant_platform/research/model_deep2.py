@@ -41,7 +41,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10"}
+LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10"}
+# 2026-10-17 (docs/research_dl_exits_review.md D3): dl-3.0.0 is dl-2.1.0 with the day's stocks looking at each other
+# (four-head self-attention across the day's eligible stocks) and the market's state gating the sequence inputs
+# (MASTER-style); its gate is against dl-2.1.0 (D3_AGAINST)
+ARCHITECTURES = {"dl-3.0.0": "attention"}
+HEADS = 4
+WIDTH = 64
+D3_AGAINST = "dl-2.1.0"
+D3_MARGIN = 0.002
+D3_COUNT = 4
 CHIPS = ("foreign_buy_20", "trust_buy_20", "dealer_buy_20", "margin_growth_20", "low_sbl_short")
 SEQUENCE = ("excess_return", "intraday", "overnight", "ma_20", "ma_60", "ma_200", "turnover_60", *CHIPS)
 MARKET = ("taiex_trend_200", "taiex_return_20", "rising_share")
@@ -143,7 +152,7 @@ def market_inputs(fp, eligible: np.ndarray) -> np.ndarray:
     return output
 
 
-def _network(sequence: int, snapshot: int):
+def _network(sequence: int, snapshot: int, architecture: str = "gru"):
     import torch
 
     class Network(torch.nn.Module):
@@ -156,11 +165,44 @@ def _network(sequence: int, snapshot: int):
                 width = size
             self.head = torch.nn.Sequential(*layers, torch.nn.Linear(width, 1))
 
-        def forward(self, steps, now, market):
+        def forward(self, steps, now, market, groups=None):
             _out, last = self.gru(steps)
             return self.head(torch.cat([last[-1], now, market], dim=1)).squeeze(-1)
 
-    return Network()
+    class Attention(torch.nn.Module):
+        """D3: the market's state gates the sequence inputs; each stock's encoding then attends to the day's others."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.gate = torch.nn.Sequential(torch.nn.Linear(len(MARKET), sequence), torch.nn.Sigmoid())
+            self.gru = torch.nn.GRU(sequence, HIDDEN, batch_first=True)
+            self.encode = torch.nn.Sequential(torch.nn.Linear(HIDDEN + snapshot, WIDTH), torch.nn.ReLU())
+            self.attention = torch.nn.MultiheadAttention(WIDTH, HEADS, dropout=DROPOUT, batch_first=True)
+            self.norm = torch.nn.LayerNorm(WIDTH)
+            self.head = torch.nn.Sequential(torch.nn.Linear(WIDTH + len(MARKET), HEAD[1]), torch.nn.ReLU(),
+                                            torch.nn.Dropout(DROPOUT), torch.nn.Linear(HEAD[1], 1))
+
+        def forward(self, steps, now, market, groups=None):
+            _out, last = self.gru(steps * 2 * self.gate(market)[:, None, :])      # a gate of 0.5 leaves them
+            encoded = self.encode(torch.cat([last[-1], now], dim=1))
+            mixed = []
+            for start, end in groups or [(0, len(encoded))]:                    # one day's stocks at a time
+                day = encoded[start:end].unsqueeze(0)
+                seen, _weights = self.attention(day, day, day, need_weights=False)
+                mixed.append(self.norm(day + seen).squeeze(0))
+            return self.head(torch.cat([torch.cat(mixed), market], dim=1)).squeeze(-1)
+
+    return Attention() if architecture == "attention" else Network()
+
+
+def _runs(sessions: np.ndarray) -> list[tuple[int, int]]:
+    """The (start, end) of each run of one session in ``sessions`` (pairs come grouped by day)."""
+    if not len(sessions):
+        return []
+    cuts = np.flatnonzero(np.diff(sessions)) + 1
+    from itertools import pairwise
+
+    return list(pairwise([0, *cuts.tolist(), len(sessions)]))
 
 
 class Inputs:
@@ -186,13 +228,23 @@ class Inputs:
                 self.market[sessions])
 
     def score(self, network, pairs: np.ndarray, size: int = 16384) -> np.ndarray:
+        """Scores in the pairs' order; the chunks hold whole days (a day's stocks attend to each other in D3)."""
         import torch
 
         output = []
         network.eval()
+        runs = _runs(pairs[:, 0]) if len(pairs) else []
         with torch.no_grad():
-            for start in range(0, len(pairs), size):
-                output.append(network(*self.batch(pairs[start:start + size])).float().cpu().numpy())
+            index = 0
+            while index < len(runs):
+                first = runs[index][0]
+                last = index
+                while last + 1 < len(runs) and runs[last + 1][1] - first <= size:
+                    last += 1
+                chunk = pairs[first: runs[last][1]]
+                groups = [(start - first, end - first) for start, end in runs[index: last + 1]]
+                output.append(network(*self.batch(chunk), groups).float().cpu().numpy())
+                index = last + 1
         network.train()
         return np.concatenate(output) if output else np.zeros(0, dtype=np.float32)
 
@@ -225,13 +277,14 @@ def _gain(scores: np.ndarray, gains: np.ndarray) -> float | None:
     return float(gains[np.argsort(-scores)[:20]].mean() - gains.mean())
 
 
-def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labels) -> tuple[dict, list[float]]:
+def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labels,
+         architecture: str = "gru") -> tuple[dict, list[float]]:
     """One seed: the network with the best held-out top-20 gain, and the curve."""
     import torch
 
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
-    network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2]).to(inputs.on)
+    network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
     optimiser = torch.optim.AdamW(network.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     held_pairs = np.concatenate([np.stack([np.full(rows[day].size, day), rows[day]], axis=1) for day in held_days])
     best, curve, waited = (-np.inf, None), [], 0
@@ -246,7 +299,7 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
                 at += count
                 pairs.append(np.stack([np.full(count, day), rows[day]], axis=1))
                 target.append(labels[day][rows[day]])
-            loss = _loss(kind, network(*inputs.batch(np.concatenate(pairs))),
+            loss = _loss(kind, network(*inputs.batch(np.concatenate(pairs)), groups),
                          torch.from_numpy(np.concatenate(target).astype(np.float32)).to(inputs.on), groups)
             optimiser.zero_grad()
             loss.backward()
@@ -289,12 +342,35 @@ def gate_check(meta: dict, against: dict) -> dict[str, object]:
             and above >= GATE_COUNT}
 
 
+def gate_check_d3(meta: dict, against: dict) -> dict[str, object]:
+    """D3's registered gate: over 2016–2020 the average top-20 gain at least D3_MARGIN above dl-2.1.0's, and better
+    than it in at least D3_COUNT of the five years."""
+    mine = [(meta.get("years") or {}).get(str(year), {}).get("top20_gain") for year in GATE_YEARS]
+    theirs = [(against.get("years") or {}).get(str(year), {}).get("top20_gain") for year in GATE_YEARS]
+    complete = all(value is not None for value in mine + theirs)
+    average = float(np.mean(mine)) if complete else None
+    yardstick = float(np.mean(theirs)) if complete else None
+    better = sum(1 for a, b in zip(mine, theirs, strict=True) if a is not None and b is not None and a > b)
+    return {"version": meta.get("version"), "against": against.get("version"), "years": list(GATE_YEARS),
+            "top20_gain": average, "against_top20_gain": yardstick, "years_better": better, "margin": D3_MARGIN,
+            "passed": complete and average >= yardstick + D3_MARGIN and better >= D3_COUNT}
+
+
+def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
+    """The version's registered gate on its meta (dl-3.0.0 against dl-2.1.0; the others against gbm-2.2.0)."""
+    against = D3_AGAINST if version in ARCHITECTURES else AGAINST
+    path = root / against / "meta.json"
+    other = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    return gate_check_d3(meta, other) if version in ARCHITECTURES else gate_check(meta, other)
+
+
 def gate(models_root: str | Path, version: str) -> dict[str, object]:
     root = Path(models_root)
-    paths = root / version / "meta.json", root / AGAINST / "meta.json"
+    against = D3_AGAINST if version in ARCHITECTURES else AGAINST
+    paths = root / version / "meta.json", root / against / "meta.json"
     if not all(path.is_file() for path in paths):
         return {"version": version, "passed": False, "reason": "not trained"}
-    return gate_check(*(json.loads(path.read_text(encoding="utf-8")) for path in paths))
+    return _judge(version, json.loads(paths[0].read_text(encoding="utf-8")), root)
 
 
 def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None, job=None) -> dict[str, object]:
@@ -314,6 +390,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
 
     torch.set_num_threads(4)
     kind = LOSSES[version]
+    architecture = ARCHITECTURES.get(version, "gru")
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     eligible = eligibility(fp)
@@ -330,17 +407,16 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
     order = [year for year in GATE_YEARS if year in years] + [year for year in years if year not in GATE_YEARS]
     meta_path = out / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
-    meta.update({"version": version, "label": "deep2", "loss": kind, "features": list(names), "sequence": list(SEQUENCE),
+    meta.update({"version": version, "label": "deep2", "loss": kind, "architecture": architecture,
+                 "features": list(names), "sequence": list(SEQUENCE),
                  "market": list(MARKET), "length": LENGTH, "hidden": HIDDEN, "head": list(HEAD), "seeds": list(SEEDS),
                  "epochs": EPOCHS, "patience": PATIENCE, "held_out": HELD_OUT, "horizon": HORIZON,
                  "device": device_name()})
     meta.setdefault("years", {})
     stored = _load_scores(out, fp.symbols)
-    against_path = out.parent / AGAINST / "meta.json"
-    against = json.loads(against_path.read_text(encoding="utf-8")) if against_path.is_file() else {}
     for number, year in enumerate(order):
         if year not in GATE_YEARS and all(str(item) in meta["years"] for item in GATE_YEARS if item in years):
-            check = gate_check(meta, against)
+            check = _judge(version, meta, out.parent)
             meta["gate"] = check
             if not check["passed"]:
                 meta["stopped"] = f"{GATE_YEARS[0]}～{GATE_YEARS[-1]} 沒過門檻，其他年度不訓練"
@@ -354,8 +430,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
         train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]   # purged
         networks, curves = [], []
         for seed in SEEDS:
-            state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels)
-            network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2]).to(inputs.on)
+            state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture)
+            network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
             network.load_state_dict(state)
             networks.append(network)
             curves.append(curve)
@@ -389,7 +465,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
             job.update(done=number + 1, total=len(order),
                        current=f"{year}：樣本外 IC {item['ic']}、前 20 名多 {item['top20_gain']}")
     if all(str(year) in meta["years"] for year in GATE_YEARS):
-        meta["gate"] = gate_check(meta, against)
+        meta["gate"] = _judge(version, meta, out.parent)
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     return meta
 
@@ -445,7 +521,8 @@ def scores(fp, folder: str | Path) -> np.ndarray:
         year = max(int(path.stem.split("-")[0]) for path in saved)
         networks = []
         for path in [path for path in saved if path.stem.startswith(f"{year}-")]:
-            network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2]).to(inputs.on)
+            network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2],
+                               meta.get("architecture", "gru")).to(inputs.on)
             network.load_state_dict(torch.load(path, weights_only=True, map_location=inputs.on))
             networks.append(network)
         for position in later:
@@ -539,7 +616,8 @@ def leak_check(history: Path, data, models_root: str | Path, version: str, days:
         inputs = Inputs(fp, eligible, tuple(meta["features"]))
         networks = []
         for path in sorted(folder.glob(f"{day.year}-*.pt")):
-            network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2]).to(inputs.on)
+            network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2],
+                               meta.get("architecture", "gru")).to(inputs.on)
             network.load_state_dict(torch.load(path, weights_only=True, map_location=inputs.on))
             networks.append(network)
         live = np.flatnonzero(eligible[:, position])
