@@ -76,10 +76,36 @@ SHORT = {
 }
 
 
-def signals() -> list[str]:
+def signals(models_root: Path | None = None) -> list[str]:
     from quant_platform.research.daily import FACTOR_LABELS, MODEL_FACTORS
 
-    return [name for name in (*FACTOR_LABELS, *MODEL_FACTORS) if name not in LEFT_OUT]
+    failed = failed_models(models_root or Path("instance") / "research" / "models")
+    return [name for name in (*FACTOR_LABELS, *MODEL_FACTORS) if name not in LEFT_OUT and name not in failed]
+
+
+def failed_models(models_root: Path) -> set[str]:
+    """2026-10-17: the model scores whose model was trained and failed its registered gate — no rule, no search (the
+    10-16 searches had dl-1.0.0 in, which had failed; one finalist, #4737, T3). A model not trained is not left out
+    here (its scores are empty)."""
+    from quant_platform.research.model_deep2 import gate as deep2_gate
+    from quant_platform.research.model_ensemble import gate as top_gate
+
+    checks = {"ml_gbm_ens": lambda: top_gate(models_root),
+              "ml_gbm_ext": lambda: top_gate(models_root, "gbm-2.2.0", "gbm-2.0.0"),
+              "ml_deep": lambda: top_gate(models_root, "dl-1.0.0", "gbm-2.0.0"),
+              "ml_deep2": lambda: deep2_gate(models_root, "dl-2.0.0"),
+              "ml_deep2_top": lambda: deep2_gate(models_root, "dl-2.1.0")}
+    output = set()
+    for name, check in checks.items():
+        try:
+            result = check()
+        except (OSError, ValueError, KeyError):
+            continue
+        trained = (result.get("top20_gain") is not None and result.get("against_top20_gain") is not None
+                   and "reason" not in result)          # both the model and its yardstick trained: a judged gate
+        if trained and not result.get("passed"):
+            output.add(name)
+    return output
 
 
 def weekly(factors: tuple[str, ...]) -> bool:

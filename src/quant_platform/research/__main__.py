@@ -1008,6 +1008,13 @@ def main() -> int:
         from quant_platform.research import scan
         from quant_platform.research.jobs import JobLog
 
+        if args.require == "ml_deep2_top":     # 2026-10-17: the second deep version, only past its registered gate
+            from quant_platform.research.model_deep2 import gate as deep2_gate
+
+            check = deep2_gate(RESEARCH / "models", "dl-2.1.0")
+            print(f"dl-2.1.0 門檻：{check}", flush=True)
+            if not check["passed"]:
+                return 0
         if args.require in ("ml_gbm_ens", "ml_gbm_ext", "ml_deep"):   # only past the model's registered gate
             from quant_platform.research.model_ensemble import gate
 

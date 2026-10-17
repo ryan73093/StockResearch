@@ -215,3 +215,24 @@ def test_the_prefilter_keeps_only_signals_that_beat_0050_alone(tmp_path, monkeyp
     assert summary["candidates"] == len(kept) * (len(kept) - 1) // 2 * 8
     folder = next((research / "scans").glob("scan-*"))
     assert json.loads((folder / "prefilter.json").read_text(encoding="utf-8"))["kept"] == kept
+
+
+def test_a_model_that_failed_its_gate_is_not_a_signal(tmp_path):
+    """2026-10-17: the 10-16 searches had dl-1.0.0 in after it failed its gate; a trained model that failed is left
+    out, one not trained is not (its scores are empty anyway)."""
+    import json
+
+    from quant_platform.research import scan
+
+    def meta(version, gains, **extra):
+        folder = tmp_path / version
+        folder.mkdir()
+        (folder / "meta.json").write_text(json.dumps({"version": version, "years": {
+            str(year): {"top20_gain": gain} for year, gain in zip(range(2016, 2021), gains)}, **extra}), encoding="utf-8")
+
+    meta("gbm-2.2.0", [0.012] * 5)
+    meta("dl-2.0.0", [0.010] * 5)                        # under gbm-2.2.0: failed
+    meta("dl-2.1.0", [0.02] * 5)                         # passed
+    assert scan.failed_models(tmp_path) == {"ml_deep2"}
+    names = scan.signals(tmp_path)
+    assert "ml_deep2" not in names and "ml_deep2_top" in names and "ml_deep" in names   # dl-1.0.0 not trained here
