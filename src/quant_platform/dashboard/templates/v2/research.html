@@ -132,17 +132,17 @@
   {% if ml.models %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>版本</th><th>標籤</th><th class="num">特徵</th><th class="num">樣本外 IC（平均）</th><th class="num">前 20 名比中位數多（預測期）</th><th>事先登錄的門檻</th><th>訓練</th></tr></thead>
+      <thead><tr><th>版本</th><th>標籤</th><th class="num">特徵</th><th class="num">樣本外 IC（平均）</th><th class="num">前 20 名比中位數多（預測期）</th><th>事先登錄的門檻（2016～2020）</th><th>訓練</th></tr></thead>
       <tbody>
       {% for item in ml.models %}
         <tr>
           <td data-primary><strong>{{ item.version }}</strong></td>
-          <td data-label="標籤">{{ {'rank': '報酬排名', 'excess': '超額報酬', 'deep': '報酬排名（深度學習）', 'deep2': ('深度學習第二版：前一成分類' if item.loss == 'top10' else '深度學習第二版：超額報酬（Huber＋ListNet）'), 'deep_risk': '20 日內跌 15% 以上的機率（深度學習風險）', 'ensemble': '集成：超額報酬'}.get(item.label, '超額報酬') }}<span class="muted small">・{{ item.horizon }} 日</span></td>
+          <td data-label="標籤">{{ {'rank': '報酬排名', 'excess': '超額報酬', 'deep': '報酬排名（深度學習）', 'deep2': ('深度第二版：前一成' if item.loss == 'top10' else '深度第二版：超額報酬'), 'deep_risk': '20 日內跌 15% 以上的機率', 'ensemble': '集成：超額報酬'}.get(item.label, '超額報酬') }}<span class="muted small">・{{ item.horizon }} 日</span></td>
           <td class="num" data-label="特徵">{{ item.features }}</td>
           <td class="num" data-label="IC">{% if item.label == 'deep_risk' %}AUC {{ '{:.3f}'.format(item.auc) if item.auc is not none else '—' }}<span class="muted small">（波動 {{ '{:.3f}'.format(item.auc_volatility) if item.auc_volatility is not none else '—' }}）</span>{% else %}{{ '{:+.3f}'.format(item.ic) if item.ic is not none else '—' }}{% endif %}</td>
           <td class="num" data-label="前 20 名">{{ '{:+.2%}'.format(item.top20_gain) if item.top20_gain is not none else '—' }}<span class="muted small">（{{ item.horizon }} 日）</span></td>
           <td data-label="門檻">{% if item.gate %}<span class="badge {{ 'badge--ok' if item.gate.passed else 'badge--bad' }}">{{ '過' if item.gate.passed else '沒過' }}</span> <span class="muted small">{{ item.gate.text }}</span>{% else %}<span class="muted small">—</span>{% endif %}</td>
-          <td class="small" data-label="訓練" data-wide>{{ item.years|length }} 個年度・{{ item.trained_at }}{% if item.stopped %}<br><span class="muted">{{ item.stopped }}</span>{% endif %}</td>
+          <td class="small" data-label="訓練" data-wide><span style="white-space:nowrap">{{ item.years|length }} 年・{{ item.trained_at[5:] }}</span>{% if item.stopped %}<br><span class="muted">沒過門檻，其他年度沒訓練</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

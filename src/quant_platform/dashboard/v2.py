@@ -284,7 +284,7 @@ def ml_view(research_dir: Path) -> dict[str, object]:
                        "horizon": meta.get("horizon", 20), "loss": meta.get("loss"), "stopped": meta.get("stopped"),
                        "gate": _model_gate(folder, version, meta),
                        "features": len(meta.get("features") or []), "years": years, "ic": average("ic"),
-                       "top20_gain": average("top20_gain"), "trained_at": (meta.get("trained_at") or "")[:16],
+                       "top20_gain": average("top20_gain"), "trained_at": (meta.get("trained_at") or "")[:16].replace("T", " "),
                        # 2026-10-17: the drop-risk model is judged by AUC, not IC (research/model_risk.py)
                        "auc": average("auc"), "auc_volatility": average("auc_volatility")})
     reports = []
@@ -336,15 +336,15 @@ def _model_gate(folder: Path, version: str, meta: dict) -> dict[str, object] | N
             check = deep2_gate(folder, version)
             if "top20_gain" not in check:
                 return None
-            return {"passed": check["passed"], "text": f"2016～2020 前 20 名 {check['top20_gain']:+.2%}，模型 G "
-                    f"{check['against_top20_gain']:+.2%}；≥ +0.6% 的年 {check['years_above_floor']}／5"}
+            return {"passed": check["passed"], "text": f"{check['top20_gain']:+.2%} 對模型 G {check['against_top20_gain']:+.2%}，"
+                    f"{check['years_above_floor']}／5 年 ≥ +0.6%"}
         if meta.get("label") == "deep_risk":
             from quant_platform.research.model_risk import gate as risk_gate
 
             check = risk_gate(folder)
             if check.get("auc") is None:
                 return None
-            return {"passed": check["passed"], "text": f"AUC {check['auc']:.3f}，要比波動 {check['auc_volatility']:.3f} 高 0.02"}
+            return {"passed": check["passed"], "text": f"AUC {check['auc']:.3f} 對波動 {check['auc_volatility']:.3f}（要高 0.02）"}
         against = {"gbm-2.0.0": "gbm-1.4.0", "gbm-2.2.0": "gbm-2.0.0", "dl-1.0.0": "gbm-2.0.0"}.get(version)
         if against:
             from quant_platform.research.model_ensemble import gate as top_gate
@@ -352,8 +352,7 @@ def _model_gate(folder: Path, version: str, meta: dict) -> dict[str, object] | N
             check = top_gate(folder, version, against)
             if check.get("top20_gain") is None or check.get("against_top20_gain") is None:
                 return None
-            return {"passed": check["passed"], "text": f"2016～2020 前 20 名 {check['top20_gain']:+.2%}，"
-                    f"{against} {check['against_top20_gain']:+.2%}"}
+            return {"passed": check["passed"], "text": f"{check['top20_gain']:+.2%} 對 {against} {check['against_top20_gain']:+.2%}"}
     except (OSError, ValueError, KeyError):
         return None
     return None
