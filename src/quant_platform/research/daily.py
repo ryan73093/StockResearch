@@ -2585,6 +2585,15 @@ def deep2_r3_batch() -> list[DailyRule]:
             for rule in deep2_cost_batch()]
 
 
+def deep2_large_batch() -> list[DailyRule]:
+    """2026-10-17 (使用者：繼續): the three cost-aware rules (#4913–#4915), T1 on drawdowns of −42% to −56%, ranking
+    only the 100 largest listed stocks (large_caps, equal amounts — as 2026-10-09's large-cap rules, whose drawdowns
+    were shallower and costs a third). Registered (research_method §7, before the results): judged by the pool's tiers;
+    the question is whether any reaches T0 candidate (a drawdown at most 5 points deeper than 0050's)."""
+    return [rule.model_copy(update={"name": rule.name.replace("前 20 名、", "市值前 100 大挑 20 名、"), "large_caps": 100})
+            for rule in deep2_cost_batch()]
+
+
 def model_g_batch() -> list[DailyRule]:
     """2026-10-16: gbm-2.2.0 as a rule — only if its development years' top-20 gain is at least gbm-2.0.0's (the
     same registered gate as model F's against gbm-1.4.0)."""
@@ -2934,7 +2943,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

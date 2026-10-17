@@ -144,3 +144,12 @@ def test_the_risk_weights_by_hand(monkeypatch):
     rules = daily.deep2_risk_batch()
     assert len(rules) == 3 and all(rule.weighting == "inverse_risk" and rule.switching == "cost1" for rule in rules)
     assert all(rule.name.endswith("依預測下跌機率配置") for rule in rules)
+
+
+def test_the_large_cap_rules_rank_only_the_largest(monkeypatch):
+    from quant_platform.research import daily
+
+    monkeypatch.setattr(model_deep2, "gate", lambda root, version: {"passed": True})
+    rules = daily.deep2_large_batch()
+    assert len(rules) == 3 and all(rule.large_caps == 100 and rule.switching == "cost1" for rule in rules)
+    assert all("市值前 100 大挑 20 名" in rule.name for rule in rules)
