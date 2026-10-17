@@ -2166,6 +2166,15 @@ def record_trial(registry: TrialRegistry, reports_dir: Path, spec_hash: str, spe
     reports_dir.mkdir(parents=True, exist_ok=True)
     report_file = f"{PERIOD}-{family}-{spec_hash[:8]}-{stamp}.json"
     (reports_dir / report_file).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    metrics = report_metrics(report, engine, plan)
+    record = registry.register(kind="candidate", period=PERIOD, spec_hash=spec_hash, spec_name=spec_name,
+                               input_hash=input_hash, data_fingerprint=data_fingerprint, report_file=report_file,
+                               metrics=metrics)
+    return record, report
+
+
+def report_metrics(report: dict, engine: str, plan: dict) -> dict[str, object]:
+    """The registered metrics of a report, with the gate's reasons (2026-10-17: also for robustness checks)."""
     strategy, benchmark = report["strategy"], report["benchmark"]
     metrics = {
         "engine": engine, "start": report["start"], "end": report["end"], "plan": plan,
@@ -2180,10 +2189,7 @@ def record_trial(registry: TrialRegistry, reports_dir: Path, spec_hash: str, spe
         "orders_per_month": report["activity"].get("orders_per_month"),
     }
     metrics["reasons"] = gate(metrics)
-    record = registry.register(kind="candidate", period=PERIOD, spec_hash=spec_hash, spec_name=spec_name,
-                               input_hash=input_hash, data_fingerprint=data_fingerprint, report_file=report_file,
-                               metrics=metrics)
-    return record, report
+    return metrics
 
 
 # --- batches -----------------------------------------------------------------------------------

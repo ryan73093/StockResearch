@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
@@ -668,6 +668,19 @@ def main() -> int:
         print(json.dumps(result["development"], ensure_ascii=False), flush=True)
         for year, row in result["years"].items():
             print(year, json.dumps(row, ensure_ascii=False), flush=True)
+        return 0
+
+    if args.command == "robustness":        # 2026-10-18: the best T0 candidates with costs doubled, filled a session late
+        from quant_platform.research import robustness
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("穩健性檢查：最好的 10 個 T0 候選，成本加倍、晚一個交易日成交", command, total=10) as job:
+            result = robustness.run(Path(args.base), RESEARCH, broker_costs(args.broker), 10, job)
+            kept = sum(1 for row in result["rows"] if row["costs_doubled"]["tier"] == "T0 候選")
+            job.payload["summary"] = f"成本加倍後仍是 T0 候選：{kept}／{len(result['rows'])}"
+        for row in result["rows"]:
+            print(json.dumps(row, ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "exit2":             # 2026-10-17: E2, the weekly optimal-stopping exit (research/exits2.py)
