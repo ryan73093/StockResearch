@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
@@ -662,6 +662,20 @@ def main() -> int:
         for year, row in result["years"].items():
             print(year, json.dumps(row, ensure_ascii=False), flush=True)
         return 0
+
+    if args.command == "deep2-leakcheck":   # 2026-10-17: dl-2.1.0's kept scores against data cut at the day
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import leakcheck
+        from quant_platform.research.model import models_root
+        from quant_platform.research.model_deep2 import leak_check
+
+        data, fp = daily_research.load(Path(args.base))
+        days = leakcheck.sample_days(fp.sessions, 6, daily_research.RECENT_START)
+        report = leak_check(Path(args.base), data, models_root(Path(args.base)), "dl-2.1.0", days)
+        for day, item in report["results"].items():
+            print(day, json.dumps(item, ensure_ascii=False), flush=True)
+        print("有差異（偷看）" if report["leak"] else "沒有發現偷看", flush=True)
+        return 0 if not report["leak"] else 1
 
     if args.command == "forward-board":
         # 2026-10-13: the common-start board (research/forward_board.py; also built after the 15:30 forward record)

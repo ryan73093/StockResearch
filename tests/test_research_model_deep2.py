@@ -63,7 +63,7 @@ def _panel():
     closes["0050.TW"] = {day: 50.0 for day in days}
     data = LegacyData(sessions=days, closes=closes, traded_value={s: {d: 5e9 for d in v} for s, v in closes.items()},
                       factors={}, predictions={})
-    return FactorPanel(Panel(data))
+    return data, FactorPanel(Panel(data))
 
 
 def test_the_development_years_first_and_the_rest_only_past_the_gate(monkeypatch, tmp_path):
@@ -76,7 +76,7 @@ def test_the_development_years_first_and_the_rest_only_past_the_gate(monkeypatch
     # the yardstick: its features are the snapshot; its 2017 top-20 gain is out of reach, so the gate stops 2018
     (snapshot / "meta.json").write_text(json.dumps({"version": "gbm-2.2.0", "features": ["momentum_3", "reversal_1"],
                                                     "years": {"2017": {"top20_gain": 9.0}}}), encoding="utf-8")
-    fp = _panel()
+    data, fp = _panel()
     meta = model.train(fp, tmp_path / "dl-2.0.0", years=[2017, 2018], label="deep2", version="dl-2.0.0")
     assert meta["label"] == "deep2" and meta["loss"] == "listnet" and meta["features"] == ["momentum_3", "reversal_1"]
     year = meta["years"]["2017"]
@@ -102,6 +102,14 @@ def test_the_development_years_first_and_the_rest_only_past_the_gate(monkeypatch
     assert -1 <= row["correlation"] <= 1 and 0 <= row["overlap"] <= 1 and 0 <= row["turnover_mine"] <= 1
     assert row["gain_blend"] is not None and result["development"]["overlap"] == row["overlap"]
     assert (tmp_path / "dl-2.1.0" / "diagnostics.json").is_file()
+    # the truncation check: the kept 2018 scores come back the same from data cut at the day
+    from quant_platform.research import leakcheck
+
+    monkeypatch.setattr(leakcheck, "truncated_panel",
+                        lambda history, full, until: (None, FactorPanel(Panel(leakcheck.truncated_data(full, until)))))
+    days = [day for day in fp.sessions if day.year == 2018][100:102]
+    report = model_deep2.leak_check(tmp_path, data, tmp_path, "dl-2.1.0", days)
+    assert not report["leak"] and all(item["checked"] >= 50 for item in report["results"].values())
 
 
 def test_the_cost_aware_rules_wait_for_the_gate(monkeypatch):

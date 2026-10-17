@@ -516,3 +516,46 @@ def diagnose(fp, models_root: str | Path, version: str = "dl-2.1.0", against: st
               "built_at": datetime.now(UTC).isoformat(timespec="seconds")}
     (root / version / "diagnostics.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     return result
+
+
+def leak_check(history: Path, data, models_root: str | Path, version: str, days: list) -> dict[str, object]:
+    """2026-10-17 (the cost-aware dl-2.1.0 rule grew to 3,659 萬 against 0050's 982 萬: check before believing it):
+    for each day, the data cut at that day, the inputs built again from it, the networks of that day's year scoring
+    the day's eligible stocks — compared stock by stock with the score kept from the full history (``deep.npz``).
+    Any difference beyond the float16 the scores are kept in means the full-history score used something later."""
+    import torch
+
+    from quant_platform.research.leakcheck import truncated_panel
+    from quant_platform.research.model import eligibility
+
+    folder = Path(models_root) / version
+    meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    results = {}
+    for day in days:
+        _cut, fp = truncated_panel(history, data, day)
+        position = fp.index[day]
+        kept = _load_scores(folder, fp.symbols).get(day.isoformat())
+        eligible = eligibility(fp)
+        inputs = Inputs(fp, eligible, tuple(meta["features"]))
+        networks = []
+        for path in sorted(folder.glob(f"{day.year}-*.pt")):
+            network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2]).to(inputs.on)
+            network.load_state_dict(torch.load(path, weights_only=True, map_location=inputs.on))
+            networks.append(network)
+        live = np.flatnonzero(eligible[:, position])
+        if kept is None or not networks or not live.size:
+            results[day.isoformat()] = {"checked": 0, "differ": 0, "reason": "no kept score or no networks"}
+            continue
+        pairs = np.stack([np.full(live.size, position), live], axis=1)
+        again = _rank_average([inputs.score(network, pairs) for network in networks])
+        before = kept[live]
+        known = np.isfinite(before)
+        gap = np.abs(again[known] - before[known])
+        results[day.isoformat()] = {"checked": int(known.sum()), "differ": int((gap > 2e-3).sum()),
+                                    "largest_gap": round(float(gap.max()), 5) if gap.size else None,
+                                    "not_kept": int((~known).sum())}
+    report = {"version": version, "days": [day.isoformat() for day in days], "results": results,
+              "leak": any(item["differ"] for item in results.values()),
+              "built_at": datetime.now(UTC).isoformat(timespec="seconds")}
+    (folder / "leakcheck.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    return report
