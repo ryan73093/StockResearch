@@ -111,7 +111,7 @@ def factor_names(version: str = VERSION) -> list[str]:
         left_out = {"revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap",
                     *TIME_FACTORS, *SHORT_FACTORS, *ALERT_FACTORS, *LENDING_FACTORS, *CORPORATE_FACTORS,
                     *ISSUANCE_FACTORS, *DEALER_FACTORS, "ml_gbm_ext"}
-        left_out |= {"rl_free", "ml_deep", "ml_deep2", "ml_deep2_top", "ml_deep3", "dl_risk", "dl_risk2"}
+        left_out |= {"rl_free", "ml_deep", "ml_deep2", "ml_deep2_top", "ml_deep3", "ml_deep2_wide", "dl_risk", "dl_risk2"}
         return [name for name in (*FACTOR_LABELS, *MODEL_FACTORS) if name not in left_out]
     return list(TECH_FEATURES)
 

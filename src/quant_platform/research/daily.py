@@ -222,6 +222,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_deep2": "深度學習第二版（GRU 讀 60 個交易日的價量與籌碼 z 分數＋當天因子快照與大盤狀態；標籤 20 日超額報酬，損失 Huber＋偏重前段的 ListNet；10 個種子）",
                  "ml_deep2_top": "深度學習第二版・前一成（同上，學「之後 20 日是否在當天前 10%」；10 個種子）",
                  "ml_deep3": "深度學習第三版（同第二版・前一成，加上同一天的股票互相比較的注意力層與大盤狀態閘門；10 個種子）",
+                 "ml_deep2_wide": "深度學習第二版・前一成（訓練加上上櫃與小型股：所有正常交易的股票；打分仍只在合格上市股裡排）",
                  "dl_risk": "深度學習風險（未來 20 個交易日內跌 15% 以上的機率，越高越危險；當濾網用，不拿來選股）",
                  "dl_risk2": "深度學習風險第二版（20 日內跌超過自己平常波動 2 倍的機率；只在同樣波動與動能的股票之間比，當濾網用）"}
 RISK_VETO_SHARE = 0.10      # risk_veto dl1: no new buy in the day's top tenth of drop risk
@@ -2632,6 +2633,22 @@ def deep3_batch() -> list[DailyRule]:
                                     "factors": {"ml_deep3": 1.0}}) for rule in twins]
 
 
+def deep2_wide_batch() -> list[DailyRule]:
+    """2026-10-18 (S9-W15): dl-2.2.0 in the frame of #4913 and of #4916 — only past its registered gate against
+    dl-2.1.0. Registered (research_method §7): each passes if it ends above its dl-2.1.0 twin from 2015-06 and from
+    2020-10."""
+    from quant_platform.research.model_deep2 import gate
+
+    check = gate(Path("instance") / "research" / "models", "dl-2.2.0")
+    print(f"dl-2.2.0 門檻（2016-2020 前 20 名多賺比 dl-2.1.0 多 0.2 個百分點，且 5 年中至少 4 年較好）：{check}", flush=True)
+    if not check.get("passed"):
+        return []
+    twins = [rule for rule in deep2_cost_batch() if rule.factors == {"ml_deep2_top": 1.0}]
+    twins += [rule for rule in deep2_risk_batch() if rule.factors == {"ml_deep2_top": 1.0}]
+    return [rule.model_copy(update={"name": rule.name.replace("深度學習第二版・前一成", "深度學習第二版・加上櫃訓練"),
+                                    "factors": {"ml_deep2_wide": 1.0}}) for rule in twins]
+
+
 def model_g_batch() -> list[DailyRule]:
     """2026-10-16: gbm-2.2.0 as a rule — only if its development years' top-20 gain is at least gbm-2.0.0's (the
     same registered gate as model F's against gbm-1.4.0)."""
@@ -2981,7 +2998,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "deep3": deep3_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

@@ -41,14 +41,20 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10"}
+LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10", "dl-2.2.0": "top10"}
+# 2026-10-18 (roadmap S9-W15): dl-2.2.0 is dl-2.1.0 learning from every listed and TPEx stock that trades normally
+# (WIDE_*), its features normalised among them; the epochs are still chosen, and the years judged, on the rules'
+# eligible listed stocks only — as dl-2.1.0. Trained on the "all" panel (MODELS[...]["universe"]).
+WIDE = {"dl-2.2.0"}
+WIDE_PRICE, WIDE_TURNOVER, WIDE_AGE = 1.0, 1_000_000, 120
 # 2026-10-17 (docs/research_dl_exits_review.md D3): dl-3.0.0 is dl-2.1.0 with the day's stocks looking at each other
 # (four-head self-attention across the day's eligible stocks) and the market's state gating the sequence inputs
 # (MASTER-style); its gate is against dl-2.1.0 (D3_AGAINST)
 ARCHITECTURES = {"dl-3.0.0": "attention"}
 HEADS = 4
 WIDTH = 64
-D3_AGAINST = "dl-2.1.0"
+D3_AGAINST = "dl-2.1.0"                 # dl-3.0.0's and dl-2.2.0's yardstick (AGAINST_OF)
+AGAINST_OF = {"dl-3.0.0": D3_AGAINST, "dl-2.2.0": D3_AGAINST}
 D3_MARGIN = 0.002
 D3_COUNT = 4
 CHIPS = ("foreign_buy_20", "trust_buy_20", "dealer_buy_20", "margin_growth_20", "low_sbl_short")
@@ -278,15 +284,18 @@ def _gain(scores: np.ndarray, gains: np.ndarray) -> float | None:
 
 
 def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labels,
-         architecture: str = "gru") -> tuple[dict, list[float]]:
-    """One seed: the network with the best held-out top-20 gain, and the curve."""
+         architecture: str = "gru", judged: tuple | None = None) -> tuple[dict, list[float]]:
+    """One seed: the network with the best held-out top-20 gain, and the curve. ``judged`` (rows, labels): the
+    stocks and labels the held-out days are judged on, when not the ones learned from (dl-2.2.0)."""
     import torch
 
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
     optimiser = torch.optim.AdamW(network.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    held_pairs = np.concatenate([np.stack([np.full(rows[day].size, day), rows[day]], axis=1) for day in held_days])
+    held_rows, held_labels = judged or (rows, labels)
+    held_pairs = np.concatenate([np.stack([np.full(held_rows[day].size, day), held_rows[day]], axis=1)
+                                 for day in held_days])
     best, curve, waited = (-np.inf, None), [], 0
     for _epoch in range(EPOCHS):
         order = rng.permutation(len(train_days))
@@ -307,8 +316,8 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
         predicted = inputs.score(network, held_pairs)
         gains, at = [], 0
         for day in held_days:
-            count = rows[day].size
-            value = _gain(predicted[at:at + count], labels[day][rows[day]])
+            count = held_rows[day].size
+            value = _gain(predicted[at:at + count], held_labels[day][held_rows[day]])
             at += count
             if value is not None:
                 gains.append(value)
@@ -342,6 +351,12 @@ def gate_check(meta: dict, against: dict) -> dict[str, object]:
             and above >= GATE_COUNT}
 
 
+def wide_mask(fp) -> np.ndarray:
+    """symbols × sessions: every stock of the panel that trades normally — dl-2.2.0 learns from these."""
+    with np.errstate(invalid="ignore"):
+        return (fp.panel.close >= WIDE_PRICE) & (fp.turnover_20 >= WIDE_TURNOVER) & (fp.age >= WIDE_AGE)
+
+
 def gate_check_d3(meta: dict, against: dict) -> dict[str, object]:
     """D3's registered gate: over 2016–2020 the average top-20 gain at least D3_MARGIN above dl-2.1.0's, and better
     than it in at least D3_COUNT of the five years."""
@@ -358,15 +373,15 @@ def gate_check_d3(meta: dict, against: dict) -> dict[str, object]:
 
 def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
     """The version's registered gate on its meta (dl-3.0.0 against dl-2.1.0; the others against gbm-2.2.0)."""
-    against = D3_AGAINST if version in ARCHITECTURES else AGAINST
+    against = AGAINST_OF.get(version, AGAINST)
     path = root / against / "meta.json"
     other = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    return gate_check_d3(meta, other) if version in ARCHITECTURES else gate_check(meta, other)
+    return gate_check_d3(meta, other) if version in AGAINST_OF else gate_check(meta, other)
 
 
 def gate(models_root: str | Path, version: str) -> dict[str, object]:
     root = Path(models_root)
-    against = D3_AGAINST if version in ARCHITECTURES else AGAINST
+    against = AGAINST_OF.get(version, AGAINST)
     paths = root / version / "meta.json", root / against / "meta.json"
     if not all(path.is_file() for path in paths):
         return {"version": version, "passed": False, "reason": "not trained"}
@@ -394,20 +409,31 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     eligible = eligibility(fp)
+    if version in WIDE:          # judged and scored on the eligible listed stocks only, as dl-2.1.0 (not TPEx ".TWO")
+        eligible = eligible & np.array([symbol.endswith(".TW") for symbol in fp.symbols])[:, None]
+    learned = wide_mask(fp) if version in WIDE else eligible      # the stocks it learns from (and normalises among)
     names = trained_features(out.parent / SNAPSHOT_VERSION, SNAPSHOT_VERSION)
-    inputs = Inputs(fp, eligible, names)
+    inputs = Inputs(fp, learned, names)
     start = LENGTH + 200
     columns = list(range(start, len(fp.sessions)))
-    excess = label_block(fp, columns, eligible, "excess", HORIZON)                 # column × symbol
+    excess = label_block(fp, columns, eligible, "excess", HORIZON)                 # column × symbol, judged on
     labels = {column: excess[slot] for slot, column in enumerate(columns)}
     rows = {column: np.flatnonzero(np.isfinite(labels[column]) & eligible[:, column]) for column in columns}
+    judged = None
+    if version in WIDE:
+        wide = label_block(fp, columns, learned, "excess", HORIZON)
+        judged = (rows, labels)
+        labels = {column: wide[slot] for slot, column in enumerate(columns)}
+        rows = {column: np.flatnonzero(np.isfinite(labels[column]) & learned[:, column]) for column in columns}
     weekly = set(sample_columns(len(fp.sessions)))
-    ranks = {column: pd.Series(labels[column]).rank(pct=True).to_numpy() for column in columns}
+    report_labels = judged[1] if judged else labels
+    ranks = {column: pd.Series(report_labels[column]).rank(pct=True).to_numpy() for column in columns}
     years = years or list(range(FIRST_YEAR, fp.sessions[-1].year + 1))
     order = [year for year in GATE_YEARS if year in years] + [year for year in years if year not in GATE_YEARS]
     meta_path = out / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
     meta.update({"version": version, "label": "deep2", "loss": kind, "architecture": architecture,
+                 "learned_from": "listed and TPEx, trading normally" if version in WIDE else "eligible listed",
                  "features": list(names), "sequence": list(SEQUENCE),
                  "market": list(MARKET), "length": LENGTH, "hidden": HIDDEN, "head": list(HEAD), "seeds": list(SEEDS),
                  "epochs": EPOCHS, "patience": PATIENCE, "held_out": HELD_OUT, "horizon": HORIZON,
@@ -422,7 +448,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                 meta["stopped"] = f"{GATE_YEARS[0]}～{GATE_YEARS[-1]} 沒過門檻，其他年度不訓練"
                 break
         first = next((index for index, day in enumerate(fp.sessions) if day.year >= year), len(fp.sessions))
-        known = [column for column in columns if column + HORIZON < first and rows[column].size >= 50]
+        known = [column for column in columns if column + HORIZON < first and rows[column].size >= 50
+                 and (judged is None or judged[0][column].size >= 50)]
         if len(known) < 120:
             continue
         cut = int(len(known) * (1 - HELD_OUT))
@@ -430,7 +457,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
         train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]   # purged
         networks, curves = [], []
         for seed in SEEDS:
-            state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture)
+            state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
             network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
             network.load_state_dict(state)
             networks.append(network)
@@ -447,8 +474,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                 values[live] = _rank_average([inputs.score(network, pairs) for network in networks])
             stored[fp.sessions[column].isoformat()] = values
         ics, top20 = [], []
-        for column in [column for column in session_columns if column in weekly and column in labels]:
-            ic, gain = _top20(stored[fp.sessions[column].isoformat()], ranks[column], labels[column])
+        for column in [column for column in session_columns if column in weekly and column in report_labels]:
+            ic, gain = _top20(stored[fp.sessions[column].isoformat()], ranks[column], report_labels[column])
             if ic is not None:
                 ics.append(ic)
             if gain is not None:

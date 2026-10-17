@@ -211,3 +211,33 @@ def test_the_attention_version_trains(monkeypatch, tmp_path):
     scores = model.scores(fp, tmp_path / "dl-3.0.0")
     later = [position for position, day in enumerate(fp.sessions) if day.year == 2018]
     assert np.isfinite(scores[later[-1]]).sum() >= 50
+
+
+def test_the_wide_version_learns_from_tpex_too_but_scores_the_listed(monkeypatch, tmp_path):
+    """2026-10-18 (S9-W15): dl-2.2.0 learns from every stock that trades normally, TPEx (.TWO) and small ones included;
+    it is scored and judged on the eligible listed stocks only, against dl-2.1.0."""
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "GATE_YEARS", (2017,))
+    snapshot = tmp_path / "gbm-2.2.0"
+    snapshot.mkdir()
+    (snapshot / "meta.json").write_text(__import__("json").dumps({"version": "gbm-2.2.0", "features": ["momentum_3"]}),
+                                        encoding="utf-8")
+    days = weekdays(date(2015, 1, 1), date(2017, 12, 31))
+    rng = np.random.default_rng(11)
+    closes = {}
+    for n in range(80):
+        symbol = f"{1101 + n}.TW" if n < 60 else f"{6101 + n}.TWO"
+        closes[symbol] = dict(zip(days, np.maximum(30 * np.cumprod(1 + rng.normal(0.0002, 0.012, len(days))), 11.0)))
+    closes["0050.TW"] = {day: 50.0 for day in days}
+    data = LegacyData(sessions=days, closes=closes, traded_value={s: {d: 5e9 for d in v} for s, v in closes.items()},
+                      factors={}, predictions={})
+    fp = FactorPanel(Panel(data))
+    meta = model.train(fp, tmp_path / "dl-2.2.0", years=[2017], label="deep2", version="dl-2.2.0")
+    assert meta["learned_from"].startswith("listed and TPEx") and meta["years"]["2017"]["top20_gain"] is not None
+    scores = model.scores(fp, tmp_path / "dl-2.2.0")
+    day = fp.index[next(day for day in fp.sessions if day.year == 2017)]
+    scored = {fp.symbols[row] for row in np.flatnonzero(np.isfinite(scores[day]))}
+    assert scored and all(symbol.endswith(".TW") for symbol in scored)          # TPEx learned from, not scored
+    assert model_deep2.wide_mask(fp)[[fp.row[s] for s in fp.symbols if s.endswith(".TWO")], day].all()

@@ -326,7 +326,7 @@ def main() -> int:
                         help="rl-sleeves：版本（1.1.0 隨機起點；2.0.0 第三個位置是現金、回撤懲罰加倍）")
     parser.add_argument("--model-version", default="gbm-1.2.0",
                         choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0", "gbm-2.0.0",
-                                 "gbm-2.1.0", "gbm-2.2.0", "dl-1.0.0", "dl-risk-1.0.0", "dl-2.0.0", "dl-2.1.0", "dl-risk-2.0.0", "dl-3.0.0"),
+                                 "gbm-2.1.0", "gbm-2.2.0", "dl-1.0.0", "dl-risk-1.0.0", "dl-2.0.0", "dl-2.1.0", "dl-risk-2.0.0", "dl-3.0.0", "dl-2.2.0"),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
@@ -594,7 +594,8 @@ def main() -> int:
         with JobLog(RESEARCH).start(f"訓練機器學習模型（{version}，{label} 標籤，逐年 {years[0]}～{years[-1]}）",
                                     command, total=len(years)) as job:
             job.update(current="載入 2013 年起上市行情與籌碼", force=True)
-            data, fp = daily_research.load(Path(args.base))
+            # 2026-10-18: a model learning from the TPEx stocks too loads the "all" panel (MODELS[...]["universe"])
+            data, fp = daily_research.load(Path(args.base), universe=research_model.VERSIONS[version].get("universe", "twse"))
             fingerprint = daily_research.fingerprint(Path(args.base))
             meta = research_model.train(fp, research_model.model_dir(Path(args.base), version), fingerprint, years,
                                         job=job, label=label, version=version,
