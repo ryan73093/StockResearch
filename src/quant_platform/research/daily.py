@@ -126,6 +126,7 @@ NEXT_DAY_PARTICIPATION = 0.005
 PRICE_LIMIT_WIDENED = date(2015, 6, 1)
 IDLE_LIMIT = 20             # sessions after the last trade: a stock that never trades again and is not listed
 VOL_FLOOR = 1e-4            # a daily standard deviation below this is a price that did not move: unknown
+RISK_FLOOR = 0.05           # weighting inverse_risk: a drop probability below this counts as this (no one pick dominates)
 TREND_WINDOW = 20           # hold "trend": a holding outside the keep zone stays while above this average
 SHADOW_WARMUP = 252         # sessions before the shadow account starts (the factors need a year)
 STOP_COOLDOWN = 20          # sessions a stopped-out stock may not be bought again
@@ -279,7 +280,10 @@ class DailyRule(BaseModel):
     # (the calmer, the more money) instead of equal amounts. account_filter "own_200": while this rule's
     # own stock account (the same rule with no core and no filter, the "shadow") is below its
     # 200-session average value, the stock part is held in 0050 instead; back above, the stocks return.
-    weighting: Literal["equal", "inverse_vol"] = "equal"
+    # 2026-10-17 (docs/research_dl_exits_review.md R1): "inverse_risk" — in proportion to 1 / the deep risk model's
+    # probability of a 15% fall within 20 sessions (dl_risk, floored at RISK_FLOOR): the riskier, the less money,
+    # none left out (the veto, risk_veto, cut the winners).
+    weighting: Literal["equal", "inverse_vol", "inverse_risk"] = "equal"
     account_filter: Literal["none", "own_200"] = "none"
     # 2026-10-07 (the owner: 降換手): rank on each factor's average over the last `smooth` sessions
     # instead of the day's value; 0 = the day's value. Left out of the hash when 0.
@@ -1650,6 +1654,8 @@ def daily_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]
     without one takes the median of the others); None for equal amounts."""
     if rule.weighting == "equal":
         return None
+    if rule.weighting == "inverse_risk":
+        return _risk_weights(fp, rule, ranks)
     volatility = -fp.matrix("low_volatility_60")             # stored negated: the daily standard deviation
     lag = lag_of(rule)
     output: dict[date, dict[str, float]] = {}
@@ -1661,6 +1667,24 @@ def daily_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]
         valid = np.isfinite(sigmas) & (sigmas > VOL_FLOOR)    # 1.3.1: a flat price is not a calm stock
         sigmas = np.where(valid, sigmas, np.median(sigmas[valid]) if valid.any() else 1.0)
         inverse = 1 / sigmas
+        output[day] = {symbol: float(share) for symbol, share in zip(names, inverse / inverse.sum(), strict=True)}
+    return output
+
+
+def _risk_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]) -> dict[date, dict[str, float]]:
+    """weighting inverse_risk: each pick in proportion to 1 / its drop probability as known on the deciding session
+    (at least RISK_FLOOR; a pick without one takes the median of the others)."""
+    risk = fp.matrix("dl_risk")
+    lag = lag_of(rule)
+    output: dict[date, dict[str, float]] = {}
+    for day, names in ranks.items():
+        if not names:
+            continue
+        position = fp.index[day] - lag
+        chances = np.array([risk[fp.row[symbol], position] for symbol in names], dtype=float)
+        valid = np.isfinite(chances)
+        chances = np.where(valid, chances, np.median(chances[valid]) if valid.any() else 0.5)
+        inverse = 1 / np.maximum(chances, RISK_FLOOR)
         output[day] = {symbol: float(share) for symbol, share in zip(names, inverse / inverse.sum(), strict=True)}
     return output
 
@@ -2446,6 +2470,16 @@ def deep2_cost_batch() -> list[DailyRule]:
                       **common)]
 
 
+def deep2_risk_batch() -> list[DailyRule]:
+    """2026-10-17 (使用者：繼續分析; docs/research_dl_exits_review.md R1): the three cost-aware rules (#4913 dl-2.1.0,
+    #4914 model G, #4915 the blend) ended far above 0050 but are T1 — drawdowns −56%, −42%, −45% against 0050's
+    −34%. The same rules with each pick's money in proportion to 1 / its predicted drop probability (dl_risk,
+    weighting="inverse_risk"). Registered gate (research_method §7, before the results): against its own rule, the
+    drawdown at least 1 point shallower and the end values from 2015-06 and from 2020-10 at least 95% of it."""
+    return [rule.model_copy(update={"name": rule.name + "、依預測下跌機率配置", "weighting": "inverse_risk"})
+            for rule in deep2_cost_batch()]
+
+
 def model_g_batch() -> list[DailyRule]:
     """2026-10-16: gbm-2.2.0 as a rule — only if its development years' top-20 gain is at least gbm-2.0.0's (the
     same registered gate as model F's against gbm-1.4.0)."""
@@ -2795,7 +2829,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

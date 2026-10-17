@@ -122,3 +122,25 @@ def test_the_cost_aware_rules_wait_for_the_gate(monkeypatch):
     assert [rule.factors for rule in rules] == [{"ml_deep2_top": 1.0}, {"ml_gbm_ext": 1.0},
                                                 {"ml_deep2_top": 0.5, "ml_gbm_ext": 0.5}]
     assert all(rule.switching == "cost1" and rule.hold == "days" and rule.min_hold == 0 for rule in rules)
+
+
+def test_the_risk_weights_by_hand(monkeypatch):
+    """2026-10-17 (R1): each pick's money in proportion to 1 / its drop probability, floored at RISK_FLOOR."""
+    from quant_platform.research import daily
+
+    _data, fp = _panel()
+    day = fp.sessions[300]
+    names = fp.symbols[:4]
+    risk = np.full((len(fp.symbols), len(fp.sessions)), np.nan)
+    for row, chance in zip(range(4), (0.1, 0.2, 0.4, 0.01)):
+        risk[row, fp.index[day]] = chance
+    real = fp.matrix
+    monkeypatch.setattr(fp, "matrix", lambda name: risk if name == "dl_risk" else real(name))
+    rule = daily.DailyRule(name="r", factors={"momentum_3": 1.0}, weighting="inverse_risk")
+    weights = daily.daily_weights(fp, rule, {day: list(names)})[day]
+    inverse = np.array([10, 5, 2.5, 20])                     # 0.01 counts as the floor, 0.05
+    assert [round(weights[name], 6) for name in names] == [round(value, 6) for value in inverse / inverse.sum()]
+    monkeypatch.setattr(model_deep2, "gate", lambda root, version: {"passed": True})
+    rules = daily.deep2_risk_batch()
+    assert len(rules) == 3 and all(rule.weighting == "inverse_risk" and rule.switching == "cost1" for rule in rules)
+    assert all(rule.name.endswith("依預測下跌機率配置") for rule in rules)
