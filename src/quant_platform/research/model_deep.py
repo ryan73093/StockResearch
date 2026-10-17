@@ -245,7 +245,7 @@ def _score_later(fp, folder: Path, positions: list[int], output: np.ndarray) -> 
         network.eval()
         networks.append(network)
     meta = folder / "meta.json"
-    drop = meta.is_file() and json.loads(meta.read_text(encoding="utf-8")).get("target") == "drop"   # the risk model
+    drop = meta.is_file() and json.loads(meta.read_text(encoding="utf-8")).get("target") in ("drop", "drop_vol")   # risk
     for position in positions:
         rows = np.flatnonzero(eligible[:, position])
         if rows.size:

@@ -221,7 +221,8 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_deep": "深度學習（GRU 讀每檔最近 40 個交易日的報酬、成交值與 12 個因子名次，逐年滾動訓練）",
                  "ml_deep2": "深度學習第二版（GRU 讀 60 個交易日的價量與籌碼 z 分數＋當天因子快照與大盤狀態；標籤 20 日超額報酬，損失 Huber＋偏重前段的 ListNet；10 個種子）",
                  "ml_deep2_top": "深度學習第二版・前一成（同上，學「之後 20 日是否在當天前 10%」；10 個種子）",
-                 "dl_risk": "深度學習風險（未來 20 個交易日內跌 15% 以上的機率，越高越危險；當濾網用，不拿來選股）"}
+                 "dl_risk": "深度學習風險（未來 20 個交易日內跌 15% 以上的機率，越高越危險；當濾網用，不拿來選股）",
+                 "dl_risk2": "深度學習風險第二版（20 日內跌超過自己平常波動 2 倍的機率；只在同樣波動與動能的股票之間比，當濾網用）"}
 RISK_VETO_SHARE = 0.10      # risk_veto dl1: no new buy in the day's top tenth of drop risk
 RISK_EXIT_SHARE = 0.05      # risk_veto dl1x: a holding in the top twentieth is sold that session
 # 2026-10-10 (使用者：純技術分析的 RL 機器人): research/tech_rl.py — sees only price and volume.
@@ -352,7 +353,7 @@ class DailyRule(BaseModel):
     # 2026-10-16 (使用者：深度學習能不能用到交易裡輔助這些策略？): the deep-learning risk model (research/model_risk.py)
     # as an overlay — "dl1": no new buy among the day's top tenth by drop probability; "dl1x": also sell a holding
     # once it is in the top twentieth (every session). Left out of the hash when "none".
-    risk_veto: Literal["none", "dl1", "dl1x"] = "none"
+    risk_veto: Literal["none", "dl1", "dl1x", "r3"] = "none"
 
     @model_validator(mode="before")
     @classmethod
@@ -476,6 +477,18 @@ class FactorPanel:
             return set()
         cut = np.quantile(column[known], 1 - share)
         return {self.symbols[row] for row in np.flatnonzero(known & (column >= cut))}
+
+    def risky_neutral(self, position: int) -> set[str]:
+        """2026-10-17 (R3): the stocks in the top tenth of their group (volatility tenth × 6-month momentum fifth among
+        the scored stocks) by the vol-neutral risk model (research/model_risk2.py); none without the model."""
+        from quant_platform.research.model_risk2 import groups, top_of_groups
+
+        column = self.matrix("dl_risk2")[:, position]
+        known = np.isfinite(column)
+        if not known.any():
+            return set()
+        group = groups(-self.matrix("low_volatility_60")[:, position], self.matrix("momentum_6")[:, position], known)
+        return {self.symbols[row] for row in np.flatnonzero(top_of_groups(np.where(known, column, np.nan), group))}
 
     def news_vetoed(self, position: int) -> set[str]:
         """The stocks under a bad-news flag at ``position`` (R15 D); none without the chip store's history."""
@@ -1110,7 +1123,9 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             vetoed = vetoed | fp.excluded(position)       # no new buys; holdings keep their usual rules
         if exit_agent is not None and hasattr(exit_agent, "refuses"):
             vetoed = vetoed | exit_agent.refuses(position)  # tech1: the robot buys only what it wants
-        if risk_veto != "none":
+        if risk_veto == "r3":                 # 2026-10-17: the vol-neutral model, the riskiest tenth of each group
+            vetoed = vetoed | fp.risky_neutral(position)
+        elif risk_veto != "none":
             vetoed = vetoed | fp.risky(position, RISK_VETO_SHARE)   # the deep risk model: not the riskiest tenth
         held, chosen = set(kept), []
         for symbol in ranked:
@@ -2020,10 +2035,14 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
     payload = {"rule": rule.canonical(), "period": PERIOD, "costs": costs.as_dict(), "data": data_fingerprint,
                "engine": ENGINE_VERSION, "plan": SEED_PLAN}
     payload.update(input_digests(history, list(rule.factors), rule.exit_model != "none"))
-    if getattr(rule, "risk_veto", "none") != "none":           # 2026-10-16: the deep risk model it reads
+    veto, weighting = getattr(rule, "risk_veto", "none"), getattr(rule, "weighting", "equal")
+    if veto != "none" or weighting == "inverse_risk":           # 2026-10-16: the deep risk model it reads
         from quant_platform.research.model import MODELS, digest, model_dir
 
-        payload["dl_risk"] = digest(model_dir(history, MODELS["dl_risk"]["version"]))
+        if veto in ("dl1", "dl1x") or weighting == "inverse_risk":   # 2026-10-17: R1's weights read it too
+            payload["dl_risk"] = digest(model_dir(history, MODELS["dl_risk"]["version"]))
+        if veto == "r3":
+            payload["dl_risk2"] = digest(model_dir(history, MODELS["dl_risk2"]["version"]))
     delisted = sorted((code, day.isoformat()) for code, days in (data.notes.get("delisted") or {}).items()
                       for day in days if day <= RECENT_END)
     payload["delisted"] = hashlib.sha256(json.dumps(delisted).encode()).hexdigest()   # 1.3.1: the list it read
@@ -2550,6 +2569,22 @@ def deep2_cluster_batch() -> list[DailyRule]:
             for rule in deep2_cost_batch()]
 
 
+def deep2_r3_batch() -> list[DailyRule]:
+    """2026-10-17 (使用者：繼續分析; docs/research_dl_exits_review.md R3): the three cost-aware rules (#4913–#4915), T1
+    on their drawdowns, buying no stock in the riskiest tenth of its volatility-and-momentum group by the vol-neutral
+    risk model — only if that model passed its registered gate. Registered gate (research_method §7, before the
+    results): at least 2 of the 3, against their own rule, the end values from 2015-06 and from 2020-10 at least 95%
+    of it and the drawdown at least 2 points shallower."""
+    from quant_platform.research.model_risk2 import gate
+
+    check = gate(Path("instance") / "research" / "models")
+    print(f"dl-risk-2.0.0 門檻（2016-2020 波動十分位內 AUC ≥ 0.55，被否決的 5 年中至少 4 年輸同組）：{check}", flush=True)
+    if not check.get("passed"):
+        return []
+    return [rule.model_copy(update={"name": rule.name + "、不買同組最危險一成", "risk_veto": "r3"})
+            for rule in deep2_cost_batch()]
+
+
 def model_g_batch() -> list[DailyRule]:
     """2026-10-16: gbm-2.2.0 as a rule — only if its development years' top-20 gain is at least gbm-2.0.0's (the
     same registered gate as model F's against gbm-1.4.0)."""
@@ -2899,7 +2934,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

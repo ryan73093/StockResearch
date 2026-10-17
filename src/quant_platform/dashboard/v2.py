@@ -338,6 +338,12 @@ def _model_gate(folder: Path, version: str, meta: dict) -> dict[str, object] | N
                 return None
             return {"passed": check["passed"], "text": f"{check['top20_gain']:+.2%} 對模型 G {check['against_top20_gain']:+.2%}，"
                     f"{check['years_above_floor']}／5 年 ≥ +0.6%"}
+        if meta.get("label") == "deep_risk2":
+            check = meta.get("gate") or {}
+            if check.get("auc_within_volatility") is None:
+                return None
+            return {"passed": bool(check.get("passed")), "text": f"同波動組內 AUC {check['auc_within_volatility']:.3f}（要 0.55）；"
+                    f"被否決的輸同組 {check.get('years_vetoed_lost')}／5 年"}
         if meta.get("label") == "deep_risk":
             from quant_platform.research.model_risk import gate as risk_gate
 

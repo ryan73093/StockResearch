@@ -57,7 +57,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_deep2_top": {"version": "dl-2.1.0", "label": "deep2"},
           # 2026-10-16 (使用者：深度學習能不能用到交易裡輔助這些策略？): the probability of a 15% fall within 20 sessions
           # (research/model_risk.py) — a risk overlay for rules (DailyRule.risk_veto), not a picking signal
-          "dl_risk": {"version": "dl-risk-1.0.0", "label": "deep_risk"}}
+          "dl_risk": {"version": "dl-risk-1.0.0", "label": "deep_risk"},
+          # 2026-10-17 (docs/research_dl_exits_review.md R3): a fall against the stock's own swing, used only among
+          # stocks of the same volatility and momentum (research/model_risk2.py; DailyRule.risk_veto "r3")
+          "dl_risk2": {"version": "dl-risk-2.0.0", "label": "deep_risk2"}}
 MONTHLY_REVENUE = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel")
 VERSIONS = {spec["version"]: spec for spec in MODELS.values()}
 LATEST = "gbm-1.2.0"
@@ -226,6 +229,10 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
         from quant_platform.research.model_deep2 import train as train_deep2
 
         return train_deep2(fp, out_dir, version, years, job)
+    if label == "deep_risk2":                # 2026-10-17: the vol-neutral fall (research/model_risk2.py)
+        from quant_platform.research.model_risk2 import train as train_risk2
+
+        return train_risk2(fp, out_dir, years, job)
     if label == "deep_risk":                 # 2026-10-16: the drop probability (research/model_risk.py)
         from quant_platform.research.model_risk import train as train_risk
 

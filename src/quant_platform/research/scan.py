@@ -52,7 +52,7 @@ DEV_END = date(2020, 9, 30)
 TOP, KEEP, MIN_HOLD, INDUSTRY_SHARE = 20, 3, 20, 0.3
 LARGE = 100
 CORRELATION_LIMIT = 0.9
-LEFT_OUT = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "dl_risk")   # dl_risk: an overlay
+LEFT_OUT = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "dl_risk", "dl_risk2")   # overlays
 SHORT = {
     "momentum_12_1": "12 月動能", "momentum_6": "6 月動能", "momentum_3": "3 月動能", "reversal_1": "1 月反轉",
     "reversal_5d": "5 日反轉", "low_volatility_60": "60 日低波", "low_volatility_250": "250 日低波",

@@ -58,7 +58,10 @@ def auc(score: np.ndarray, label: np.ndarray) -> float | None:
     return float((ranks[label == 1].sum() - positive * (positive + 1) / 2) / (positive * negative))
 
 
-def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> dict[str, object]:
+def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None, version: str = VERSION,
+          label_function=None, target: str = "drop") -> dict[str, object]:
+    """2026-10-17: ``label_function`` and ``target`` let dl-risk-2.0.0 (research/model_risk2.py) train the same
+    network on its own label."""
     import pandas as pd
     import torch
 
@@ -76,7 +79,7 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
     eligible = eligibility(fp)
     data = torch.from_numpy(sequences(fp, eligible)).to(on)
     samples = [column for column in sample_columns(len(fp.sessions)) if column >= LENGTH]
-    drops = labels(fp, samples, eligible, HORIZON)
+    drops = (label_function or labels)(fp, samples, eligible, HORIZON)
     volatility = -fp.matrix("low_volatility_60")                                  # the yardstick: riskier = calmer less
     slot_of = {column: index for index, column in enumerate(samples)}
     years = years or list(range(FIRST_YEAR, fp.sessions[-1].year + 1))
@@ -143,7 +146,7 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
     days = sorted(kept)
     np.savez_compressed(out / "deep.npz", days=np.array(days), symbols=np.array(fp.symbols),
                         scores=np.stack([kept[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0)))
-    meta = {"version": VERSION, "label": "deep_risk", "target": "drop", "drop": DROP, "horizon": HORIZON,
+    meta = {"version": version, "label": "deep_risk", "target": target, "drop": DROP, "horizon": HORIZON,
             "length": LENGTH, "seeds": list(SEEDS), "epochs": EPOCHS, "held_out": HELD_OUT, "years": diagnostics,
             "device": device_name(), "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
