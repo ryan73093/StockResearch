@@ -127,6 +127,8 @@ PRICE_LIMIT_WIDENED = date(2015, 6, 1)
 IDLE_LIMIT = 20             # sessions after the last trade: a stock that never trades again and is not listed
 VOL_FLOOR = 1e-4            # a daily standard deviation below this is a price that did not move: unknown
 RISK_FLOOR = 0.05           # weighting inverse_risk: a drop probability below this counts as this (no one pick dominates)
+CLUSTERS = 15               # cluster_cap: groups of stocks that moved together, re-made every month
+CLUSTER_WINDOW = 120        # cluster_cap: sessions of daily returns the grouping looks at
 TREND_WINDOW = 20           # hold "trend": a holding outside the keep zone stays while above this average
 SHADOW_WARMUP = 252         # sessions before the shadow account starts (the factors need a year)
 STOP_COOLDOWN = 20          # sessions a stopped-out stock may not be bought again
@@ -267,6 +269,10 @@ class DailyRule(BaseModel):
     # At most this share of the picks from one industry (2026-10-04: a trend rule bunched into passive
     # components and fell 41% in a month); 0 = no limit. Left out of the hash at 0.
     industry_cap: float = Field(default=0.0, ge=0.0, le=1.0)
+    # 2026-10-17 (docs/research_dl_exits_review.md R2): at most this share of the picks from one group of stocks that
+    # moved together — each month the eligible stocks are split into CLUSTERS groups by their last 120 sessions'
+    # return correlation (FactorPanel.cluster), on top of the industry cap; 0 = off, left out of the hash.
+    cluster_cap: float = Field(default=0.0, ge=0.0, le=1.0)
     # R6 (2026-10-05): "all" ranks the TPEx stocks too. Left out of the hash when "twse".
     universe: Literal["twse", "all"] = "twse"
     # R7 (2026-10-05), risk controls, left out of the hash when off. stop_loss: sell a holding whose
@@ -369,6 +375,8 @@ class DailyRule(BaseModel):
         data = self.model_dump(mode="json")
         if not data.get("industry_cap"):
             data.pop("industry_cap", None)
+        if not data.get("cluster_cap"):
+            data.pop("cluster_cap", None)
         if data.get("universe") == "twse":
             data.pop("universe", None)
         if not data.get("stop_loss"):
@@ -412,6 +420,10 @@ class DailyRule(BaseModel):
     @property
     def industry_limit(self) -> int | None:
         return max(1, int(self.industry_cap * self.top)) if self.industry_cap else None
+
+    @property
+    def cluster_limit(self) -> int | None:
+        return max(1, int(self.cluster_cap * self.top)) if getattr(self, "cluster_cap", 0.0) else None
 
     @property
     def rule_hash(self) -> str:
@@ -764,6 +776,46 @@ class FactorPanel:
     def industry(self, symbol: str) -> str:
         return self.industries.get(symbol.split(".")[0], "未分類")
 
+    def cluster(self, symbol: str, position: int) -> int:
+        """R2 (2026-10-17): the group of stocks that moved together, as known at the start of the session's month —
+        the eligible stocks with at least 100 of the 120 sessions before the month's first session, split into
+        CLUSTERS groups (average-linkage hierarchical clustering on 1 − the correlation of their daily returns).
+        A stock not grouped gets a group of its own (−1 − its row)."""
+        first = position
+        while first > 0 and self.sessions[first - 1].month == self.sessions[position].month:
+            first -= 1
+        key = f"__cluster__{first}"
+        if key not in self._cache:
+            self._cache[key] = self._clusters(first)
+        return self._cache[key].get(self.row[symbol], -1 - self.row[symbol])
+
+    def _clusters(self, first: int) -> dict[int, int]:
+        from scipy.cluster.hierarchy import fcluster, linkage
+        from scipy.spatial.distance import squareform
+
+        if first < CLUSTER_WINDOW + 1:
+            return {}
+        prices = self.panel.filled[:, first - CLUSTER_WINDOW - 1: first]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            returns = prices[:, 1:] / prices[:, :-1] - 1
+        fields = DailyRule.model_fields                      # the rules' default eligibility
+        eligible = ((self.panel.close[:, first - 1] >= fields["min_price"].default)
+                    & (self.turnover_20[:, first - 1] >= fields["min_turnover"].default)
+                    & (np.isfinite(returns).sum(axis=1) >= 100))
+        rows = np.flatnonzero(eligible)
+        if rows.size <= CLUSTERS:
+            return {}
+        block = np.nan_to_num(returns[rows], nan=0.0)
+        block = block - block.mean(axis=1, keepdims=True)
+        scale = np.sqrt((block ** 2).sum(axis=1))
+        keep = scale > 0
+        rows, block, scale = rows[keep], block[keep], scale[keep]
+        correlation = np.clip((block @ block.T) / np.outer(scale, scale), -1.0, 1.0)
+        distance = 1.0 - correlation
+        np.fill_diagonal(distance, 0.0)
+        labels = fcluster(linkage(squareform(distance, checks=False), method="average"), CLUSTERS, criterion="maxclust")
+        return {int(row): int(label) for row, label in zip(rows, labels, strict=True)}
+
     def price(self, symbol: str, position: int) -> float:
         """The adjusted close (dividends reinvested): its ratios between two days are the total return."""
         return float(self.panel.filled[self.row[symbol], position])
@@ -1048,6 +1100,11 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
         if limit:
             for symbol in kept:
                 counts[fp.industry(symbol)] += 1
+        group_limit = rule.cluster_limit                 # R2: the groups that moved together
+        groups: dict[int, int] = defaultdict(int)
+        if group_limit:
+            for symbol in kept:
+                groups[fp.cluster(symbol, position)] += 1
         vetoed = fp.news_vetoed(position) if getattr(rule, "news_veto", "none") == "v1" else set()
         if getattr(rule, "exclude", "none") == "v1":
             vetoed = vetoed | fp.excluded(position)       # no new buys; holdings keep their usual rules
@@ -1061,11 +1118,14 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                 break
             if symbol in held or symbol in vetoed:
                 continue
+            if limit and counts[fp.industry(symbol)] >= limit:
+                continue                          # this industry is full: the next best from another
+            if group_limit and groups[fp.cluster(symbol, position)] >= group_limit:
+                continue                          # R2: this group of stocks that move together is full
             if limit:
-                group = fp.industry(symbol)
-                if counts[group] >= limit:
-                    continue                      # this industry is full: the next best from another
-                counts[group] += 1
+                counts[fp.industry(symbol)] += 1
+            if group_limit:
+                groups[fp.cluster(symbol, position)] += 1
             chosen.append(symbol)
         return chosen
 
@@ -2480,6 +2540,16 @@ def deep2_risk_batch() -> list[DailyRule]:
             for rule in deep2_cost_batch()]
 
 
+def deep2_cluster_batch() -> list[DailyRule]:
+    """2026-10-17 (使用者：繼續分析; docs/research_dl_exits_review.md R2): the three cost-aware rules (#4913–#4915), T1 on
+    their drawdowns, with at most 3 in 10 of the picks from one group of stocks that moved together over the last 120
+    sessions (15 groups, re-made monthly; cluster_cap 0.3, as the review set it), on top of the industry cap.
+    Registered gate (research_method §7, before the results): against its own rule, the drawdown at least 3 points
+    shallower and the end values from 2015-06 and from 2020-10 at least 90% of it."""
+    return [rule.model_copy(update={"name": rule.name + "、同一群連動股最多 3 成", "cluster_cap": 0.3})
+            for rule in deep2_cost_batch()]
+
+
 def model_g_batch() -> list[DailyRule]:
     """2026-10-16: gbm-2.2.0 as a rule — only if its development years' top-20 gain is at least gbm-2.0.0's (the
     same registered gate as model F's against gbm-1.4.0)."""
@@ -2829,7 +2899,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
