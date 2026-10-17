@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
@@ -667,6 +667,26 @@ def main() -> int:
         print(json.dumps(result["development"], ensure_ascii=False), flush=True)
         for year, row in result["years"].items():
             print(year, json.dumps(row, ensure_ascii=False), flush=True)
+        return 0
+
+    if args.command == "exit2":             # 2026-10-17: E2, the weekly optimal-stopping exit (research/exits2.py)
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import exits2
+        from quant_platform.research.jobs import JobLog
+        from quant_platform.research.model import models_root
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("學習出場第二版（每週最佳停止，dl-2.1.0 的排名）：模型與門檻", command) as job:
+            job.update(current="載入行情與因子", force=True)
+            _data, fp = daily_research.load(Path(args.base))
+            meta = exits2.train(fp, models_root(Path(args.base)) / exits2.VERSION, job=job)
+            check = meta["gate"]
+            job.payload["summary"] = (f"換掉的比替補（之後 60 日）{check.get('swapped_gap')}、比隨機差的年 "
+                                      f"{check.get('years_worse_than_random')}／5、每週換 {check.get('swaps_per_week')}；"
+                                      f"門檻{'通過' if check['passed'] else '沒過'}")
+        for year, item in meta["years"].items():
+            print(year, json.dumps(item, ensure_ascii=False), flush=True)
+        print(json.dumps(meta["gate"], ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "deep2-leakcheck":   # 2026-10-17: dl-2.1.0's kept scores against data cut at the day
