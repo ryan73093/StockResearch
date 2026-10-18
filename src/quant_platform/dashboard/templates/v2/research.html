@@ -82,6 +82,30 @@
 </section>
 {% endif %}
 
+{% if downside %}
+<section class="card" id="downside">
+  <div class="card__head"><h2>跌市時的表現</h2><span class="muted small">市場不好時會不會比 0050 跌得多（使用者 2026-10-18：避免因此失去信心、做錯決定）・月底資料</span></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th class="num">期末</th><th class="num">0050 下跌的月份<br>平均（策略／0050）</th><th class="num">比 0050 跌得多<br>的月份</th><th class="num">0050 大跌時最糟的一次<br>（策略／0050）</th><th class="num">相對 0050<br>最大落後</th></tr></thead>
+      <tbody>
+      {% for row in downside %}{% set worst = row.worst_fall %}
+        <tr>
+          <td data-primary><a href="/research/rules/{{ row.rule_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else 'badge--warn') }}">{{ row.tier }}</span></td>
+          <td class="num" data-label="期末">{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（回撤 {{ '{:.0%}'.format(row.max_drawdown) }}）</span></td>
+          <td class="num" data-label="0050 下跌的月份">{{ '{:+.1%}'.format(row.down_rule) }} ／ {{ '{:+.1%}'.format(row.down_base) }}</td>
+          <td class="num" data-label="跌得比 0050 多">{{ '{:.0%}'.format(row.down_worse_share) }}<span class="muted small">（{{ row.down_months }} 個月）</span></td>
+          <td class="num {{ 'down' if worst and worst.gap < -0.05 else '' }}" data-label="大跌時最糟">{% if worst %}{{ '{:+.1%}'.format(worst.rule) }} ／ {{ '{:+.1%}'.format(worst.base) }}<br><span class="muted small">{{ worst.months }}・{{ '多跌' if worst.gap < 0 else '少跌' }} {{ '{:.1f}'.format((worst.gap * 100)|abs) }} 點</span>{% else %}—{% endif %}</td>
+          <td class="num" data-label="相對最大落後">{{ '{:.0%}'.format(row.most_behind) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　過門檻的規則（T0 候選、高風險）與 T1，依期末排序；30 萬＋每月 1 萬、扣掉每月投入算每月報酬。<b>0050 下跌的月份</b>：0050 當月下跌的那些月份，策略平均報酬對 0050 平均報酬。<b>比 0050 跌得多的月份</b>：那些月份裡策略跌得比 0050 多的比例。<b>0050 大跌時最糟的一次</b>：0050 從高點跌 10% 以上的每一段期間，策略同期的漲跌對 0050 的漲跌，列出策略多跌最多的那一段（紅字＝多跌 5 個百分點以上）。<b>相對 0050 最大落後</b>：策略價值 ÷ 0050 價值，從最高到最低跌了多少——拿 0050 比較時，最落後的時候會覺得少了多少。只看月底，月中跌下去又回來的看不到。</p>
+</section>
+{% endif %}
+
 {% if robustness and robustness.rows %}
 <section class="card" id="robustness">
   <div class="card__head"><h2>穩健性檢查</h2><span class="muted small">T0 候選在比較不利的條件下還站得住嗎（診斷，不算試驗）・{{ robustness.built_at[:16].replace('T', ' ') }}</span></div>

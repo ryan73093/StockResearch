@@ -434,3 +434,21 @@ def test_the_research_overview_shows_the_robustness_check(tmp_path):
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
     body = client.get("/research").get_data(as_text=True)
     assert "穩健性檢查" in body and 'href="/research/rules/abc"' in body and "成本加倍後仍是 T0 候選：<strong>0／1</strong>" in body
+
+
+def test_the_research_overview_shows_how_rules_fare_when_0050_falls(tmp_path, monkeypatch):
+    """2026-10-18 (使用者：市場不好時不要比 0050 跌得多): the falling-market table on the overview."""
+    from quant_platform.config.settings import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard import v2
+    from quant_platform.dashboard.app import create_app
+
+    row = {"trial": 7, "rule_hash": "xyz", "name": "穩的規則", "tier": "T0 候選（高風險）", "final_value": 24_000_000,
+           "max_drawdown": -0.40, "benchmark_max_drawdown": -0.34, "down_months": 40, "down_rule": -0.025,
+           "down_base": -0.036, "down_worse_share": 0.39, "most_behind": -0.15,
+           "worst_fall": {"gap": -0.028, "months": "2018-08～2018-12", "rule": -0.161, "base": -0.133}}
+    monkeypatch.setattr(v2, "downside_table", lambda research: [row])
+    client = create_app(build_container(
+        Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
+    body = client.get("/research").get_data(as_text=True)
+    assert "跌市時的表現" in body and 'href="/research/rules/xyz"' in body and "多跌 2.8 點" in body and "badge--bad" in body
