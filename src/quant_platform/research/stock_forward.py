@@ -223,8 +223,8 @@ class StockForwardTracker:
         whose account started elsewhere starts again from the month's start (its records moved to an archive). Until
         the month's selection is graded nothing is added. Accounts that hold 0050 stop (NO_0050); the forward-only
         experiments (FORWARD_ONLY) start from the month's start too."""
+        from quant_platform.research.blend import BlendRule, parse_spec
         from quant_platform.research.categories import NO_0050, uses_0050
-        from quant_platform.research.daily import DailyRule
         from quant_platform.research.rolling import cutoff_for, folder as rolling_folder
 
         cutoff = cutoff_for(today)
@@ -250,7 +250,7 @@ class StockForwardTracker:
                 if not row.get("passed"):
                     continue
                 try:
-                    rule = DailyRule.model_validate(row["spec"])
+                    rule = parse_spec(row["spec"])          # 2026-10-18: a blend that passes too
                 except (KeyError, ValueError):
                     continue
                 target[rule.rule_hash] = (rule, f"每月滾動：只用 {cutoff.isoformat()} 以前的資料挑出（{row.get('tier')}）")
@@ -283,7 +283,7 @@ class StockForwardTracker:
             if rule_hash in by_hash:
                 continue
             added.append({"rule_hash": rule_hash, "name": rule.name, "rule": rule.model_dump(mode="json"),
-                          "kind": "daily", "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
+                          "kind": "blend" if isinstance(rule, BlendRule) else "daily", "plan": "seed", "initial": SEED_CAPITAL, "monthly": SEED_MONTHLY,
                           "since": start, "added": today.isoformat(), "reason": reason, "added_at": moment})
         if restart:
             self._archive_records(restart, moment)

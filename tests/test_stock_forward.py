@@ -130,6 +130,31 @@ def test_the_accounts_follow_the_months_rolling_selection_from_the_day_after_the
     assert (tmp_path / "forward" / "stocks" / "log-archive.jsonl").is_file()
 
 
+def test_a_blend_in_the_months_selection_is_tracked_as_a_blend(tmp_path):
+    """2026-10-18: a blend of daily rules that passes the month is followed like a rule — from the day after the
+    cutoff, its account the sum of its sleeves."""
+    from quant_platform.research.blend import BlendRule, Sleeve
+    from quant_platform.research.daily import DailyRule
+
+    days = weekdays(date(2024, 1, 1), date(2026, 10, 9))
+    build(tmp_path, days)
+    one = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3)
+    two = DailyRule(name="每天 6 個月動能：前 3 名", factors={"momentum_6": 1.0}, top=3)
+    blend = BlendRule(name="組合：3 個月動能 60%＋6 個月動能 40%", sleeves=(Sleeve(rule=one, share=0.6), Sleeve(rule=two, share=0.4)))
+    folder = tmp_path / "rolling"
+    folder.mkdir()
+    (folder / "2026-08-31.json").write_text(json.dumps({"cutoff": "2026-08-31", "graded": [
+        {"passed": True, "tier": "T0 候選（高風險）", "spec": blend.canonical()}]}, ensure_ascii=False), encoding="utf-8")
+    tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
+    tracker.record(date(2026, 10, 2), now=at(date(2026, 10, 2)))
+    item = tracker.tracked()[0]
+    assert item["kind"] == "blend" and item["rule_hash"] == blend.rule_hash and item["since"] == "2026-09-01"
+    assert BlendRule.model_validate(item["rule"]).rule_hash == blend.rule_hash
+    records = tracker.records()
+    assert records[0]["date"] == "2026-09-01" and records[-1]["contributed"] == 310_000 and reconcile(records) == {}
+    assert len(records[0]["holdings"]) >= 3                                  # both sleeves' stocks
+
+
 def test_the_ai_researcher_account_follows_its_best_rule_from_each_quarter(tmp_path, monkeypatch):
     """2026-10-09: the researcher as a strategy — 0050 until it has a qualifying rule, switching on the first
     session of a quarter by selling at that close; the carried money is not new money."""

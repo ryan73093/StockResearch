@@ -107,3 +107,52 @@ def test_the_worker_starts_the_month_once_then_refreshes_the_holdout_each_tradin
     november = datetime(2026, 11, 2, 22, 30, tzinfo=zone)
     assert start_rolling(container, november, launch=started.append) == "rolling"   # a new cutoff: 2026-09-30
     assert started == ["rolling", "rolling-holdout", "rolling"]
+
+
+def test_a_blend_is_graded_to_the_cutoff_and_run_after_it_like_a_rule(monkeypatch):
+    """2026-10-18: a blend of daily rules (no 0050 part) goes through the month like a single rule — graded on data up
+    to the cutoff, then a fresh account after it, the sum of its sleeves."""
+    from quant_platform.research.blend import BlendRule, Sleeve, evaluate_blend
+
+    monkeypatch.setattr(daily, "RECENT_START", date(2024, 1, 1))
+    monkeypatch.setattr(daily, "REGIME_START", date(2024, 4, 1))
+    monkeypatch.setattr(daily, "RECENT_END", date(2024, 12, 31))
+    monkeypatch.setattr(daily, "WINDOWS", {"1y": 3})
+    days = weekdays(date(2023, 1, 2), date(2024, 12, 31))
+    data = market(days)
+    fp = FactorPanel(Panel(data))
+    one = DailyRule(name="a", factors={"momentum_3": 1.0}, top=3, hold="trend", min_history=20)
+    two = DailyRule(name="b", factors={"momentum_6": 1.0}, top=3, hold="trend", min_history=20)
+    blend = BlendRule(name="組合：a 60%＋b 40%", sleeves=(Sleeve(rule=one, share=0.6), Sleeve(rule=two, share=0.4)))
+    cut = evaluate_blend(data, fp, blend, FREE, end=date(2024, 8, 30))
+    assert cut["end"] == "2024-08-30" and cut["strategy"]["final_value"] > 0
+    rows = [{"trial": 9, "rule_hash": blend.rule_hash, "name": blend.name, "spec": blend.canonical()}]
+    item = rolling.holdout(data, fp, rows, date(2024, 10, 31), FREE)[0]
+    assert item["start"] == "2024-11-01" and item["contributed"] == 300_000 + 10_000 * 2
+    parts = [rolling.holdout(data, fp, [{"trial": n, "rule_hash": rule.rule_hash, "name": rule.name,
+                                         "spec": rule.canonical()}], date(2024, 10, 31), FREE)[0]
+             for n, rule in enumerate((one, two))]
+    # each sleeve gets its share of every amount; with no costs the blend is the shares of the two accounts
+    assert item["value"] == pytest.approx(0.6 * parts[0]["value"] + 0.4 * parts[1]["value"], rel=0.02)
+
+
+def test_the_months_rules_include_blends_without_0050(tmp_path):
+    import json
+
+    from quant_platform.research.blend import BlendRule, Sleeve
+    from quant_platform.research.registry import TrialRegistry
+
+    one = DailyRule(name="a", factors={"momentum_3": 1.0}, top=3)
+    two = DailyRule(name="b", factors={"momentum_6": 1.0}, top=3)
+    stocks = BlendRule(name="組合：a＋b", sleeves=(Sleeve(rule=one, share=0.5), Sleeve(rule=two, share=0.5)))
+    cored = BlendRule(name="組合：a＋b＋0050", core=0.2, sleeves=(Sleeve(rule=one, share=0.4), Sleeve(rule=two, share=0.4)))
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    for number, spec in enumerate((one, stocks, cored), start=1):
+        (reports / f"{number}.json").write_text(json.dumps({"spec": spec.canonical()}, ensure_ascii=False), encoding="utf-8")
+        registry.register(spec_hash=spec.rule_hash, spec_name=spec.name, kind="candidate", period="recent",
+                          input_hash=str(number), data_fingerprint="x", metrics={"engine": "daily-1.5.0+blend-1.0.0"},
+                          report_file=f"{number}.json")
+    names = [item["spec"]["name"] for item in rolling.rules(tmp_path)]
+    assert names == ["a", "組合：a＋b"]                                   # the blend with 0050 is left out

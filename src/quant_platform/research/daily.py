@@ -2639,6 +2639,38 @@ def core_satellite_batch() -> list:
                       sleeves=(Sleeve(rule=core, share=CORE_SHARE), Sleeve(rule=satellite, share=1 - CORE_SHARE)))]
 
 
+# spread_batch: risk parity on 2015-07..2020-09 monthly volatility of each member's registered account (#4316 5.09%,
+# #4916 8.58%, #4547 4.80% — the same calculation gives core_satellite_batch's 0.63/0.37), fixed before the run
+SPREAD_THREE = (0.377, 0.223, 0.400)
+SPREAD_TWO = (0.359, 0.641)
+
+
+def spread_batch() -> list:
+    """2026-10-18 (使用者：錢賺得多就可以；市場不好時不要比 0050 跌得多，多跌的備註高風險；繼續再研究): accounts whose
+    sleeves fall at different times. The deep rule's worst stretch (#4916, 2021-06..2022-09, −47% at month ends while
+    0050 −23%) is not the T0 consensus's (2018's second half) nor the calm scan rule's (#4547, at most 2.8 points
+    behind 0050 in each 10% fall): the deep rule with the calm rule (against #4932, the deep rule with the consensus),
+    and all three. Registered (research_method §7, before the results): each passes if it is a T0 候選 (high-risk or
+    not), ends above #4932 (2,866 萬) from 2015-06 and from 2020-10, and its worst 10% fall of 0050 is closer to
+    0050's than #4932's (5.2 points)."""
+    from quant_platform.research.blend import BlendRule, Sleeve
+
+    consensus = DailyRule(name="T0 共識清單（25 個 T0 候選投票）：前 20 名、同產業最多 3 成、每週決策、看成本才換股",
+                          factors={"t0_consensus": 1.0}, check="weekly", keep=3, min_hold=20, industry_cap=0.3,
+                          switching="cost1")
+    deep = DailyRule(name="深度學習第二版・前一成：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股、依預測下跌機率配置",
+                     factors={"ml_deep2_top": 1.0}, check="weekly", keep=3, min_hold=0, industry_cap=0.3,
+                     weighting="inverse_risk", switching="cost1")
+    calm = DailyRule(name="掃描：外資持股＋新高次數＋股利調升＋技術模型：前 20 名、同產業最多 3 成、依波動度配置、每週決策、月線上續抱",
+                     factors={"foreign_holding": 1.0, "high_52w_count_60": 1.0, "dividend_raise": 1.0, "ml_tech_ens": 1.0},
+                     check="weekly", keep=3, min_hold=0, industry_cap=0.3, weighting="inverse_vol", hold="trend")
+    return [BlendRule(name="組合：深度學習第二版 36%＋跌市穩健的掃描規則 64%",
+                      sleeves=(Sleeve(rule=deep, share=SPREAD_TWO[0]), Sleeve(rule=calm, share=SPREAD_TWO[1]))),
+            BlendRule(name="組合：T0 共識清單 38%＋深度學習第二版 22%＋跌市穩健的掃描規則 40%",
+                      sleeves=(Sleeve(rule=consensus, share=SPREAD_THREE[0]), Sleeve(rule=deep, share=SPREAD_THREE[1]),
+                               Sleeve(rule=calm, share=SPREAD_THREE[2])))]
+
+
 def deep3_batch() -> list[DailyRule]:
     """2026-10-17 (D3): dl-3.0.0 in the frame of #4913 (cost-aware switching) and of #4916 (also money by predicted
     drop probability) — only past its registered gate against dl-2.1.0. Registered (research_method §7): each passes
@@ -3020,7 +3052,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

@@ -358,6 +358,8 @@ def main() -> int:
     parser.add_argument("--step", choices=("select", "models", "holdout"),
                         help="rolling：每月滾動的哪一步（挑策略／重訓模型／前向測試）")
     parser.add_argument("--cutoff", help="rolling：截止日（預設：兩個月前的月底）")
+    parser.add_argument("--only-new", action="store_true",
+                        help="rolling --step select：只評這個月還沒評過的規則，加進原本的名單（2026-10-18：組合帳戶）")
     parser.add_argument("--calm", action="store_true",
                         help="scan：最後名單只挑開發期 0050 每次大跌（10% 以上）都沒有比 0050 多跌超過 1 個百分點的（使用者 2026-10-18）")
     parser.add_argument("--prefilter", action="store_true",
@@ -815,7 +817,9 @@ def main() -> int:
             with JobLog(RESEARCH).start(f"每月滾動：用 {cutoff} 以前的資料挑策略（全部規則回測到截止日）", command) as job:
                 def progress(done, total, row):
                     job.update(done=done, total=total, current=f"{row.get('name', '')[:40]}：{'過' if row.get('passed') else '沒過'}")
-                graded = rolling.select(Path(args.base), RESEARCH, cutoff, args.broker, args.workers, progress)
+                kept = [row for row in payload.get("graded") or [] if not row.get("error")] if args.only_new else []
+                graded = kept + rolling.select(Path(args.base), RESEARCH, cutoff, args.broker, args.workers, progress,
+                                               skip={row["trial"] for row in kept})
                 payload.update(graded=graded, selected_at=datetime.now().isoformat(timespec="seconds"),
                                engine=daily_research.ENGINE_VERSION)
                 rolling.save(RESEARCH, cutoff, payload)

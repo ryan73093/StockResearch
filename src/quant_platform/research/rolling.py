@@ -40,9 +40,10 @@ def folder(research: str | Path) -> Path:
 
 
 def rules(research: str | Path) -> list[dict]:
-    """Every registered 100%-stock daily rule (not a blend, not a free robot), its newest spec once."""
+    """Every registered 100%-stock daily rule (not a free robot), its newest spec once. 2026-10-18: blends of them
+    too (sleeves of daily rules, no 0050 part) — the core-satellite account #4932 was a T0 候選 that no month graded."""
+    from quant_platform.research.blend import BlendRule, parse_spec
     from quant_platform.research.categories import uses_0050
-    from quant_platform.research.daily import DailyRule
     from quant_platform.research.registry import TrialRegistry, newest
 
     research = Path(research)
@@ -56,10 +57,11 @@ def rules(research: str | Path) -> list[dict]:
     for record in sorted(latest.values(), key=lambda record: record.trial_id):
         try:
             spec = json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
-            rule = DailyRule.model_validate(spec)
+            rule = parse_spec(spec)
         except (OSError, ValueError, KeyError, TypeError):
-            continue                                          # a blend or an older spec
-        if uses_0050(spec) or rule.free:
+            continue                                          # an older spec
+        members = [sleeve.rule for sleeve in rule.sleeves] if isinstance(rule, BlendRule) else [rule]
+        if uses_0050(spec) or any(member.free for member in members):
             continue
         output.append({"trial": record.trial_id, "spec": spec})
     return output
@@ -74,12 +76,14 @@ def _init(base: str, broker: str) -> None:
 
 
 def _grade(item: dict, cutoff: str) -> dict:
-    from quant_platform.research.daily import PASSING_TIERS, DailyRule, evaluate, gate, tier
+    from quant_platform.research.blend import BlendRule, evaluate_blend, parse_spec
+    from quant_platform.research.daily import PASSING_TIERS, evaluate, gate, tier
 
-    rule = DailyRule.model_validate(item["spec"])
+    rule = parse_spec(item["spec"])
+    run = evaluate_blend if isinstance(rule, BlendRule) else evaluate
     try:
-        report = evaluate(_worker["data"], _worker["fp"], rule, _worker["costs"], _worker["cache"],
-                          end=date.fromisoformat(cutoff))
+        report = run(_worker["data"], _worker["fp"], rule, _worker["costs"], _worker["cache"],
+                     end=date.fromisoformat(cutoff))
     except Exception as error:  # noqa: BLE001 - one rule's failure is recorded, the month goes on
         return {"trial": item["trial"], "name": rule.name, "error": str(error)[:200]}
     metrics = {"full_period_excess": report["full_period_excess"], "since_2020_excess": report["since_2020"]["excess"],
@@ -94,9 +98,10 @@ def _grade(item: dict, cutoff: str) -> dict:
 
 
 def select(base: str | Path, research: str | Path, cutoff: date, broker: str = "cathay", workers: int = 2,
-           progress=None) -> list[dict]:
-    """Every rule graded on 2015-06..cutoff, in ``workers`` processes (each loads the data once)."""
-    items = rules(research)
+           progress=None, skip: set[int] | None = None) -> list[dict]:
+    """Every rule graded on 2015-06..cutoff, in ``workers`` processes (each loads the data once); 2026-10-18: but
+    the trials in ``skip`` (already graded this month — only the new ones are added)."""
+    items = [item for item in rules(research) if item["trial"] not in (skip or set())]
     output = []
     with ProcessPoolExecutor(max_workers=max(1, workers), initializer=_init, initargs=(str(base), broker)) as pool:
         for done, row in enumerate(pool.map(_grade, items, [cutoff.isoformat()] * len(items), chunksize=4), start=1):
@@ -107,9 +112,11 @@ def select(base: str | Path, research: str | Path, cutoff: date, broker: str = "
 
 
 def holdout(data, fp, rows: list[dict], cutoff: date, costs, end: date | None = None) -> list[dict]:
-    """Each passing rule's fresh owner's account from the first session after ``cutoff`` to ``end`` (the latest)."""
+    """Each passing rule's (or blend's) fresh owner's account from the first session after ``cutoff`` to ``end``
+    (the latest)."""
+    from quant_platform.research.blend import BlendAccount, BlendRule, parse_spec
     from quant_platform.research.daily import (
-        DailyRule, account_parking, daily_rankings, daily_weights, exposure_schedule, simulate_daily,
+        account_parking, daily_rankings, daily_weights, exposure_schedule, simulate_daily,
     )
     from quant_platform.research.metrics import unit_values
     from quant_platform.research.stock_rules import SeedPlan
@@ -122,11 +129,14 @@ def holdout(data, fp, rows: list[dict], cutoff: date, costs, end: date | None = 
     bench_units = unit_values(bench.values, bench.flows)
     output = []
     for row in rows:
-        rule = DailyRule.model_validate(row["spec"])
-        ranks = daily_rankings(fp, rule, first, last)
-        run = simulate_daily(data, rule, costs, first, last, ranks, plan=SeedPlan(),
-                             weights=daily_weights(fp, rule, ranks), parked=account_parking(data, fp, rule, costs),
-                             exposure=exposure_schedule(data, fp, rule, costs))
+        rule = parse_spec(row["spec"])
+        if isinstance(rule, BlendRule):
+            run = BlendAccount(data, fp, rule, costs, first, last).run(first, last, plan=SeedPlan())
+        else:
+            ranks = daily_rankings(fp, rule, first, last)
+            run = simulate_daily(data, rule, costs, first, last, ranks, plan=SeedPlan(),
+                                 weights=daily_weights(fp, rule, ranks), parked=account_parking(data, fp, rule, costs),
+                                 exposure=exposure_schedule(data, fp, rule, costs))
         units = unit_values(run.values, run.flows)
         peak, drawdown = 0.0, 0.0
         for value in units:
