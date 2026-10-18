@@ -21,7 +21,11 @@ from pathlib import Path
 import numpy as np
 
 FALL = 0.10                 # a stretch of 0050 falling at least this much from a high counts as a bad market
+# 2026-10-18 (使用者：1；前面不是說要備註高風險嗎): a rule whose worst such stretch fell more than this much further
+# than 0050 is marked 高風險 — marked, not left out
+RISK_GAP = 0.01
 _CACHE: dict[str, object] = {}
+_NOTES: dict[str, object] = {}
 
 
 def returns(curve: dict[str, list[float]]) -> tuple[list[str], np.ndarray, np.ndarray]:
@@ -75,6 +79,17 @@ def profile(curve: dict[str, list[float]]) -> dict[str, object]:
             "down_base": round(float(base[down].mean()), 4) if down.any() else None,
             "down_worse_share": round(float((rule[down] < base[down]).mean()), 3) if down.any() else None,
             "worst_fall": worst, "most_behind": round(behind, 4)}
+
+
+def notes(research: str | Path) -> dict[str, dict[str, object]]:
+    """rule hash → the falling-market mark of every listed rule whose worst 0050 fall it fell more than RISK_GAP
+    further than 0050 (its gap and months), kept with the table."""
+    rows = table(research)
+    key = _CACHE.get("key")
+    if _NOTES.get("key") != key:
+        _NOTES.update(key=key, notes={row["rule_hash"]: row["worst_fall"] for row in rows
+                                     if row.get("worst_fall") and row["worst_fall"]["gap"] < -RISK_GAP})
+    return dict(_NOTES.get("notes") or {})
 
 
 def table(research: str | Path) -> list[dict[str, object]]:

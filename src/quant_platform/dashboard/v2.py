@@ -34,6 +34,7 @@ from quant_platform.research.forward import FORWARD_START, ForwardTracker
 from quant_platform.research.forward_board import common_start as forward_common_start
 from quant_platform.research.rolling import cutoff_for
 from quant_platform.research.robustness import latest as robustness_latest
+from quant_platform.research.downside import notes as downside_notes
 from quant_platform.research.downside import table as downside_table
 from quant_platform.research.legacy_challenger import challenger_view
 from quant_platform.research.legacy_challenger import latest_report as latest_challenger
@@ -427,6 +428,15 @@ def market_session(now: datetime, calendar) -> dict[str, str]:
 
 def create_v2_blueprint(dependencies) -> Blueprint:
     blueprint = Blueprint("v2", __name__)
+
+    def risk_note(rule_hash: str) -> dict | None:
+        """2026-10-18: the falling-market mark of a rule (research/downside.py), for every page that lists rules."""
+        try:
+            return downside_notes(_instance_dir(dependencies.settings.database_url) / "research").get(rule_hash)
+        except (OSError, ValueError, KeyError):
+            return None
+
+    blueprint.add_app_template_global(risk_note, "risk_note")
 
     @blueprint.context_processor
     def layout_context() -> dict[str, object]:

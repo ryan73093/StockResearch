@@ -1,9 +1,10 @@
 {% extends "v2/base.html" %}
+{% from "v2/_risk.html" import risk_badge %}
 {% block title %}{{ rule.name }} · 研究{% endblock %}
 {% block heading %}
 <header class="page-head">
   <div>
-    <h1>{{ rule.name }}</h1>
+    <h1>{{ rule.name }}</h1>{{ risk_badge(rule.spec_hash) }}
     <p class="page-head__sub">{{ rule.family }}・{{ rule.source }}・每一次的模擬回測紀錄</p>
   </div>
   <div class="page-head__meta"><a href="/research/pool">回選手池</a>・<a href="/research/rules/{{ rule.spec_hash }}.json">JSON</a></div>

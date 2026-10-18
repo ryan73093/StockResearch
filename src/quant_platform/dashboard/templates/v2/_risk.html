@@ -1,0 +1,5 @@
+{# 2026-10-18 (使用者：0050 大跌時多跌超過 1 個百分點的，備註高風險): a red mark after a rule's name. #}
+{% macro risk_badge(rule_hash) -%}
+{%- set note = risk_note(rule_hash) -%}
+{%- if note %} <span class="badge badge--bad" title="0050 從高點跌 10% 以上的期間，這個策略最糟比 0050 多跌 {{ '{:.1f}'.format(-note.gap * 100) }} 個百分點（{{ note.months }}：策略 {{ '{:+.1%}'.format(note.rule) }}、0050 {{ '{:+.1%}'.format(note.base) }}）">高風險・跌市多跌 {{ '{:.1f}'.format(-note.gap * 100) }} 點</span>{% endif -%}
+{%- endmacro %}

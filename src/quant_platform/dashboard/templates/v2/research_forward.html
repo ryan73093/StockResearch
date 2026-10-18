@@ -1,10 +1,11 @@
 {% extends "v2/base.html" %}
+{% from "v2/_risk.html" import risk_badge %}
 {% block title %}{{ forward.item.name }} · 前向觀察{% endblock %}
 {% block heading %}
 {% set latest = forward.latest %}
 <header class="page-head">
   <div>
-    <h1>{{ forward.item.name }}</h1>
+    <h1>{{ forward.item.name }}</h1>{{ risk_badge(forward.item.rule_hash) }}
     <p class="page-head__sub">前向觀察：{{ forward.item.since }} 起、已記錄 {{ forward.sessions }} 個交易日{% if latest %}（最新 {{ latest.date }}）{% endif %}</p>
   </div>
   <div class="page-head__meta"><a href="/research?tab=forward">回前向觀察</a>{% if not forward.item.rule_hash.startswith('meta-') %}・<a href="/research/rules/{{ forward.item.rule_hash }}">回測紀錄</a>{% endif %}</div>

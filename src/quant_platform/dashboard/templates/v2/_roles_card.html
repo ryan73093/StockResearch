@@ -1,4 +1,5 @@
 {# 2026-10-16 (使用者：每次優化之後我都要在首頁看到每種角色成長了多少、跟之前訓練相比強化了多少): the strategy roles. #}
+{% from "v2/_risk.html" import risk_badge %}
 {% macro roles_card(growth, limit=8, tab=none) %}
 {% if growth and growth.roles %}
 <section class="card" id="roles"{% if tab %} data-tab="{{ tab }}"{% endif %}>
@@ -56,7 +57,7 @@
       <tbody>
       {% for row in rolling.holdout[:limit] %}
         <tr>
-          <td data-primary class="name">{{ row.name }}</td>
+          <td data-primary class="name">{{ row.name }}{{ risk_badge(row.rule_hash) }}</td>
           <td class="num" data-label="前向測試期末">{{ '{:,.0f}'.format(row.value) }}</td>
           <td class="num" data-label="0050">{{ '{:,.0f}'.format(row.benchmark_value) }}</td>
           <td class="num {{ 'up' if (row['return'] or 0) > (row.benchmark_return or 0) else 'down' }}" data-label="報酬（0050）">{{ '{:+.1%}'.format(row['return']) if row['return'] is not none else '—' }}（{{ '{:+.1%}'.format(row.benchmark_return) if row.benchmark_return is not none else '—' }}）</td>

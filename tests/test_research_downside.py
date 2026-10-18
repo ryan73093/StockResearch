@@ -23,3 +23,14 @@ def test_the_profile_by_hand():
 def test_falls_need_ten_percent():
     assert downside.falls(np.array([-0.05, -0.04, 0.2])) == []
     assert downside.falls(np.array([0.1, -0.06, -0.06, 0.2])) == [(1, 3)]
+
+
+def test_a_rule_falling_more_than_a_point_further_than_0050_is_marked(monkeypatch):
+    """2026-10-18 (使用者：1；備註高風險): marked, not left out."""
+    rows = [{"rule_hash": "calm", "worst_fall": {"gap": -0.005, "months": "x", "rule": -0.2, "base": -0.195}},
+            {"rule_hash": "rough", "worst_fall": {"gap": -0.089, "months": "2018-08～2018-12", "rule": -0.222, "base": -0.133}},
+            {"rule_hash": "none", "worst_fall": None}]
+    monkeypatch.setattr(downside, "table", lambda research: rows)
+    downside._CACHE["key"] = ("test",)
+    downside._NOTES.clear()
+    assert set(downside.notes("anywhere")) == {"rough"}
