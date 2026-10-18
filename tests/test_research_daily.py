@@ -642,3 +642,31 @@ def test_a_drawdown_within_fifteen_points_is_a_high_risk_t0_candidate():
     assert tier({**base, "max_drawdown": -0.45, "since_2020_excess": -0.1})[0] == "T2"  # another gate failed
     forward = {"sessions": 60, "excess": 0.01}
     assert tier({**base, "max_drawdown": -0.45}, forward)[0] == "T0（高風險）"
+
+
+def test_a_winner_grown_past_trim_above_times_its_target_is_sold_back_to_it():
+    """2026-10-18: the deep rule held 30% of the account in one stock — with trim_above 2 a holding is never left above
+    twice its target on a decision day; the money goes to the picks below theirs. Off, the winner keeps growing."""
+    days = weekdays(date(2024, 1, 1), date(2024, 3, 29))
+    closes = {"A.TW": {day: 10.0 * 1.03 ** n for n, day in enumerate(days)}}
+    closes.update({f"{name}.TW": {day: 10.0 for day in days} for name in "BCD"})
+    data = market(days, closes)
+    ranks = {day: ["A.TW", "B.TW", "C.TW", "D.TW"] for day in days}
+
+    def shares(rule):
+        books = {}
+        run = simulate_daily(data, rule, FREE, days[0], days[-1], ranks, SeedPlan(100_000, 0), snapshots=books)
+        out = []
+        for day in days:
+            cash, units = books[day]
+            values = {symbol: count * closes[symbol][day] for symbol, count in units.items()}
+            out.append((values.get("A.TW", 0.0) / (cash + sum(values.values())), cash))
+        return out, run
+
+    plain, _run = shares(DailyRule(name="x", factors={"trend_200": 1.0}, top=4, min_hold=0))
+    trimmed, run = shares(DailyRule(name="x", factors={"trend_200": 1.0}, top=4, min_hold=0, trim_above=2.0))
+    assert plain[-1][0] > 0.65                                             # left alone, A is two thirds of the account
+    assert max(share for share, _cash in trimmed) <= 0.5 + 1e-3            # never above twice its quarter
+    assert trimmed[-1][1] < 1_000 and run.sold > 30_000                    # sold back and the money put to work
+    assert DailyRule(name="x", factors={"trend_200": 1.0}).rule_hash == \
+        DailyRule(name="x", factors={"trend_200": 1.0}, trim_above=0.0).rule_hash   # off: the same rule

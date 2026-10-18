@@ -356,6 +356,11 @@ class DailyRule(BaseModel):
     # as an overlay — "dl1": no new buy among the day's top tenth by drop probability; "dl1x": also sell a holding
     # once it is in the top twentieth (every session). Left out of the hash when "none".
     risk_veto: Literal["none", "dl1", "dl1x", "r3"] = "none"
+    # 2026-10-18 (使用者：繼續研究有什麼更好的策略; the deep rule held 30% of the account in one stock and 48% in
+    # shipping on 2021-06-30 — the industry cap counts stocks when bought, winners grow past it): on a decision day a
+    # holding worth more than ``trim_above`` times its target is sold back to its target, the money topping up the
+    # picks below theirs. 0 = off, left out of the hash.
+    trim_above: float = Field(default=0.0, ge=0.0, le=10.0)
 
     @model_validator(mode="before")
     @classmethod
@@ -418,6 +423,8 @@ class DailyRule(BaseModel):
             data.pop("eligibility", None)
         if data.get("risk_veto") == "none":
             data.pop("risk_veto", None)
+        if not data.get("trim_above"):
+            data.pop("trim_above", None)
         return data
 
     @property
@@ -1562,6 +1569,11 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                         excess = units[symbol] * price(symbol, day) - targets.get(symbol, 0.0)
                         if units[symbol] > 0 and excess >= minimum:
                             sell_all(symbol, day, excess)
+                if rule.trim_above and today is not None and not park and not again:
+                    for symbol in picks:                 # 2026-10-18: a winner grown past trim_above × its target
+                        target, held_value = targets.get(symbol, 0.0), units[symbol] * price(symbol, day)
+                        if target > 0 and held_value > rule.trim_above * target and not stuck(symbol, day):
+                            sell_all(symbol, day, held_value - target)
                 orders = []
                 for symbol, target in targets.items():
                     held_value = units[symbol] * price(symbol, day)
@@ -2683,6 +2695,29 @@ def deep2_timing_batch() -> list:
     return [_variant(base, "隔天收盤成交", execution="next"), _variant(base, "隔天開盤成交", execution="open")]
 
 
+TRIM_RULES = (4916, 4913, 4316, 4589)    # trim_batch: the deep rules and the T0 consensus that held 48% in shipping
+
+
+def trim_batch() -> list:
+    """2026-10-18 (使用者：繼續研究有什麼更好的策略): on 2021-06-30 the deep rule #4916 held 48% of its account in shipping
+    and 21% in steel, one stock (2609) 30% — the industry cap counts stocks when bought, and the winners grew; the T0
+    consensus #4316 held 48% in shipping too. Each with trim_above 2: on a decision day a holding worth more than twice
+    its target is sold back to it (the money tops up the picks below theirs). Registered (research_method §7, before
+    the results): each passes if it is a T0 候選 (high-risk or not), ends at least 95% of its own rule from 2015-06 and
+    from 2020-10, and its drawdown is at least 2 points shallower."""
+    import json as _json
+
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    rules = []
+    for trial in TRIM_RULES:
+        spec = _json.loads((research / "reports" / records[trial].report_file).read_text(encoding="utf-8"))["spec"]
+        rules.append(_variant(DailyRule.model_validate(spec), "漲過目標 2 倍賣回", trim_above=2.0))
+    return rules
+
+
 def deep3_batch() -> list[DailyRule]:
     """2026-10-17 (D3): dl-3.0.0 in the frame of #4913 (cost-aware switching) and of #4916 (also money by predicted
     drop probability) — only past its registered gate against dl-2.1.0. Registered (research_method §7): each passes
@@ -3064,7 +3099,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
