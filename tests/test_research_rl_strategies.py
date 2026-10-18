@@ -63,6 +63,6 @@ def test_the_research_page_shows_rl3_and_the_robot(tmp_path):
                                      encoding="utf-8")
     client = create_app(build_container(
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
-    body = client.get("/research?tab=ml").get_data(as_text=True)
+    body = client.get("/research/rl").get_data(as_text=True)          # 2026-10-17: RL has its own page
     assert "強化學習 3.0：在 T0 候選之間分配" in body and "平均分配（每月重設）" in body
     assert "技術分析 RL 機器人" in body and "+0.040%" in body and "tech-rl-1.0.0</strong>" not in body

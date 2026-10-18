@@ -2294,7 +2294,9 @@ def tpex_batch() -> list[DailyRule]:
     mid caps add return or only volatility."""
     rules = []
     for rule in risk_batch()[:6]:
-        name = rule.name.replace("每天 ", "每天（上市＋上櫃）", 1)[:80]
+        # 2026-10-18: the strongest rules are no longer all named 每天 …; the mark goes in front then
+        name = (rule.name.replace("每天 ", "每天（上市＋上櫃）", 1) if rule.name.startswith("每天 ")
+                else "（上市＋上櫃）" + rule.name)[:80]
         rules.append(rule.model_copy(update={"name": name, "universe": "all"}))
     return rules
 
@@ -2718,6 +2720,13 @@ def trim_batch() -> list:
     return rules
 
 
+def blend_scan_batch() -> list:
+    """2026-10-18: the search over two- and three-rule accounts (research/blend_scan.py), its finalists as blends."""
+    from quant_platform.research.blend_scan import batch
+
+    return batch()
+
+
 def deep3_batch() -> list[DailyRule]:
     """2026-10-17 (D3): dl-3.0.0 in the frame of #4913 (cost-aware switching) and of #4916 (also money by predicted
     drop probability) — only past its registered gate against dl-2.1.0. Registered (research_method §7): each passes
@@ -3099,7 +3108,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

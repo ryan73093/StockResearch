@@ -1,0 +1,205 @@
+"""2026-10-18 (使用者：繼續研究有什麼更好的策略；錢賺得多就可以，市場不好時不要比 0050 跌得多): the two-stage search over
+accounts split across rules.
+
+The first spread accounts showed it (research_method §7): the deep rule with the calm scan rule #4547 kept #4932's money
+and fell less when 0050 fell, because the two rules' worst stretches came at different times. This searches every pair
+and triple of the registered rules that beat 0050 in both periods (the passing tiers and T1) the same way:
+
+1. stage 1 reads only each rule's registered month-end values up to the development period's end (2020-09). A blend's
+   sleeves each run on their share of every amount and are never rebalanced against each other, so its value is the
+   shares' sum of its members' values (the costs scale with the money). The shares are fixed by risk parity on the
+   development months' volatility (as #4932 and the spread accounts). A candidate stays if, in the development period,
+   it beats 0050, its month-end drawdown is at most DRAWDOWN_ROOM deeper than 0050's and it fell at most CALM_GAP further
+   than 0050 in each of 0050's 10% falls (2015's, 2018's end, 2020's spring); no two members are near copies.
+2. the best by development excess — rules whose development months correlate above NEAR_COPY count as one family (the
+   deep rule's versions); a family in at most MEMBER_LIMIT finalists, no two finalists sharing two families — run in the
+   engine as blends (research/blend.py) and registered — judged by the same tiers as any rule.
+
+The members were themselves kept for beating 0050 over the whole period, so 2020-10 onwards is not a clean check here;
+the month's rolling selection and the forward accounts are.
+"""
+
+from __future__ import annotations
+
+import itertools
+import json
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+
+SCAN_VERSION = "blend-scan-1.0.0"
+DEV_END = "2020-09"           # the development period's last month: nothing after it is read in stage 1
+START = "2015-06"             # members whose accounts start here (the common start)
+CALM_GAP = 0.01               # at most this much further than 0050 in each of its 10% falls
+DRAWDOWN_ROOM = 0.05          # the month-end drawdown at most this much deeper than 0050's
+NEAR_COPY = 0.9               # two members whose development month returns correlate above this are one rule
+MEMBER_LIMIT = 5              # a family (rules whose development months move together, NEAR_COPY) in at most
+                              # this many finalists
+FINALISTS = 20
+
+
+def label(name: str) -> str:
+    head, _, rest = name.partition("：")
+    if head in ("掃描", "每天") and rest:
+        head = rest.split("：")[0]
+    return head.replace("（25 個 T0 候選投票）", "")[:12]
+
+
+def pool(research: str | Path) -> list[dict]:
+    """Every newest-engine 100%-stock single rule graded T0 候選 (high-risk or not), T0 or T1, its account from START:
+    its month-end values to DEV_END, 0050's and the money put in."""
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.daily import ENGINE_VERSION, PASSING_TIERS, DailyRule, tier
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = Path(research)
+    records = newest([record for record in TrialRegistry(research / "trials.jsonl").records()
+                      if record.kind == "candidate" and record.period == "recent"
+                      and str(record.metrics.get("engine", "")) == ENGINE_VERSION])
+    output = []
+    for record in sorted(records.values(), key=lambda record: record.trial_id):
+        grade = tier(record.metrics)[0]
+        if grade not in PASSING_TIERS and grade != "T1":
+            continue
+        try:
+            report = json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))
+            rule = DailyRule.model_validate(report["spec"])
+        except (OSError, ValueError, KeyError):
+            continue
+        if uses_0050(report["spec"]) or rule.free or rule.universe != "twse":
+            continue
+        curve = report.get("curve") or {}
+        months = [month for month in curve if month <= DEV_END]
+        if not months or months[0] != START:
+            continue
+        output.append({"trial": record.trial_id, "name": record.spec_name, "tier": grade, "rule": rule,
+                       "months": months, "values": np.array([curve[month][0] for month in months], dtype=float),
+                       "bench": np.array([curve[month][1] for month in months], dtype=float),
+                       "paid": np.array([curve[month][2] for month in months], dtype=float)})
+    if not output:
+        return output
+    # one cash flow and one 0050 account for all: the members whose money and 0050 match the most common ones
+    common = max(output, key=lambda item: sum(np.array_equal(item["paid"], other["paid"])
+                                              and np.allclose(item["bench"], other["bench"], rtol=0.005) for other in output))
+    return [item for item in output if len(item["months"]) == len(common["months"])
+            and np.array_equal(item["paid"], common["paid"]) and np.allclose(item["bench"], common["bench"], rtol=0.005)]
+
+
+def month_returns(values: np.ndarray, paid: np.ndarray) -> np.ndarray:
+    """Month returns net of the month's money (values: … × months)."""
+    flow = np.diff(paid)
+    return (values[..., 1:] - flow) / values[..., :-1] - 1
+
+
+def falls(bench_returns: np.ndarray) -> list[tuple[int, int]]:
+    from quant_platform.research.downside import FALL, falls as found
+
+    return found(bench_returns, FALL)
+
+
+def measure(values: np.ndarray, bench: np.ndarray, paid: np.ndarray, stretches: list[tuple[int, int]]) -> dict:
+    """Development excess, month-end drawdown and the worst gap to 0050 in its falls, for each row of ``values``."""
+    returns = month_returns(values, paid)
+    units = np.concatenate([np.ones((len(values), 1)), np.cumprod(1 + returns, axis=1)], axis=1)
+    drawdown = (units / np.maximum.accumulate(units, axis=1) - 1).min(axis=1)
+    base = np.concatenate([[1.0], np.cumprod(1 + month_returns(bench, paid))])
+    gap = np.full(len(values), np.inf)
+    for peak, trough in stretches:
+        gap = np.minimum(gap, (units[:, trough] / units[:, peak] - 1) - (base[trough] / base[peak] - 1))
+    return {"excess": (values[:, -1] - bench[-1]) / paid[-1], "drawdown": drawdown,
+            "bench_drawdown": float((base / np.maximum.accumulate(base) - 1).min()),
+            "gap": np.where(np.isfinite(gap), gap, 0.0)}
+
+
+def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set[str] | None = None) -> dict:
+    """Stage 1 over every pair and triple of ``members``: the counts and the finalists (members, shares, development
+    measures), best development excess first. ``taken``: blend hashes already registered (left out)."""
+    from quant_platform.research.blend import BlendRule, Sleeve
+
+    if not members:
+        return {"version": SCAN_VERSION, "pool": 0, "candidates": 0, "passed": 0, "finalists": []}
+    paid, bench = members[0]["paid"], members[0]["bench"]
+    values = np.stack([member["values"] for member in members])
+    returns = month_returns(values, paid)
+    volatility = returns.std(axis=1, ddof=1)
+    correlation = np.corrcoef(returns)
+    stretches = falls(month_returns(bench, paid))
+    family = list(range(len(members)))                    # near copies joined (union-find)
+
+    def root(index: int) -> int:
+        while family[index] != index:
+            family[index] = family[family[index]]
+            index = family[index]
+        return index
+    for left, right in zip(*np.nonzero(np.triu(correlation > NEAR_COPY, 1))):
+        family[root(int(left))] = root(int(right))
+    counted, rows = 0, []
+    for size in sizes:
+        combos = np.array(list(itertools.combinations(range(len(members)), size)), dtype=int)
+        if not len(combos):
+            continue
+        counted += len(combos)
+        apart = np.ones(len(combos), dtype=bool)
+        for left, right in itertools.combinations(range(size), 2):
+            apart &= correlation[combos[:, left], combos[:, right]] <= NEAR_COPY
+        combos = combos[apart]
+        for begin in range(0, len(combos), 20_000):                  # a block at a time (memory)
+            block = combos[begin:begin + 20_000]
+            weights = 1 / volatility[block]
+            shares = weights / weights.sum(axis=1, keepdims=True)
+            blended = np.einsum("km,kmt->kt", shares, values[block])
+            found = measure(blended, bench, paid, stretches)
+            keep = ((found["excess"] > 0) & (found["drawdown"] >= found["bench_drawdown"] - DRAWDOWN_ROOM)
+                    & (found["gap"] >= -CALM_GAP))
+            for index in np.flatnonzero(keep):
+                rows.append((float(found["excess"][index]), block[index].tolist(), shares[index].tolist(),
+                             float(found["drawdown"][index]), float(found["gap"][index])))
+    rows.sort(key=lambda row: -row[0])
+    used: dict[int, int] = {}
+    chosen: list[dict] = []
+    for excess, combo, shares, drawdown, gap in rows:
+        if len(chosen) >= count:
+            break
+        groups = {root(member) for member in combo}
+        if any(used.get(group, 0) >= MEMBER_LIMIT for group in groups):
+            continue
+        if any(len(groups & item["groups"]) >= min(2, len(groups)) for item in chosen):
+            continue
+        rounded = [round(share, 3) for share in shares[:-1]]
+        rounded.append(round(1 - sum(rounded), 3))
+        parts = [members[member] for member in combo]
+        blend = BlendRule(name=("組合搜尋：" + "＋".join(f"{label(part['name'])}#{part['trial']} {share:.0%}"
+                                                    for part, share in zip(parts, rounded)))[:80],
+                          sleeves=tuple(Sleeve(rule=part["rule"], share=share) for part, share in zip(parts, rounded)))
+        if blend.rule_hash in (taken or set()):
+            continue
+        for group in groups:
+            used[group] = used.get(group, 0) + 1
+        chosen.append({"combo": combo, "groups": groups, "blend": blend, "members": [part["trial"] for part in parts], "shares": rounded,
+                       "dev_excess": round(excess, 4), "dev_drawdown": round(drawdown, 4), "dev_gap": round(gap, 4)})
+    return {"version": SCAN_VERSION, "pool": len(members), "families": len({root(index) for index in range(len(members))}),
+            "candidates": counted, "passed": len(rows),
+            "bench_drawdown": round(float(measure(values[:1], bench, paid, stretches)["bench_drawdown"]), 4),
+            "finalists": chosen}
+
+
+def batch(research: str | Path = Path("instance") / "research") -> list:
+    """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json."""
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path(research)
+    taken = {record.spec_hash for record in TrialRegistry(research / "trials.jsonl").records()}
+    found = search(pool(research), taken=taken)
+    folder = research / "blend_scan"
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    summary = {**{key: value for key, value in found.items() if key != "finalists"}, "stamp": stamp,
+               "dev_end": DEV_END, "calm_gap": CALM_GAP, "drawdown_room": DRAWDOWN_ROOM, "near_copy": NEAR_COPY,
+               "finalists": [{key: value for key, value in item.items() if key not in ("blend", "combo", "groups")}
+                             | {"name": item["blend"].name, "rule_hash": item["blend"].rule_hash}
+                             for item in found["finalists"]]}
+    (folder / f"{stamp}.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"組合搜尋第一階段：{found['pool']} 個規則、{found['candidates']} 個兩檔／三檔組合、"
+          f"{found['passed']} 個開發期贏 0050 且跌市不多跌、{len(found['finalists'])} 個進引擎", flush=True)
+    return [item["blend"] for item in found["finalists"]]

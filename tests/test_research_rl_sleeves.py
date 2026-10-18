@@ -95,7 +95,7 @@ def test_the_report_shows_on_the_research_page(tmp_path):
                     first_year=2016, config=tiny, version="rl-sleeves-2.0.0")
     client = create_app(build_container(
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
-    body = client.get("/research?tab=ml").get_data(as_text=True)
+    body = client.get("/research/rl").get_data(as_text=True)          # 2026-10-17: RL has its own page
     assert "在策略家族間分配" in body and "rl-sleeves-2.0.0" in body and "減碼到現金" in body and "現金" in body
 
 

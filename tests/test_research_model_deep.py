@@ -54,8 +54,9 @@ def test_the_deep_model_learns_year_by_year_and_keeps_every_sessions_scores(monk
     assert np.allclose(extended[len(days) - 1][kept], scores[len(days) - 1][kept])
 
 
-def test_the_deep_model_is_a_model_factor_the_robots_did_not_learn():
+def test_the_deep_model_is_a_model_factor_the_robots_did_not_learn(tmp_path):
     from quant_platform.research import daily, rl_timing, scan
 
-    assert "ml_deep" in daily.MODEL_FACTORS and "ml_deep" in scan.signals()
+    # in the search unless its model was trained and failed its gate (2026-10-17, scan.failed_models): none here
+    assert "ml_deep" in daily.MODEL_FACTORS and "ml_deep" in scan.signals(tmp_path)
     assert "ml_deep" not in rl_timing.factor_names(rl_timing.ALL_VERSION)
