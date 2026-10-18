@@ -40,7 +40,7 @@ def test_dashboard_and_health(tmp_path):
     assert "每日決策工作台" in client.get("/decisions").get_data(as_text=True)
     assert "台股研究資料" in client.get("/taiwan-data").get_data(as_text=True)
     assert "模型解釋" in client.get("/explain?symbol=0050").get_data(as_text=True)
-    assert "開發藍圖" in client.get("/roadmap").get_data(as_text=True)
+    assert "<title>路線圖" in client.get("/roadmap", follow_redirects=True).get_data(as_text=True)  # 2026-10-17: /project/roadmap
     progress_page = client.get("/progress").get_data(as_text=True)
     assert "系統建置進度" in progress_page
     assert "盤後策略打贏 0050" in progress_page
