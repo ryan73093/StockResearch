@@ -361,6 +361,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "market_calendar_refresh",
             "prediction_archive",
             "database_backup",
+            "research_mirror",
             "close_availability_probe",
             "research_history_refresh",
             "forward_simulation",

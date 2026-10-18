@@ -116,6 +116,9 @@ class Settings:
     openai_enabled: bool = False
     openai_api_key: str = ""
     openai_response_model: str = "gpt-5.6-luna"
+    # 2026-10-19: a second copy of the research folder and the database backups on another disk (research/mirror.py);
+    # empty = no mirror
+    research_mirror_dir: str = ""
     openai_embedding_enabled: bool = False
     openai_embedding_model: str = "text-embedding-3-large"
     openai_embedding_dimensions: int = 1024
@@ -214,6 +217,7 @@ class Settings:
             in {"1", "true", "yes"},
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             openai_response_model=os.getenv("OPENAI_RESPONSE_MODEL", "gpt-5.6-luna"),
+            research_mirror_dir=os.getenv("RESEARCH_MIRROR_DIR", "").strip(),
             openai_embedding_enabled=os.getenv(
                 "OPENAI_EMBEDDING_ENABLED", "false"
             ).lower() in {"1", "true", "yes"},

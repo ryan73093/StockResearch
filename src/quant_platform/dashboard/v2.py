@@ -78,6 +78,7 @@ DOCS = {
     "architecture": ("架構", "docs/system_architecture.md"),
     "requirements": ("需求", "REQUIREMENTS.md"),
     "handoff": ("目前工作（交接）", "docs/development_handoff.md"),
+    "risks": ("專案風險與排除", "docs/project_risks.md"),
     "history": ("開發歷程", "DEVELOPMENT_HISTORY.md"),
     "line": ("LINE 設定", "docs/line-notifications.md"),
     "research_method": ("研究方法", "docs/research_method.md"),
@@ -87,7 +88,7 @@ DOCS = {
     "ai_full": ("AI 與程式交易全面研究", "reports/AI 與程式交易可行方法全面研究.md"),
 }
 # 2026-10-17 (使用者：要在 sidebar 看到專案資訊——路線圖、專案紀錄、開發歷程): the project pages, in this order
-PROJECT_DOCS = ("roadmap", "handoff", "history", "research_method", "requirements", "architecture", "dl_review",
+PROJECT_DOCS = ("roadmap", "handoff", "risks", "history", "research_method", "requirements", "architecture", "dl_review",
                 "ai_methods", "taiwan_quant", "ai_full", "line", "guide")
 JOB_LABELS = {
     "daily_market_data": "日線行情",

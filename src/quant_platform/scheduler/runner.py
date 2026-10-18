@@ -283,6 +283,29 @@ def notify_plan_advice(container: "Container", now: datetime | None = None) -> s
     return None
 
 
+def mirror_research(container: "Container") -> object | None:
+    """2026-10-19 (使用者：評估專案可能失敗的原因並排除): the research folder and the newest database backup copied to
+    another disk every night (research/mirror.py), after the 03:00 backup; skipped when no mirror is set."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.jobs import JobLog
+    from quant_platform.research.mirror import mirror
+
+    target = container.settings.research_mirror_dir
+    if not target:
+        return None
+    instance = _instance_dir(container.settings.database_url)
+    try:
+        with JobLog(instance / "research").start("研究資料第二份備份（另一顆硬碟）", "scheduler mirror_research") as job:
+            result = mirror(instance, target)
+            job.payload["summary"] = (f"{result['files']} 個檔案、新複製 {result['copied']} 個"
+                                      f"（{result['copied_bytes'] / 1e6:,.0f} MB）、資料庫 {result['database']}")
+        return result
+    except Exception as exc:
+        logger.exception("Research mirror failed")
+        _notify_failure(container, f"mirror:{datetime.now().date()}", "研究資料第二份備份", str(exc))
+        return None
+
+
 def refresh_research_history(container: "Container", now: datetime | None = None) -> object | None:
     """Keep the long-history research dataset current (S3): after the close on
     trading days, re-request only the current month and year; everything else
@@ -779,6 +802,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=2 * 60 * 60,
+    )
+    scheduler.add_job(
+        mirror_research,
+        args=[container],
+        trigger=CronTrigger(hour=3, minute=30, timezone=timezone),
+        id="research_mirror",
+        name="研究資料與資料庫第二份備份到另一顆硬碟（每日 03:30）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 60 * 60,
     )
     scheduler.add_job(
         refresh_research_history,
