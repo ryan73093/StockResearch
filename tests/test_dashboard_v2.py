@@ -412,3 +412,25 @@ def test_the_sidebar_groups_research_and_always_lists_system(client):
     assert body.count('href="/project"') >= 1 and 'href="/system#project"' not in body
     redirect = client.get("/roadmap")
     assert redirect.status_code == 302 and redirect.headers["Location"].endswith("/project/roadmap")
+
+
+def test_the_research_overview_shows_the_robustness_check(tmp_path):
+    """2026-10-18: the newest robustness check (research/robustness/<stamp>.json) as a tab of the overview."""
+    import json
+
+    from quant_platform.config.settings import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+
+    folder = tmp_path / "research" / "robustness"
+    folder.mkdir(parents=True)
+    item = {"final_value": 30_000_000, "since_2020_final_value": 9_000_000, "benchmark_final_value": 9_820_000,
+            "since_2020_benchmark_final_value": 3_770_000, "max_drawdown": -0.34, "tier": "T0 候選", "reason": ""}
+    row = {"trial": 1, "rule_hash": "abc", "name": "測試規則", "base": item, "costs_doubled": {**item, "tier": "T1"},
+           "next_session": None}
+    (folder / "20261018-000000.json").write_text(json.dumps({"rows": [row], "built_at": "2026-10-18T02:14:08"}),
+                                                 encoding="utf-8")
+    client = create_app(build_container(
+        Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
+    body = client.get("/research").get_data(as_text=True)
+    assert "穩健性檢查" in body and 'href="/research/rules/abc"' in body and "成本加倍後仍是 T0 候選：<strong>0／1</strong>" in body

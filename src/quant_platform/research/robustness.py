@@ -57,7 +57,8 @@ def run(base: Path, research: Path, costs, top: int = 10, job=None) -> dict[str,
         rule = DailyRule.model_validate(spec)
         if job:
             job.update(done=number, total=len(chosen), current=f"{record.spec_name[:40]}", force=True)
-        row = {"trial": record.trial_id, "name": record.spec_name, "base": _summary(record.metrics, tier)}
+        row = {"trial": record.trial_id, "rule_hash": record.spec_hash, "name": record.spec_name,
+               "base": _summary(record.metrics, tier)}
         doubled = report_metrics(evaluate(data, fp, rule, costs.scaled(COST_FACTOR), dearer), ENGINE_VERSION, SEED_PLAN)
         row["costs_doubled"] = _summary(doubled, tier)
         if rule.execution == "same":
@@ -72,6 +73,18 @@ def run(base: Path, research: Path, costs, top: int = 10, job=None) -> dict[str,
     (folder / f"{datetime.now(UTC):%Y%m%d-%H%M%S}.json").write_text(json.dumps(result, ensure_ascii=False, indent=1),
                                                                    encoding="utf-8")
     return result
+
+
+def latest(research: Path) -> dict | None:
+    """The newest check (research/robustness/<stamp>.json), for the research page."""
+    folder = Path(research) / "robustness"
+    files = sorted(folder.glob("*.json")) if folder.is_dir() else []
+    for path in reversed(files):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+    return None
 
 
 def _summary(metrics: dict, tier) -> dict[str, object]:

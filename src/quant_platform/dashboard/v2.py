@@ -33,6 +33,7 @@ from quant_platform.research.agent.researcher import agent_status
 from quant_platform.research.forward import FORWARD_START, ForwardTracker
 from quant_platform.research.forward_board import common_start as forward_common_start
 from quant_platform.research.rolling import cutoff_for
+from quant_platform.research.robustness import latest as robustness_latest
 from quant_platform.research.legacy_challenger import challenger_view
 from quant_platform.research.legacy_challenger import latest_report as latest_challenger
 from quant_platform.research.forward import STANDARD_PLAN as FORWARD_PLAN
@@ -980,6 +981,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             research_tab=tab, jobs=jobs, factor_report=latest_factor_strength(research_dir / "factors"),
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
             ml=ml_view(research_dir) if tab == "ml" else None,
+            robustness=robustness_latest(research_dir) if tab == "overview" else None,
             news=news_view(research_dir, dependencies.settings) if tab == "news" else None,
             factor_columns=factor_columns(latest_factor_strength(research_dir / "factors")),
             overview=overview,

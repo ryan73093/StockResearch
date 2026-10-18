@@ -82,6 +82,30 @@
 </section>
 {% endif %}
 
+{% if robustness and robustness.rows %}
+<section class="card" id="robustness">
+  <div class="card__head"><h2>穩健性檢查</h2><span class="muted small">T0 候選在比較不利的條件下還站得住嗎（診斷，不算試驗）・{{ robustness.built_at[:16].replace('T', ' ') }}</span></div>
+  {% set kept = robustness.rows|selectattr('costs_doubled.tier', 'equalto', 'T0 候選')|list|length %}
+  <p class="small" style="margin:0 0 10px">成本加倍後仍是 T0 候選：<strong>{{ kept }}／{{ robustness.rows|length }}</strong>；全部 {{ robustness.rows|selectattr('costs_doubled.final_value', 'gt', robustness.rows[0].base.benchmark_final_value)|list|length }} 個仍贏 0050。</p>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th class="num">原本</th><th class="num">成本加倍</th><th class="num">晚一個交易日成交</th></tr></thead>
+      <tbody>
+      {% for row in robustness.rows %}
+        <tr>
+          <td data-primary>{% if row.rule_hash %}<a href="/research/rules/{{ row.rule_hash }}">#{{ row.trial }} {{ row.name }}</a>{% else %}#{{ row.trial }} {{ row.name }}{% endif %}</td>
+          {% for key in ('base', 'costs_doubled', 'next_session') %}{% set item = row[key] %}
+          <td class="num" data-label="{{ {'base': '原本', 'costs_doubled': '成本加倍', 'next_session': '晚一天成交'}[key] }}">{% if item %}{{ '{:,.0f}'.format(item.final_value / 10000) }} 萬<span class="muted small">（{{ '{:.0%}'.format(item.max_drawdown) }}）</span><br><span class="badge {{ 'badge--ok' if item.tier == 'T0 候選' else 'badge--warn' }}">{{ item.tier }}</span>{% else %}<span class="muted small">本來就晚一天成交</span>{% endif %}</td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　依原本期末排序的 T0 候選（單一上市股規則）。<b>原本</b>：登錄的回測（2015-06 起，30 萬＋每月 1 萬）。<b>成本加倍</b>：手續費、最低手續費、滑價都乘 2（證交稅照法定）。<b>晚一個交易日成交</b>：原本當天盤後成交的，改成隔天收盤成交。括號是最大回撤；等級照選手池（T0 候選要回撤不比 0050 深超過 5 個百分點）。同樣的錢買 0050 是 {{ '{:,.0f}'.format(robustness.rows[0].base.benchmark_final_value / 10000) }} 萬。</p>
+</section>
+{% endif %}
+
 <section class="card">
   <div class="card__head"><h2>最近完成的研究程式</h2><a class="small" href="/research?tab=jobs">全部{% if running_count %}（{{ running_count }} 個在跑）{% endif %}</a></div>
   {% if recent_jobs %}

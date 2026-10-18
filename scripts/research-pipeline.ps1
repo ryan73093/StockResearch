@@ -652,7 +652,7 @@ switch ($Name) {
         while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
             Start-Sleep -Seconds 300
         }
-        Invoke-Step "1-check" @("-m", "quant_platform.research", "robustness", "--broker", "cathay")
+        Invoke-Step "1-check" @("-m", "quant_platform.research", "robustness", "--broker", "cathay", "--top", "60")
     }
     "forward-rolling" {
         # 2026-10-17 (使用者：前向觀察照現在的月份往前推兩個月起算): once the month's selection is graded and its models

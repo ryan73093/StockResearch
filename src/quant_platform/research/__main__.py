@@ -675,8 +675,9 @@ def main() -> int:
         from quant_platform.research.jobs import JobLog
 
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
-        with JobLog(RESEARCH).start("穩健性檢查：最好的 10 個 T0 候選，成本加倍、晚一個交易日成交", command, total=10) as job:
-            result = robustness.run(Path(args.base), RESEARCH, broker_costs(args.broker), 10, job)
+        top = args.top or 10
+        with JobLog(RESEARCH).start(f"穩健性檢查：最好的 {top} 個 T0 候選，成本加倍、晚一個交易日成交", command, total=top) as job:
+            result = robustness.run(Path(args.base), RESEARCH, broker_costs(args.broker), top, job)
             kept = sum(1 for row in result["rows"] if row["costs_doubled"]["tier"] == "T0 候選")
             job.payload["summary"] = f"成本加倍後仍是 T0 候選：{kept}／{len(result['rows'])}"
         for row in result["rows"]:
