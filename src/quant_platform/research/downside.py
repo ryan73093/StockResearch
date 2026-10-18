@@ -81,6 +81,16 @@ def profile(curve: dict[str, list[float]]) -> dict[str, object]:
             "worst_fall": worst, "most_behind": round(behind, 4)}
 
 
+def frontier(rows: list[dict], passing: tuple[str, ...]) -> set[str]:
+    """2026-10-18 (使用者：繼續研究有什麼更好的策略): the passing rules no other passing rule beats on both — more money
+    at the end and a smaller worst gap to 0050 in its falls (at least as good on one, better on the other)."""
+    listed = [(row["rule_hash"], row.get("final_value") or 0.0, (row.get("worst_fall") or {}).get("gap", 0.0))
+              for row in rows if row.get("tier") in passing]
+    return {key for key, money, gap in listed
+            if not any(other_money >= money and other_gap >= gap and (other_money > money or other_gap > gap)
+                       for other, other_money, other_gap in listed if other != key)}
+
+
 def notes(research: str | Path) -> dict[str, dict[str, object]]:
     """rule hash → the falling-market mark of every listed rule whose worst 0050 fall it fell more than RISK_GAP
     further than 0050 (its gap and months), kept with the table."""
@@ -124,5 +134,8 @@ def table(research: str | Path) -> list[dict[str, object]]:
                      "final_value": record.metrics.get("final_value"), "max_drawdown": record.metrics.get("max_drawdown"),
                      "benchmark_max_drawdown": record.metrics.get("benchmark_max_drawdown"), **found})
     rows.sort(key=lambda row: -(row["final_value"] or 0))
+    edge = frontier(rows, PASSING_TIERS)
+    for row in rows:
+        row["frontier"] = row["rule_hash"] in edge
     _CACHE.update(key=key, rows=rows)
     return list(rows)

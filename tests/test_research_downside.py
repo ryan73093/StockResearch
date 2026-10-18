@@ -34,3 +34,12 @@ def test_a_rule_falling_more_than_a_point_further_than_0050_is_marked(monkeypatc
     downside._CACHE["key"] = ("test",)
     downside._NOTES.clear()
     assert set(downside.notes("anywhere")) == {"rough"}
+
+
+def test_the_frontier_is_the_passing_rules_nothing_beats_on_both():
+    """2026-10-18: more money and a smaller worst gap to 0050 in its falls — the rules nothing beats on both."""
+    def row(key, money, gap, tier="T0 候選"):
+        return {"rule_hash": key, "final_value": money, "worst_fall": {"gap": gap}, "tier": tier}
+    rows = [row("rich", 3_900, -0.098, "T0 候選（高風險）"), row("middle", 2_876, -0.035), row("calm", 2_722, -0.011),
+            row("beaten", 2_400, -0.028), row("calmest", 2_000, -0.005), row("t1", 4_200, 0.02, "T1")]
+    assert downside.frontier(rows, ("T0 候選", "T0 候選（高風險）")) == {"rich", "middle", "calm", "calmest"}
