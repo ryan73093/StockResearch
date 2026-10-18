@@ -47,6 +47,7 @@ import pandas as pd
 # session, not only on the weekly decision days; and the decision frequency is a candidate dimension — every set is
 # tried deciding daily and weekly (sets with a chip or model factor used to be weekly only, never tried daily).
 SCAN_VERSION = "scan-1.3.0"
+CALM_GAP = 0.01             # 2026-10-18: --calm, at most this much further than 0050 in each of its 10% falls
 EXCESS_CORRELATION_LIMIT = 0.7
 DEV_END = date(2020, 9, 30)
 TOP, KEEP, MIN_HOLD, INDUSTRY_SHARE = 20, 3, 20, 0.3
@@ -518,11 +519,28 @@ def _count_lines(path: Path) -> int:
         return 0
 
 
+def worst_fall_gap(returns: np.ndarray, bench: np.ndarray) -> float | None:
+    """2026-10-18 (使用者：市場不好時不要比 0050 跌得多): over every stretch the 0050 daily returns ``bench`` fell 10%
+    or more from a high, the strategy's change less 0050's — the worst one (None when 0050 never fell that far)."""
+    from quant_platform.research.downside import falls
+
+    bench = np.asarray(bench[: len(returns)], dtype=np.float64)
+    returns = np.asarray(returns, dtype=np.float64)
+    worst = None
+    for peak, trough in falls(bench):
+        mine = float(np.prod(1 + returns[peak:trough]) - 1)
+        theirs = float(np.prod(1 + bench[peak:trough]) - 1)
+        worst = mine - theirs if worst is None else min(worst, mine - theirs)
+    return worst
+
+
 def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 600,
-              seeds: list[dict] | None = None, stable: bool = False) -> list[dict]:
+              seeds: list[dict] | None = None, stable: bool = False, calm: bool = False) -> list[dict]:
     """The passing candidates, best development-period excess first, skipping any whose daily returns
     correlate above CORRELATION_LIMIT with one already taken — or with a ``seeds`` candidate (an earlier
-    scan's finalists: a new scan adds strategies, not near-copies of ones already run)."""
+    scan's finalists: a new scan adds strategies, not near-copies of ones already run). 2026-10-18: ``calm`` —
+    also skipping any that fell more than CALM_GAP further than 0050 in one of 0050's 10% falls of the
+    development period (2018's end, 2020's spring)."""
     if stable:                                   # 1.1.0: stability first, apart by the excess correlation
         ranked = sorted((row for row in rows if passes(row, True)), key=stability, reverse=True)[:pool]
     else:
@@ -546,6 +564,11 @@ def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 6
         _metrics, (returns, _entries) = evaluate(arrays, candidate, costs)
         if np.std(returns) == 0:
             continue
+        if calm:
+            gap = worst_fall_gap(returns, arrays.bench)
+            if gap is not None and gap < -CALM_GAP:
+                continue
+            row["worst_fall_gap"] = round(gap, 4) if gap is not None else None
         returns = apart(returns)
         # 1.1.0, 2026-10-13: against earlier scans only a near copy is skipped (0.9 — with 200 earlier finalists
         # every new set sits within 0.7 of one of them); among this scan's own finalists the 0.7 limit holds
@@ -583,7 +606,8 @@ def earlier_finalists(research: Path) -> list[dict]:
 
 def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 80, largest: int = 3,
              names: list[str] | None = None, job=None, smallest: int = 1, require: str | None = None,
-             resume: Path | None = None, pool: int = 600, stable: bool = True, prefilter: bool = False) -> dict:
+             resume: Path | None = None, pool: int = 600, stable: bool = True, prefilter: bool = False,
+             calm: bool = False) -> dict:
     """Both stages; returns the summary written next to the screen results. With ``resume`` (an earlier
     scan's folder whose first stage finished) only the second stage runs, on that folder's arrays and rows."""
     from quant_platform.research import daily
@@ -626,7 +650,7 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                       if job else None)
     pd.DataFrame([{**row, "factors": "+".join(row["factors"])} for row in rows]).to_parquet(folder / "screen.parquet")
     seeds = earlier_finalists(research)
-    chosen = finalists(arrays, rows, costs, count, pool=pool, seeds=seeds, stable=stable)
+    chosen = finalists(arrays, rows, costs, count, pool=pool, seeds=seeds, stable=stable, calm=calm)
     effective = effective_trials(folder) if any(folder.glob("screen-*.excess.npy")) else None
     registry = TrialRegistry(research / "trials.jsonl")
     cache: dict = {}
@@ -643,7 +667,7 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                         "since_2020": report["since_2020"]["excess"], "drawdown": report["strategy"]["max_drawdown"],
                         "reasons": reasons, "tier": daily.tier(record.metrics)[0]})
     summary = {"version": SCAN_VERSION, "stamp": stamp, "development": [str(arrays.days[0]), str(DEV_END)],
-               "signals": arrays.names, "sizes": [smallest, largest], "require": require,
+               "signals": arrays.names, "sizes": [smallest, largest], "require": require, "calm": calm,
                "prefilter": json.loads((folder / "prefilter.json").read_text(encoding="utf-8"))
                if (folder / "prefilter.json").is_file() else None,
                "selection": "stability" if stable else "excess", "effective_trials": effective,

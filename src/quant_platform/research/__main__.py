@@ -358,6 +358,8 @@ def main() -> int:
     parser.add_argument("--step", choices=("select", "models", "holdout"),
                         help="rolling：每月滾動的哪一步（挑策略／重訓模型／前向測試）")
     parser.add_argument("--cutoff", help="rolling：截止日（預設：兩個月前的月底）")
+    parser.add_argument("--calm", action="store_true",
+                        help="scan：最後名單只挑開發期 0050 每次大跌（10% 以上）都沒有比 0050 多跌超過 1 個百分點的（使用者 2026-10-18）")
     parser.add_argument("--prefilter", action="store_true",
                         help="scan：先在開發期單獨篩每個訊號，只用單獨贏過 0050 的訊號組合（GPU 用來跑 4 個一組）")
     parser.add_argument("--require-new", action="store_true",
@@ -1090,7 +1092,8 @@ def main() -> int:
                  else len(scan.candidates(None, args.signals_max, args.signals_min, require)))
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         title = (f"大規模策略搜尋：接著跑第二階段（第一階段 {count:,} 個已完成）" if args.resume else
-                 f"大規模策略搜尋（GPU：先篩單一訊號，再 {args.signals_min}～{args.signals_max} 個一組，第一階段 2015-06～2020-09）"
+                 f"大規模策略搜尋（GPU：先篩單一訊號，再 {args.signals_min}～{args.signals_max} 個一組，第一階段 2015-06～2020-09"
+                 f"{'；最後名單要跌市不多跌' if args.calm else ''}）"
                  if args.prefilter else
                  f"大規模策略搜尋（{args.signals_min}～{args.signals_max} 個訊號一組，{count:,} 個候選，第一階段 2015-06～2020-09）")
         with JobLog(RESEARCH).start(title,
@@ -1099,7 +1102,7 @@ def main() -> int:
                                     count=args.finalists, job=job, largest=args.signals_max,
                                     smallest=args.signals_min, require=require,
                                     resume=Path(args.resume) if args.resume else None, pool=args.pool,
-                                    stable=not args.by_excess, prefilter=args.prefilter)
+                                    stable=not args.by_excess, prefilter=args.prefilter, calm=args.calm)
             job.payload["summary"] = (f"{summary['candidates']:,} 個候選、{summary['passed_screen']:,} 個過第一階段、"
                                       f"{summary['finalists']} 個完整回測：{summary['tiers']}")
         for item in summary["results"]:

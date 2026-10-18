@@ -236,3 +236,15 @@ def test_a_model_that_failed_its_gate_is_not_a_signal(tmp_path):
     assert scan.failed_models(tmp_path) == {"ml_deep2"}
     names = scan.signals(tmp_path)
     assert "ml_deep2" not in names and "ml_deep2_top" in names and "ml_deep" in names   # dl-1.0.0 not trained here
+
+
+def test_the_worst_fall_gap_by_hand():
+    """2026-10-18 (使用者：市場不好時不要比 0050 跌得多): 0050 falls 19% over two sessions; the strategy falls 10%."""
+    import numpy as np
+
+    from quant_platform.research import scan
+
+    bench = np.array([0.05, -0.1, -0.1, 0.3])
+    mine = np.array([0.0, -0.05, -0.0526316, 0.1])
+    assert scan.worst_fall_gap(mine, bench) == pytest.approx((0.95 * (1 - 0.0526316) - 1) - (0.9 * 0.9 - 1), abs=1e-6)
+    assert scan.worst_fall_gap(np.zeros(3), np.array([0.01, -0.05, 0.02])) is None      # never 10% down
