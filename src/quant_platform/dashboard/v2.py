@@ -212,7 +212,7 @@ def _taipei_text(value: datetime | None, pattern: str = "%m/%d %H:%M") -> str:
 # 2026-10-07: the old design's tabs (ranking, promotion, AI researcher, legacy model) became one "舊設計紀錄".
 RESEARCH_TABS = ("overview", "orders", "factors", "ml", "news", "forward", "hypothesis", "jobs", "legacy")
 OLD_RESEARCH_TABS = {"rules": "ranking", "promotion": "promotion", "agent": "agent"}
-BEST_TIERS = ("T0", "T0 候選", "T1")
+BEST_TIERS = ("T0", "T0（高風險）", "T0 候選", "T0 候選（高風險）", "T1")
 CONCLUSIONS_HEADING = "目前結論（網站"
 
 

@@ -154,6 +154,7 @@ def strengths(research: Path, factors: dict[str, float]) -> dict[str, object]:
 
 VERDICTS = {
     "T0 候選": ("好", "兩段期間都贏同樣的錢買 0050，視窗勝率與回撤都在門檻內（還要前向觀察確認）。"),
+    "T0 候選（高風險）": ("好，但高風險", "兩段期間都贏 0050、視窗勝率夠，但回撤比 0050 深 5～15 個百分點。"),
     "T1": ("部分好", "兩段期間都贏 0050，但回撤或視窗勝率沒過門檻：報酬有、太顛簸。"),
     "T2": ("不穩定", "只在部分期間贏 0050，或贏得不穩定。"),
     "T3": ("不好", "輸給同樣的錢買 0050。"),
@@ -192,7 +193,7 @@ def run_one(research: Path, history: Path, item: dict, client, data, fp, fingerp
               "orders_per_month": (report.get("activity") or {}).get("orders_per_month"),
               "reasons": record.metrics.get("reasons") or []}
     peers = item["similar"]
-    good = sum(1 for peer in peers if peer["tier"] in ("T0 候選", "T1"))
+    good = sum(1 for peer in peers if peer["tier"] in ("T0 候選", "T0 候選（高風險）", "T1"))
     item.update(result=result, verdict=verdict,
                 reason=reason + (f" 平台試過 {len(peers)} 個類似的策略，其中 {good} 個是 T0 候選或 T1。" if peers else ""))
     try:

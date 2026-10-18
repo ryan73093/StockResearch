@@ -627,3 +627,18 @@ def test_a_weekly_trend_rule_sells_the_session_a_holding_breaks_down():
     trend = daily_rankings(fp, weekly, date(2024, 1, 2), date(2024, 3, 29))
     assert crash in trend and "1106.TW" not in trend[crash]                     # sold on the Wednesday
     assert crash not in daily_rankings(fp, fixed, date(2024, 1, 2), date(2024, 3, 29))   # no trend: waits for the week
+
+
+def test_a_drawdown_within_fifteen_points_is_a_high_risk_t0_candidate():
+    """2026-10-18 (使用者：錢賺得多就可以；回撤上限放寬但保留，標註高風險)."""
+    from quant_platform.research.daily import PASSING_TIERS, tier
+
+    base = {"full_period_excess": 2.0, "since_2020_excess": 0.5, "benchmark_max_drawdown": -0.34,
+            "windows": {"3y": {"count": 30, "win_ratio": 0.9, "median_excess": 0.2}, "1y": {"count": 50, "win_ratio": 0.6}}}
+    assert tier({**base, "max_drawdown": -0.38})[0] == "T0 候選"                      # within 5 points
+    grade, why = tier({**base, "max_drawdown": -0.45})
+    assert grade == "T0 候選（高風險）" and "回撤" in why and grade in PASSING_TIERS    # 11 points deeper
+    assert tier({**base, "max_drawdown": -0.54})[0] == "T1"                             # 20 points deeper
+    assert tier({**base, "max_drawdown": -0.45, "since_2020_excess": -0.1})[0] == "T2"  # another gate failed
+    forward = {"sessions": 60, "excess": 0.01}
+    assert tier({**base, "max_drawdown": -0.45}, forward)[0] == "T0（高風險）"

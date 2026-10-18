@@ -15,7 +15,7 @@
         {% set now = row.now %}
         <tr>
           <td data-primary class="name"><strong>{{ row.role }}</strong><br><span class="muted small">{{ row.rules }} 個規則{% if row.grades.get('T0 候選') %}・T0 候選 {{ row.grades.get('T0 候選') }}{% endif %}</span></td>
-          <td data-label="等級"><span class="badge{% if now.tier == 'T0 候選' %} badge--ok{% elif now.tier == 'T3' %} badge--warn{% endif %}">{{ now.tier }}</span></td>
+          <td data-label="等級"><span class="badge{% if now.tier == 'T0 候選' %} badge--ok{% elif '高風險' in now.tier %} badge--bad{% elif now.tier == 'T3' %} badge--warn{% endif %}">{{ now.tier }}</span></td>
           <td class="num" data-label="現在最好">{{ '{:,.0f}'.format(now.final / 10000) }} 萬</td>
           <td class="num" data-label="上次優化前">{{ '{:,.0f}'.format(row.before.final / 10000) ~ ' 萬' if row.before else '—' }}</td>
           <td class="num {{ 'up' if (row.change or 0) > 0 else ('down' if (row.change or 0) < 0 else '') }}" data-label="這次成長">{{ '{:+.0%}'.format(row.change) if row.change is not none else '新角色' }}</td>

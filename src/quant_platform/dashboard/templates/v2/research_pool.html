@@ -17,17 +17,18 @@
   <div class="card__head"><h2>策略分類 <span class="badge">{{ pool.daily|length }} 個規則</span></h2><span class="muted small">依規則押注的因子分類；點分類名稱只看那一類</span></div>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>分類</th><th class="num">規則數</th><th class="num">T0／T0 候選</th><th class="num">T1</th><th class="num">T2</th><th class="num">T3</th><th>這一類最好的規則</th></tr></thead>
+      <thead><tr><th>分類</th><th class="num">規則數</th><th class="num">T0／T0 候選</th><th class="num">高風險</th><th class="num">T1</th><th class="num">T2</th><th class="num">T3</th><th>這一類最好的規則</th></tr></thead>
       <tbody>
       {% for item in pool.categories %}
         <tr>
           <td data-primary><strong><a href="#daily" data-pick-family="{{ item.family }}">{{ item.family }}</a></strong><br><span class="muted small">{{ item.note }}</span></td>
           <td class="num" data-label="規則數">{{ item.count }}</td>
           <td class="num" data-label="T0／T0 候選">{% set top = item.tiers['T0'] + item.tiers['T0 候選'] %}{% if top %}<span class="badge badge--ok">{{ item.tiers['T0'] }}／{{ item.tiers['T0 候選'] }}</span>{% else %}0{% endif %}</td>
+          <td class="num" data-label="高風險">{% set risky = item.tiers['T0（高風險）'] + item.tiers['T0 候選（高風險）'] %}{% if risky %}<span class="badge badge--bad">{{ risky }}</span>{% else %}0{% endif %}</td>
           <td class="num" data-label="T1">{{ item.tiers['T1'] }}</td>
           <td class="num" data-label="T2">{{ item.tiers['T2'] }}</td>
           <td class="num" data-label="T3">{{ item.tiers['T3'] }}</td>
-          <td data-label="最好的規則" data-wide><a href="/research/rules/{{ item.best.spec_hash }}">{{ item.best.name }}</a> <span class="badge {{ 'badge--ok' if item.best.tier in ('T0', 'T0 候選') else ('badge--warn' if item.best.tier == 'T1' else ('badge--bad' if item.best.tier == 'T3' else '')) }}">{{ item.best.tier }}</span>{% if item.best.excess is not none %} <span class="small {{ 'up' if item.best.excess > 0 else 'down' }}">比 0050 {{ '{:+.0%}'.format(item.best.excess) }}</span>{% endif %}</td>
+          <td data-label="最好的規則" data-wide><a href="/research/rules/{{ item.best.spec_hash }}">{{ item.best.name }}</a> <span class="badge {{ 'badge--ok' if item.best.tier in ('T0', 'T0 候選') else ('badge--warn' if item.best.tier == 'T1' else ('badge--bad' if item.best.tier == 'T3' or '高風險' in item.best.tier else '')) }}">{{ item.best.tier }}</span>{% if item.best.excess is not none %} <span class="small {{ 'up' if item.best.excess > 0 else 'down' }}">比 0050 {{ '{:+.0%}'.format(item.best.excess) }}</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -51,7 +52,7 @@
 <section class="card" id="daily" data-tab="全部規則（新設計，每天決策）">
   <div class="card__head"><h2>新設計：2015-06 起、每天決策 <span class="badge">{{ pool.daily|length }} 個規則</span></h2></div>
   <div class="kpis kpis--four" style="margin-bottom:12px">
-    {% for grade in ('T0', 'T0 候選', 'T1', 'T2', 'T3') %}<div class="kpi"><div class="kpi__label">{{ grade }}</div><div class="kpi__value">{{ pool.daily_tiers[grade] }}</div></div>{% endfor %}
+    {% for grade in ('T0', 'T0（高風險）', 'T0 候選', 'T0 候選（高風險）', 'T1', 'T2', 'T3') %}<div class="kpi"><div class="kpi__label">{{ grade }}</div><div class="kpi__value">{{ pool.daily_tiers[grade] }}</div></div>{% endfor %}
   </div>
   <p class="small" style="margin:0 0 10px">分級：<strong>T0</strong> 全部門檻都過，而且前向觀察滿 60 個交易日仍不輸 0050，可以由你核准採用；<strong>T0 候選</strong> 全部門檻都過，等前向觀察；<strong>T1</strong> 兩段期間都贏、視窗勝率也夠，但回撤比 0050 深超過 5 個百分點（贏但波動大）；<strong>T2</strong> 只有部分期間贏；<strong>T3</strong> 輸 0050。T0 候選與 T1 自動進前向觀察。</p>
   <p class="muted small" style="margin:0 0 10px">帳戶：啟動資金 30 萬、每月 5 日再投入 1 萬，整個帳戶都能買賣；每個交易日收盤後檢查，掉出保留區才賣、新進榜才買；比同樣的錢買 0050。門檻：2015-06 起與 2020-10 起都贏 0050、3 年視窗勝率 ≥ 60% 且中位為正、1 年視窗勝率 ≥ 50%、回撤不比 0050 深超過 5 個百分點。最後以 2026-10-05 起的前向觀察判斷。</p>
@@ -59,7 +60,7 @@
   <div class="filters">
     <input type="search" id="daily-search" placeholder="搜尋規則名稱" aria-label="搜尋規則名稱">
     <select id="daily-family" aria-label="分類"><option value="">全部分類</option>{% for family in pool.category_order %}<option value="{{ family }}">{{ family }}</option>{% endfor %}</select>
-    <select id="daily-tier" aria-label="等級"><option value="">全部等級</option>{% for grade in ('T0', 'T0 候選', 'T1', 'T2', 'T3') %}<option value="{{ grade }}">{{ grade }}</option>{% endfor %}<option value="不採用">不採用（含 0050）</option></select>
+    <select id="daily-tier" aria-label="等級"><option value="">全部等級</option>{% for grade in ('T0', 'T0（高風險）', 'T0 候選', 'T0 候選（高風險）', 'T1', 'T2', 'T3') %}<option value="{{ grade }}">{{ grade }}</option>{% endfor %}<option value="不採用">不採用（含 0050）</option></select>
     <select id="daily-trait" aria-label="特性"><option value="">全部特性</option>{% for trait in pool.traits %}<option value="{{ trait }}">{{ trait }}</option>{% endfor %}</select>
     <span class="muted small" id="daily-count"></span>
   </div>
@@ -71,7 +72,7 @@
         <tr data-name="{{ row.name }}" data-family="{{ row.category.family }}" data-tier="{{ '不採用' if row.uses_0050 else row.tier }}" data-traits="|{{ row.category.traits|join('|') }}|">
           <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong>{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
           <td data-label="分類" data-wide><span class="badge">{{ row.category.family }}</span>{% if row.category.detail %} <span class="small">{{ row.category.detail }}</span>{% endif %}<br><span class="muted small">{{ row.category.traits|join('・') }}</span></td>
-          <td data-label="等級" data-wide>{% if row.uses_0050 %}<span class="badge">不採用</span> <span class="small">含 0050（你自己另外持有 0050），回測等級 {{ row.tier }}</span>{% else %}<span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--warn' if row.tier == 'T1' else ('badge--bad' if row.tier == 'T3' else '')) }}">{{ row.tier }}</span> <span class="small">{{ row.tier_reason }}</span>{% endif %}</td>
+          <td data-label="等級" data-wide>{% if row.uses_0050 %}<span class="badge">不採用</span> <span class="small">含 0050（你自己另外持有 0050），回測等級 {{ row.tier }}</span>{% else %}<span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--warn' if row.tier == 'T1' else ('badge--bad' if row.tier == 'T3' or '高風險' in row.tier else '')) }}">{{ row.tier }}</span> <span class="small">{{ row.tier_reason }}</span>{% endif %}</td>
           <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
           <td class="num {{ 'up' if (row.excess or 0) > 0 else 'down' }}" data-label="比 0050">{{ '{:+.0%}'.format(row.excess) if row.excess is not none else '—' }}</td>
           <td class="num {{ 'up' if (row.since_2020_excess or 0) > 0 else 'down' }}" data-label="2020-10 起">{{ '{:+.0%}'.format(row.since_2020_excess) if row.since_2020_excess is not none else '—' }}</td>
@@ -83,7 +84,7 @@
       </tbody>
     </table>
   </div>
-  <p class="col-help"><b>欄位說明</b>　<b>等級</b>：T0 候選＝全部門檻都過；T1＝兩段都贏、視窗勝率夠，但回撤比 0050 深超過 5 個百分點；T2＝2015-06 起贏但有一段輸或勝率不夠；T3＝2015-06 起就輸 0050。<b>期末</b>：2015-06 起 30 萬＋每月 1 萬的期末金額（括號是同樣的錢買 0050）。<b>比 0050</b>：（期末 − 0050 期末）÷ 投入的錢。<b>2020-10 起比 0050</b>：同樣算法，只看 2020-10 以後。<b>視窗勝率</b>：每個月開始的 1 年／3 年帳戶，贏 0050 的比例。<b>最大回撤</b>：期間內從高點的最大跌幅（括號是 0050）。<b>費稅佔投入・每月下單</b>：手續費加交易稅佔投入金額的比例、平均每月下單筆數。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>等級</b>：T0 候選＝全部門檻都過；T0 候選（高風險）＝其他門檻都過，但回撤比 0050 深 5～15 個百分點（使用者 2026-10-18 放寬、標註高風險）；T1＝兩段都贏、視窗勝率夠，但回撤比 0050 深超過 15 個百分點；T2＝2015-06 起贏但有一段輸或勝率不夠；T3＝2015-06 起就輸 0050。<b>期末</b>：2015-06 起 30 萬＋每月 1 萬的期末金額（括號是同樣的錢買 0050）。<b>比 0050</b>：（期末 − 0050 期末）÷ 投入的錢。<b>2020-10 起比 0050</b>：同樣算法，只看 2020-10 以後。<b>視窗勝率</b>：每個月開始的 1 年／3 年帳戶，贏 0050 的比例。<b>最大回撤</b>：期間內從高點的最大跌幅（括號是 0050）。<b>費稅佔投入・每月下單</b>：手續費加交易稅佔投入金額的比例、平均每月下單筆數。</p>
   {% else %}
   <p class="muted" style="margin:0">還沒有結果；回測在跑時看<a href="/research?tab=jobs">執行中的程式</a>。</p>
   {% endif %}

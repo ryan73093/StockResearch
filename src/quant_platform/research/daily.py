@@ -1837,11 +1837,17 @@ def gate(metrics: dict) -> list[str]:
     return reasons
 
 
-TIERS = ("T0", "T0 候選", "T1", "T2", "T3")
+# 2026-10-18 (使用者：錢賺得多就可以；回撤上限放寬，但保留上限並標註高風險): a rule that passes every gate but the
+# drawdown — no more than RISKY_DRAWDOWN deeper than 0050 instead of 5 points — is a T0 candidate marked 高風險
+RISKY_DRAWDOWN = 0.15
+TIERS = ("T0", "T0（高風險）", "T0 候選", "T0 候選（高風險）", "T1", "T2", "T3")
+PASSING_TIERS = ("T0", "T0（高風險）", "T0 候選", "T0 候選（高風險）")
 TIER_LABELS = {
     "T0": "T0：可採用（全部門檻＋前向觀察確認）",
+    "T0（高風險）": "T0（高風險）：同 T0，但回撤比 0050 深 5～15 個百分點",
     "T0 候選": "T0 候選：全部門檻都過，等前向觀察",
-    "T1": "T1：贏 0050，但波動較大",
+    "T0 候選（高風險）": "T0 候選（高風險）：其他門檻都過，回撤比 0050 深 5～15 個百分點，等前向觀察",
+    "T1": "T1：贏 0050，但回撤比 0050 深超過 15 個百分點",
     "T2": "T2：只有部分期間贏",
     "T3": "T3：輸 0050",
 }
@@ -1852,20 +1858,30 @@ def tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
     """The pool's grade of a daily rule (owner 2026-10-04): T3 lost to 0050 from 2015-06; T2 won from
     2015-06 but lost from 2020-10 or failed the rolling windows; T1 passed both periods and the windows
     but fell more than 5 points deeper than 0050 (more volatile); T0 候選 passed every gate; T0 is a
-    T0 候選 that, after at least 60 sessions of forward observation, is not behind 0050 and reconciles."""
+    T0 候選 that, after at least 60 sessions of forward observation, is not behind 0050 and reconciles. 2026-10-18 (使用者):
+    a rule whose only failed gate is the drawdown, within RISKY_DRAWDOWN of 0050's, is T0 候選（高風險） (T0（高風險）
+    once forward observation confirms it); deeper than that, T1."""
     reasons = gate(metrics)
     if (metrics.get("full_period_excess") or 0) <= 0:
         return "T3", reasons[0] if reasons else "2015-06 起輸 0050"
     partial = [reason for reason in reasons if "2020-10" in reason or "視窗" in reason]
     if partial:
         return "T2", "；".join(partial)
+    risky = False
     if reasons:
-        return "T1", "；".join(reasons)
+        strategy, benchmark = metrics.get("max_drawdown"), metrics.get("benchmark_max_drawdown")
+        drawdown_only = all(reason.startswith("最大回撤") for reason in reasons)
+        if not (drawdown_only and strategy is not None and benchmark is not None
+                and strategy >= benchmark - RISKY_DRAWDOWN):
+            return "T1", "；".join(reasons)
+        risky = True
+    mark = "（高風險）" if risky else ""
+    note = f"；最大回撤 {metrics['max_drawdown']:.0%} 比 0050 {metrics['benchmark_max_drawdown']:.0%} 深" if risky else ""
     sessions = (forward or {}).get("sessions") or 0
     if (sessions >= FORWARD_SESSIONS and ((forward or {}).get("excess") or 0) >= 0
             and not (forward or {}).get("problems")):
-        return "T0", f"前向觀察 {sessions} 個交易日、不輸 0050"
-    return "T0 候選", f"前向觀察 {sessions}／{FORWARD_SESSIONS} 個交易日"
+        return f"T0{mark}", f"前向觀察 {sessions} 個交易日、不輸 0050{note}"
+    return f"T0 候選{mark}", f"前向觀察 {sessions}／{FORWARD_SESSIONS} 個交易日{note}"
 
 
 def free_targets(fp: FactorPanel, rule: DailyRule) -> dict[date, dict[str, float]]:
@@ -2716,7 +2732,7 @@ def rerun_batch() -> list:
             latest[record.spec_hash] = record          # the tiers as rated before the market's rules: a fixed set
     rules = []
     for record in sorted(latest.values(), key=lambda record: record.trial_id):
-        if tier(record.metrics)[0] not in ("T0 候選", "T1"):
+        if tier(record.metrics)[0] not in ("T0 候選", "T0 候選（高風險）", "T1"):
             continue
         try:
             spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]

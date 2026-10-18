@@ -74,7 +74,7 @@ def _init(base: str, broker: str) -> None:
 
 
 def _grade(item: dict, cutoff: str) -> dict:
-    from quant_platform.research.daily import DailyRule, evaluate, gate, tier
+    from quant_platform.research.daily import PASSING_TIERS, DailyRule, evaluate, gate, tier
 
     rule = DailyRule.model_validate(item["spec"])
     try:
@@ -89,7 +89,8 @@ def _grade(item: dict, cutoff: str) -> dict:
                "xirr": report["strategy"].get("xirr"), "benchmark_xirr": report["benchmark"].get("xirr")}
     reasons = gate(metrics)
     return {"trial": item["trial"], "name": rule.name, "rule_hash": rule.rule_hash, "spec": item["spec"],
-            "metrics": metrics, "reasons": reasons, "tier": tier(metrics)[0], "passed": not reasons}
+            # 2026-10-18 (使用者：回撤上限放寬並標註高風險): T0 候選（高風險） passes too, marked by its tier
+            "metrics": metrics, "reasons": reasons, "tier": tier(metrics)[0], "passed": tier(metrics)[0] in PASSING_TIERS}
 
 
 def select(base: str | Path, research: str | Path, cutoff: date, broker: str = "cathay", workers: int = 2,

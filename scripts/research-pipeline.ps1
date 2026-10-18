@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -653,6 +653,18 @@ switch ($Name) {
             Start-Sleep -Seconds 300
         }
         Invoke-Step "1-check" @("-m", "quant_platform.research", "robustness", "--broker", "cathay", "--top", "60")
+    }
+    "rolling-regrade" {
+        # 2026-10-18 (使用者：回撤上限放寬並標註高風險): the month's rolling selection graded again on the new tiers — every
+        # registered rule (the ones made since the first grading too) on data up to the cutoff — then its forward test,
+        # the forward accounts (high-risk passers from the day after the cutoff) and the common-start board.
+        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--workers", "2", "--broker", "cathay")
+        Invoke-Step "2-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "3-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "4-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "forward-rolling" {
         # 2026-10-17 (使用者：前向觀察照現在的月份往前推兩個月起算): once the month's selection is graded and its models

@@ -499,6 +499,8 @@ def ai_rounds(research_dir: str | Path) -> list[dict[str, object]]:
 def pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> dict[str, object]:
     """What the pool page shows: counts, the lists an owner asks about, and every rule, on one basis
     (lump sum, the owner's strategy account since 2026-10-04, or the monthly plan)."""
+    from quant_platform.research.daily import TIERS
+
     rows = rule_rows(research_dir, basis)
     daily_rules = daily_rows(research_dir)
     counts = {status: sum(1 for row in rows if row["status"] == status) for status in STATUS_ORDER}
@@ -528,6 +530,6 @@ def pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> d
         "category_order": [family for family in FAMILY_ORDER if any(row["category"]["family"] == family for row in daily_rules)],
         "traits": sorted({trait for row in daily_rules for trait in row["category"]["traits"]}),
         "daily_tiers": {grade: sum(1 for row in daily_rules if row["tier"] == grade and not row["uses_0050"])
-                        for grade in ("T0", "T0 候選", "T1", "T2", "T3")},
+                        for grade in TIERS},
         "status_labels": STATUS_LABELS, "basis": basis, "basis_label": BASIS_LABELS[basis], "bases": BASIS_LABELS,
     }

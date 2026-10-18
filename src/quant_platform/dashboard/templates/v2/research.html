@@ -21,7 +21,7 @@
   <div class="kpis kpis--four">
     <div class="kpi"><div class="kpi__label">試過的規則（新設計）</div><div class="kpi__value">{{ overview.daily|length }}<small>（舊設計另有 {{ overview.attempts }}）</small></div></div>
     <div class="kpi"><div class="kpi__label">T0／T0 候選</div><div class="kpi__value">{{ overview.daily_tiers['T0'] }}／{{ overview.daily_tiers['T0 候選'] }}</div></div>
-    <div class="kpi"><div class="kpi__label">T1（贏 0050、波動大）</div><div class="kpi__value">{{ overview.daily_tiers['T1'] }}</div></div>
+    <div class="kpi"><div class="kpi__label">T0 候選（高風險）／T1</div><div class="kpi__value">{{ overview.daily_tiers['T0（高風險）'] + overview.daily_tiers['T0 候選（高風險）'] }}／{{ overview.daily_tiers['T1'] }}</div></div>
     <div class="kpi"><div class="kpi__label">前向觀察中</div><div class="kpi__value">{{ overview.forward_stocks|rejectattr('stopped')|list|length }}<small>（已停止 {{ overview.forward_stocks|selectattr('stopped')|list|length }}）</small></div></div>
   </div>
   {% endif %}
@@ -42,7 +42,7 @@
       {% for row in best %}{% set fwd = forward_map.get(row.spec_hash) %}
         <tr>
           <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong><br><span class="muted small">{{ row.category.family }}{% if row.category.detail %}（{{ row.category.detail }}）{% endif %}</span></td>
-          <td data-label="等級"><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--warn' }}">{{ row.tier }}</span></td>
+          <td data-label="等級"><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else 'badge--warn') }}">{{ row.tier }}</span></td>
           <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
           <td class="num" data-label="比 0050">{% if row.excess is not none %}<span class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.excess) }}</span>{% else %}—{% endif %}／{% if row.since_2020_excess is not none %}<span class="{{ 'up' if row.since_2020_excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.since_2020_excess) }}</span>{% else %}—{% endif %}</td>
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
@@ -53,7 +53,7 @@
       </tbody>
     </table>
   </div>
-  <p class="note">T0 候選要前向觀察滿 60 個交易日仍不輸 0050 才是 T0；T1 贏 0050，但回撤比 0050 深超過 5 個百分點。前向觀察的相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入，明細在<a href="/research?tab=forward">前向觀察</a>。歷史結果只作研究參考。</p>
+  <p class="note">T0 候選要前向觀察滿 60 個交易日仍不輸 0050 才是 T0；T0 候選（高風險）其他門檻都過，但回撤比 0050 深 5～15 個百分點（使用者 2026-10-18：錢賺得多就可以，標註高風險）；T1 贏 0050，但回撤比 0050 深超過 15 個百分點。前向觀察的相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入，明細在<a href="/research?tab=forward">前向觀察</a>。歷史結果只作研究參考。</p>
   {% else %}<p class="muted" style="margin:0">還沒有過門檻的規則。</p>{% endif %}
 </section>
 
@@ -67,7 +67,7 @@
         <tr><td><strong>0050（同樣的錢）</strong></td>{% for year in yearly.years %}{% set value = yearly.benchmark.get(year) %}<td class="num">{{ '{:+.0%}'.format(value) if value is not none else '—' }}</td>{% endfor %}<td></td></tr>
         {% for row in yearly.rows %}{% set wins = namespace(count=0, total=0) %}
         <tr>
-          <td><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--warn' }}">{{ row.tier }}</span></td>
+          <td><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else 'badge--warn') }}">{{ row.tier }}</span></td>
           {% for year in yearly.years %}{% set item = row.years.get(year) %}
           {% if item %}{% set wins.total = wins.total + 1 %}{% if item.strategy > item.benchmark %}{% set wins.count = wins.count + 1 %}{% endif %}{% endif %}
           <td class="num {{ ('up' if item.strategy > item.benchmark else 'down') if item else '' }}" title="{{ '0050 {:+.1%}'.format(item.benchmark) if item else '' }}">{{ '{:+.0%}'.format(item.strategy) if item else '—' }}</td>

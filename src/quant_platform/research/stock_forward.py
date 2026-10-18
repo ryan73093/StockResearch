@@ -110,7 +110,7 @@ def best_ai_rule(research_dir: str | Path) -> dict[str, object] | None:
     best = None
     for spec_hash, record in latest.items():
         grade, _why = tier(record.metrics)
-        if grade not in ("T0", "T0 候選", "T1"):
+        if grade not in ("T0", "T0（高風險）", "T0 候選", "T0 候選（高風險）", "T1"):
             continue
         if uses_0050(_report_spec(base, record.report_file)):
             continue
@@ -154,7 +154,7 @@ def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:
     output = []
     for record in latest.values():
         grade, _why = tier(record.metrics)
-        if grade not in ("T0 候選", "T1"):            # T1 too: beats 0050, more volatile (owner 2026-10-04)
+        if grade not in ("T0 候選", "T0 候選（高風險）", "T1"):   # T1 too: beats 0050, more volatile (owner 2026-10-04)
             continue
         try:
             spec = json.loads((base / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
