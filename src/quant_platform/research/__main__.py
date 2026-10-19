@@ -309,6 +309,7 @@ def main() -> int:
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
+    parser.add_argument("--events", help="factors：事件因子分析，逗號分隔（例如 low_insider_sell_60,buyback_60）")
     parser.add_argument("--explain", action="store_true",
                         help="forward：替 2026-10-19 以前的決定補上買賣原因（重算排名，和當時一樣的才補）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
@@ -476,6 +477,19 @@ def main() -> int:
     if args.command == "factors":
         from quant_platform.research import factors as factor_strength
         from quant_platform.research.jobs import JobLog
+
+        if args.events:                          # 2026-10-19: event factors, the stocks with an event against all
+            names = [name.strip() for name in args.events.split(",") if name.strip()]
+            with JobLog(RESEARCH).start(f"事件因子分析（{len(names)} 個，2015-06 起每週）",
+                                        "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+                path = factor_strength.event_study(Path(args.base), RESEARCH / "factors", names, job=job)
+            report = json.loads(path.read_text(encoding="utf-8"))
+            for key, item in report["factors"].items():
+                periods = "；".join(f"{period['label']} {period['excess_20']:+.2%}（t={period['t']}）"
+                                   for period in item["periods"].values())
+                print(f"{item['label']}：每週約 {item['stocks_per_week']} 檔；之後 20 日比平均 {periods}", flush=True)
+            print(f"已寫入 {path}")
+            return 0
 
         title = "因子強弱分析（2015-06 起、每週、19 個因子）" if args.recent else "因子強弱分析（全市場、2005 起每月）"
         with JobLog(RESEARCH).start(title, "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:

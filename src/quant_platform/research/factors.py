@@ -336,6 +336,72 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None) -> Path:
     return path
 
 
+def event_weeks(matrix: np.ndarray, forward: np.ndarray, eligible: np.ndarray) -> tuple[float, int] | None:
+    """One week of an event factor: the stocks with an event (a nonzero value) against every eligible stock, their
+    mean next-20-session return less the eligible mean, and how many had one; None without an event."""
+    mask = eligible & np.isfinite(matrix) & np.isfinite(forward)
+    if mask.sum() < 50:
+        return None
+    hit = mask & (matrix != 0)
+    if not hit.any():
+        return None
+    return float(forward[hit].mean() - forward[mask].mean()), int(hit.sum())
+
+
+def event_study(history: str | Path, out_dir: str | Path, factors: list[str], job=None) -> Path:
+    """2026-10-19 (使用者：還有什麼方法可以找到更好的策略): event factors (insiders' notices to sell, buyback programs)
+    are zero for most stocks most weeks, so ranking them by fifths says little. Every week from 2015-06: the stocks with
+    an event in the last 60 sessions against every eligible stock — their mean next-20-session return less the
+    eligible mean — by the same periods as the strength table and by year, with a t on the weekly differences."""
+    from quant_platform.research import daily
+
+    if job:
+        job.update(current="載入 2013 年起全市場行情", force=True)
+    _data, fp = daily.load(history)
+    eligibility = daily.DailyRule(name="資格", factors={"momentum_3": 1.0})
+    sessions = fp.sessions
+    positions = [index for index, day in enumerate(sessions)
+                 if daily.RECENT_START <= day <= daily.RECENT_END and index + HORIZON < len(sessions)][::STEP]
+    summary: dict[str, object] = {}
+    for count, factor in enumerate(factors):
+        if job:
+            job.update(done=count, total=len(factors), current=daily.FACTOR_LABELS[factor], force=True)
+        matrix = fp.matrix(factor)
+        weeks = []
+        for position in positions:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                forward = fp.panel.filled[:, position + HORIZON] / fp.panel.filled[:, position] - 1
+            found = event_weeks(matrix[:, position].astype(float), forward, fp.eligible(eligibility, position))
+            if found:
+                weeks.append({"date": sessions[position].isoformat(), "excess": found[0], "stocks": found[1]})
+        periods = {}
+        for key, label, start, end in RECENT_COLUMNS:
+            chosen = [row["excess"] for row in weeks if start.isoformat() <= row["date"] <= end.isoformat()]
+            if len(chosen) < 10:
+                continue
+            deviation = statistics.stdev(chosen)
+            periods[key] = {"label": label, "weeks": len(chosen), "excess_20": round(statistics.fmean(chosen), 5),
+                            "t": round(statistics.fmean(chosen) / (deviation / math.sqrt(len(chosen))), 2) if deviation else None,
+                            "share_positive": round(sum(value > 0 for value in chosen) / len(chosen), 3)}
+        by_year: dict[str, list[float]] = {}
+        for row in weeks:
+            by_year.setdefault(row["date"][:4], []).append(row["excess"])
+        summary[factor] = {"label": daily.FACTOR_LABELS[factor], "periods": periods,
+                           "stocks_per_week": round(statistics.fmean(row["stocks"] for row in weeks), 1) if weeks else 0,
+                           "by_year": {year: round(statistics.fmean(values), 5) for year, values in sorted(by_year.items())}}
+    report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "design": "events",
+              "universe": "證交所上市普通股（含後來下市），資格同規則；每週一次，有事件的股票之後 20 個交易日減全部合格股票平均",
+              "factors": summary, "horizon": HORIZON, "step": STEP}
+    folder = Path(out_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"events-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    if job:
+        job.payload["summary"] = f"{len(factors)} 個事件因子、{len(positions)} 週"
+    return path
+
+
 DEFAULT_COLUMNS = [["development", "開發期 2005–2016"], ["validation", "驗證期 2017–2021"],
                    ["final", "最終驗證期 2022–2026"], ["since_2024", "2024 後"]]
 

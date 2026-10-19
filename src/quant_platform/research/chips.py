@@ -87,6 +87,17 @@ CORPORATE_FACTORS = {
     "no_cash_issue": "沒有現金增資（現增新股佔發行股數，反向；公告後 250 日）",
 }
 CORPORATE_SESSIONS = 250
+# 2026-10-19 (使用者：資料先用免費的；還有什麼方法可以找到更好的策略): what insiders and the company announce on the
+# Market Observation Post System — insiders' advance notices to sell on the market (research/history/insider.py; a
+# gift, a trust or a sale to a named person is not a sale on the market) and buyback programs (history/buyback.py,
+# only what the board's announcement says), each from the session after its date, summed over 60 sessions against the
+# shares issued. Insider sales are followed by weaker returns and buyback announcements by stronger (Lakonishok & Lee
+# 2001; Ikenberry, Lakonishok & Vermaelen 1995; Taiwan event studies of 申報轉讓 and 庫藏股).
+DISCLOSURE_FACTORS = {
+    "low_insider_sell_60": "內部人申報在市場賣出少（60 日內申報要在市場賣的股數佔發行股數，反向）",
+    "buyback_60": "庫藏股買回（60 日內董事會決議要買回的股數佔發行股數）",
+}
+DISCLOSURE_SESSIONS = 60
 # 2026-10-16 (股本膨脹): new shares over 250 sessions against the shares issued — cash capital increases, convertible
 # bonds and employee shares turned into stock, shares issued in mergers (net share issuance, Pontiff & Woodgate 2008).
 # A stock dividend's new shares are not issuance: the first jump in the shares issued within 70 sessions after its
@@ -434,6 +445,53 @@ class ChipStore:
         frame = pd.DataFrame(share, index=sessions).ffill(limit=CORPORATE_SESSIONS - 1).fillna(0.0)
         frame.loc[frame.index <= first] = np.nan  # before the first announcement nothing is known
         return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
+
+    def disclosure_path(self, factor: str) -> Path:
+        history = self._folder.parent
+        return history / ("insider/transfers.parquet" if factor == "low_insider_sell_60" else "buyback/programs.parquet")
+
+    def disclosure_available(self, factor: str) -> bool:
+        return self.disclosure_path(factor).is_file()
+
+    def disclosure_matrix(self, factor: str) -> np.ndarray:
+        """symbols × sessions, DISCLOSURE_FACTORS: the shares announced over the last DISCLOSURE_SESSIONS sessions
+        (each from the session after its date) against the shares issued; insiders' sales reversed. NaN before the
+        data starts."""
+        from quant_platform.research.history.insider import MARKET_METHODS
+
+        table = pq.read_table(self.disclosure_path(factor)).to_pandas()
+        dated = table["notice_date" if factor == "low_insider_sell_60" else "board_date"].dropna()
+        if self.until is not None:
+            dated = dated[pd.to_datetime(dated) < pd.Timestamp(self.until)]
+        first = pd.to_datetime(dated).min() if len(dated) else None     # the data's start, every kind of notice
+        if factor == "low_insider_sell_60":
+            table = table[table["method"].astype(str).str.contains("|".join(MARKET_METHODS))]
+            table = table.assign(when=table["notice_date"],
+                                 amount=table["total_own"].fillna(0.0) + table["total_trust"].fillna(0.0))
+        else:
+            table = table.assign(when=table["board_date"], amount=table["planned_shares"].fillna(0.0))
+        table = table[table["when"].notna()]
+        if self.until is not None:
+            table = table[pd.to_datetime(table["when"]) < pd.Timestamp(self.until)]
+        sessions = pd.to_datetime(pd.Index(self.sessions))
+        if first is None:
+            return np.full((len(self._codes), len(sessions)), np.nan, dtype=np.float32)
+        table = table.assign(at=sessions.searchsorted(pd.to_datetime(table["when"]).to_numpy(), side="right"),
+                             code=table["code"].astype(str))
+        table = table[(table["at"] < len(sessions)) & table["code"].isin(self._codes)]
+        frame = pd.DataFrame(0.0, index=sessions, columns=list(dict.fromkeys(self._codes)))
+        if len(table):
+            values = table.groupby(["at", "code"])["amount"].sum().unstack(fill_value=0.0)
+            frame.loc[sessions[values.index], values.columns] = values.to_numpy()
+        window = frame.rolling(DISCLOSURE_SESSIONS, min_periods=1).sum().reindex(columns=self._codes)
+        shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued").to_numpy(dtype=np.float64)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            share = window.to_numpy(dtype=np.float64) / np.where(shares > 0, shares, np.nan)
+        if factor == "low_insider_sell_60":
+            share = -share
+        result = pd.DataFrame(share, index=sessions)
+        result.loc[result.index <= first] = np.nan        # before the first announcement nothing is known
+        return np.ascontiguousarray(result.to_numpy(dtype=np.float32).T)
 
     def dealer_available(self) -> bool:
         path = self._folder / "TaiwanStockInstitutionalInvestorsBuySell.parquet"
