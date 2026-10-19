@@ -9,6 +9,7 @@ all describe the same state. Nothing here is written; the sources are.
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 from quant_platform.research.promotion import (
@@ -253,12 +254,16 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
     tracker = StockForwardTracker(base)
     since = {item["rule_hash"]: item["since"] for item in tracker.tracked()}
     forward = {row["rule_hash"]: row for row in tracker.summary()} if latest else {}
+    # 2026-10-19 (使用者選「串接滾動前向紀錄」): a rule's grade counts the sessions it earned on the monthly lists,
+    # chained (stock_forward.chain); the current account's reconciliation problems still count
+    chained = tracker.chained(date.today()) if latest else {}
+    judged = {key: {**value, "problems": (forward.get(key) or {}).get("problems") or []} for key, value in chained.items()}
     rows = []
     for spec_hash, record in latest.items():
         metrics = record.metrics
         reasons = daily_gate(metrics)
         one, three = _window(metrics, "1y"), _window(metrics, "3y")
-        grade, why = tier(metrics, forward.get(spec_hash))
+        grade, why = tier(metrics, judged.get(spec_hash))
         rows.append({
             "tier": grade, "tier_label": TIER_LABELS[grade], "tier_reason": why,
             "spec_hash": spec_hash, "name": record.spec_name, "source": origin.get(spec_hash, "其他"),

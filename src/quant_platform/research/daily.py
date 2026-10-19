@@ -1892,8 +1892,8 @@ def tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
     sessions = (forward or {}).get("sessions") or 0
     if (sessions >= FORWARD_SESSIONS and ((forward or {}).get("excess") or 0) >= 0
             and not (forward or {}).get("problems")):
-        return f"T0{mark}", f"前向觀察 {sessions} 個交易日、不輸 0050{note}"
-    return f"T0 候選{mark}", f"前向觀察 {sessions}／{FORWARD_SESSIONS} 個交易日{note}"
+        return f"T0{mark}", f"串接前向 {sessions} 個交易日、不輸 0050{note}"
+    return f"T0 候選{mark}", f"串接前向 {sessions}／{FORWARD_SESSIONS} 個交易日{note}"
 
 
 def free_targets(fp: FactorPanel, rule: DailyRule) -> dict[date, dict[str, float]]:

@@ -55,7 +55,7 @@
   <div class="kpis kpis--four" style="margin-bottom:12px">
     {% for grade in ('T0', 'T0（高風險）', 'T0 候選', 'T0 候選（高風險）', 'T1', 'T2', 'T3') %}<div class="kpi"><div class="kpi__label">{{ grade }}</div><div class="kpi__value">{{ pool.daily_tiers[grade] }}</div></div>{% endfor %}
   </div>
-  <p class="small" style="margin:0 0 10px">分級：<strong>T0</strong> 全部門檻都過，而且前向觀察滿 60 個交易日仍不輸 0050，可以由你核准採用；<strong>T0 候選</strong> 全部門檻都過，等前向觀察；<strong>T1</strong> 兩段期間都贏、視窗勝率也夠，但回撤比 0050 深超過 5 個百分點（贏但波動大）；<strong>T2</strong> 只有部分期間贏；<strong>T3</strong> 輸 0050。T0 候選與 T1 自動進前向觀察。</p>
+  <p class="small" style="margin:0 0 10px">分級：<strong>T0</strong> 全部門檻都過，而且串接滾動前向紀錄（連續留在每月名單上的月份串起來）滿 60 個交易日仍不輸 0050，可以由你核准採用（最快 2026-12-28）；<strong>T0 候選</strong> 全部門檻都過，等前向觀察；<strong>T0 候選（高風險）</strong> 其他門檻都過，但回撤比 0050 深 5～15 個百分點；<strong>T1</strong> 兩段期間都贏、視窗勝率也夠，但回撤比 0050 深超過 15 個百分點（贏但波動大）；<strong>T2</strong> 只有部分期間贏；<strong>T3</strong> 輸 0050。T0 候選與 T1 自動進前向觀察。</p>
   <p class="muted small" style="margin:0 0 10px">帳戶：啟動資金 30 萬、每月 5 日再投入 1 萬，整個帳戶都能買賣；每個交易日收盤後檢查，掉出保留區才賣、新進榜才買；比同樣的錢買 0050。門檻：2015-06 起與 2020-10 起都贏 0050、3 年視窗勝率 ≥ 60% 且中位為正、1 年視窗勝率 ≥ 50%、回撤不比 0050 深超過 5 個百分點。最後以 2026-10-05 起的前向觀察判斷。</p>
   {% if pool.daily %}
   <div class="filters">

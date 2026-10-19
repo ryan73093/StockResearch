@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -311,6 +311,28 @@ class StockForwardTracker:
             self.rebases_path.write_text(json.dumps({key: value for key, value in marks.items() if key not in hashes},
                                                     ensure_ascii=False, indent=1), encoding="utf-8")
         return len(moved)
+
+    def archived(self) -> list[dict[str, object]]:
+        """The records moved off the log when an account started again (``_archive_records``)."""
+        path = self._folder / "log-archive.jsonl"
+        if not path.is_file():
+            return []
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def chained(self, today: date) -> dict[str, dict[str, object]]:
+        """2026-10-19 (使用者選「串接滾動前向紀錄」): each rule's chained rolling forward record — see ``chain``."""
+        from quant_platform.research.rolling import folder as rolling_folder
+
+        lists: dict[str, set[str]] = {}
+        for path in sorted(rolling_folder(self._base).glob("*.json")) if rolling_folder(self._base).is_dir() else []:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except ValueError:
+                continue
+            passed = {str(row.get("rule_hash")) for row in payload.get("graded") or [] if row.get("passed")}
+            if passed and payload.get("cutoff"):
+                lists[payload["cutoff"]] = passed
+        return chain(self.archived() + self.records(), lists, today)
 
     def records(self) -> list[dict[str, object]]:
         if not self.log_path.is_file():
@@ -842,6 +864,62 @@ def _replay_check(earlier: list[dict[str, object]], rule_hash: str, replayed: di
         if value is not None and abs(value - record["value"]) > VALUE_TOLERANCE:
             mismatches.append({"date": record["date"], "recorded": record["value"], "replayed": round(value, 2)})
     return {"days": len(mine), "mismatches": mismatches}
+
+
+CHAIN_START = "2026-10"     # the first month with a rolling list (cutoff 2026-08-31)
+
+
+def chain(records: list[dict], lists: dict[str, set[str]], today: date) -> dict[str, dict[str, object]]:
+    """2026-10-19 (使用者：評估專案可能失敗的原因並排除；選「串接滾動前向紀錄」): the record a rule earns while it is on the
+    monthly lists. Each month M is judged by M's list — the rules passing with data up to cutoff_for(M), the end of the
+    month two months back — the list an owner would use that month. M's sessions come from the rule's forward account
+    for that list (started the day after the cutoff, so a month before M: M's first session has the day before it);
+    the unit returns (net of each day's money) are chained over the latest run of consecutive months up to ``today``'s
+    month in which the rule was on the list; leaving a list starts it again. The same for 0050 from the same accounts.
+
+    ``records``: forward records, live and archived (each with ``since``); ``lists``: cutoff (ISO) → rule hashes that
+    passed. Returns rule hash → sessions, months, start, the chained returns and ``excess`` (rule's minus 0050's)."""
+    from quant_platform.research.rolling import cutoff_for
+
+    months, month = [], CHAIN_START
+    while month <= f"{today:%Y-%m}":
+        months.append(month)
+        year, number = int(month[:4]), int(month[5:])
+        month = f"{year + number // 12}-{number % 12 + 1:02d}"
+    by_account: dict[tuple[str, str], dict[str, dict]] = {}
+    for record in records:
+        by_account.setdefault((record["rule_hash"], str(record.get("since"))), {})[record["date"]] = record
+    output: dict[str, dict[str, object]] = {}
+    hashes = {key for passed in lists.values() for key in passed}
+    for rule_hash in hashes:
+        run: list[str] = []
+        for month in months:
+            cutoff = cutoff_for(date(int(month[:4]), int(month[5:]), 1))
+            if rule_hash in lists.get(cutoff.isoformat(), set()):
+                run.append(month)
+            else:
+                run = []
+        if not run:
+            continue
+        rule_units, base_units, sessions = 1.0, 1.0, 0
+        for month in run:
+            cutoff = cutoff_for(date(int(month[:4]), int(month[5:]), 1))
+            since = (cutoff + timedelta(days=1)).isoformat()
+            days = by_account.get((rule_hash, since), {})
+            ordered = sorted(days)
+            for previous, day in zip(ordered, ordered[1:]):
+                if not day.startswith(month):
+                    continue
+                before, now = days[previous], days[day]
+                flow = float(now["contributed"]) - float(before["contributed"])
+                if before["value"] and before["benchmark_value"]:
+                    rule_units *= (float(now["value"]) - flow) / float(before["value"])
+                    base_units *= (float(now["benchmark_value"]) - flow) / float(before["benchmark_value"])
+                    sessions += 1
+        output[rule_hash] = {"sessions": sessions, "months": run, "start": run[0],
+                             "return": round(rule_units - 1, 6), "benchmark_return": round(base_units - 1, 6),
+                             "excess": round(rule_units - base_units, 6)}
+    return output
 
 
 def reconcile(records: list[dict[str, object]], rebased: dict[str, dict[str, str]] | None = None) -> dict[str, list[str]]:

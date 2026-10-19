@@ -160,7 +160,7 @@ def test_tiers():
     windows = {"1y": {"count": 100, "win_ratio": 0.6}, "3y": {"count": 80, "win_ratio": 0.8, "median_excess": 0.2}}
     good = {"full_period_excess": 2.0, "since_2020_excess": 0.4, "max_drawdown": -0.36, "benchmark_max_drawdown": -0.34,
             "windows": windows}
-    assert tier(good)[0] == "T0 候選" and tier(good, {"sessions": 30, "excess": 0.02})[1] == "前向觀察 30／60 個交易日"
+    assert tier(good)[0] == "T0 候選" and tier(good, {"sessions": 30, "excess": 0.02})[1] == "串接前向 30／60 個交易日"
     assert tier(good, {"sessions": 60, "excess": 0.01, "problems": []})[0] == "T0"
     assert tier(good, {"sessions": 60, "excess": -0.01, "problems": []})[0] == "T0 候選"
     assert tier({**good, "max_drawdown": -0.52})[0] == "T1"                      # wins, more volatile

@@ -345,3 +345,31 @@ def test_a_restart_moves_every_live_account_to_the_common_start_and_keeps_the_ol
     assert items["a"]["since"] == "2026-10-01" and items["a"]["added"] == "2026-10-15" and items["b"]["since"] == "2026-10-01"
     assert [record["rule_hash"] for record in tracker.records()] == ["b"]            # the stopped account keeps its record
     assert len((folder / found["archive"]).read_text(encoding="utf-8").splitlines()) == 3
+
+
+def test_the_chained_record_counts_each_month_on_that_months_list():
+    """2026-10-19 (使用者選「串接滾動前向紀錄」): month M is judged by M's list (cutoff two month-ends back) and its
+    sessions come from that list's account; consecutive months chain, leaving a list starts again."""
+    from quant_platform.research.stock_forward import chain
+
+    def rec(rule, since, day, value, paid, bench):
+        return {"rule_hash": rule, "since": since, "date": day, "value": value, "contributed": paid,
+                "benchmark_value": bench}
+    records = [
+        rec("A", "2026-09-01", "2026-09-30", 100, 100, 100), rec("A", "2026-09-01", "2026-10-01", 110, 100, 101),
+        rec("A", "2026-09-01", "2026-10-02", 121, 100, 102.01),
+        rec("A", "2026-10-04", "2026-10-05", 999, 100, 100),                 # an older design's account: not counted
+        rec("A", "2026-10-01", "2026-10-30", 100, 100, 100), rec("A", "2026-10-01", "2026-11-02", 120, 110, 111),
+        rec("A", "2026-11-01", "2026-11-30", 100, 100, 100), rec("A", "2026-11-01", "2026-12-01", 90, 100, 100),
+        rec("B", "2026-09-01", "2026-09-30", 100, 100, 100), rec("B", "2026-09-01", "2026-10-01", 150, 100, 100),
+        rec("B", "2026-11-01", "2026-11-30", 100, 100, 100), rec("B", "2026-11-01", "2026-12-01", 102, 100, 101),
+    ]
+    lists = {"2026-08-31": {"A", "B"}, "2026-09-30": {"A"}, "2026-10-31": {"A", "B"}}
+    found = chain(records, lists, date(2026, 12, 3))
+    a = found["A"]
+    assert a["months"] == ["2026-10", "2026-11", "2026-12"] and a["sessions"] == 4
+    assert a["return"] == pytest.approx(1.1 * 1.1 * ((120 - 10) / 100) * 0.9 - 1, abs=1e-6)       # money netted out
+    assert a["benchmark_return"] == pytest.approx(1.01 * 1.01 * ((111 - 10) / 100) - 1, abs=1e-6)
+    assert a["excess"] == pytest.approx(a["return"] - a["benchmark_return"], abs=1e-6)
+    b = found["B"]                                                            # off the November list: December only
+    assert b["months"] == ["2026-12"] and b["sessions"] == 1 and b["return"] == pytest.approx(0.02)
