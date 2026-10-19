@@ -373,6 +373,8 @@ def main() -> int:
                         help="scan：只跑至少含一個 2026-10-13 新價量因子的組（先過新穎性閘門）")
     parser.add_argument("--require-time", action="store_true",
                         help="scan：只跑至少含一個 2026-10-14 時間因子的組（先過新穎性閘門）")
+    parser.add_argument("--require-industry", action="store_true",
+                        help="scan：只跑至少含一個產業因子的組（先過新穎性閘門；2026-10-20）")
     parser.add_argument("--require-dealer", action="store_true",
                         help="scan：只跑至少含一個自營商因子的組（先過新穎性閘門）")
     parser.add_argument("--require-issuance", action="store_true",
@@ -1094,7 +1096,8 @@ def main() -> int:
                 return 0
         require = args.require
         if (args.require_new or args.require_time or args.require_short or args.require_lending
-                or args.require_corporate or args.require_issuance or args.require_dealer):   # after the novelty gate
+                or args.require_corporate or args.require_issuance or args.require_dealer
+                or args.require_industry):                                                      # after the novelty gate
             from quant_platform.research import daily as daily_research
 
             family = (daily_research.TIME_FACTORS if args.require_time else
@@ -1102,7 +1105,8 @@ def main() -> int:
                       else daily_research.LENDING_FACTORS if args.require_lending
                       else daily_research.CORPORATE_FACTORS if args.require_corporate
                       else daily_research.ISSUANCE_FACTORS if args.require_issuance
-                      else daily_research.DEALER_FACTORS if args.require_dealer else daily_research.RAW_V2)
+                      else daily_research.DEALER_FACTORS if args.require_dealer
+                      else daily_research.INDUSTRY_FACTORS if args.require_industry else daily_research.RAW_V2)
             _data, novelty_fp = daily_research.load(Path(args.base))
             gate = scan.novelty(novelty_fp, list(family))
             print(f"新穎性閘門：{gate}", flush=True)
@@ -1112,7 +1116,8 @@ def main() -> int:
                                    "novelty-lending.json" if args.require_lending else
                                    "novelty-corporate.json" if args.require_corporate else
                                    "novelty-issuance.json" if args.require_issuance else
-                                   "novelty-dealer.json" if args.require_dealer else "novelty-raw-v2.json")).write_text(
+                                   "novelty-dealer.json" if args.require_dealer else
+                                   "novelty-industry.json" if args.require_industry else "novelty-raw-v2.json")).write_text(
                 json.dumps(gate, ensure_ascii=False, indent=1), encoding="utf-8")
             require = [name for name, item in gate.items() if item["kept"]]
             del novelty_fp, _data

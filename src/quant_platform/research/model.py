@@ -47,10 +47,11 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_tech_ens": {"version": "gbm-2.1.0", "label": "ensemble", "features": "technical"},
           # 2026-10-16: the same ensemble on every rule factor but monthly revenue — the families added since
           # (lending and short selling, notices, lending fees, dividends and new shares, issuance, dealers) included
+          # (2026-10-20: frozen at those 57 — the families added later are not in it)
           "ml_gbm_ext": {"version": "gbm-2.2.0", "label": "ensemble", "features": "extended"},
           # 2026-10-20 (使用者：持續優化每一個策略): model G's ensemble on every factor now — the insiders' notices to
           # sell and the buyback programs added (chips.DISCLOSURE_FACTORS); judged against gbm-2.2.0
-          "ml_gbm_h": {"version": "gbm-2.3.0", "label": "ensemble", "features": "extended"},
+          "ml_gbm_h": {"version": "gbm-2.3.0", "label": "ensemble", "features": "extended_h"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -85,13 +86,15 @@ def features() -> tuple[str, ...]:
     """The model's inputs: every rule factor except the 2026-10-10 trend-quality ones, which a later model
     version would add on purpose (a saved version keeps its own list, ``trained_features``)."""
     from quant_platform.research.daily import (
-        ALERT_FACTORS, CORPORATE_FACTORS, DEALER_FACTORS, DISCLOSURE_FACTORS, FACTOR_LABELS, ISSUANCE_FACTORS,
-        LENDING_FACTORS, PLEDGE_FACTORS, RAW_V2, SHORT_FACTORS, TIME_FACTORS, TREND_QUALITY,
+        ALERT_FACTORS, CORPORATE_FACTORS, DEALER_FACTORS, DISCLOSURE_FACTORS, FACTOR_LABELS, INDUSTRY_FACTORS,
+        ISSUANCE_FACTORS, LENDING_FACTORS, PLEDGE_FACTORS, RAW_V2, SHORT_FACTORS, TIME_FACTORS, TREND_QUALITY,
     )
 
-    # 2026-10-20: the later families (the insiders' notices, the buybacks, the pledges) stay out of the shared list too
+    # 2026-10-20: the later families (the insiders' notices, the buybacks, the pledges, the industries) stay out of the
+    # shared list too
     later = {**TREND_QUALITY, **RAW_V2, **TIME_FACTORS, **SHORT_FACTORS, **ALERT_FACTORS, **LENDING_FACTORS,
-             **CORPORATE_FACTORS, **ISSUANCE_FACTORS, **DEALER_FACTORS, **DISCLOSURE_FACTORS, **PLEDGE_FACTORS}
+             **CORPORATE_FACTORS, **ISSUANCE_FACTORS, **DEALER_FACTORS, **DISCLOSURE_FACTORS, **PLEDGE_FACTORS,
+             **INDUSTRY_FACTORS}
     return tuple(name for name in FACTOR_LABELS if name not in later)
 
 
@@ -127,6 +130,7 @@ def version_features(version: str | None) -> tuple[str, ...]:
         DEALER_FACTORS,
         DISCLOSURE_FACTORS,
         FACTOR_LABELS,
+        INDUSTRY_FACTORS,
         ISSUANCE_FACTORS,
         LENDING_FACTORS,
         PLEDGE_FACTORS,
@@ -135,8 +139,14 @@ def version_features(version: str | None) -> tuple[str, ...]:
         TIME_FACTORS,
     )
 
-    if version and VERSIONS.get(version, {}).get("features") == "extended":
-        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE)
+    # 2026-10-20: each version's list frozen at what it was trained on — G (2026-10-16) before the insiders' notices,
+    # the buybacks, the pledges and the industries; H with the notices, buybacks and pledges
+    kind = VERSIONS.get(version, {}).get("features") if version else None
+    if kind == "extended":
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in DISCLOSURE_FACTORS
+                     and name not in PLEDGE_FACTORS and name not in INDUSTRY_FACTORS)
+    if kind == "extended_h":
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS)
     if version and VERSIONS.get(version, {}).get("features") == "technical":
         from quant_platform.research.tech_rl import TECH_FEATURES
 
@@ -146,7 +156,8 @@ def version_features(version: str | None) -> tuple[str, ...]:
                      and name not in TIME_FACTORS and name not in SHORT_FACTORS and name not in ALERT_FACTORS
                      and name not in LENDING_FACTORS and name not in CORPORATE_FACTORS
                      and name not in ISSUANCE_FACTORS and name not in DEALER_FACTORS
-                     and name not in DISCLOSURE_FACTORS and name not in PLEDGE_FACTORS)
+                     and name not in DISCLOSURE_FACTORS and name not in PLEDGE_FACTORS
+                     and name not in INDUSTRY_FACTORS)
     return features()
 
 

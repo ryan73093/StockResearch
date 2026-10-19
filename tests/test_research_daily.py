@@ -716,3 +716,25 @@ def test_a_score_ranked_within_its_volatility_tenth():
     assert out[99, 0] == 1.0 and out[90, 0] == pytest.approx(0.1)    # the top of every tenth ties at 1
     few = volatility_neutral(score[:40], volatility[:40])
     assert np.isnan(few).all()                                       # fewer than 50 stocks: nothing
+
+
+def test_industry_factors_by_hand():
+    """2026-10-20: the industry's average daily log return summed over the window; the laggard subtracts the
+    stock's own; unclassified stocks and industries with fewer than five stocks get none."""
+    days = weekdays(date(2023, 1, 2), date(2023, 12, 29))
+    rates = {"1101.TW": 0.001, "1102.TW": 0.002, "1103.TW": 0.003, "1104.TW": 0.004, "1105.TW": -0.001,
+             "2301.TW": 0.002, "2302.TW": 0.001, "9999.TW": 0.005}
+    closes = {symbol: {day: 10 * (1 + rate) ** n for n, day in enumerate(days)} for symbol, rate in rates.items()}
+    industries = {"1101": "水泥", "1102": "水泥", "1103": "水泥", "1104": "水泥", "1105": "水泥",
+                  "2301": "電子", "2302": "電子"}
+    fp = FactorPanel(Panel(market(days, closes)), industries=industries)
+    last = len(days) - 1
+    cement = np.mean([np.log1p(rates[f"110{n}.TW"]) for n in range(1, 6)])
+    row = fp.symbols.index("1103.TW")
+    assert fp.matrix("industry_mom_1")[row, last] == pytest.approx(21 * cement, rel=1e-4)
+    assert fp.matrix("industry_mom_6")[row, last] == pytest.approx(126 * cement, rel=1e-4)
+    assert fp.matrix("industry_laggard_5")[row, last] == pytest.approx(5 * (cement - np.log1p(0.003)), abs=1e-6)
+    assert fp.matrix("industry_mom_1")[fp.symbols.index("1101.TW"), last] == pytest.approx(21 * cement, rel=1e-4)
+    assert np.isnan(fp.matrix("industry_mom_1")[fp.symbols.index("2301.TW"), last])     # two stocks: too few
+    assert np.isnan(fp.matrix("industry_mom_1")[fp.symbols.index("9999.TW"), last])     # unclassified
+    assert np.isnan(fp.matrix("industry_mom_6")[row, 90])                                # under 80% of six months

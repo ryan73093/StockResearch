@@ -13,8 +13,8 @@ from __future__ import annotations
 FAMILY_FACTORS = {
     "趨勢動能": ("trend_200", "momentum_12_1", "momentum_6", "momentum_3", "high_52w", "breakout_55",
                  "ma_cross_20_60", "macd_hist", "rsi_14", "kd_k", "bollinger_b", "fip_12", "imom_12", "resid_mom_12",
-                 "high_52w_count_60", "range_position_60"),
-    "反轉": ("reversal_1", "reversal_5d", "overnight_reversal_12"),
+                 "high_52w_count_60", "range_position_60", "industry_mom_6", "industry_mom_1"),
+    "反轉": ("reversal_1", "reversal_5d", "overnight_reversal_12", "industry_laggard_5"),
     "低波動": ("low_volatility_60", "low_volatility_250", "low_max_return", "low_ivol_60"),
     "價值殖利率": ("dividend_yield", "earnings_yield", "book_to_price"),
     "籌碼": ("foreign_holding", "foreign_holding_change", "foreign_buy_20", "trust_buy_20", "margin_growth_20",
@@ -22,7 +22,8 @@ FAMILY_FACTORS = {
              # 2026-10-17: the lending and short-selling, day-trading and notice families
              "low_sbl_short", "sbl_cover_20", "low_day_trade_20", "low_lending_fee_60", "low_lending_20",
              "lending_fee_not_rising", "low_attention_20", "low_disposition_60"),
-    "公司事件": ("dividend_raise", "no_cash_issue", "low_issuance_250", "dividend_ahead"),
+    "公司事件": ("dividend_raise", "no_cash_issue", "low_issuance_250", "dividend_ahead",
+                 "low_insider_sell_60", "buyback_60", "low_pledge", "pledge_heavy"),
     "營收財報": ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "roe_ttm", "gross_margin", "operating_margin_change", "eps_growth",
                  "low_debt"),
     "成交量規模": ("liquidity", "volume_surge", "market_cap", "low_pv_corr_20"),

@@ -179,6 +179,20 @@ RAW_V2 = {
     "low_pv_corr_20": "量價相關低（20 日報酬與成交值變化的相關，反向）",
     "overnight_reversal_12": "隔夜反轉（12 個月扣最近 1 個月：開盤跳空的累積報酬，反向）",
 }
+# 2026-10-20 (使用者：持續優化每一個策略): the industry family, never tested — Taiwan's market moves by sectors
+# (shipping 2021, AI servers 2023-24). Industry momentum (Moskowitz & Grinblatt 1999): the equal-weighted log return
+# of the stock's industry over 6 months and over the last month (an industry's last month continues where a single
+# stock's reverses); and the laggard within its industry (Hou 2007: an industry's news reaches some members later):
+# the industry's last week minus the stock's own. Today's classification applied to history (as the industry cap
+# and resid_mom_12 do); an unclassified stock, or an industry with fewer than INDUSTRY_LEAST stocks trading that day,
+# has none. Not model features (a later model version would add them on purpose).
+INDUSTRY_FACTORS = {
+    "industry_mom_6": "產業動能（同產業股票過去 6 個月的平均報酬）",
+    "industry_mom_1": "產業短期動能（同產業股票過去 1 個月的平均報酬）",
+    "industry_laggard_5": "同產業落後補漲（同產業過去 1 週平均報酬減這檔自己的）",
+}
+INDUSTRY_WINDOWS = {"industry_mom_6": 126, "industry_mom_1": 21, "industry_laggard_5": 5}
+INDUSTRY_LEAST = 5
 # 2026-10-14 (使用者：因子裡面有考慮到時間的部分嗎？): the calendar and event-time family, never tested before —
 # a stock's own same-calendar-month seasonality (Heston & Sadka 2008), the run-up to an announced ex-dividend date,
 # and the investment trusts' quarter-end window dressing. Each uses only what was known at the session: earlier
@@ -210,7 +224,7 @@ def quarter_weights(sessions) -> np.ndarray:
     return weights
 FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS, **EVENT_FACTORS, **TREND_QUALITY,
                  **RAW_V2, **TIME_FACTORS, **SHORT_FACTORS, **ALERT_FACTORS, **LENDING_FACTORS, **CORPORATE_FACTORS,
-                 **ISSUANCE_FACTORS, **DEALER_FACTORS, **DISCLOSURE_FACTORS, **PLEDGE_FACTORS}
+                 **ISSUANCE_FACTORS, **DEALER_FACTORS, **DISCLOSURE_FACTORS, **PLEDGE_FACTORS, **INDUSTRY_FACTORS}
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
 MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
                  "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
@@ -675,7 +689,36 @@ class FactorPanel:
             return self._trend_quality(factor)
         if factor in RAW_V2:
             return self._raw_v2(factor)
+        if factor in INDUSTRY_FACTORS:
+            return self._industry_factor(factor)
         raise ValueError(factor)
+
+    def _industry_factor(self, factor: str) -> np.ndarray:
+        """sessions × symbols; INDUSTRY_FACTORS, each from returns up to the session: the industry's average daily
+        log return (its stocks trading that day; NaN below INDUSTRY_LEAST of them or unclassified), summed over the
+        window; industry_laggard_5 subtracts the stock's own sum."""
+        with np.errstate(divide="ignore", invalid="ignore"):
+            logs = np.log(self._prices / self._prices.shift(1)).to_numpy()
+        average = np.full_like(logs, np.nan)
+        groups: dict[str, list[int]] = defaultdict(list)
+        for column, symbol in enumerate(self.symbols):
+            if self.industry(symbol) != "未分類":
+                groups[self.industry(symbol)].append(column)
+        for columns in groups.values():
+            block = logs[:, columns]
+            known = np.isfinite(block).sum(axis=1)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                mean = np.nanmean(block, axis=1)
+            mean[known < INDUSTRY_LEAST] = np.nan
+            average[:, columns] = mean[:, None]
+        window = INDUSTRY_WINDOWS[factor]
+        least = max(1, int(window * 0.8))
+        total = pd.DataFrame(average).rolling(window, min_periods=least).sum()
+        if factor != "industry_laggard_5":
+            return total.to_numpy()
+        own = pd.DataFrame(logs).rolling(window, min_periods=least).sum()
+        return (total - own).to_numpy()
 
     def _time_factor(self, factor: str) -> np.ndarray:
         """sessions × symbols; TIME_FACTORS, each from what was known at the session."""

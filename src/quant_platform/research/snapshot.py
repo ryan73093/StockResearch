@@ -41,6 +41,7 @@ GROUPS = (
     ("時間與事件", ("season_month", "dividend_ahead", "trust_quarter_end", "dividend_raise", "no_cash_issue",
                 "low_issuance_250")),       # 2026-10-14
     ("公司公告與質押", ("low_insider_sell_60", "buyback_60", "low_pledge", "pledge_heavy")),   # 2026-10-19/20
+    ("產業", ("industry_mom_6", "industry_mom_1", "industry_laggard_5")),                    # 2026-10-20
 )
 
 
