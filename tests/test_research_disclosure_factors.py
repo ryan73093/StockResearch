@@ -62,3 +62,33 @@ def test_an_event_week_compares_the_stocks_with_an_event_to_every_eligible_one()
     assert stocks == 2 and excess == pytest.approx(0.04 - (0.08 + 0.01 * 57) / 59)
     assert event_weeks(np.zeros(60), forward, eligible) is None                # no event that week
     assert event_weeks(matrix, forward, np.zeros(60, dtype=bool)) is None     # too few eligible
+
+
+def test_factors_that_rank_stocks_alike_form_a_family(tmp_path, monkeypatch):
+    """2026-10-20 (使用者：那些因子有高度相關)."""
+    import json
+
+    from quant_platform.research import daily, factors
+
+    days = weekdays(date(2016, 1, 4), date(2016, 6, 30))
+    rng = np.random.default_rng(1)
+    base = rng.normal(size=(80, len(days)))
+    arrays = {"momentum_3": base, "momentum_6": base * 2 + 0.01 * rng.normal(size=base.shape),
+              "rsi_14": rng.normal(size=base.shape)}
+
+    class Panel:
+        sessions = days
+
+        def matrix(self, name):
+            if name not in arrays:
+                raise ValueError(name)
+            return arrays[name]
+
+        def eligible(self, rule, position):
+            return np.ones(80, dtype=bool)
+    monkeypatch.setattr(daily, "load", lambda history, universe="twse": (None, Panel()))
+    path = factors.correlations(tmp_path, tmp_path, step=5)
+    report = json.loads(path.read_text(encoding="utf-8"))
+    assert report["factors"] == 3
+    assert [set(family["factors"]) for family in report["families"]] == [{"momentum_3", "momentum_6"}]
+    assert report["alone"] == ["rsi_14"] and report["pairs"][0]["correlation"] > 0.99

@@ -21,6 +21,7 @@ the month's rolling selection and the forward accounts are.
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 from datetime import datetime
@@ -194,12 +195,17 @@ def batch(research: str | Path = Path("instance") / "research") -> list:
     folder = research / "blend_scan"
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    # 2026-10-20: the pool names every batch's rules (pool._build_sources), so this runs again whenever the registry
+    # changes — the same finalists are written once, under their digest, not once a call
+    digest = hashlib.sha256(json.dumps(sorted(item["blend"].rule_hash for item in found["finalists"])).encode()).hexdigest()[:12]
+    target = folder / f"finalists-{digest}.json"
     summary = {**{key: value for key, value in found.items() if key != "finalists"}, "stamp": stamp,
                "dev_end": DEV_END, "calm_gap": CALM_GAP, "drawdown_room": DRAWDOWN_ROOM, "near_copy": NEAR_COPY,
                "finalists": [{key: value for key, value in item.items() if key not in ("blend", "combo", "groups")}
                              | {"name": item["blend"].name, "rule_hash": item["blend"].rule_hash}
                              for item in found["finalists"]]}
-    (folder / f"{stamp}.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    if not target.is_file():
+        target.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"組合搜尋第一階段：{found['pool']} 個規則、{found['candidates']} 個兩檔／三檔組合、"
           f"{found['passed']} 個開發期贏 0050 且跌市不多跌、{len(found['finalists'])} 個進引擎", flush=True)
     return [item["blend"] for item in found["finalists"]]

@@ -408,3 +408,82 @@ DEFAULT_COLUMNS = [["development", "開發期 2005–2016"], ["validation", "驗
 
 def columns(report: dict[str, object] | None) -> list[list[str]]:
     return list((report or {}).get("columns") or DEFAULT_COLUMNS)
+
+
+CORRELATED = 0.7        # factors whose rankings move together at least this much on average are one family
+
+
+def correlations(history: str | Path, out_dir: str | Path, job=None, step: int = 20) -> Path:
+    """2026-10-20 (使用者：那些因子有高度相關，可否利用這些因子獲得更高的報酬): every pair of the daily engine's factors
+    (the models' scores too) — their rankings' correlation across the eligible stocks, every ``step`` sessions from
+    2015-06, averaged; the families of factors whose rankings move together (at least CORRELATED, linked), and each
+    factor's strongest partner. Description only: nothing is chosen with it."""
+    from quant_platform.research import daily
+
+    if job:
+        job.update(current="載入 2013 年起全市場行情", force=True)
+    _data, fp = daily.load(history)
+    eligibility = daily.DailyRule(name="資格", factors={"momentum_3": 1.0})
+    names = [*daily.FACTOR_LABELS, *daily.MODEL_FACTORS]
+    positions = [index for index, day in enumerate(fp.sessions) if daily.RECENT_START <= day <= daily.RECENT_END][::step]
+    matrices: dict[str, np.ndarray] = {}
+    for count, name in enumerate(names):
+        if job:
+            job.update(done=count, total=len(names), current=f"讀因子 {name}", force=count % 10 == 0)
+        try:
+            matrix = fp.matrix(name)
+        except Exception:                       # a model not trained here, a table not downloaded
+            continue
+        if np.isfinite(matrix[:, positions]).sum() > 0:
+            matrices[name] = matrix
+    kept = list(matrices)
+    totals = np.zeros((len(kept), len(kept)))
+    counts = np.zeros((len(kept), len(kept)))
+    for position in positions:
+        mask = fp.eligible(eligibility, position)
+        ranked = []
+        for name in kept:
+            values = matrices[name][:, position].astype(float)
+            values = np.where(mask & np.isfinite(values), values, np.nan)
+            ranked.append(pd.Series(values).rank().to_numpy())
+        frame = pd.DataFrame(np.array(ranked).T, columns=kept)
+        if len(frame.dropna(how="all")) < 50:
+            continue
+        corr = frame.corr(min_periods=50).to_numpy()
+        valid = np.isfinite(corr)
+        totals[valid] += corr[valid]
+        counts[valid] += 1
+    with np.errstate(invalid="ignore"):
+        average = np.where(counts > 0, totals / np.maximum(counts, 1), np.nan)
+    family = list(range(len(kept)))
+
+    def root(index: int) -> int:
+        while family[index] != index:
+            family[index] = family[family[index]]
+            index = family[index]
+        return index
+    for left, right in zip(*np.nonzero(np.triu(np.abs(np.nan_to_num(average)) >= CORRELATED, 1))):
+        family[root(int(left))] = root(int(right))
+    groups: dict[int, list[str]] = {}
+    for index, name in enumerate(kept):
+        groups.setdefault(root(index), []).append(name)
+    labels = {**daily.FACTOR_LABELS, **daily.MODEL_FACTORS}
+    families = sorted(([{"factors": members, "labels": [labels[name] for name in members]}
+                        for members in groups.values() if len(members) > 1]), key=lambda item: -len(item["factors"]))
+    pairs = []
+    for left in range(len(kept)):
+        for right in range(left + 1, len(kept)):
+            if np.isfinite(average[left, right]):
+                pairs.append({"a": kept[left], "b": kept[right], "correlation": round(float(average[left, right]), 3)})
+    pairs.sort(key=lambda item: -abs(item["correlation"]))
+    report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "factors": len(kept),
+              "dates": len(positions), "threshold": CORRELATED, "families": families,
+              "alone": [name for members in groups.values() if len(members) == 1 for name in members],
+              "pairs": pairs[:200], "labels": {name: labels[name] for name in kept}}
+    folder = Path(out_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"correlations-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    if job:
+        job.payload["summary"] = f"{len(kept)} 個因子、{len(families)} 群高度相關（≥ {CORRELATED}）"
+    return path

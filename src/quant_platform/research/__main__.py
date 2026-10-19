@@ -309,6 +309,7 @@ def main() -> int:
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
+    parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
     parser.add_argument("--events", help="factors：事件因子分析，逗號分隔（例如 low_insider_sell_60,buyback_60）")
     parser.add_argument("--explain", action="store_true",
                         help="forward：替 2026-10-19 以前的決定補上買賣原因（重算排名，和當時一樣的才補）")
@@ -478,6 +479,15 @@ def main() -> int:
         from quant_platform.research import factors as factor_strength
         from quant_platform.research.jobs import JobLog
 
+        if args.correlations:                    # 2026-10-20: which factors rank stocks alike
+            with JobLog(RESEARCH).start("因子相關分析（2015-06 起、每 20 個交易日）",
+                                        "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+                path = factor_strength.correlations(Path(args.base), RESEARCH / "factors", job=job)
+            report = json.loads(path.read_text(encoding="utf-8"))
+            for family in report["families"]:
+                print("、".join(family["labels"]), flush=True)
+            print(f"{report['factors']} 個因子、{len(report['families'])} 群；已寫入 {path}")
+            return 0
         if args.events:                          # 2026-10-19: event factors, the stocks with an event against all
             names = [name.strip() for name in args.events.split(",") if name.strip()]
             with JobLog(RESEARCH).start(f"事件因子分析（{len(names)} 個，2015-06 起每週）",
