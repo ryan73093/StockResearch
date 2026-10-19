@@ -689,6 +689,32 @@ def run_test_suite(container: "Container", runner=None) -> object | None:
     return summary
 
 
+def refresh_disclosures(container: "Container", today=None, modules=None) -> object | None:
+    """2026-10-20: model H (in the month's list and the forward accounts) reads the insiders' notices, the buyback
+    programs and the directors' pledges; each kept current on trading days at 07:40 — the notices' days not stored
+    yet, this and last year's buybacks, the last two months' pledges — and rebuilt (research/history/insider.py,
+    buyback.py, pledge.py)."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.history import buyback, insider, pledge
+    from quant_platform.research.jobs import JobLog
+
+    insider, buyback, pledge = modules or (insider, buyback, pledge)
+    research = _instance_dir(container.settings.database_url) / "research"
+    base = research / "history"
+    day = today or datetime.now(ZoneInfo(container.settings.scheduler_timezone)).date()
+    with JobLog(research).start("補抓內部人申報、庫藏股、董監質押（模型 H 的特徵）",
+                                "scheduler refresh_disclosures") as job:
+        notices = insider.download(base, day)
+        insider.build(base)
+        programs = buyback.fetch(base, day)
+        buyback.build(base)
+        pledges = pledge.fetch(base, day)
+        pledge.build(base)
+        job.payload["summary"] = (f"內部人新 {notices['stored']} 天；庫藏股請求 {programs['asked']} 次；"
+                                  f"質押請求 {pledges['asked']} 次")
+    return {"insider": notices, "buyback": programs, "pledge": pledges}
+
+
 def collect_tdcc_holding(container: "Container", get=None) -> object | None:
     """2026-10-20: the depository's weekly holder distribution (TDCC open data, only the latest week is free), stored
     each time a new week appears (research/history/tdcc.py); every day at 08:20."""
@@ -912,6 +938,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3 * 3600,
+    )
+    scheduler.add_job(
+        refresh_disclosures,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=7, minute=40, timezone=timezone),
+        id="disclosure_refresh",
+        name="補抓內部人申報、庫藏股、董監質押（交易日 07:40，模型 H 的特徵）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
         run_test_suite,

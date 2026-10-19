@@ -25,3 +25,35 @@ def test_a_new_week_is_stored_once_and_built(tmp_path):
     big = frame[(frame["code"] == "2330") & (frame["level"] == tdcc.BIG)].iloc[0]
     assert big["percent"] == 88.70 and big["holders"] == 1500
     assert tdcc.fetch(tmp_path, get=lambda: b"")["stored"] is False
+
+
+def test_the_disclosures_refresh_every_trading_morning(tmp_path):
+    """2026-10-20: model H's three data sets kept current by the worker (scheduler.refresh_disclosures)."""
+    from datetime import date
+
+    from quant_platform.config.settings import Settings
+    from quant_platform.container import build_container
+    from quant_platform.scheduler.runner import refresh_disclosures
+
+    calls = []
+
+    class Fake:
+        def __init__(self, name, **answer):
+            self.name, self.answer = name, answer
+
+        def download(self, base, today):
+            calls.append((self.name, "fetch", today))
+            return self.answer
+
+        fetch = download
+
+        def build(self, base):
+            calls.append((self.name, "build"))
+            return {}
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'x.db'}"))
+    found = refresh_disclosures(container, today=date(2026, 10, 21),
+                                modules=(Fake("insider", stored=1), Fake("buyback", asked=4), Fake("pledge", asked=4)))
+    assert [call[:2] for call in calls] == [("insider", "fetch"), ("insider", "build"), ("buyback", "fetch"),
+                                            ("buyback", "build"), ("pledge", "fetch"), ("pledge", "build")]
+    assert found["insider"] == {"stored": 1} and calls[0][2] == date(2026, 10, 21)
