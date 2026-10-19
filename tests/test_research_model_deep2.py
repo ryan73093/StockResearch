@@ -312,3 +312,30 @@ def test_the_technical_version_sees_prices_and_volumes_only_and_its_own_gate(mon
     assert model_deep2.gate(tmp_path, "dl-2.5.0")["against"] == "gbm-2.1.0"
     scores = model_deep2.scores(fp, tmp_path / "dl-2.5.0")
     assert scores.shape == (len(fp.sessions), len(fp.symbols)) and np.isfinite(scores).any()
+
+
+def test_the_monthly_version_refits_every_month_on_labels_ended_before_it(monkeypatch, tmp_path):
+    """2026-10-20: dl-2.6.0 is dl-2.1.0 refitted every month; each fit learns only from labels ended before its month."""
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "GATE_YEARS", (2017,))
+    snapshot = tmp_path / "gbm-2.2.0"
+    snapshot.mkdir()
+    (snapshot / "meta.json").write_text(json.dumps({"version": "gbm-2.2.0", "features": ["momentum_3"]}), encoding="utf-8")
+    fits = []
+    real_fit = model_deep2._fit
+
+    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None):
+        fits.append((max(train_days), max(held_days)))
+        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+    monkeypatch.setattr(model_deep2, "_fit", spy)
+    _data, fp = _panel()
+    meta = model.train(fp, tmp_path / "dl-2.6.0", years=[2017], label="deep2", version="dl-2.6.0")
+    months = sorted({day.month for day in fp.sessions if day.year == 2017})
+    assert len(fits) == len(months) and meta["years"]["2017"]["top20_gain"] is not None
+    firsts = [next(index for index, day in enumerate(fp.sessions) if day.year == 2017 and day.month == month)
+              for month in months]
+    assert all(held + model.HORIZON < first for (_train, held), first in zip(fits, firsts, strict=True))
+    assert fits[-1][1] > fits[0][1]                                                  # later months learn more
+    assert model_deep2.gate(tmp_path, "dl-2.6.0")["reason"] == "not trained"          # no dl-2.1.0 yardstick here

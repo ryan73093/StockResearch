@@ -59,6 +59,8 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # (research/model_deep2.py), two registered losses aimed at the top of the list
           "ml_deep2": {"version": "dl-2.0.0", "label": "deep2"},
           "ml_deep2_top": {"version": "dl-2.1.0", "label": "deep2"},
+          # 2026-10-20: dl-2.1.0 refitted every month (model_deep2.MONTHLY)
+          "ml_deep2_monthly": {"version": "dl-2.6.0", "label": "deep2"},
           # 2026-10-20: dl-2.1.0 learning the top tenth of the volatility-adjusted excess (model_deep2.RISK_ADJUSTED)
           "ml_deep2_riskadj": {"version": "dl-2.4.0", "label": "deep2"},
           # 2026-10-20 (the technical robot's third version): dl-2.1.0 on prices and volumes only (model_deep2.TECHNICAL)

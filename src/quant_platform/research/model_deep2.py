@@ -42,12 +42,16 @@ import numpy as np
 import pandas as pd
 
 LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10", "dl-2.2.0": "top10", "dl-2.4.0": "top10",
-          "dl-2.5.0": "top10"}
+          "dl-2.5.0": "top10", "dl-2.6.0": "top10"}
 # 2026-10-20 (使用者：技術分析機器人有沒有在優化？): the technical robot's third version — dl-2.1.0 seeing prices and
 # volumes only: the sequence without the chip columns and the snapshot of the robot's 20 technical factors
 # (tech_rl.TECH_FEATURES) instead of model G's; judged against the technical ensemble gbm-2.1.0 (PLAIN_AGAINST)
 TECHNICAL = {"dl-2.5.0"}
-PLAIN_AGAINST = {"dl-2.5.0": "gbm-2.1.0"}
+# 2026-10-20 (使用者：持續優化每一個策略): dl-2.1.0 refitted every month instead of every year — each month's ten networks
+# learn from every label that ended before the month's first session and score that month (the forward accounts'
+# models are retrained monthly too); judged against dl-2.1.0 itself
+MONTHLY = {"dl-2.6.0"}
+PLAIN_AGAINST = {"dl-2.5.0": "gbm-2.1.0", "dl-2.6.0": "dl-2.1.0"}
 # 2026-10-20 (使用者：持續優化每一個策略; the factor correlations: dl-2.1.0 ran −0.70 with low volatility): dl-2.1.0 learning
 # the day's top tenth of the excess return divided by the stock's own 60-session volatility (known on the day) — a
 # volatile stock no longer reaches the top tenth for being volatile; still judged (held-out choice, gate) on the excess
@@ -472,32 +476,41 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
             if not check["passed"]:
                 meta["stopped"] = f"{GATE_YEARS[0]}～{GATE_YEARS[-1]} 沒過門檻，其他年度不訓練"
                 break
-        first = next((index for index, day in enumerate(fp.sessions) if day.year >= year), len(fp.sessions))
-        known = [column for column in columns if column + HORIZON < first and rows[column].size >= 50
-                 and (judged is None or judged[0][column].size >= 50)]
-        if len(known) < 120:
-            continue
-        cut = int(len(known) * (1 - HELD_OUT))
-        held_days = known[cut:]
-        train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]   # purged
-        networks, curves = [], []
-        for seed in SEEDS:
-            state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
-            network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
-            network.load_state_dict(state)
-            networks.append(network)
-            curves.append(curve)
-            torch.save(state, out / f"{year}-{seed}.pt")
-            if job:
-                job.update(current=f"{version}：{year} 年第 {seed + 1}/{len(SEEDS)} 個種子，保留期前 20 名多 {max(curve):+.4f}")
         session_columns = [column for column, day in enumerate(fp.sessions) if day.year == year and column >= LENGTH]
-        for column in session_columns:
-            live = np.flatnonzero(eligible[:, column])
-            values = np.full(len(fp.symbols), np.nan, dtype=np.float32)
-            if live.size:
-                pairs = np.stack([np.full(live.size, column), live], axis=1)
-                values[live] = _rank_average([inputs.score(network, pairs) for network in networks])
-            stored[fp.sessions[column].isoformat()] = values
+        # the periods refitted: the year (one fit) or each month of it (MONTHLY); the last period's networks are kept
+        months = sorted({fp.sessions[column].month for column in session_columns}) if version in MONTHLY else [None]
+        train_days, held_days, curves = [], [], []
+        for month in months:
+            period = [column for column in session_columns if month is None or fp.sessions[column].month == month]
+            first = period[0] if month is not None and period else next(
+                (index for index, day in enumerate(fp.sessions) if day.year >= year), len(fp.sessions))
+            known = [column for column in columns if column + HORIZON < first and rows[column].size >= 50
+                     and (judged is None or judged[0][column].size >= 50)]
+            if len(known) < 120:
+                continue
+            cut = int(len(known) * (1 - HELD_OUT))
+            held_days = known[cut:]
+            train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]   # purged
+            networks, curves = [], []
+            for seed in SEEDS:
+                state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+                network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
+                network.load_state_dict(state)
+                networks.append(network)
+                curves.append(curve)
+                torch.save(state, out / f"{year}-{seed}.pt")
+                if job:
+                    when = f"{year} 年" + (f" {month} 月" if month is not None else "")
+                    job.update(current=f"{version}：{when}第 {seed + 1}/{len(SEEDS)} 個種子，保留期前 20 名多 {max(curve):+.4f}")
+            for column in period:
+                live = np.flatnonzero(eligible[:, column])
+                values = np.full(len(fp.symbols), np.nan, dtype=np.float32)
+                if live.size:
+                    pairs = np.stack([np.full(live.size, column), live], axis=1)
+                    values[live] = _rank_average([inputs.score(network, pairs) for network in networks])
+                stored[fp.sessions[column].isoformat()] = values
+        if not train_days:
+            continue
         ics, top20 = [], []
         for column in [column for column in session_columns if column in weekly and column in report_labels]:
             ic, gain = _top20(stored[fp.sessions[column].isoformat()], ranks[column], report_labels[column])
