@@ -52,7 +52,7 @@ def _summary(manifest: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
-                                            "chips", "tpex", "fundamentals", "alerts", "reductions", "insider"))
+                                            "chips", "tpex", "fundamentals", "alerts", "reductions", "insider", "buyback"))
     parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報")
     parser.add_argument("--refresh-quarter", help="finmind：季更新，due＝法定期限已過的最新一季；只重抓近期有交易、"
                                                   "還沒有這一季的檔（2026-10-07）")
@@ -237,6 +237,20 @@ def main() -> int:
             written = insider.build(base)
             job.payload["summary"] = (f"新下載 {fetched['stored']:,} 天、共 {written['days']:,} 天；申報 {written['filings']:,} 筆，"
                                       f"在市場賣出的 {written['on_market']:,} 筆")
+        print(json.dumps({**fetched, **written}, ensure_ascii=False), flush=True)
+        return 0
+
+    if args.command == "buyback":            # 2026-10-19: companies' buyback programs (MOPS 庫藏股統計彙總表)
+        from datetime import date as _date
+
+        from quant_platform.research.history import buyback
+        from quant_platform.research.jobs import JobLog
+
+        with JobLog(base.parent).start("下載庫藏股買回案（公開資訊觀測站，上市＋上櫃，2015 起）",
+                                       "python -m quant_platform.research.history buyback") as job:
+            fetched = buyback.fetch(base, _date.today())
+            written = buyback.build(base)
+            job.payload["summary"] = f"請求 {fetched['asked']} 次；買回案 {written['programs']:,} 筆（維護股東權益 {written['protect']:,} 筆）"
         print(json.dumps({**fetched, **written}, ensure_ascii=False), flush=True)
         return 0
 
