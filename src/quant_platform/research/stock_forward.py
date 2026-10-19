@@ -851,6 +851,8 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
 
     units: dict[str, float] = defaultdict(float)
     basis: dict[str, float] = defaultdict(float)
+    episode: dict[str, int] = defaultdict(int)    # a stock's holding from a first buy until it is all sold
+    closed: dict[tuple[str, int], str] = {}       # (stock, episode) -> the day it was all sold
     rows: list[dict] = []
     realized, wins, losses, paid_before = 0.0, 0, 0, None
     for record in days:
@@ -869,6 +871,7 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
                                                  else "帳上現金（股利等），補到目標比重")
                 basis[code] += shares * price + costs
                 units[code] += shares
+                row["episode"] = episode[code]
             else:
                 before = units[code]
                 cost = basis[code] * (min(1.0, shares / before) if before > 1e-9 else 1.0)
@@ -880,12 +883,18 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
                                                  else "調整比重")
                 basis[code] -= cost
                 units[code] = max(0.0, before - shares)
+                if full:
+                    closed[(code, episode[code])] = day
+                    episode[code] += 1
                 realized += made
                 wins += made > 0
                 losses += made <= 0
             rows.append(row)
         held = {row["code"]: float(row["units"]) for row in record["holdings"]}
         for code in list(units):              # ex-rights and reductions change the shares, not what they cost
+            if units[code] > 1e-9 and held.get(code, 0.0) <= 1e-9 and (code, episode[code]) not in closed:
+                closed[(code, episode[code])] = day          # gone without a sale (written off)
+                episode[code] += 1
             units[code] = held.get(code, 0.0)
             if units[code] <= 1e-9:
                 basis[code] = 0.0
@@ -899,7 +908,9 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
                                           "pnl_pct": (row["value"] - cost) / cost}
     for row in rows:
         if row["side"] == "BUY":
-            row["now"] = positions.get(row["code"])
+            ended = closed.get((row["code"], row.pop("episode")))
+            row["now"] = None if ended else positions.get(row["code"])
+            row["sold_on"] = ended
     summary = {"realized": realized, "wins": wins, "losses": losses, "sells": wins + losses,
                "unrealized": sum(item["pnl"] for item in positions.values()), "positions": positions}
     return list(reversed(rows)), summary

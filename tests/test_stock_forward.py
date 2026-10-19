@@ -410,6 +410,7 @@ def test_every_trade_shows_what_it_made_and_why():
     assert summary["wins"] == 1 and summary["losses"] == 1
     assert summary["realized"] == pytest.approx(63 + 60.5 * 9 - 21 - 575)
     assert summary["unrealized"] == pytest.approx(1100 - 1020) and rows[3]["now"]["pnl"] == pytest.approx(80)
+    assert rows[0]["now"] is None and rows[0]["sold_on"] == "2026-09-10"       # A was all sold: that buy says when
 
 
 def test_reasons_are_filled_in_only_where_the_ranking_again_is_the_list_kept(tmp_path, monkeypatch):
