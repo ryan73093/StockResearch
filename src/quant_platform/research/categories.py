@@ -122,6 +122,8 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
             traits.append("上市＋上櫃")
         if spec.get("switching") not in (None, "none"):
             traits.append("看成本才換股")
+        if spec.get("winner_hold"):
+            traits.append("贏家續抱")
         if spec.get("exclude") not in (None, "none"):
             traits.append("不買樂透型股票")
         if spec.get("large_caps"):               # equal amounts unless weighted by calmness (its own trait)

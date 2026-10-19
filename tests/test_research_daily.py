@@ -738,3 +738,35 @@ def test_industry_factors_by_hand():
     assert np.isnan(fp.matrix("industry_mom_1")[fp.symbols.index("2301.TW"), last])     # two stocks: too few
     assert np.isnan(fp.matrix("industry_mom_1")[fp.symbols.index("9999.TW"), last])     # unclassified
     assert np.isnan(fp.matrix("industry_mom_6")[row, 90])                                # under 80% of six months
+
+
+def test_a_winner_up_half_and_above_its_average_runs_on():
+    """2026-10-20: winner_hold — a holding leaving the keep zone stays while it is up 50% since bought and rising."""
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 12))
+    script = {day: ["A", "B", "C", "E"] if number < 3 else ["B", "C", "D", "E", "A"] for number, day in enumerate(days)}
+
+    class WinnerPanel(PricedPanel):
+        def __init__(self, prices, up):
+            super().__init__(days, script, prices, [True] * len(days))
+            self.symbols = sorted(prices)
+            self.row = {symbol: row for row, symbol in enumerate(self.symbols)}
+            self.up = up
+
+        def rising(self):
+            return np.array([self.up[symbol] for symbol in self.symbols])
+
+    flat = [100.0] * len(days)
+    climb = [100.0, 120.0, 140.0] + [160.0] * (len(days) - 3)          # up 60% when it leaves the top three
+    always, never = [True] * len(days), [False] * len(days)
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=3, keep=1, min_hold=0, winner_hold=0.5)
+    assert rule.canonical()["winner_hold"] == 0.5
+    assert "winner_hold" not in DailyRule(name="x", factors={"trend_200": 1.0}).canonical()
+    prices = {"A": climb, "B": flat, "C": flat, "D": flat, "E": flat}
+    runs = daily_rankings(WinnerPanel(prices, {name: always for name in "ABCDE"}), rule, days[0], days[-1])
+    assert runs[days[0]] == ["A", "B", "C"] and set(runs[days[3]]) == {"A", "B", "C"}   # A runs on; D waits
+    plain = DailyRule(name="x", factors={"trend_200": 1.0}, top=3, keep=1, min_hold=0)
+    assert daily_rankings(WinnerPanel(prices, {name: always for name in "ABCDE"}), plain, days[0], days[-1])[days[3]] == ["B", "C", "D"]
+    falling = {"A": never, "B": always, "C": always, "D": always, "E": always}   # up 60% but below its average
+    assert daily_rankings(WinnerPanel(prices, falling), rule, days[0], days[-1])[days[3]] == ["B", "C", "D"]
+    small = {**prices, "A": [100.0, 110.0, 120.0] + [140.0] * (len(days) - 3)}   # up only 40%
+    assert daily_rankings(WinnerPanel(small, {name: always for name in "ABCDE"}), rule, days[0], days[-1])[days[3]] == ["B", "C", "D"]

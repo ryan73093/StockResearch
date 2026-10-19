@@ -389,6 +389,11 @@ class DailyRule(BaseModel):
     # holding worth more than ``trim_above`` times its target is sold back to its target, the money topping up the
     # picks below theirs. 0 = off, left out of the hash.
     trim_above: float = Field(default=0.0, ge=0.0, le=10.0)
+    # 2026-10-20 (使用者：前向都是賠錢；the rules' money is in the few winners held 60+ sessions, research_method §7): on a
+    # decision day a holding leaving the keep zone is kept while it is up at least ``winner_hold`` since it was bought
+    # (adjusted closes) and above its TREND_WINDOW-session average — the winners run, the others leave as before.
+    # 0 = off, left out of the hash.
+    winner_hold: float = Field(default=0.0, ge=0.0, le=5.0)
 
     @model_validator(mode="before")
     @classmethod
@@ -453,6 +458,8 @@ class DailyRule(BaseModel):
             data.pop("risk_veto", None)
         if not data.get("trim_above"):
             data.pop("trim_above", None)
+        if not data.get("winner_hold"):
+            data.pop("winner_hold", None)
         return data
 
     @property
@@ -1186,6 +1193,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
     entry_only = getattr(rule, "eligibility", "both") == "entry"
     tracked = bool(rule.stop_loss) or exit_agent is not None
     risk_veto = getattr(rule, "risk_veto", "none")
+    winners = float(getattr(rule, "winner_hold", 0.0) or 0.0)
     again: set[int] = set()               # decisions kept before 1.5.0 with again_after: decide in full that session
     pending_sells: set[str] = set()       # 1.5.0: sells the market refused, looked at again every session
     pending_slots = 0                     # 1.5.0: places whose buy the market refused, filled again every session
@@ -1278,7 +1286,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                             stopped[symbol] = count
                 bought = {symbol: bought.get(symbol, count) for symbol in current}
                 peak = {symbol: peak[symbol] for symbol in current if symbol in peak}
-                if exit_agent is not None:
+                if exit_agent is not None or winners:
                     buy_price = {symbol: buy_price.get(symbol, fp.price(symbol, position)) for symbol in current}
                 output[when] = list(current)
             if tracked:
@@ -1325,7 +1333,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             barred = {symbol for symbol, at in stopped.items() if count - at < cooldown}
             ranked = [symbol for symbol in ranked if symbol not in barred]
         keep_zone, eligible = set(ranked[: rule.top * rule.keep]), set(ranked)
-        rising = fp.rising()[:, position] if hold == "trend" else None
+        rising = fp.rising()[:, position] if hold == "trend" or winners else None
         asked = 0
         if risk_off:                          # the market filter: no stocks (1.5.0: every session)
             wanted: list[str] = []
@@ -1340,6 +1348,13 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                 for symbol, replacement in zip(leaving, waiting):
                     if (gain(percentiles[fp.row[replacement], position]) - gain(percentiles[fp.row[symbol], position])
                             <= ROUND_TRIP):
+                        kept.append(symbol)
+            if winners:                       # 2026-10-20: a winner up winner_hold and above its average runs on
+                for symbol in staying:
+                    row = fp.row.get(symbol)
+                    if (symbol not in kept and symbol in eligible and row is not None and rising[row]
+                            and symbol in buy_price and buy_price[symbol] > 0
+                            and fp.price(symbol, position) / buy_price[symbol] - 1 >= winners):
                         kept.append(symbol)
             wanted = kept + fill(ranked, kept, rule.top - len(kept), position)
         else:                                 # between decisions: the exits and the refused orders only
@@ -1409,7 +1424,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
         bought = {symbol: bought.get(symbol, count) for symbol in current}
         if tracked:
             peak = {symbol: peak[symbol] if symbol in peak else fp.price(symbol, position) for symbol in current}
-        if exit_agent is not None:
+        if exit_agent is not None or winners:
             buy_price = {symbol: buy_price.get(symbol, fp.price(symbol, position)) for symbol in current}
         output[when] = list(current)
     if trace is not None:
@@ -3017,6 +3032,28 @@ def deep24_batch() -> list[DailyRule]:
 META_RULES = (4941, 4913)
 
 
+WINNER_RULES = (4941, 4589, 4594, 4415)
+WINNER_HOLD = 0.5
+
+
+def winner_batch() -> list[DailyRule]:
+    """2026-10-20 (使用者：前向都是賠錢；持續優化每一個策略): the frontier's single rules each with winner_hold 0.5 — a
+    holding leaving the keep zone runs on while it is up 50% since bought and above its 20-session average. Registered
+    (research_method §7): each passes if it is a T0 候選 (high-risk or not) ending above its own rule from 2015-06 and
+    from 2020-10 with a drawdown at most 2 points deeper."""
+    import json as _json
+
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    rules = []
+    for trial in WINNER_RULES:
+        spec = _json.loads((research / "reports" / records[trial].report_file).read_text(encoding="utf-8"))["spec"]
+        rules.append(_variant(DailyRule.model_validate(spec), "漲 50% 以上且在月線上的贏家續抱", winner_hold=WINNER_HOLD))
+    return rules
+
+
 def meta1_batch() -> list[DailyRule]:
     """2026-10-20 (使用者：前向都是賠錢；持續優化每一個策略): the meta-label veto (research/meta_label.py) on the deep rules
     #4941 and #4913 — only past the model's registered gate. Each passes if it is a T0 候選 (high-risk or not) and on
@@ -3431,7 +3468,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "meta1": meta1_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
