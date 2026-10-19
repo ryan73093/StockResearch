@@ -241,3 +241,31 @@ def test_the_wide_version_learns_from_tpex_too_but_scores_the_listed(monkeypatch
     scored = {fp.symbols[row] for row in np.flatnonzero(np.isfinite(scores[day]))}
     assert scored and all(symbol.endswith(".TW") for symbol in scored)          # TPEx learned from, not scored
     assert model_deep2.wide_mask(fp)[[fp.row[s] for s in fp.symbols if s.endswith(".TWO")], day].all()
+
+
+def test_the_volatility_adjusted_version_learns_excess_over_volatility_and_trains(monkeypatch, tmp_path):
+    """2026-10-20: dl-2.4.0 learns the top tenth of the excess ÷ the stock's 60-session volatility, judged on the excess."""
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "GATE_YEARS", (2017,))
+    snapshot = tmp_path / "gbm-2.2.0"
+    snapshot.mkdir()
+    (snapshot / "meta.json").write_text(__import__("json").dumps({"version": "gbm-2.2.0", "features": ["momentum_3"]}),
+                                        encoding="utf-8")
+    seen = {}
+    real_fit = model_deep2._fit
+
+    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None):
+        seen.setdefault("labels", labels)
+        seen.setdefault("judged", judged)
+        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+    monkeypatch.setattr(model_deep2, "_fit", spy)
+    _data, fp = _panel()
+    meta = model.train(fp, tmp_path / "dl-2.4.0", years=[2017], label="deep2", version="dl-2.4.0")
+    assert meta["years"]["2017"]["top20_gain"] is not None and seen["judged"] is not None
+    column = next(iter(seen["labels"]))
+    deviation = -fp.matrix("low_volatility_60")[:, column]
+    raw = seen["judged"][1][column]
+    known = np.isfinite(raw) & (deviation > 0)
+    assert np.allclose(seen["labels"][column][known], raw[known] / deviation[known])   # learned: excess ÷ volatility

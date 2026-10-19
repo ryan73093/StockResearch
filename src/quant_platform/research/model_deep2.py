@@ -41,7 +41,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10", "dl-2.2.0": "top10"}
+LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10", "dl-2.2.0": "top10", "dl-2.4.0": "top10"}
+# 2026-10-20 (使用者：持續優化每一個策略; the factor correlations: dl-2.1.0 ran −0.70 with low volatility): dl-2.1.0 learning
+# the day's top tenth of the excess return divided by the stock's own 60-session volatility (known on the day) — a
+# volatile stock no longer reaches the top tenth for being volatile; still judged (held-out choice, gate) on the excess
+RISK_ADJUSTED = {"dl-2.4.0"}
 # 2026-10-18 (roadmap S9-W15): dl-2.2.0 is dl-2.1.0 learning from every listed and TPEx stock that trades normally
 # (WIDE_*), its features normalised among them; the epochs are still chosen, and the years judged, on the rules'
 # eligible listed stocks only — as dl-2.1.0. Trained on the "all" panel (MODELS[...]["universe"]).
@@ -420,6 +424,13 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
     labels = {column: excess[slot] for slot, column in enumerate(columns)}
     rows = {column: np.flatnonzero(np.isfinite(labels[column]) & eligible[:, column]) for column in columns}
     judged = None
+    if version in RISK_ADJUSTED:
+        deviation = -fp.matrix("low_volatility_60")                               # stored negated: the daily std
+        judged = (rows, labels)
+        labels = {column: np.where(deviation[:, column] > 0, labels[column] / np.where(deviation[:, column] > 0,
+                                                                                    deviation[:, column], 1.0), np.nan)
+                  for column in columns}
+        rows = {column: np.flatnonzero(np.isfinite(labels[column]) & eligible[:, column]) for column in columns}
     if version in WIDE:
         wide = label_block(fp, columns, learned, "excess", HORIZON)
         judged = (rows, labels)
