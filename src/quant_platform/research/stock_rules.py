@@ -336,6 +336,20 @@ class Panel:
                     # an ex-rights day: the payout per unit is what the unit factor reinvested
                     self.cash[row, position] = close * (factors[day] - 1)
         self.filled = _forward_fill(self.adjusted)
+        # 2026-10-20 (research/meta_label.py): 0050 with its distributions reinvested, carried over gaps (NaN before it)
+        self.benchmark = np.full(count, np.nan)
+        growth, units = 1.0, data.factors.get(BENCHMARK, {})
+        for day, close in sorted((data.closes.get(BENCHMARK) or {}).items()):
+            position = self.index.get(day)
+            growth *= units.get(day, 1.0)
+            if position is not None:
+                self.benchmark[position] = close * growth
+        last = np.nan
+        for position in range(count):
+            if np.isnan(self.benchmark[position]):
+                self.benchmark[position] = last
+            else:
+                last = self.benchmark[position]
 
     def ranked(self, rule: StockRule, day: date) -> list[str]:
         with warnings.catch_warnings():

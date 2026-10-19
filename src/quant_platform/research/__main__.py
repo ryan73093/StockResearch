@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "worst-rl", "free-rl4", "free-rl41", "rolling"),
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "meta-label", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
@@ -898,6 +898,28 @@ def main() -> int:
             alike = sum(item["equal_excess"] for item in meta["yearly"].values())
             job.payload["summary"] = f"{len(meta['yearly'])} 年樣本外：反向機器人比 0050 {robot:+.3f}、平均 {alike:+.3f}"
         print(job.payload["summary"])
+        return 0
+
+    if args.command == "meta-label":
+        # 2026-10-20: the meta-label model on the deep model's picks (research/meta_label.py) and its registered gate
+        from quant_platform.research import daily as daily_research
+        from quant_platform.research import meta_label
+        from quant_platform.research.jobs import JobLog
+        from quant_platform.research.model import models_root
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("後設標籤模型：深度學習前 40 名，預測買進後 40 個交易日贏不贏 0050（逐年滾動）",
+                                    command) as job:
+            _data, fp = daily_research.load(Path(args.base))
+            meta = meta_label.train(fp, models_root(Path(args.base)) / meta_label.VERSION, job=job)
+            check = meta["gate"]
+            job.payload["summary"] = (f"2016～2020：留下 {check.get('kept')}、否決 {check.get('vetoed')}；留下的平均贏 0050 "
+                                      f"{check.get('excess_kept')}、否決的 {check.get('excess_vetoed')}；勝率留下 "
+                                      f"{check.get('win_kept')}、全部 {check.get('win_all')}；門檻{'通過' if check['passed'] else '沒過'}")
+        print(json.dumps(check, ensure_ascii=False), flush=True)
+        for year, item in meta["years"].items():
+            print(year, json.dumps({key: value for key, value in item.items() if not key.startswith("sum_")},
+                                   ensure_ascii=False), flush=True)
         return 0
 
     if args.command in ("block-rl31", "block-rl32"):

@@ -381,7 +381,7 @@ class DailyRule(BaseModel):
     # 2026-10-16 (使用者：深度學習能不能用到交易裡輔助這些策略？): the deep-learning risk model (research/model_risk.py)
     # as an overlay — "dl1": no new buy among the day's top tenth by drop probability; "dl1x": also sell a holding
     # once it is in the top twentieth (every session). Left out of the hash when "none".
-    risk_veto: Literal["none", "dl1", "dl1x", "r3"] = "none"
+    risk_veto: Literal["none", "dl1", "dl1x", "r3", "meta1"] = "none"
     # 2026-10-18 (使用者：繼續研究有什麼更好的策略; the deep rule held 30% of the account in one stock and 48% in
     # shipping on 2021-06-30 — the industry cap counts stocks when bought, winners grow past it): on a decision day a
     # holding worth more than ``trim_above`` times its target is sold back to its target, the money topping up the
@@ -512,6 +512,18 @@ class FactorPanel:
             return set()
         cut = np.quantile(column[known], 1 - share)
         return {self.symbols[row] for row in np.flatnonzero(known & (column >= cut))}
+
+    def meta_vetoed(self, position: int) -> set[str]:
+        """2026-10-20: the deep model's candidates the meta-label model (research/meta_label.py) expects to lose to
+        0050 at ``position`` (margin below 0); none without the model."""
+        if "__meta1__" not in self._cache:
+            from quant_platform.research.meta_label import VERSION as META_VERSION
+            from quant_platform.research.meta_label import scores as meta_scores
+
+            folder = Path(self.models) / META_VERSION if self.models is not None else Path("missing")
+            self._cache["__meta1__"] = np.ascontiguousarray(meta_scores(self, folder).T)     # symbols × sessions
+        column = self._cache["__meta1__"][:, position]
+        return {self.symbols[row] for row in np.flatnonzero(np.isfinite(column) & (column < 0))}
 
     def risky_neutral(self, position: int) -> set[str]:
         """2026-10-17 (R3): the stocks in the top tenth of their group (volatility tenth × 6-month momentum fifth among
@@ -1216,7 +1228,9 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             vetoed = vetoed | fp.excluded(position)       # no new buys; holdings keep their usual rules
         if exit_agent is not None and hasattr(exit_agent, "refuses"):
             vetoed = vetoed | exit_agent.refuses(position)  # tech1: the robot buys only what it wants
-        if risk_veto == "r3":                 # 2026-10-17: the vol-neutral model, the riskiest tenth of each group
+        if risk_veto == "meta1":              # 2026-10-20: the meta-label model expects it to lose to 0050
+            vetoed = vetoed | fp.meta_vetoed(position)
+        elif risk_veto == "r3":               # 2026-10-17: the vol-neutral model, the riskiest tenth of each group
             vetoed = vetoed | fp.risky_neutral(position)
         elif risk_veto != "none":
             vetoed = vetoed | fp.risky(position, RISK_VETO_SHARE)   # the deep risk model: not the riskiest tenth
@@ -2195,6 +2209,13 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
             payload["dl_risk"] = digest(model_dir(history, MODELS["dl_risk"]["version"]))
         if veto == "r3":
             payload["dl_risk2"] = digest(model_dir(history, MODELS["dl_risk2"]["version"]))
+        if veto == "meta1":                                      # 2026-10-20: the meta-label model it reads
+            from quant_platform.research.meta_label import VERSION as META_VERSION
+            from quant_platform.research.meta_label import digest as meta_digest
+            from quant_platform.research.model import models_root
+
+            payload["meta1"] = meta_digest(models_root(history) / META_VERSION)
+            payload["meta1_primary"] = digest(model_dir(history, MODELS["ml_deep2_top"]["version"]))
     delisted = sorted((code, day.isoformat()) for code, days in (data.notes.get("delisted") or {}).items()
                       for day in days if day <= RECENT_END)
     payload["delisted"] = hashlib.sha256(json.dumps(delisted).encode()).hexdigest()   # 1.3.1: the list it read
@@ -2983,6 +3004,32 @@ def deep24_batch() -> list[DailyRule]:
                       factors={"ml_deep2_riskadj": 1.0}, **common)]
 
 
+META_RULES = (4941, 4913)
+
+
+def meta1_batch() -> list[DailyRule]:
+    """2026-10-20 (使用者：前向都是賠錢；持續優化每一個策略): the meta-label veto (research/meta_label.py) on the deep rules
+    #4941 and #4913 — only past the model's registered gate. Each passes if it is a T0 候選 (high-risk or not) and on
+    the money-against-falls frontier, or ends at least 95% of its own rule with a drawdown 2 points shallower
+    (research_method §7)."""
+    import json as _json
+
+    from quant_platform.research.meta_label import gate as meta_gate
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    check = meta_gate(research / "models")
+    print(f"meta-1.0.0 門檻（2016-2020 被否決的比留下的少賺、留下的勝率較高）：{check}", flush=True)
+    if not check.get("passed"):
+        return []
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    rules = []
+    for trial in META_RULES:
+        spec = _json.loads((research / "reports" / records[trial].report_file).read_text(encoding="utf-8"))["spec"]
+        rules.append(_variant(DailyRule.model_validate(spec), "後設標籤預測輸 0050 的不買", risk_veto="meta1"))
+    return rules
+
+
 def tech_deep_batch() -> list[DailyRule]:
     """2026-10-20 (使用者：技術分析機器人有沒有在優化？): the technical robot's third version, dl-2.5.0 (dl-2.1.0 on prices
     and volumes only) — only past its registered gate (the development years' top-20 gain at least the technical
@@ -3364,7 +3411,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "meta1": meta1_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
