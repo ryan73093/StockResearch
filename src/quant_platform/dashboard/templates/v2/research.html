@@ -231,6 +231,27 @@
 
 {% if research_tab == 'news' and news %}
 <section class="card">
+  <div class="card__head"><h2>今日財經新聞 <span class="badge">{{ news.headlines|length }} 則</span></h2><span class="muted small">每天 07:10、12:10、17:10、22:10 自動收集；最近兩天、新的在上</span></div>
+  {% if news.headlines %}
+  <div class="table-wrap table-wrap--stack table-wrap--tall">
+    <table class="table--stack">
+      <thead><tr><th>時間</th><th>來源</th><th>標題</th></tr></thead>
+      <tbody>
+      {% for item in news.headlines %}
+        <tr>
+          <td data-primary class="small">{{ item.published[5:16].replace('T', ' ') if item.published else '—' }}</td>
+          <td data-label="來源" class="small">{{ item.source }}</td>
+          <td data-label="標題" data-wide><a href="{{ item.link }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>{% if item.summary %}<br><span class="muted small">{{ item.summary }}</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted" style="margin:0">還沒有收集到；下一次 {{ '07:10、12:10、17:10、22:10' }} 自動收集。</p>{% endif %}
+  <p class="col-help"><b>欄位說明</b>　<b>時間</b>：新聞發布時間（台北）。<b>來源</b>：{{ news.feeds|join('、') }}（公開 RSS）。<b>標題</b>：點了開原文；只存標題、來源自己的摘要與連結。個股新聞另外在每個交易日 14:40 收集（成交值前 150 檔與前向持股），下面的新聞事件會用到。</p>
+</section>
+
+<section class="card">
   <div class="card__head"><h2>新聞事件 <span class="badge">LLM 只讀標題、輸出固定欄位</span></h2><span class="muted small">{{ news.prompt_version }}</span></div>
   <div class="kpis kpis--four">
     <div class="kpi"><div class="kpi__label">本月 LLM 總花費</div><div class="kpi__value">US${{ '%.2f' % news.spend.total }}<small>／上限 {{ '%.0f' % news.spend.total_cap }}</small></div></div>

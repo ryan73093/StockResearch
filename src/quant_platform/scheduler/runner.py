@@ -653,6 +653,24 @@ def collect_news(container: "Container", now: datetime | None = None) -> object 
         return collect(base, day, codes, container.settings.finmind_token, job=job)
 
 
+def collect_market_news(container: "Container", now: datetime | None = None, get=None) -> object | None:
+    """2026-10-20 (使用者：我也要你自動每日抓取財經新聞): the financial headlines from public RSS feeds, every day
+    at 07:10, 12:10, 17:10 and 22:10 (a feed keeps only its latest items); research/market_news.py."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import market_news
+    from quant_platform.research.jobs import JobLog
+
+    research = _instance_dir(container.settings.database_url) / "research"
+    with JobLog(research).start("收集財經新聞（RSS：Yahoo 股市、中央社、經濟日報、鉅亨網）",
+                                "scheduler collect_market_news") as job:
+        found = market_news.collect(research / "history", now, **({"get": get} if get else {}))
+        job.payload["summary"] = f"{found['feeds']} 個來源、新增 {found['added']} 則" + (
+            f"、{found['failed']} 個來源失敗" if found["failed"] else "")
+    if found["feeds"] == 0:
+        _notify_failure(container, f"market-news:{datetime.now().date()}", "收集財經新聞", "；".join(found["errors"]))
+    return found
+
+
 def score_news_events(container: "Container", now: datetime | None = None, client=None) -> object | None:
     """R15 D (2026-10-09): at 21:45 on trading days, the collected headlines not scored yet turned into event
     fields by the model (research/news_events.py), inside the monthly LLM budget."""
@@ -846,6 +864,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=50,
+    )
+    scheduler.add_job(
+        collect_market_news,
+        args=[container],
+        trigger=CronTrigger(hour="7,12,17,22", minute=10, timezone=timezone),
+        id="market_news_collection",
+        name="收集財經新聞（每天 07:10、12:10、17:10、22:10，RSS）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3 * 3600,
     )
     scheduler.add_job(
         collect_news,

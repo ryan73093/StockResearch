@@ -676,6 +676,8 @@ td.wrap { white-space: normal; min-width: 180px; }
 .rule-chart .line-put { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
 /* 2026-10-20: every sale's result and their running total (forward account, 每一筆交易) */
 .trade-chart { margin: 0 0 6px; }
+/* 2026-10-20: a long list (the day's headlines) scrolls inside its card, its header fixed */
+.table-wrap--tall { max-height: 560px; overflow-y: auto; }
 .trade-chart .zero { stroke: var(--border); stroke-width: 1; }
 .trade-chart .gain { fill: var(--up); opacity: .75; }
 .trade-chart .loss { fill: var(--down); opacity: .75; }

@@ -228,7 +228,12 @@ def news_view(research_dir: Path, settings) -> dict[str, object]:
     ledger = UsageLedger(research_dir / "agent" / "usage.jsonl")
     now = datetime.now(UTC)
     pair = [row for row in StockForwardTracker(research_dir).summary() if "新聞" in row["name"]]
+    from quant_platform.research import market_news
+
     return {
+        # 2026-10-20 (使用者：自動每日抓取財經新聞): the latest two days' headlines
+        "headlines": market_news.latest(research_dir / "history", days=2)[:200],
+        "feeds": [label for label, _url in market_news.FEEDS.values()],
         **news_events.summary(research_dir / "history"),
         "spend": {"total": ledger.month_spend(now), "total_cap": settings.llm_monthly_budget_usd,
                   "news": ledger.month_spend(now, (news_events.OPERATION,)), "news_cap": settings.news_events_monthly_budget_usd,
