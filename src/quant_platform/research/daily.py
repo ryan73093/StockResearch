@@ -2853,6 +2853,37 @@ def deep2_neutral_batch() -> list[DailyRule]:
                       factors={"ml_deep2_volneutral": 1.0}, **common)]
 
 
+def cost_all_batch() -> list[DailyRule]:
+    """2026-10-20 (使用者：持續優化每一個策略): cost-aware switching (switching cost1: a leaving holding is replaced only
+    when the replacement's expected excess beats it by a round trip) on every passing single rule (T0 / T0 候選, high-risk
+    or not; newest engine; no 0050) that does not switch that way yet — it turned the deep rule from T2 into the most
+    money and the consensus up by a third, but made the next-day consensus worse. Registered (research_method §7): each
+    judged by the pool's tiers; and over all of them, if the median end value rises and the median drawdown is not 2
+    points deeper, new rules switch that way by default."""
+    import json as _json
+
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = Path("instance") / "research"
+    latest = newest(TrialRegistry(research / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent"
+                    and str((record.metrics or {}).get("engine", "")) == ENGINE_VERSION)
+    rules = []
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        if tier(record.metrics or {})[0] not in PASSING_TIERS:
+            continue
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            base = DailyRule.model_validate(spec)
+        except (OSError, ValueError, KeyError):
+            continue                                  # a blend
+        if uses_0050(spec) or base.free or base.switching != "none" or base.universe != "twse":
+            continue
+        rules.append(_variant(base, "看成本才換股", switching="cost1"))
+    return rules
+
+
 def deep2_top10_batch() -> list[DailyRule]:
     """2026-10-20 (使用者：持續優化每一個策略; diagnosis, research_method §7): dl-2.1.0's top 10 beat its top 20 and 30
     in both periods (+2.24% / +1.67% / +1.44% over 20 sessions before 2020-10, +3.51% / +3.12% / +2.53% after) and in
@@ -3232,7 +3263,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
