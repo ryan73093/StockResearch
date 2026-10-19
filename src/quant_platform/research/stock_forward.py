@@ -914,7 +914,11 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
             row["sold_on"] = ended
     summary = {"realized": realized, "wins": wins, "losses": losses, "sells": wins + losses,
                "unrealized": sum(item["pnl"] for item in positions.values()), "positions": positions}
-    return list(reversed(rows)), summary
+    by_day: dict[str, list[dict]] = {}
+    for row in rows:
+        by_day.setdefault(row["date"], []).append(row)
+    # newest day first, a day's trades in the order they were made (as the page listed them before)
+    return [row for day in sorted(by_day, reverse=True) for row in by_day[day]], summary
 
 
 def sell_all(record: dict, costs) -> dict[str, float]:

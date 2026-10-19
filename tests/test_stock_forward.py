@@ -397,7 +397,7 @@ def test_every_trade_shows_what_it_made_and_why():
     why = {"2026-09-01": {"A.TW": "新進前 20 名（當天第 2 名）"},
            "2026-09-10": {"A.TW": "跌出前 60 名（當天第 75 名），而且跌破月線"}}
     rows, summary = explain_trades(days, why, trim_above=2.0)
-    rows = list(reversed(rows))                                               # oldest first here
+    rows = sorted(rows, key=lambda row: row["date"])                          # oldest first here, a day's order kept
     assert rows[0]["why"] == "新進前 20 名（當天第 2 名）"
     assert rows[1]["why"] == "每月 5 日投入的錢，補到目標比重"                 # money came in that day
     trim = rows[2]                                                            # half of 1,150 cost: 575
