@@ -218,3 +218,20 @@ def test_the_reverse_robot_learns_to_lose(monkeypatch, tmp_path):
         assert "momentum_3" not in weights or weights["momentum_3"] < 0.25
         assert year["robot_excess"] <= year["equal_excess"]
     assert rl_timing.factor_names(rl_timing.WORST_VERSION) == list(rl_timing.BLOCKS)
+
+
+def test_the_robot_32_has_todays_models_and_a_defensive_slot(monkeypatch, tmp_path):
+    """2026-10-20: 3.2 is 3.1 with model G and the deep model in the model slot and a ninth, calm slot; it trains and
+    scores as its own version."""
+    assert rl_timing.SLOTS_32["模型"] == ("ml_gbm_ens", "ml_gbm_ext", "ml_deep2_top")
+    assert "low_volatility_60" in rl_timing.SLOTS_32["跌市穩"] and len(rl_timing.SLOTS_32) == len(rl_timing.SLOTS) + 1
+    assert set(rl_timing.factor_names(rl_timing.ROLLING32_VERSION)) >= {"ml_deep2_top", "low_ivol_60", "high_52w"}
+    data, fp = _blocks_market(monkeypatch)
+    monkeypatch.setattr(rl_timing, "SLOTS_32", {"動能": ("momentum_3", "reversal_1"), "跌市穩": ("low_volatility_60",)})
+    monkeypatch.setattr(rl_timing, "SELECT_FROM", date(2015, 1, 1))
+    monkeypatch.setattr(rl_timing, "SELECT_LEAST", 60)
+    meta = rl_timing.walk_forward_rolling(fp, rl_timing.benchmark_units(data, fp.sessions), tmp_path,
+                                          version=rl_timing.ROLLING32_VERSION)
+    assert meta["version"] == rl_timing.ROLLING32_VERSION and meta["factors"] == ["動能", "跌市穩"]
+    robot = rl_timing.scores(fp, tmp_path, "robot", rl_timing.ROLLING32_VERSION)
+    assert np.isfinite(robot).sum() > 10

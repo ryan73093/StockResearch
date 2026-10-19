@@ -268,6 +268,8 @@ META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現�
                 "rl_worst": "反向 RL 機器人（同 3.0 的 8 個區塊，學著賠最多；趣味與檢查）",
                 "rl_rolling": "RL 機器人 3.1（8 個槽位，每年只用那年以前的資料挑各槽位最強的因子，再由機器人決定權重）",
                 "rolling_equal": "8 個逐年挑選的槽位平均（機器人 3.1 的對照）",
+                "rl_rolling32": "RL 機器人 3.2（9 個槽位：3.1 的槽位、模型槽加入模型 G 與深度學習、再加跌市穩槽；每年只用那年以前的資料挑因子，機器人決定權重）",
+                "rolling32_equal": "9 個逐年挑選的槽位平均（機器人 3.2 的對照）",
                 "rl_free": "RL 機器人 4.0 的每檔比重（每天自己決定買哪些、各多少、留多少現金；只受交易所規則限制）",
                 "rl_free41": "RL 機器人 4.1 的每檔比重（同 4.0，訓練帳戶是 30 萬＋每月 1 萬、最低手續費、整股）"}
 # 2026-10-20 (使用者：持續優化每一個策略; the factor correlations: the deep model's score ran −0.70 with low volatility
@@ -564,15 +566,17 @@ class FactorPanel:
                 return free_weights(self, Path(self.models) / version if self.models is not None else Path("missing"))
             if factor == "tech_momentum":
                 return timing_scores(self, factor_names())
-            from quant_platform.research.rl_timing import ROLLING_VERSION, WORST_VERSION
+            from quant_platform.research.rl_timing import ROLLING32_VERSION, ROLLING_VERSION, WORST_VERSION
 
             version = (ALL_VERSION if factor in ("rl_all", "all_equal") else
+                       ROLLING32_VERSION if factor in ("rl_rolling32", "rolling32_equal") else
                        BLOCK_VERSION if factor in ("rl_blocks", "block_equal") else
                        WORST_VERSION if factor == "rl_worst" else
                        ROLLING_VERSION if factor in ("rl_rolling", "rolling_equal") else ROBOT_VERSION)
             folder = Path(self.models) / version if self.models is not None else Path("missing")
             return robot_scores(self, folder,
-                                "equal" if factor in ("tech_equal", "all_equal", "block_equal", "rolling_equal") else "robot",
+                                "equal" if factor in ("tech_equal", "all_equal", "block_equal", "rolling_equal",
+                                                      "rolling32_equal") else "robot",
                                 version)
         if factor in CONSENSUS_FACTORS:
             from quant_platform.research.consensus import scores as consensus_scores
@@ -2273,6 +2277,14 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
 
         payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]))
         payload["robot_rolling"] = robot_digest(models_root(history) / ROLLING_VERSION)    # the yardstick reads it too
+    if any(name in ("rl_rolling32", "rolling32_equal") for name in factor_names):   # 2026-10-20: the robot 3.2
+        from quant_platform.research.model import MODELS, digest, model_dir, models_root
+        from quant_platform.research.rl_timing import ROLLING32_VERSION
+        from quant_platform.research.rl_timing import digest as robot_digest
+
+        for factor in ("ml_gbm_ens", "ml_gbm_ext", "ml_deep2_top"):
+            payload[f"model_{factor}"] = digest(model_dir(history, MODELS[factor]["version"]))
+        payload["robot_rolling32"] = robot_digest(models_root(history) / ROLLING32_VERSION)
     if any(name in TECH_FACTORS for name in factor_names):      # 2026-10-10: the technical robot's policies
         from quant_platform.research.tech_rl import digest as tech_digest
         from quant_platform.research.tech_rl import tech_dir
@@ -3184,6 +3196,17 @@ def robot30_batch() -> list:
                       factors={"block_equal": 1.0}, **common)]
 
 
+def robot32_batch() -> list:
+    """2026-10-20 (使用者：RL 你還有沒有在優化？): the robot 3.2 (rl_timing.SLOTS_32) and its yardstick, the same rule
+    otherwise as robot31_batch. Registered (research_method §7): it passes if it beats its yardstick in both periods and
+    is a T0 候選 (high-risk or not)."""
+    common = {"top": 20, "check": "weekly", "industry_cap": 0.3, "hold": "trend"}
+    return [DailyRule(name="RL 機器人 3.2：逐年挑選的 9 個槽位（含深度學習與跌市穩）由機器人決定權重、前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"rl_rolling32": 1.0}, **common),
+            DailyRule(name="逐年挑選的 9 個槽位（含深度學習與跌市穩）平均：前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"rolling32_equal": 1.0}, **common)]
+
+
 def robot31_batch() -> list:
     """2026-10-16: the robot 3.1 (each year's slot factors chosen before the year) and its yardstick; the same rule
     otherwise as robot30_batch."""
@@ -3346,5 +3369,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
-           "robot30": robot30_batch, "robot31": robot31_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
+           "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch}

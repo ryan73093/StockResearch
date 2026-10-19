@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
@@ -900,18 +900,22 @@ def main() -> int:
         print(job.payload["summary"])
         return 0
 
-    if args.command == "block-rl31":
-        # 2026-10-16 (the audit): the robot 3.1 — each test year's slot factors chosen before the year (rl_timing.py)
+    if args.command in ("block-rl31", "block-rl32"):
+        # 2026-10-16 (the audit): the robot 3.1 — each test year's slot factors chosen before the year (rl_timing.py);
+        # 2026-10-20: 3.2, nine slots with today's models and a defensive one
         from quant_platform.research import daily as daily_research
         from quant_platform.research import rl_timing
         from quant_platform.research.jobs import JobLog
         from quant_platform.research.model import models_root
 
+        version = rl_timing.ROLLING32_VERSION if args.command == "block-rl32" else rl_timing.ROLLING_VERSION
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
-        with JobLog(RESEARCH).start("RL 機器人 3.1：逐年滾動訓練（每年只用之前的資料挑 8 個槽位的因子）", command) as job:
+        title = ("RL 機器人 3.2：逐年滾動訓練（9 個槽位，含深度學習與跌市穩）" if args.command == "block-rl32"
+                 else "RL 機器人 3.1：逐年滾動訓練（每年只用之前的資料挑 8 個槽位的因子）")
+        with JobLog(RESEARCH).start(title, command) as job:
             data, fp = daily_research.load(Path(args.base))
             meta = rl_timing.walk_forward_rolling(fp, rl_timing.benchmark_units(data, fp.sessions),
-                                                  models_root(Path(args.base)) / rl_timing.ROLLING_VERSION, job=job)
+                                                  models_root(Path(args.base)) / version, job=job, version=version)
             robot = sum(item["robot_excess"] for item in meta["yearly"].values())
             alike = sum(item["equal_excess"] for item in meta["yearly"].values())
             abstained = sum(1 for item in meta["yearly"].values() if item["abstained"])

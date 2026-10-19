@@ -83,6 +83,20 @@ SLOTS = {
 }
 SELECT_FROM = date(2015, 6, 1)
 SELECT_LEAST = 120
+# 3.2.0 (2026-10-20; 使用者：RL 你還有沒有在優化？): the robot 3.1 with today's models in the model slot (model F, model G
+# and the deep model's top tenth — each year the strongest by its record before the year) and a ninth, defensive slot
+# (calm stocks: low volatility over 60 or 250 sessions, low idiosyncratic volatility, no lottery-like jumps), so the
+# robot has something to turn to when the aggressive slots go wrong; judged against the nine alike.
+ROLLING32_VERSION = "block-rl-3.2.0"
+SLOTS_32 = {**{slot: members for slot, members in SLOTS.items() if slot != "模型"},
+            "模型": ("ml_gbm_ens", "ml_gbm_ext", "ml_deep2_top"),
+            "跌市穩": ("low_volatility_60", "low_volatility_250", "low_ivol_60", "low_max_return")}
+ROLLING_VERSIONS = (ROLLING_VERSION, ROLLING32_VERSION)
+
+
+def _slots(version: str) -> dict[str, tuple[str, ...]]:
+    """A rolling robot's slots (looked up when called, so a test can swap them)."""
+    return SLOTS_32 if version == ROLLING32_VERSION else SLOTS
 # 2026-10-16 (使用者：訓練一個賠最多的模型，反著做，看看會怎樣): the robot 3.0's learning with the reward turned around —
 # it learns the eight blocks' weights that lose the most to 0050 (abstaining, i.e. the blocks alike, when its
 # held-out fifth does not lose more than them). A curiosity and a check: a robot that can lose on purpose shows the
@@ -95,8 +109,8 @@ def factor_names(version: str = VERSION) -> list[str]:
 
     if version in (BLOCK_VERSION, WORST_VERSION):
         return list(BLOCKS)
-    if version == ROLLING_VERSION:
-        return list(dict.fromkeys(name for members in SLOTS.values() for name in members))
+    if version in ROLLING_VERSIONS:
+        return list(dict.fromkeys(name for members in _slots(version).values() for name in members))
     if version == ALL_VERSION:
         from quant_platform.research.chips import (
             ALERT_FACTORS,
@@ -250,17 +264,17 @@ class Slotted:
         self.forward, self.bench = timeline.forward, timeline.bench
 
 
-def choose_members(fp, first_session: date) -> list[str]:
+def choose_members(fp, first_session: date, version: str = ROLLING_VERSION) -> list[str]:
     """Each slot's factor for a test year: the strongest by its spread as known from SELECT_FROM to ``first_session``."""
     from quant_platform.research.factor_timing import known_spreads
 
-    every = factor_names(ROLLING_VERSION)
+    every = factor_names(version)
     frame = known_spreads(fp, every)
     sessions = pd.Index(fp.sessions)
     window = frame[(sessions >= SELECT_FROM) & (sessions < first_session)]
     means, counts = window.mean(), window.count()
     chosen = []
-    for members in SLOTS.values():
+    for members in _slots(version).values():
         usable = [name for name in members if counts.get(name, 0) >= SELECT_LEAST and np.isfinite(means.get(name, np.nan))]
         chosen.append(max(usable, key=lambda name: means[name]) if usable else members[0])
     return chosen
@@ -455,18 +469,20 @@ def walk_forward_blocks(fp, benchmark: np.ndarray, out_dir: Path, job=None, wors
     return meta
 
 
-def walk_forward_rolling(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> dict[str, object]:
-    """The robot 3.1: the robot 3.0's learning over slots whose factors are chosen for each test year before it."""
-    timelines = [Timeline(fp, benchmark, ROLLING_VERSION, offset) for offset in PHASES]
+def walk_forward_rolling(fp, benchmark: np.ndarray, out_dir: Path, job=None,
+                         version: str = ROLLING_VERSION) -> dict[str, object]:
+    """The robot 3.1 (3.2: SLOTS_32): the robot 3.0's learning over slots whose factors are chosen for each test year
+    before it."""
+    timelines = [Timeline(fp, benchmark, version, offset) for offset in PHASES]
     every = timelines[0].names
-    slots = list(SLOTS)
+    slots = list(_slots(version))
     equal = np.full(len(slots), 1 / len(slots))
     years = sorted({day.year for day in timelines[0].days if day.year >= FIRST_TEST_YEAR})
     weights: dict[str, list[float]] = {}
     yearly, members = {}, {}
     for number, year in enumerate(years):
         first_session = next(day for day in fp.sessions if day.year == year)
-        chosen = choose_members(fp, first_session)
+        chosen = choose_members(fp, first_session, version)
         views = [Slotted(timeline, [every.index(name) for name in chosen]) for timeline in timelines]
         main = views[0]
         before = [[index for index, position in enumerate(view.positions)
@@ -505,11 +521,11 @@ def walk_forward_rolling(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> 
         if job:
             job.update(done=number + 1, total=len(years),
                        current=f"{year}：{'不押（用平均）' if abstain else '機器人'} {robot.sum():+.3f}、平均 {alike.sum():+.3f}")
-    meta = {"version": ROLLING_VERSION, "factors": slots, "members": members, "weights": weights, "yearly": yearly,
+    meta = {"version": version, "factors": slots, "members": members, "weights": weights, "yearly": yearly,
             "config": {"step": STEP, "top": TOP, "cost_swap": COST_SWAP, "sigma": SIGMA, "penalty": BLOCK_PENALTY,
                        "epochs": EPOCHS, "rollouts": ROLLOUTS, "learning_rate": LEARNING_RATE, "seeds": list(BLOCK_SEEDS),
                        "phases": list(PHASES), "held_out": HELD_OUT, "check_every": CHECK_EVERY,
-                       "slots": {slot: list(names) for slot, names in SLOTS.items()},
+                       "slots": {slot: list(names) for slot, names in _slots(version).items()},
                        "select_from": SELECT_FROM.isoformat(), "select_least": SELECT_LEAST},
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -517,7 +533,7 @@ def walk_forward_rolling(fp, benchmark: np.ndarray, out_dir: Path, job=None) -> 
     return meta
 
 
-def _rolling_scores(fp, folder: str | Path, kind: str) -> np.ndarray:
+def _rolling_scores(fp, folder: str | Path, kind: str, version: str = ROLLING_VERSION) -> np.ndarray:
     """The robot 3.1's scores (``robot``) or its yardstick's (``equal``: the year's eight factors alike): each session
     uses its year's factors (the latest trained year's after it) and the latest decision's weights."""
     from quant_platform.research.model import _rank, eligibility
@@ -535,7 +551,7 @@ def _rolling_scores(fp, folder: str | Path, kind: str) -> np.ndarray:
     percentiles = {name: _rank(np.where(eligible, fp.matrix(name), np.nan).T).astype(np.float32) for name in needed}
     decided = sorted((date.fromisoformat(day), np.array(values)) for day, values in meta["weights"].items())
     years = sorted(members)
-    equal = np.full(len(SLOTS), 1 / len(SLOTS))
+    equal = np.full(len(_slots(version)), 1 / len(_slots(version)))
     index, current = 0, None
     for position, day in enumerate(fp.sessions):
         while index < len(decided) and decided[index][0] <= day:
@@ -557,8 +573,8 @@ def scores(fp, folder: str | Path, kind: str = "robot", version: str = VERSION) 
     before the first test decision or without a trained robot); ``equal``: the version's factors alike."""
     from quant_platform.research.model import _rank, eligibility
 
-    if version == ROLLING_VERSION:
-        return _rolling_scores(fp, folder, kind)
+    if version in ROLLING_VERSIONS:
+        return _rolling_scores(fp, folder, kind, version)
     names = factor_names(version)
     eligible = eligibility(fp)
     percentiles = np.stack([_rank(np.where(eligible, fp.matrix(name), np.nan).T)
