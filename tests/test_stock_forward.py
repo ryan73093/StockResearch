@@ -443,3 +443,21 @@ def test_reasons_are_filled_in_only_where_the_ranking_again_is_the_list_kept(tmp
     why = DecisionStore(tmp_path).why(name)
     assert why == {"2024-01-01": {"A": "新進前 3 名（當天第 1 名）", "B": "新進前 3 名（當天第 2 名）",
                                   "C": "新進前 3 名（當天第 3 名）"}}
+
+
+def test_the_sales_chart_cumulates_each_sale_then_adds_the_paper_result():
+    """2026-10-20 (使用者：每一筆買賣的資產增加累積圖)."""
+    from quant_platform.research.stock_forward import trade_chart
+
+    trades = [  # newest first, as the page lists them
+        {"date": "2026-09-10", "side": "SELL", "code": "B", "name": "乙", "pnl": -50.0},
+        {"date": "2026-09-08", "side": "BUY", "code": "C", "name": "丙"},
+        {"date": "2026-09-05", "side": "SELL", "code": "A", "name": "甲", "pnl": 100.0},
+    ]
+    chart = trade_chart(trades, {"unrealized": 30.0}, width=300, height=110)
+    assert chart["sales"] == 2 and chart["first"] == "2026-09-05" and chart["last"] == "2026-09-10"
+    assert chart["realized"] == 50.0 and chart["final"] == 80.0 and (chart["high"], chart["low"]) == (100.0, -50.0)
+    first, second = chart["bars"]
+    assert first["up"] and not second["up"] and "累計 +100" in first["title"] and "累計 +50" in second["title"]
+    assert first["y"] < chart["zero"] and second["y"] == chart["zero"]          # one above the zero line, one below
+    assert trade_chart([{"date": "2026-09-01", "side": "BUY", "code": "A"}], None) is None

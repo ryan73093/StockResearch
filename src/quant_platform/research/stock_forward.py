@@ -916,6 +916,43 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
     return list(reversed(rows)), summary
 
 
+def trade_chart(trades: list[dict], results: dict | None, width: int = 640, height: int = 220) -> dict | None:
+    """2026-10-20 (使用者：我要有每一筆買賣的資產增加累積圖): every sale in order — a bar for what it made (up) or lost
+    (down) and a line of what the sales have made so far; a last dashed step adds what the stocks still held are up or
+    down on paper. None before the first sale."""
+    sales = [trade for trade in reversed(trades) if trade["side"] == "SELL" and trade.get("pnl") is not None]
+    if not sales:
+        return None
+    running, totals = 0.0, []
+    for trade in sales:
+        running += float(trade["pnl"])
+        totals.append(running)
+    unrealized = float((results or {}).get("unrealized") or 0.0)
+    final = running + unrealized
+    low = min(0.0, final, *totals, *(float(trade["pnl"]) for trade in sales))
+    high = max(0.0, final, *totals, *(float(trade["pnl"]) for trade in sales))
+    span = (high - low) or 1.0
+    steps = len(sales) + 1                                  # one more place for the paper result
+    pad = 8
+
+    def y(value: float) -> float:
+        return round(pad + (high - value) / span * (height - 2 * pad), 1)
+
+    def x(index: int) -> float:
+        return round((index + 0.5) * width / steps, 1)
+    bar = max(2.0, min(24.0, width / steps * 0.6))
+    bars = [{"x": round(x(index) - bar / 2, 1), "y": min(y(float(trade["pnl"])), y(0.0)), "width": round(bar, 1),
+             "height": max(1.0, round(abs(y(float(trade["pnl"])) - y(0.0)), 1)),
+             "up": float(trade["pnl"]) >= 0, "title": f"{trade['date']} 賣 {trade['code']} {trade.get('name', '')}："
+             f"{'賺' if float(trade['pnl']) >= 0 else '賠'} {abs(float(trade['pnl'])):,.0f}，累計 {total:+,.0f}"}
+            for index, (trade, total) in enumerate(zip(sales, totals, strict=True))]
+    line = " ".join(f"{x(index)},{y(total)}" for index, total in enumerate(totals))
+    return {"width": width, "height": height, "bars": bars, "line": line, "zero": y(0.0),
+            "paper": f"{x(len(totals) - 1)},{y(totals[-1])} {x(len(totals))},{y(final)}", "paper_y": y(final),
+            "paper_x": x(len(totals)), "realized": running, "unrealized": unrealized, "final": final,
+            "first": sales[0]["date"], "last": sales[-1]["date"], "sales": len(sales), "high": high, "low": low}
+
+
 def _fixed_hold(rule) -> bool:
     return getattr(rule, "hold", "days") != "trend" and bool(getattr(rule, "min_hold", 0))
 

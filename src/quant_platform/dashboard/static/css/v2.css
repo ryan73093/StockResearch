@@ -674,6 +674,16 @@ td.wrap { white-space: normal; min-width: 180px; }
 .rule-chart .line-rule { fill: none; stroke: var(--accent); stroke-width: 2; }
 .rule-chart .line-bench { fill: none; stroke: var(--warn); stroke-width: 2; }
 .rule-chart .line-put { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
+/* 2026-10-20: every sale's result and their running total (forward account, 每一筆交易) */
+.trade-chart { margin: 0 0 6px; }
+.trade-chart .zero { stroke: var(--border); stroke-width: 1; }
+.trade-chart .gain { fill: var(--up); opacity: .75; }
+.trade-chart .loss { fill: var(--down); opacity: .75; }
+.trade-chart .paper { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; }
+.trade-chart .paper-dot { fill: var(--accent); }
+.legend .swatch-gain { background: var(--up); }
+.legend .swatch-loss { background: var(--down); }
+.legend .swatch-paper { background: repeating-linear-gradient(90deg, var(--accent) 0 5px, transparent 5px 9px); }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--text-2); margin: 6px 0 0; }
 .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; }
 

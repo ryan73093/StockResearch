@@ -1050,12 +1050,16 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         if detail is None:
             abort(404)
         chart = value_chart({row["date"]: [row["value"], row["benchmark"], row["contributed"]] for row in detail["series"]})
+        from quant_platform.research.stock_forward import trade_chart
+
+        trades_chart = trade_chart(detail["trades"], detail.get("results"))    # 2026-10-20: every sale, cumulated
         board = forward_board_load(research_dir) or {}         # 2026-10-17: the same rule on the common start line
         board_row = next((row for row in board.get("rows") or [] if row.get("rule_hash") == rule_hash), None)
         if board.get("common_start") != forward_common_start(datetime.now(TAIPEI).date()).isoformat():
             board_row = None                                    # 2026-10-17: last month's start line is not shown
         return render_template("v2/research_forward.html", active_nav="research", forward=detail, chart=chart,
-                               board=board, board_row=board_row, research_tab="forward", jobs=JobLog(research_dir).jobs())
+                               trades_chart=trades_chart, board=board, board_row=board_row, research_tab="forward",
+                               jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/roles")
     def research_roles():
