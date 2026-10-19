@@ -471,3 +471,16 @@ def test_a_rule_falling_further_than_0050_is_marked_on_the_pages(tmp_path, monke
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
     body = client.get("/research").get_data(as_text=True)
     assert "高風險・跌市多跌 8.9 點" in body
+
+
+def test_the_optimization_log_is_read_from_the_research_method(tmp_path):
+    """2026-10-20 (使用者：持續優化每一個策略，要看得到結果)."""
+    from quant_platform.dashboard.v2 import research_optimizations
+
+    doc = tmp_path / "method.md"
+    doc.write_text("### 目前結論\n- x\n\n### 最佳化紀錄（網站研究總覽）\n\n說明。\n\n| 日期 | 家族 | 做了什麼 | 結果 | 判定 |\n"
+                   "|---|---|---|---|---|\n| 2026-10-20 | 深度學習 | 前 10 名 | 2,650 萬 | 沒過 |\n"
+                   "| 2026-10-19 | 新資料 | 內部人 | 反向 | 沒過 |\n\n### 下一節\n| a | b | c | d | e |\n", encoding="utf-8")
+    rows = research_optimizations(doc)
+    assert [row["what"] for row in rows] == ["前 10 名", "內部人"] and rows[0]["verdict"] == "沒過"
+    assert research_optimizations(tmp_path / "missing.md") == []

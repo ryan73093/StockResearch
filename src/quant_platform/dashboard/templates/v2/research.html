@@ -33,6 +33,29 @@
   <p class="muted small" style="margin:10px 0 0">完整的方法、數字與淘汰原因：<a href="/project/research_method">研究方法</a>（第 7～9 節）；每個規則走到哪一關：<a href="/research/pool">選手池</a>。</p>
 </section>
 
+{% if optimizations %}
+<section class="card" id="optimizations">
+  <div class="card__head"><h2>最佳化紀錄 <span class="badge">{{ optimizations|length }} 項</span></h2><span class="muted small">每個試驗做完就加一行，最新在上；細節在<a href="/project/research_method">研究方法</a>第 7 節</span></div>
+  <div class="table-wrap table-wrap--stack table-wrap--tall">
+    <table class="table--stack">
+      <thead><tr><th>日期</th><th>家族</th><th>做了什麼</th><th>結果</th><th>判定</th></tr></thead>
+      <tbody>
+      {% for row in optimizations %}
+        <tr>
+          <td data-primary class="small">{{ row.date }}</td>
+          <td data-label="家族"><span class="badge">{{ row.family }}</span></td>
+          <td data-label="做了什麼" data-wide>{{ row.what }}</td>
+          <td data-label="結果" data-wide class="small">{{ row.result }}</td>
+          <td data-label="判定"><span class="badge {{ 'badge--ok' if row.verdict.startswith('過') else ('badge--warn' if row.verdict in ('進行中', '描述', '不做', '不採用') or row.verdict.startswith('部分') or row.verdict.startswith('收穫') else 'badge--bad') }}">{{ row.verdict }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　<b>家族</b>：機器學習、深度學習、強化學習、規則、組合、新資料、搜尋、預測、分析。<b>判定</b>：過＝照跑之前寫好的門檻通過；沒過＝照實記錄、不採用；進行中＝背景還在跑；不做／不採用＝診斷顯示不值得或沒用。過門檻的規則會自動進每月滾動與前向觀察。</p>
+</section>
+{% endif %}
+
 <section class="card" id="best">
   <div class="card__head"><h2>目前最好的規則 <span class="badge">T0、T0 候選、T1</span></h2><a class="small" href="/research/pool">全部規則</a></div>
   {% if best %}

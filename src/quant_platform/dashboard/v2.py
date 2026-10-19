@@ -267,6 +267,31 @@ def research_conclusions(path: Path) -> list[str]:
     return output
 
 
+OPTIMIZATIONS_HEADING = "最佳化紀錄（網站"
+
+
+def research_optimizations(path: Path) -> list[dict[str, str]]:
+    """2026-10-20 (使用者：持續優化每一個策略，要看得到結果): the rows of research_method.md's optimization log table,
+    newest first as written there (the document is the one place it is kept)."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    output, inside = [], False
+    for line in lines:
+        if line.startswith("#"):
+            if inside:
+                break
+            inside = OPTIMIZATIONS_HEADING in line
+            continue
+        if not inside or not line.startswith("|") or line.startswith("|---") or "做了什麼" in line:
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 5:
+            output.append(dict(zip(("date", "family", "what", "result", "verdict"), cells, strict=True)))
+    return output
+
+
 def ml_view(research_dir: Path) -> dict[str, object]:
     """2026-10-06: the walk-forward models' out-of-sample diagnostics and the RL overlay's report."""
     models, tech = [], []
@@ -1007,6 +1032,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             yearly=yearly_matrix(research_dir, best) if best else None,
             forward_map={row["rule_hash"]: row for row in overview["forward_stocks"]} if overview else {},
             conclusions=research_conclusions(_project_root() / DOCS["research_method"][1]) if tab == "overview" else [],
+            optimizations=research_optimizations(_project_root() / DOCS["research_method"][1]) if tab == "overview" else [],
             recent_jobs=[job for job in jobs if job.get("status") != "running"
                          and not str(job.get("command") or "").startswith("scheduler")][:6],
             round_view=round_view,
