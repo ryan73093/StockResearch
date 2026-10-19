@@ -22,6 +22,10 @@
   <div class="kpi"><div class="kpi__label">相對 0050（÷ 投入）</div><div class="kpi__value {{ 'up' if (latest.excess or 0) > 0 else ('down' if (latest.excess or 0) < 0 else '') }}">{{ '{:+.2%}'.format(latest.excess) if latest.excess is not none else '—' }}</div></div>
   <div class="kpi"><div class="kpi__label">投入・現金</div><div class="kpi__value">{{ '{:,.0f}'.format(latest.contributed) }}<small>・現金 {{ '{:,.0f}'.format(latest.cash) }}</small></div></div>
 </div>
+{% set out = forward.sell_all %}
+{% if out %}
+<p class="small" style="margin:0 0 12px"><b>今天全部賣掉</b>（{{ latest.date }} 收盤價、扣手續費、證交稅與滑價 {{ '{:,.0f}'.format(out.costs) }} 元）實際拿回 <strong>{{ '{:,.0f}'.format(out.cash_back) }}</strong> 元，比投入的 {{ '{:,.0f}'.format(latest.contributed) }} 元 <strong class="{{ 'up' if out.gain >= 0 else 'down' }}">{{ '多' if out.gain >= 0 else '少' }} {{ '{:,.0f}'.format(out.gain|abs) }}</strong> 元；同樣的錢買 0050 全部賣掉拿回 {{ '{:,.0f}'.format(out.bench_back) }} 元（{{ '多' if out.bench_gain >= 0 else '少' }} {{ '{:,.0f}'.format(out.bench_gain|abs) }}）。這個規則比 0050 <strong class="{{ 'up' if out.ahead >= 0 else 'down' }}">{{ '多拿回' if out.ahead >= 0 else '少拿回' }} {{ '{:,.0f}'.format(out.ahead|abs) }}</strong> 元。</p>
+{% endif %}
 
 {% if board_row %}
 <section class="card">

@@ -829,6 +829,7 @@ class StockForwardTracker:
         problems = reconcile(days, marks).get(rule_hash, [])
         decisions = self.meta_decisions() if item.get("kind") == "meta-ai" else []
         return {"item": item, "latest": latest, "holdings": holdings, "trades": trades, "results": results,
+                "sell_all": sell_all(latest, self._costs) if latest else None,
                 "adjustments": adjustments,
                 "decisions": list(reversed(decisions)), "rebased": sorted((marks.get(rule_hash) or {}).items()),
                 "series": series, "sessions": len(days), "problems": problems,
@@ -914,6 +915,27 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
     summary = {"realized": realized, "wins": wins, "losses": losses, "sells": wins + losses,
                "unrealized": sum(item["pnl"] for item in positions.values()), "positions": positions}
     return list(reversed(rows)), summary
+
+
+def sell_all(record: dict, costs) -> dict[str, float]:
+    """2026-10-20 (使用者：未實現損益不叫賺錢): what selling every holding at the latest close would put in the account
+    after the fee, the tax and the slippage — the cash an owner would hold — and the same for the 0050 account."""
+    from quant_platform.research.legacy_challenger import _tax_kind
+
+    back, paid = float(record["cash"]), 0.0
+    for row in record["holdings"]:
+        units, close = float(row["units"]), float(row["close"])
+        if units <= 0 or close <= 0:
+            continue
+        amount = units * close * (1 - costs.slippage_bps / 10_000)
+        fee, tax = costs.fee(amount), costs.tax(amount, _tax_kind(row["code"]), "SELL")
+        back += amount - fee - tax
+        paid += fee + tax + units * close - amount
+    bench = float(record["benchmark_value"]) * (1 - costs.slippage_bps / 10_000)
+    bench_back = bench - costs.fee(bench) - costs.tax(bench, "stock_etf", "SELL")
+    contributed = float(record["contributed"])
+    return {"cash_back": back, "costs": paid, "gain": back - contributed, "bench_back": bench_back,
+            "bench_gain": bench_back - contributed, "ahead": back - bench_back}
 
 
 def trade_chart(trades: list[dict], results: dict | None, width: int = 640, height: int = 220) -> dict | None:

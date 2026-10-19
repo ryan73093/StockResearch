@@ -219,6 +219,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_ens": "機器學習集成（多種子提升樹、前五分之一分類器、脊迴歸、60 日標籤，36 個因子、逐年滾動訓練）",
                  "ml_tech_ens": "技術模型（同樣的集成，只用 20 個價量技術因子、逐年滾動訓練）",
                  "ml_gbm_ext": "機器學習集成 G（同模型 F 的集成，特徵加上後來的借券、注意處置、借券費率、股利與現增、股本、自營商因子，不含月營收）",
+                 "ml_gbm_h": "機器學習集成 H（模型 G 的集成，特徵再加上內部人申報賣股與庫藏股買回）",
                  "ml_deep": "深度學習（GRU 讀每檔最近 40 個交易日的報酬、成交值與 12 個因子名次，逐年滾動訓練）",
                  "ml_deep2": "深度學習第二版（GRU 讀 60 個交易日的價量與籌碼 z 分數＋當天因子快照與大盤狀態；標籤 20 日超額報酬，損失 Huber＋偏重前段的 ListNet；10 個種子）",
                  "ml_deep2_top": "深度學習第二版・前一成（同上，學「之後 20 日是否在當天前 10%」；10 個種子）",
@@ -2817,6 +2818,22 @@ def model_g_batch() -> list[DailyRule]:
                       check="weekly", industry_cap=0.3, hold="trend", min_hold=0)]
 
 
+def model_h_batch() -> list[DailyRule]:
+    """2026-10-20 (使用者：持續優化每一個策略): gbm-2.3.0 (model H: model G with the insiders' notices and the buyback
+    programs) — only if its development years' top-20 gain is at least gbm-2.2.0's (registered, research_method §7) —
+    in model G's two frames: the cost-aware switching one (#4914) and the trend-hold one."""
+    from quant_platform.research.model_ensemble import gate
+
+    check = gate(Path("instance") / "research" / "models", "gbm-2.3.0", "gbm-2.2.0")
+    print(f"gbm-2.3.0 門檻（2016-2020 前 20 名多賺，對 gbm-2.2.0）：{check}", flush=True)
+    if not check["passed"]:
+        return []
+    return [DailyRule(name="機器學習集成（模型 H）：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股",
+                      factors={"ml_gbm_h": 1.0}, check="weekly", keep=3, min_hold=0, industry_cap=0.3, switching="cost1"),
+            DailyRule(name="機器學習集成（模型 H）：前 20 名、同產業最多 3 成、每週決策、月線上續抱", factors={"ml_gbm_h": 1.0},
+                      check="weekly", industry_cap=0.3, hold="trend", min_hold=0)]
+
+
 def cost_switch_batch() -> list[DailyRule]:
     """2026-10-12: cost-aware switching on the two consensus frames that passed — the T0 consensus top 20
     (#2272) and the development-period consensus top 40 (#2275); each is one new trial."""
@@ -3153,7 +3170,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

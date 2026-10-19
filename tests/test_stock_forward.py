@@ -461,3 +461,21 @@ def test_the_sales_chart_cumulates_each_sale_then_adds_the_paper_result():
     assert first["up"] and not second["up"] and "累計 +100" in first["title"] and "累計 +50" in second["title"]
     assert first["y"] < chart["zero"] and second["y"] == chart["zero"]          # one above the zero line, one below
     assert trade_chart([{"date": "2026-09-01", "side": "BUY", "code": "A"}], None) is None
+
+
+def test_selling_everything_today_returns_the_cash_after_fees_tax_and_slippage():
+    """2026-10-20 (使用者：未實現損益不叫賺錢)."""
+    from quant_platform.research.costs import CostModel
+    from quant_platform.research.stock_forward import sell_all
+
+    costs = CostModel(fee_rate=0.001425, fee_discount=1.0, minimum_fee=20, slippage_bps=10.0)
+    record = {"cash": 1_000.0, "contributed": 300_000.0, "benchmark_value": 290_000.0,
+              "holdings": [{"code": "2330", "units": 100.0, "close": 1_000.0}, {"code": "1101", "units": 0.0, "close": 30.0}]}
+    out = sell_all(record, costs)
+    amount = 100 * 1_000 * (1 - 0.001)                                          # 0.1% slippage
+    fee, tax = max(20, int(amount * 0.001425)), int(amount * 0.003)
+    assert out["cash_back"] == pytest.approx(1_000 + amount - fee - tax)
+    assert out["gain"] == pytest.approx(out["cash_back"] - 300_000)
+    bench = 290_000 * (1 - 0.001)
+    assert out["bench_back"] == pytest.approx(bench - max(20, int(bench * 0.001425)) - int(bench * 0.001))   # ETF tax 0.1%
+    assert out["ahead"] == pytest.approx(out["cash_back"] - out["bench_back"])

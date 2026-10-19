@@ -48,6 +48,9 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # 2026-10-16: the same ensemble on every rule factor but monthly revenue — the families added since
           # (lending and short selling, notices, lending fees, dividends and new shares, issuance, dealers) included
           "ml_gbm_ext": {"version": "gbm-2.2.0", "label": "ensemble", "features": "extended"},
+          # 2026-10-20 (使用者：持續優化每一個策略): model G's ensemble on every factor now — the insiders' notices to
+          # sell and the buyback programs added (chips.DISCLOSURE_FACTORS); judged against gbm-2.2.0
+          "ml_gbm_h": {"version": "gbm-2.3.0", "label": "ensemble", "features": "extended"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
