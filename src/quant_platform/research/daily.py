@@ -2858,6 +2858,17 @@ def deep2_neutral_batch() -> list[DailyRule]:
                       factors={"ml_deep2_volneutral": 1.0}, **common)]
 
 
+def three_families_batch() -> list[DailyRule]:
+    """2026-10-20 (使用者：持續優化每一個策略; the factor correlations): the strongest score of three families that do not
+    move together — the deep model (with the volatility family), the T0 consensus (price strength) and model G (the
+    gradient boosting models) — a third each of the day's percentiles, in #4916's frame (cost-aware switching, money by
+    predicted drop). Registered (research_method §7): passes if a T0 候選 (high-risk or not) on the money-against-falls
+    frontier."""
+    return [DailyRule(name="三家合併（深度學習＋T0 共識＋模型 G 各三分之一）：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股、依預測下跌機率配置",
+                      factors={"ml_deep2_top": 1.0, "t0_consensus": 1.0, "ml_gbm_ext": 1.0}, check="weekly", keep=3,
+                      min_hold=0, industry_cap=0.3, weighting="inverse_risk", switching="cost1")]
+
+
 def cost_all_batch() -> list[DailyRule]:
     """2026-10-20 (使用者：持續優化每一個策略): cost-aware switching (switching cost1: a leaving holding is replaced only
     when the replacement's expected excess beats it by a round trip) on every passing single rule (T0 / T0 候選, high-risk
@@ -3268,7 +3279,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
