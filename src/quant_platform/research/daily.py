@@ -253,7 +253,12 @@ META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現�
                 "rolling_equal": "8 個逐年挑選的槽位平均（機器人 3.1 的對照）",
                 "rl_free": "RL 機器人 4.0 的每檔比重（每天自己決定買哪些、各多少、留多少現金；只受交易所規則限制）",
                 "rl_free41": "RL 機器人 4.1 的每檔比重（同 4.0，訓練帳戶是 30 萬＋每月 1 萬、最低手續費、整股）"}
-RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FACTORS, **META_FACTORS}
+# 2026-10-20 (使用者：持續優化每一個策略; the factor correlations: the deep model's score ran −0.70 with low volatility
+# and +0.63 with the predicted drop): a model's score ranked within its volatility tenth of the day — what it says beyond
+# picking volatile stocks (factor neutralization). Not a model feature (not in FACTOR_LABELS).
+NEUTRAL_FACTORS = {"ml_deep2_volneutral": "深度學習第二版前一成・同波動組內排名（去掉挑高波動的成分）"}
+NEUTRAL_OF = {"ml_deep2_volneutral": "ml_deep2_top"}
+RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FACTORS, **META_FACTORS, **NEUTRAL_FACTORS}
 WINDOWS = {"1y": 12, "3y": 36}
 
 
@@ -523,6 +528,8 @@ class FactorPanel:
         return self._cache[factor]
 
     def _compute(self, factor: str):
+        if factor in NEUTRAL_FACTORS:                 # 2026-10-20: the score's percentile within the volatility tenth
+            return volatility_neutral(self.matrix(NEUTRAL_OF[factor]), -self.matrix("low_volatility_60")).T
         if factor in META_FACTORS:
             from quant_platform.research.factor_timing import scores as timing_scores
             from quant_platform.research.rl_timing import ALL_VERSION, BLOCK_VERSION, VERSION as ROBOT_VERSION
@@ -970,6 +977,21 @@ class FactorPanel:
         # 1.4.2 (2026-10-15): an equal score goes to the more liquid stock (20-session turnover), not the lower code
         order = np.lexsort((-self.turnover_20[chosen, position], -score))
         return [self.symbols[chosen[index]] for index in order]
+
+
+def volatility_neutral(score: np.ndarray, volatility: np.ndarray, tenths: int = 10) -> np.ndarray:
+    """symbols × sessions: each day, the stocks with a score and a volatility cut into ``tenths`` equal groups by
+    volatility, the score's percentile within its group (0–1]; NaN for the others and for a day of fewer than 50."""
+    output = np.full(score.shape, np.nan, dtype=np.float64)
+    for column in range(score.shape[1]):
+        known = np.isfinite(score[:, column]) & np.isfinite(volatility[:, column])
+        rows = np.flatnonzero(known)
+        if rows.size < 50:
+            continue
+        order = pd.Series(volatility[rows, column]).rank(method="first").to_numpy() - 1
+        group = np.minimum((order * tenths // rows.size).astype(int), tenths - 1)
+        output[rows, column] = pd.Series(score[rows, column]).groupby(group).rank(pct=True).to_numpy()
+    return output
 
 
 def _percentile(values: np.ndarray) -> np.ndarray:
@@ -2818,6 +2840,18 @@ def model_g_batch() -> list[DailyRule]:
                       check="weekly", industry_cap=0.3, hold="trend", min_hold=0)]
 
 
+def deep2_neutral_batch() -> list[DailyRule]:
+    """2026-10-20 (使用者：持續優化每一個策略): the deep rules #4916 (money by predicted drop) and #4913 with the deep
+    score ranked within each volatility tenth (ml_deep2_volneutral). Registered (research_method §7, before the
+    results): each passes if it is a T0 候選 (high-risk or not) and on the money-against-falls frontier — no passing
+    rule both ends higher and falls less in 0050's falls."""
+    common = {"check": "weekly", "keep": 3, "min_hold": 0, "industry_cap": 0.3, "switching": "cost1"}
+    return [DailyRule(name="深度學習第二版・同波動組內排名：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股、依預測下跌機率配置",
+                      factors={"ml_deep2_volneutral": 1.0}, weighting="inverse_risk", **common),
+            DailyRule(name="深度學習第二版・同波動組內排名：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股",
+                      factors={"ml_deep2_volneutral": 1.0}, **common)]
+
+
 def model_h_batch() -> list[DailyRule]:
     """2026-10-20 (使用者：持續優化每一個策略): gbm-2.3.0 (model H: model G with the insiders' notices and the buyback
     programs) — only if its development years' top-20 gain is at least gbm-2.2.0's (registered, research_method §7) —
@@ -3170,7 +3204,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

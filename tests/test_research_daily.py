@@ -700,3 +700,19 @@ def test_a_stop_loss_exit_says_so():
                    days[0], days[-1], trace=trace)
     # A, stopped out, is barred from the day's ranking: D is third among the rest
     assert trace["why"][days[5]] == {"A": "從買進後的最高價跌超過 15%（停損）", "D": "新進前 3 名（當天第 3 名）"}
+
+
+def test_a_score_ranked_within_its_volatility_tenth():
+    """2026-10-20: the deep score ran −0.70 with low volatility — ranked within the day's volatility tenths, a volatile
+    stock no longer ranks high for being volatile."""
+    from quant_platform.research.daily import volatility_neutral
+
+    volatility = np.arange(100, dtype=float)[:, None]               # one day, 100 stocks, ten tenths of 10
+    score = volatility.copy()                                        # the score is the volatility itself
+    score[5] = 1_000.0                                               # a calm stock the model likes most
+    out = volatility_neutral(score, volatility)
+    assert out.shape == (100, 1)
+    assert out[5, 0] == 1.0 and out[9, 0] == pytest.approx(0.9)      # first tenth: stock 5 top, 9 second
+    assert out[99, 0] == 1.0 and out[90, 0] == pytest.approx(0.1)    # the top of every tenth ties at 1
+    few = volatility_neutral(score[:40], volatility[:40])
+    assert np.isnan(few).all()                                       # fewer than 50 stocks: nothing

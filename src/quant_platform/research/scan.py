@@ -68,7 +68,7 @@ SHORT = {
     "earnings_yield": "本益比低", "book_to_price": "淨值比低", "roe_ttm": "ROE", "gross_margin": "毛利率",
     "operating_margin_change": "營益率增", "eps_growth": "EPS 成長", "low_debt": "負債低", "fip_12": "趨勢連續",
     "imom_12": "日內動能", "resid_mom_12": "殘差動能", "ml_gbm": "模型A", "ml_gbm_excess": "模型B",
-    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "ml_gbm_ext": "模型G", "ml_gbm_h": "模型H", "low_insider_sell_60": "內部人不賣", "buyback_60": "庫藏股", "ml_deep": "深度模型", "ml_deep2": "深度模型2", "ml_deep2_top": "深度模型2前一成", "ml_deep3": "深度模型3", "ml_deep2_wide": "深度模型2加上櫃", "rl_tech": "技術機器人",
+    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "ml_gbm_ext": "模型G", "ml_gbm_h": "模型H", "ml_deep2_volneutral": "深度2同波動", "low_insider_sell_60": "內部人不賣", "buyback_60": "庫藏股", "ml_deep": "深度模型", "ml_deep2": "深度模型2", "ml_deep2_top": "深度模型2前一成", "ml_deep3": "深度模型3", "ml_deep2_wide": "深度模型2加上櫃", "rl_tech": "技術機器人",
     "high_52w_count_60": "新高次數", "range_position_60": "區間位置", "low_ivol_60": "特質低波",
     "low_pv_corr_20": "量價背離", "overnight_reversal_12": "隔夜反轉", "rl_tech_weekly": "技術機器人週",
     "season_month": "同月季節性", "dividend_ahead": "即將除息", "trust_quarter_end": "投信季底作帳",
