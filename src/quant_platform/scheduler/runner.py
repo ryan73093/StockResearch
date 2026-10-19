@@ -671,6 +671,24 @@ def collect_market_news(container: "Container", now: datetime | None = None, get
     return found
 
 
+def run_test_suite(container: "Container", runner=None) -> object | None:
+    """2026-10-20 (docs/project_risks.md item 9): the whole test suite every Sunday at 04:30, the result on the System
+    page (application/test_runs.py); a failure is notified."""
+    from quant_platform.application import test_runs
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.jobs import JobLog
+
+    instance = _instance_dir(container.settings.database_url)
+    with JobLog(instance / "research").start("每週自動測試（全部測試）", "scheduler run_test_suite") as job:
+        summary = test_runs.run(instance.parent, instance / "test_runs", **({"runner": runner} if runner else {}))
+        job.payload["summary"] = (f"通過 {summary['passed']}、失敗 {summary['failed']}、略過 {summary['skipped']}"
+                                  f"（{float(summary['seconds']) / 60:.0f} 分鐘）")
+    if not summary["ok"]:
+        names = "、".join(item["test"].split("::")[-1] for item in summary["failures"][:5]) or "；".join(summary["tail"])
+        _notify_failure(container, f"tests:{datetime.now().date()}", "每週自動測試", names)
+    return summary
+
+
 def collect_tdcc_holding(container: "Container", get=None) -> object | None:
     """2026-10-20: the depository's weekly holder distribution (TDCC open data, only the latest week is free), stored
     each time a new week appears (research/history/tdcc.py); every day at 08:20."""
@@ -894,6 +912,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3 * 3600,
+    )
+    scheduler.add_job(
+        run_test_suite,
+        args=[container],
+        trigger=CronTrigger(day_of_week="sun", hour=4, minute=30, timezone=timezone),
+        id="weekly_test_suite",
+        name="每週自動測試（週日 04:30，結果在系統頁）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=12 * 3600,
     )
     scheduler.add_job(
         collect_tdcc_holding,

@@ -1291,6 +1291,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         items.append(research_tile())
         items.append(dividend_tile(now))
         items.append(host_memory.memory_tile(host_memory.read_host_memory()))
+        from quant_platform.application import test_runs     # 2026-10-20: the weekly test suite
+
+        items.append(test_runs.tile(test_runs.latest(_project_root() / "instance" / "test_runs"), now))
         items.append(line_tile())
         access_on = dependencies.settings.auth_mode == "cloudflare-access"
         items.append({
