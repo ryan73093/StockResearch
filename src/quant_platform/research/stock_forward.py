@@ -625,6 +625,11 @@ class StockForwardTracker:
             based = marks.get(item["rule_hash"]) or {}
             mismatches = sum(len((record.get("replay_check") or {}).get("mismatches") or []) for record in mine
                              if record["date"] not in based)     # a marked day's replay differences have their reason
+            # 2026-10-20 (使用者：未實現損益不叫賺錢): the sales' results and the cash if all were sold today, on the list
+            by_day = {record["date"]: record for record in mine}
+            _trades, results = explain_trades([by_day[day] for day in sorted(by_day)], {},
+                                              float((item.get("rule") or {}).get("trim_above") or 0.0))
+            cashed = sell_all(latest, self._costs) if latest else None
             rows.append({
                 "rule_hash": item["rule_hash"], "name": item["name"], "since": item["since"], "reason": item.get("reason"),
                 "plan": item.get("plan", "dca"), "amount": item.get("amount"),
@@ -642,6 +647,8 @@ class StockForwardTracker:
                 "problems": problems.get(item["rule_hash"], []), "replay_mismatches": mismatches,
                 "final": finals.get(item["rule_hash"]), "stopped": item.get("stopped"), "stop_reason": item.get("stop_reason"),
                 "rebased": sorted((marks.get(item["rule_hash"]) or {}).items()),
+                "realized": results["realized"], "wins": results["wins"], "losses": results["losses"],
+                "unrealized": results["unrealized"], "sell_all": cashed,
             })
         return rows
 
