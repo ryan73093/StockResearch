@@ -25,6 +25,16 @@ function Write-PipelineRecord([string]$Status) {
 Write-PipelineRecord "running"
 
 function Invoke-Step([string]$Label, [string[]]$Arguments) {
+    # 2026-10-20: three pipelines ended with the board at once (3-4 GB and a CPU each) and a deploy timed out; the
+    # board and the month's list are rebuilt by one run at a time — wait while another research process runs the same
+    foreach ($exclusive in @("forward-board", "--step select", "--step holdout")) {
+        if (($Arguments -join " ") -like "*$exclusive*") {
+            while (Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
+                    $_.CommandLine -like "*quant_platform.research*$exclusive*" }) {
+                Start-Sleep -Seconds 60
+            }
+        }
+    }
     $out = Join-Path $logs "$Name-$stamp-$Label.log"
     $err = Join-Path $logs "$Name-$stamp-$Label.err.log"
     Start-Process -FilePath $python -ArgumentList $Arguments -WorkingDirectory $root -NoNewWindow -Wait `
