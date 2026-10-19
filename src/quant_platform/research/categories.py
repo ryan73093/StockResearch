@@ -34,7 +34,7 @@ FAMILY_ORDER = ("T0 共識清單", "機器學習", "深度學習", "RL 機器人
                 "價值殖利率", "籌碼", "公司事件", "營收財報", "成交量規模", "多因子", "反向（學著賠）", "其他")
 FAMILY_NOTES = {
     "機器學習": "把 35 個因子交給逐年滾動訓練的模型打分數",
-    "技術分析機器人": "強化學習的交易機器人，只看價格與成交量，自己決定買進和賣出",
+    "技術分析機器人": "只看價格與成交量的機器人：強化學習版自己決定買進和賣出；第三版是深度學習替股票排名",
     "深度學習": "深度學習模型（讀每檔最近 40 個交易日）打分數",
     "RL 機器人": "強化學習決定各訊號的權重，或每天自己決定每檔比重與現金（含它的對照組：同樣訊號平均）",
     "公司事件": "看股利調升、現金增資、股本膨脹、即將除息等公司事件",
@@ -64,6 +64,8 @@ ROBOT_FACTORS = ("rl_blocks", "block_equal", "rl_rolling", "rolling_equal", "rl_
 def _family(factor: str, weight: float) -> str:
     if factor == "rl_worst" or (weight < 0 and (factor.startswith("ml_") or factor in ROBOT_FACTORS)):
         return "反向（學著賠）"
+    if factor == "ml_tech_deep":                                 # 2026-10-20: the technical robot's third version
+        return "技術分析機器人"
     if factor.startswith("ml_deep"):
         return "深度學習"
     if factor in ROBOT_FACTORS:
@@ -98,6 +100,8 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
             family = "反向（學著賠）"
         elif "RL 機器人" in families:
             family = "RL 機器人"
+        elif "技術分析機器人" in families:
+            family = "技術分析機器人"
         elif "深度學習" in families:
             family = "深度學習"
         elif "機器學習" in families:

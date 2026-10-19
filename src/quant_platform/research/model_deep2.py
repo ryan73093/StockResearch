@@ -41,7 +41,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10", "dl-2.2.0": "top10", "dl-2.4.0": "top10"}
+LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10", "dl-2.2.0": "top10", "dl-2.4.0": "top10",
+          "dl-2.5.0": "top10"}
+# 2026-10-20 (使用者：技術分析機器人有沒有在優化？): the technical robot's third version — dl-2.1.0 seeing prices and
+# volumes only: the sequence without the chip columns and the snapshot of the robot's 20 technical factors
+# (tech_rl.TECH_FEATURES) instead of model G's; judged against the technical ensemble gbm-2.1.0 (PLAIN_AGAINST)
+TECHNICAL = {"dl-2.5.0"}
+PLAIN_AGAINST = {"dl-2.5.0": "gbm-2.1.0"}
 # 2026-10-20 (使用者：持續優化每一個策略; the factor correlations: dl-2.1.0 ran −0.70 with low volatility): dl-2.1.0 learning
 # the day's top tenth of the excess return divided by the stock's own 60-session volatility (known on the day) — a
 # volatile stock no longer reaches the top tenth for being volatile; still judged (held-out choice, gate) on the excess
@@ -104,8 +110,9 @@ def _average(prices: np.ndarray, sessions: int) -> np.ndarray:
     return pd.DataFrame(prices.T).rolling(sessions, min_periods=max(5, sessions // 2)).mean().to_numpy().T
 
 
-def sequence_inputs(fp, eligible: np.ndarray) -> np.ndarray:
-    """session × symbol × SEQUENCE (float16): the day's z-scores (see the module text)."""
+def sequence_inputs(fp, eligible: np.ndarray, chips: bool = True) -> np.ndarray:
+    """session × symbol × SEQUENCE (float16): the day's z-scores (see the module text); without the CHIPS columns
+    when ``chips`` is false (TECHNICAL)."""
     import warnings
 
     panel = fp.panel
@@ -124,7 +131,7 @@ def sequence_inputs(fp, eligible: np.ndarray) -> np.ndarray:
         flow = np.log1p(np.nan_to_num(panel.turnover, nan=0.0))
         turnover = flow - pd.DataFrame(flow.T).rolling(60, min_periods=20).mean().to_numpy().T
     columns = [move - median, intraday, overnight, averages[20], averages[60], averages[200], turnover]
-    columns += [fp.matrix(name) for name in CHIPS]
+    columns += [fp.matrix(name) for name in CHIPS] if chips else []
     output = np.zeros((len(fp.sessions), len(fp.symbols), len(columns)), dtype=np.float16)
     for index, values in enumerate(columns):
         output[:, :, index] = _zscore(values, eligible).astype(np.float16)
@@ -218,13 +225,13 @@ def _runs(sessions: np.ndarray) -> list[tuple[int, int]]:
 class Inputs:
     """The three input blocks on the device, and the batches of (session, symbol) pairs drawn from them."""
 
-    def __init__(self, fp, eligible: np.ndarray, names: tuple[str, ...]) -> None:
+    def __init__(self, fp, eligible: np.ndarray, names: tuple[str, ...], chips: bool = True) -> None:
         import torch
 
         from quant_platform.research.gpu import device
 
         self.on = device()
-        self.sequence = torch.from_numpy(sequence_inputs(fp, eligible)).to(self.on)
+        self.sequence = torch.from_numpy(sequence_inputs(fp, eligible, chips)).to(self.on)
         self.snapshot = torch.from_numpy(snapshot_inputs(fp, eligible, names)).to(self.on)
         self.market = torch.from_numpy(market_inputs(fp, eligible)).to(self.on)
 
@@ -376,8 +383,9 @@ def gate_check_d3(meta: dict, against: dict) -> dict[str, object]:
 
 
 def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
-    """The version's registered gate on its meta (dl-3.0.0 against dl-2.1.0; the others against gbm-2.2.0)."""
-    against = AGAINST_OF.get(version, AGAINST)
+    """The version's registered gate on its meta (dl-3.0.0 against dl-2.1.0; dl-2.5.0 against gbm-2.1.0; the others
+    against gbm-2.2.0)."""
+    against = AGAINST_OF.get(version) or PLAIN_AGAINST.get(version, AGAINST)
     path = root / against / "meta.json"
     other = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
     return gate_check_d3(meta, other) if version in AGAINST_OF else gate_check(meta, other)
@@ -385,7 +393,7 @@ def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
 
 def gate(models_root: str | Path, version: str) -> dict[str, object]:
     root = Path(models_root)
-    against = AGAINST_OF.get(version, AGAINST)
+    against = AGAINST_OF.get(version) or PLAIN_AGAINST.get(version, AGAINST)
     paths = root / version / "meta.json", root / against / "meta.json"
     if not all(path.is_file() for path in paths):
         return {"version": version, "passed": False, "reason": "not trained"}
@@ -416,8 +424,13 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
     if version in WIDE:          # judged and scored on the eligible listed stocks only, as dl-2.1.0 (not TPEx ".TWO")
         eligible = eligible & np.array([symbol.endswith(".TW") for symbol in fp.symbols])[:, None]
     learned = wide_mask(fp) if version in WIDE else eligible      # the stocks it learns from (and normalises among)
-    names = trained_features(out.parent / SNAPSHOT_VERSION, SNAPSHOT_VERSION)
-    inputs = Inputs(fp, learned, names)
+    if version in TECHNICAL:
+        from quant_platform.research.tech_rl import TECH_FEATURES
+
+        names = tuple(TECH_FEATURES)
+    else:
+        names = trained_features(out.parent / SNAPSHOT_VERSION, SNAPSHOT_VERSION)
+    inputs = Inputs(fp, learned, names, chips=version not in TECHNICAL)
     start = LENGTH + 200
     columns = list(range(start, len(fp.sessions)))
     excess = label_block(fp, columns, eligible, "excess", HORIZON)                 # column × symbol, judged on
@@ -445,7 +458,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
     meta.update({"version": version, "label": "deep2", "loss": kind, "architecture": architecture,
                  "learned_from": "listed and TPEx, trading normally" if version in WIDE else "eligible listed",
-                 "features": list(names), "sequence": list(SEQUENCE),
+                 "features": list(names),
+                 "sequence": [name for name in SEQUENCE if version not in TECHNICAL or name not in CHIPS],
                  "market": list(MARKET), "length": LENGTH, "hidden": HIDDEN, "head": list(HEAD), "seeds": list(SEEDS),
                  "epochs": EPOCHS, "patience": PATIENCE, "held_out": HELD_OUT, "horizon": HORIZON,
                  "device": device_name()})
@@ -555,7 +569,8 @@ def scores(fp, folder: str | Path) -> np.ndarray:
 
         meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
         eligible = eligibility(fp)
-        inputs = Inputs(fp, eligible, tuple(meta["features"]))
+        inputs = Inputs(fp, eligible, tuple(meta["features"]),
+                        chips=len(meta.get("sequence") or SEQUENCE) == len(SEQUENCE))
         year = max(int(path.stem.split("-")[0]) for path in saved)
         networks = []
         for path in [path for path in saved if path.stem.startswith(f"{year}-")]:

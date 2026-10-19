@@ -236,6 +236,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_ext": "機器學習集成 G（同模型 F 的集成，特徵加上後來的借券、注意處置、借券費率、股利與現增、股本、自營商因子，不含月營收）",
                  "ml_gbm_h": "機器學習集成 H（模型 G 的集成，特徵再加上內部人申報賣股與庫藏股買回）",
                  "ml_deep2_riskadj": "深度學習第二版・學以波動調整的前一成（不靠挑高波動股）",
+                 "ml_tech_deep": "技術分析機器人第三版（深度學習第二版・前一成，只看價量：60 日價量序列＋20 個技術因子＋大盤狀態）",
                  "ml_deep": "深度學習（GRU 讀每檔最近 40 個交易日的報酬、成交值與 12 個因子名次，逐年滾動訓練）",
                  "ml_deep2": "深度學習第二版（GRU 讀 60 個交易日的價量與籌碼 z 分數＋當天因子快照與大盤狀態；標籤 20 日超額報酬，損失 Huber＋偏重前段的 ListNet；10 個種子）",
                  "ml_deep2_top": "深度學習第二版・前一成（同上，學「之後 20 日是否在當天前 10%」；10 個種子）",
@@ -2970,6 +2971,24 @@ def deep24_batch() -> list[DailyRule]:
                       factors={"ml_deep2_riskadj": 1.0}, **common)]
 
 
+def tech_deep_batch() -> list[DailyRule]:
+    """2026-10-20 (使用者：技術分析機器人有沒有在優化？): the technical robot's third version, dl-2.5.0 (dl-2.1.0 on prices
+    and volumes only) — only past its registered gate (the development years' top-20 gain at least the technical
+    ensemble gbm-2.1.0's, four of five years at +0.6% or more) — in #4913's and #4941's frames. Each passes if it is a
+    T0 候選 (high-risk or not) with more money than #2090, the best purely technical one (research_method §7)."""
+    from quant_platform.research.model_deep2 import gate
+
+    check = gate(Path("instance") / "research" / "models", "dl-2.5.0")
+    print(f"dl-2.5.0 門檻（2016-2020 前 20 名多賺，對 gbm-2.1.0）：{check}", flush=True)
+    if not check.get("passed"):
+        return []
+    common = {"check": "weekly", "keep": 3, "min_hold": 0, "industry_cap": 0.3, "switching": "cost1"}
+    return [DailyRule(name="技術分析機器人第三版（只看價量的深度學習）：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股",
+                      factors={"ml_tech_deep": 1.0}, **common),
+            DailyRule(name="技術分析機器人第三版（只看價量的深度學習）：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股、依預測下跌機率配置＋漲過目標 2 倍賣回",
+                      factors={"ml_tech_deep": 1.0}, weighting="inverse_risk", trim_above=2.0, **common)]
+
+
 def model_h_batch() -> list[DailyRule]:
     """2026-10-20 (使用者：持續優化每一個策略): gbm-2.3.0 (model H: model G with the insiders' notices and the buyback
     programs) — only if its development years' top-20 gain is at least gbm-2.2.0's (registered, research_method §7) —
@@ -3322,7 +3341,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

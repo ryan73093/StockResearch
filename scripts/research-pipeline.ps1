@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -853,6 +853,30 @@ switch ($Name) {
         Invoke-Step "4-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
         Invoke-Step "5-forward" @("-m", "quant_platform.research", "forward")
         Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "techdeep" {
+        # 2026-10-20 (使用者：技術分析機器人有沒有在優化？): the technical robot's third version — dl-2.1.0 on prices and
+        # volumes only (dl-2.5.0), its registered gate against gbm-2.1.0, then its two rules (research_method §7). Waits
+        # for the month's other model work (the GPU and the rolling list).
+        foreach ($other in @("modelh", "deep24", "costall")) {
+            $otherRecord = Join-Path $records "$other.json"
+            while ($true) {
+                $state = if (Test-Path $otherRecord) { Get-Content $otherRecord -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+                $alive = $state -and $state.status -eq "running" -and (Get-Process -Id $state.pid -ErrorAction SilentlyContinue)
+                if (-not $alive) { break }
+                Start-Sleep -Seconds 120
+            }
+        }
+        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.5.0")
+        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "techdeep", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "4-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
+        Invoke-Step "5-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "6-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "7-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "industry" {
         # 2026-10-20 (使用者：持續優化每一個策略): the industry family (daily.INDUSTRY_FACTORS) — its strength, then

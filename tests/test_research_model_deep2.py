@@ -285,3 +285,30 @@ def test_the_command_line_takes_every_registered_model_version(monkeypatch):
     except SystemExit as stop:
         seen["code"] = stop.code
     assert seen["code"] == 0 and {"gbm-2.3.0", "dl-2.4.0"} <= set(VERSIONS)
+
+
+def test_the_technical_version_sees_prices_and_volumes_only_and_its_own_gate(monkeypatch, tmp_path):
+    """2026-10-20: dl-2.5.0 (the technical robot's third version) — the sequence without the chip columns, the robot's
+    20 technical factors as the snapshot, judged against gbm-2.1.0; its scores load with the same inputs."""
+    from quant_platform.research.tech_rl import TECH_FEATURES
+
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "GATE_YEARS", (2017,))
+    _data, fp = _panel()
+    eligible = model.eligibility(fp)
+    full = model_deep2.sequence_inputs(fp, eligible)
+    bare = model_deep2.sequence_inputs(fp, eligible, chips=False)
+    assert full.shape[2] == len(model_deep2.SEQUENCE) and bare.shape[2] == len(model_deep2.SEQUENCE) - len(model_deep2.CHIPS)
+    assert np.array_equal(bare, full[:, :, :bare.shape[2]])                       # the same price and volume columns
+    meta = model.train(fp, tmp_path / "dl-2.5.0", years=[2017], label="deep2", version="dl-2.5.0")
+    assert meta["features"] == list(TECH_FEATURES) and not set(model_deep2.CHIPS) & set(meta["sequence"])
+    assert model_deep2.gate(tmp_path, "dl-2.5.0") == {"version": "dl-2.5.0", "passed": False, "reason": "not trained"}
+    yardstick = tmp_path / "gbm-2.1.0"
+    yardstick.mkdir()
+    (yardstick / "meta.json").write_text(json.dumps({"version": "gbm-2.1.0", "years": {"2017": {"top20_gain": -1.0}}}),
+                                         encoding="utf-8")
+    assert model_deep2.gate(tmp_path, "dl-2.5.0")["against"] == "gbm-2.1.0"
+    scores = model_deep2.scores(fp, tmp_path / "dl-2.5.0")
+    assert scores.shape == (len(fp.sessions), len(fp.symbols)) and np.isfinite(scores).any()
