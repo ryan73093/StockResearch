@@ -441,7 +441,9 @@ td.wrap { white-space: normal; min-width: 180px; }
      squeezed the name into a column two characters wide at 375 px. */
   .table--stack td[data-primary] { grid-column: 1 / -1; display: block; text-align: left; font-size: 15px; }
   .table--stack td[data-primary]::before { content: none; }
-  .table--stack td[data-wide] { grid-column: 1 / -1; text-align: left; }
+  /* 2026-10-19: a wide cell flows as text after its label — as flex items the label (原因, 賺賠) folded into a
+     column one character wide and a rule's name next to its badges into a narrow one */
+  .table--stack td[data-wide] { grid-column: 1 / -1; display: block; text-align: left; }
   .table--stack td[data-wide]::before { margin-right: 8px; }
   .table--stack tbody tr:hover td { background: none; }
   .table--stack .stack-only { display: inline-flex; }

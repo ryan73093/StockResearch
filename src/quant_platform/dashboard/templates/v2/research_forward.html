@@ -113,7 +113,7 @@
           <td class="num" data-label="成交價">{{ '{:,.2f}'.format(trade.price) }}</td>
           <td class="num" data-label="金額">{{ '{:,.0f}'.format(trade.amount) }}</td>
           <td class="num" data-label="手續費＋稅">{{ '{:,}'.format(trade.fee + trade.tax) }}</td>
-          <td class="num" data-label="賺賠">{% if trade.side == 'SELL' and trade.pnl is not none %}<strong class="{{ 'up' if trade.pnl >= 0 else 'down' }}">{{ '賺' if trade.pnl >= 0 else '賠' }} {{ '{:,.0f}'.format(trade.pnl|abs) }}</strong>{% if trade.pnl_pct is not none %}<span class="muted small">（{{ '{:+.1%}'.format(trade.pnl_pct) }}）</span>{% endif %}{% elif trade.side == 'BUY' and trade.now %}<span class="muted small">還拿著，帳面</span> <span class="{{ 'up' if trade.now.pnl >= 0 else 'down' }}">{{ '{:+.1%}'.format(trade.now.pnl_pct) }}</span>{% elif trade.side == 'BUY' and trade.sold_on %}<span class="muted small">{{ trade.sold_on }} 全部賣出，看那筆</span>{% else %}—{% endif %}</td>
+          <td class="num" data-label="賺賠" data-wide>{% if trade.side == 'SELL' and trade.pnl is not none %}<strong class="{{ 'up' if trade.pnl >= 0 else 'down' }}">{{ '賺' if trade.pnl >= 0 else '賠' }} {{ '{:,.0f}'.format(trade.pnl|abs) }}</strong>{% if trade.pnl_pct is not none %}<span class="muted small">（{{ '{:+.1%}'.format(trade.pnl_pct) }}）</span>{% endif %}{% elif trade.side == 'BUY' and trade.now %}<span class="muted small">還拿著，帳面</span> <span class="{{ 'up' if trade.now.pnl >= 0 else 'down' }}">{{ '{:+.1%}'.format(trade.now.pnl_pct) }}</span>{% elif trade.side == 'BUY' and trade.sold_on %}<span class="muted small">{{ trade.sold_on }} 全部賣出，看那筆</span>{% else %}—{% endif %}</td>
           <td data-label="原因" data-wide class="small">{{ trade.why or '—' }}</td>
         </tr>
       {% endfor %}
