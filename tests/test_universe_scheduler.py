@@ -363,6 +363,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "database_backup",
             "research_mirror",
             "market_news_collection",
+            "tdcc_holding_collection",
             "close_availability_probe",
             "research_history_refresh",
             "forward_simulation",
