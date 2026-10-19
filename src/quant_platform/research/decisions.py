@@ -45,14 +45,37 @@ class DecisionStore:
                 "days": {date.fromisoformat(day): list(symbols) for day, symbols in entry["days"].items()},
                 "pending": entry.get("pending"), "again_after": bool(entry.get("again_after"))}
 
-    def keep(self, name: str, ranks: dict[date, list[str]], pending: dict | None, through: date) -> None:
-        """Write down an account's decisions up to ``through`` (never moving an earlier ``through`` back)."""
+    def why(self, name: str) -> dict[str, dict[str, str]]:
+        """2026-10-19 (使用者：每一筆買賣要有原因): day (ISO) -> symbol -> why it came in or left, as decided."""
+        entry = self._kept.get(name) or self._data.get(name) or {}
+        return dict(entry.get("why") or {})
+
+    def add_why(self, name: str, why: dict) -> None:
+        """2026-10-19: reasons for days kept before reasons were written down (``explain_backfill``); a day that has
+        its reason keeps it."""
+        entry = self._kept.get(name) or self._data.get(name)
+        if not entry:
+            return
+        reasons = dict(entry.get("why") or {})
+        for day, notes in why.items():
+            reasons.setdefault(day.isoformat() if isinstance(day, date) else str(day), dict(notes))
+        self._kept[name] = {**entry, "why": reasons}
+
+    def keep(self, name: str, ranks: dict[date, list[str]], pending: dict | None, through: date,
+             why: dict | None = None) -> None:
+        """Write down an account's decisions up to ``through`` (never moving an earlier ``through`` back); ``why``
+        (day -> symbol -> reason) is added to what was kept, a day's reasons written once."""
         entry = self._kept.get(name) or self._data.get(name)
         if entry and date.fromisoformat(entry["through"]) > through:
             return
+        reasons = dict((entry or {}).get("why") or {})
+        for day, notes in (why or {}).items():
+            stamp = day.isoformat() if isinstance(day, date) else str(day)
+            if stamp <= through.isoformat() and stamp not in reasons:
+                reasons[stamp] = dict(notes)
         self._kept[name] = {"through": through.isoformat(),
                             "days": {day.isoformat(): list(symbols) for day, symbols in sorted(ranks.items()) if day <= through},
-                            "pending": pending or None}
+                            "pending": pending or None, "why": reasons}
 
     def save(self) -> None:
         """Merge what this run kept into the file as it is now (another process may have written meanwhile)."""
@@ -90,5 +113,5 @@ def rankings(fp, rule, start: date, end: date, store: DecisionStore | None = Non
         resume = next((day for number, day in enumerate(sessions)            # the first session decided live
                        if number + lag < len(sessions) and sessions[number + lag] > through), None)
         pending = trace["pending"].get(resume) if resume is not None else trace["pending_after"]
-        store.keep(name, ranks, pending, through)
+        store.keep(name, ranks, pending, through, trace.get("why"))
     return ranks

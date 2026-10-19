@@ -749,6 +749,49 @@ class StockForwardTracker:
                 carry = cash
         return combined
 
+    def explain_backfill(self) -> dict[str, int]:
+        """2026-10-19 (使用者：每一筆買賣要有原因): the reasons for the decisions kept before reasons were written down.
+        Each live account's sessions are ranked again from its start, as when they were decided, with the reasons
+        traced; a day's reasons are kept only when the list ranked again is the list that was kept — otherwise the page
+        says only that the stock came in or left."""
+        from quant_platform.research.blend import BlendRule
+        from quant_platform.research.daily import DailyRule, daily_rankings, load
+        from quant_platform.research.decisions import DecisionStore, key
+
+        _data, fp = load(self._history)
+        store = DecisionStore(self._base)
+        counts = {"accounts": 0, "days": 0, "explained": 0, "differed": 0}
+        for item in self.tracked():
+            if item.get("stopped") or item.get("kind") not in ("daily", "blend"):
+                continue
+            start = date.fromisoformat(item["since"])
+            if item["kind"] == "blend":
+                parts = [(key(item["rule_hash"], start, number), sleeve.rule)
+                         for number, sleeve in enumerate(BlendRule.model_validate(item["rule"]).sleeves)]
+            else:
+                parts = [(key(item["rule_hash"], start), DailyRule.model_validate(item["rule"]))]
+            for name, rule in parts:
+                fixed = store.fixed(name)
+                if not fixed or getattr(rule, "universe", "twse") != "twse":
+                    continue
+                trace: dict = {}
+                again = daily_rankings(fp, rule, start, fixed["through"], trace=trace)
+                traced, found = trace.get("why") or {}, {}
+                for day, symbols in fixed["days"].items():
+                    if day not in traced:
+                        continue
+                    counts["days"] += 1
+                    if set(again.get(day, [])) == set(symbols):
+                        found[day] = traced[day]
+                    else:
+                        counts["differed"] += 1
+                if found:
+                    store.add_why(name, found)
+                    counts["explained"] += len(found)
+                counts["accounts"] += 1
+        store.save()
+        return counts
+
     def detail(self, rule_hash: str) -> dict[str, object] | None:
         """One tracked rule's forward record (使用者 2026-10-09：要看它買了哪些股票、做了哪些操作): every
         recorded day's value against 0050, today's holdings with their weights, and every trade and
@@ -767,8 +810,17 @@ class StockForwardTracker:
             total = latest["value"] or 1.0
             holdings = sorted(({**row, "weight": row["value"] / total} for row in latest["holdings"]),
                               key=lambda row: -row["value"])
-        trades = [{**trade, "date": record["date"], "amount": trade["shares"] * trade["price"]}
-                  for record in reversed(days) for trade in record["trades_today"]]
+        # 2026-10-19 (使用者：每一筆買賣賺多少賠多少、要有原因): average-cost results and the decisions' reasons
+        from quant_platform.research.decisions import DecisionStore, key as decision_key
+
+        store, start = DecisionStore(self._base), date.fromisoformat(item["since"])
+        sleeves = len((item.get("rule") or {}).get("sleeves") or []) if item.get("kind") == "blend" else 0
+        why: dict[str, dict[str, str]] = {}
+        for name in ([decision_key(rule_hash, start, number) for number in range(sleeves)] if sleeves
+                     else [decision_key(rule_hash, start)]):
+            for day, notes in store.why(name).items():
+                why.setdefault(day, {}).update(notes)
+        trades, results = explain_trades(days, why, float((item.get("rule") or {}).get("trim_above") or 0.0))
         adjustments = [{**entry, "date": record["date"]} for record in reversed(days)
                        for entry in record.get("adjustments_today") or []]
         series = [{"date": record["date"], "value": record["value"], "benchmark": record["benchmark_value"],
@@ -776,11 +828,81 @@ class StockForwardTracker:
         marks = self.rebases()
         problems = reconcile(days, marks).get(rule_hash, [])
         decisions = self.meta_decisions() if item.get("kind") == "meta-ai" else []
-        return {"item": item, "latest": latest, "holdings": holdings, "trades": trades, "adjustments": adjustments,
+        return {"item": item, "latest": latest, "holdings": holdings, "trades": trades, "results": results,
+                "adjustments": adjustments,
                 "decisions": list(reversed(decisions)), "rebased": sorted((marks.get(rule_hash) or {}).items()),
                 "series": series, "sessions": len(days), "problems": problems,
                 "buys": sum(1 for trade in trades if trade["side"] == "BUY"),
                 "sells": sum(1 for trade in trades if trade["side"] == "SELL")}
+
+
+def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above: float = 0.0
+                   ) -> tuple[list[dict], dict[str, object]]:
+    """2026-10-19 (使用者：前向觀察要看到每一筆買賣賺多少賠多少，還要有買賣的原因): every trade of one account, newest
+    first, with what it made and why.
+
+    Average cost per stock, fees and taxes included: a buy adds what it cost; a sale takes the cost of the shares it
+    sells (its share of the shares held before it) and its proceeds less fee and tax minus that cost is what it made.
+    Shares changed by ex-rights or a capital reduction keep the cost. Why: the day's decision (research/decisions.py)
+    for a stock coming in or leaving; a buy of a stock already held tops it up to its target (the month's money, cash
+    from the day's sales, or other cash such as dividends); a partial sale trims it. Each buy also shows the stock's
+    position now (value against its cost)."""
+    from collections import defaultdict
+
+    units: dict[str, float] = defaultdict(float)
+    basis: dict[str, float] = defaultdict(float)
+    rows: list[dict] = []
+    realized, wins, losses, paid_before = 0.0, 0, 0, None
+    for record in days:
+        day = record["date"]
+        notes = {str(symbol).split(".")[0]: text for symbol, text in (why.get(day) or {}).items()}
+        paid_today = paid_before is not None and float(record["contributed"]) > paid_before + 0.5
+        sold_today = any(trade["side"] == "SELL" for trade in record["trades_today"])
+        for trade in record["trades_today"]:
+            code, shares, price = trade["code"], float(trade["shares"]), float(trade["price"])
+            costs = float(trade.get("fee") or 0) + float(trade.get("tax") or 0)
+            row = {**trade, "date": day, "amount": shares * price}
+            if trade["side"] == "BUY":
+                fresh = units[code] <= 1e-9
+                row["why"] = notes.get(code) or ("新進名單" if fresh else "每月 5 日投入的錢，補到目標比重" if paid_today
+                                                 else "賣出後的現金，補到目標比重" if sold_today
+                                                 else "帳上現金（股利等），補到目標比重")
+                basis[code] += shares * price + costs
+                units[code] += shares
+            else:
+                before = units[code]
+                cost = basis[code] * (min(1.0, shares / before) if before > 1e-9 else 1.0)
+                made = shares * price - costs - cost
+                full = shares >= before - 1e-6
+                row.update(cost=cost, pnl=made, pnl_pct=made / cost if cost else None)
+                row["why"] = notes.get(code) or ("離開名單" if full else
+                                                 f"漲到目標比重的 {trim_above:g} 倍以上，賣回目標比重" if trim_above
+                                                 else "調整比重")
+                basis[code] -= cost
+                units[code] = max(0.0, before - shares)
+                realized += made
+                wins += made > 0
+                losses += made <= 0
+            rows.append(row)
+        held = {row["code"]: float(row["units"]) for row in record["holdings"]}
+        for code in list(units):              # ex-rights and reductions change the shares, not what they cost
+            units[code] = held.get(code, 0.0)
+            if units[code] <= 1e-9:
+                basis[code] = 0.0
+        paid_before = float(record["contributed"])
+    positions = {}
+    if days:
+        for row in days[-1]["holdings"]:
+            cost = basis.get(row["code"]) or 0.0
+            if cost > 0:
+                positions[row["code"]] = {"value": row["value"], "cost": cost, "pnl": row["value"] - cost,
+                                          "pnl_pct": (row["value"] - cost) / cost}
+    for row in rows:
+        if row["side"] == "BUY":
+            row["now"] = positions.get(row["code"])
+    summary = {"realized": realized, "wins": wins, "losses": losses, "sells": wins + losses,
+               "unrealized": sum(item["pnl"] for item in positions.values()), "positions": positions}
+    return list(reversed(rows)), summary
 
 
 def _fixed_hold(rule) -> bool:

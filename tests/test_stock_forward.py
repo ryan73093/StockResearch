@@ -373,3 +373,72 @@ def test_the_chained_record_counts_each_month_on_that_months_list():
     assert a["excess"] == pytest.approx(a["return"] - a["benchmark_return"], abs=1e-6)
     b = found["B"]                                                            # off the November list: December only
     assert b["months"] == ["2026-12"] and b["sessions"] == 1 and b["return"] == pytest.approx(0.02)
+
+
+def test_every_trade_shows_what_it_made_and_why():
+    """2026-10-19 (使用者：每一筆買賣賺多少賠多少，還要有買賣的原因): average cost with fees and taxes, the decision's
+    reason for a stock coming in or leaving, and the top-ups and trims explained by the day."""
+    from quant_platform.research.stock_forward import explain_trades
+
+    def day(when, paid, trades, holdings):
+        return {"date": when, "contributed": paid, "trades_today": trades,
+                "holdings": [{"code": code, "units": units, "value": value} for code, units, value in holdings]}
+
+    def trade(code, side, shares, price, fee, tax=0):
+        return {"code": code, "name": code, "side": side, "shares": shares, "price": price, "fee": fee, "tax": tax}
+    days = [
+        day("2026-09-01", 300_000, [trade("A", "BUY", 100, 10.0, 20)], [("A", 100, 1000)]),
+        day("2026-09-07", 310_000, [trade("A", "BUY", 10, 11.0, 20)], [("A", 110, 1210)]),
+        day("2026-09-08", 310_000, [trade("A", "SELL", 55, 12.0, 20, 2), trade("B", "BUY", 50, 20.0, 20)],
+            [("A", 55, 660), ("B", 50, 1000)]),
+        day("2026-09-09", 310_000, [], [("A", 60.5, 660), ("B", 50, 1000)]),            # a stock dividend: 55 -> 60.5
+        day("2026-09-10", 310_000, [trade("A", "SELL", 60.5, 9.0, 20, 1)], [("B", 50, 1100)]),
+    ]
+    why = {"2026-09-01": {"A.TW": "新進前 20 名（當天第 2 名）"},
+           "2026-09-10": {"A.TW": "跌出前 60 名（當天第 75 名），而且跌破月線"}}
+    rows, summary = explain_trades(days, why, trim_above=2.0)
+    rows = list(reversed(rows))                                               # oldest first here
+    assert rows[0]["why"] == "新進前 20 名（當天第 2 名）"
+    assert rows[1]["why"] == "每月 5 日投入的錢，補到目標比重"                 # money came in that day
+    trim = rows[2]                                                            # half of 1,150 cost: 575
+    assert trim["why"] == "漲到目標比重的 2 倍以上，賣回目標比重"
+    assert trim["pnl"] == pytest.approx(55 * 12 - 22 - 575) and trim["pnl_pct"] == pytest.approx(63 / 575)
+    assert rows[3]["why"] == "新進名單"                                        # no decision kept: a new name
+    last = rows[4]                                                            # 60.5 shares still cost 575
+    assert last["why"] == "跌出前 60 名（當天第 75 名），而且跌破月線"
+    assert last["pnl"] == pytest.approx(60.5 * 9 - 21 - 575)
+    assert summary["wins"] == 1 and summary["losses"] == 1
+    assert summary["realized"] == pytest.approx(63 + 60.5 * 9 - 21 - 575)
+    assert summary["unrealized"] == pytest.approx(1100 - 1020) and rows[3]["now"]["pnl"] == pytest.approx(80)
+
+
+def test_reasons_are_filled_in_only_where_the_ranking_again_is_the_list_kept(tmp_path, monkeypatch):
+    """2026-10-19: decisions kept before reasons were written down get them from ranking the days again — but only a
+    day whose list comes out the same as the one kept."""
+    from quant_platform.research import daily
+    from quant_platform.research.daily import DailyRule
+    from quant_platform.research.decisions import DecisionStore, key
+
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 3))
+
+    class Scripted:
+        sessions, index = days, {day: number for number, day in enumerate(days)}
+        script = {days[0]: ["A", "B", "C", "D"], days[1]: ["D", "E", "F", "A"], days[2]: ["D", "E", "F", "A"]}
+
+        def ranked(self, rule, position):
+            return list(self.script[self.sessions[position]])
+    monkeypatch.setattr(daily, "load", lambda history, universe="twse": (None, Scripted()))
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, min_hold=0)
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    (folder / "tracked.json").write_text(json.dumps([{"rule_hash": rule.rule_hash, "name": "x", "kind": "daily",
+                                                      "rule": rule.model_dump(mode="json"), "since": "2024-01-01"}]),
+                                         encoding="utf-8")
+    name = key(rule.rule_hash, days[0])
+    (folder / "decisions.json").write_text(json.dumps({name: {"through": "2024-01-03", "pending": None, "days": {
+        "2024-01-01": ["A", "B", "C"], "2024-01-02": ["D", "E", "A"], "2024-01-03": ["D", "E", "A"]}}}), encoding="utf-8")
+    found = StockForwardTracker(tmp_path, experiments=False).explain_backfill()
+    assert found == {"accounts": 1, "days": 2, "explained": 1, "differed": 1}
+    why = DecisionStore(tmp_path).why(name)
+    assert why == {"2024-01-01": {"A": "新進前 3 名（當天第 1 名）", "B": "新進前 3 名（當天第 2 名）",
+                                  "C": "新進前 3 名（當天第 3 名）"}}

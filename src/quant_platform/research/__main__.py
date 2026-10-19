@@ -309,6 +309,8 @@ def main() -> int:
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
+    parser.add_argument("--explain", action="store_true",
+                        help="forward：替 2026-10-19 以前的決定補上買賣原因（重算排名，和當時一樣的才補）")
     parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
     parser.add_argument("--freeze", action="store_true",
                         help="forward：把每個帳戶最新紀錄背後的決定寫下來（之後重算不再改變已做的決定）")
@@ -1130,6 +1132,11 @@ def main() -> int:
             print(f"重新起算：{found}", flush=True)
         if args.rebase:                         # 2026-10-15: known causes, not reconciliation errors
             print(f"標成重算基準：{tracker.rebase(args.rebase)} 筆紀錄", flush=True)
+        if args.explain:                        # 2026-10-19: the reasons for the decisions kept before reasons were
+            found = tracker.explain_backfill()  # written down
+            print(f"補上買賣原因：{found['accounts']} 個帳戶、{found['explained']}／{found['days']} 個有換股的決策日"
+                  f"（{found['differed']} 天重算和當時不同，只寫進出）", flush=True)
+            return 0
         if args.freeze:                         # 2026-10-15: the decisions behind every latest record, kept
             differences = tracker.freeze(day)
             print(f"寫下決定；重算和最新紀錄不同的帳戶 {len(differences)} 個", flush=True)

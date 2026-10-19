@@ -1053,7 +1053,9 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
     market refused, looked at again: a refused sell is sold if the rule still would, a place whose buy was refused is
     filled with the best stock the rule would buy that day; the other holdings are not touched until the next decision.
     2026-10-15 (research/decisions.py): ``fixed`` — the decisions already taken up to ``fixed["through"]`` are taken
-    as they were made, only later sessions are ranked; ``trace`` receives the refused orders pending each session."""
+    as they were made, only later sessions are ranked; ``trace`` receives the refused orders pending each session and
+    (2026-10-19, 使用者：每一筆買賣要有原因) ``trace["why"]``: for each session decided here, why each stock came in or
+    left — its place in the day's ranking, the keep zone, the hold rule, the stop-loss, the market filter."""
     sessions = [day for day in fp.sessions if start <= day <= end]
     checks = check_days(sessions, rule.check)
     output: dict[date, list[str]] = {}
@@ -1183,18 +1185,23 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             current = [symbol for symbol in current if symbol not in lost]
             pending_sells -= set(lost)
         holding = list(current)
+        refused_before = set(pending_sells)
         decide = day in checks or count in again
         if tracked and current:
             track(current, position)
         out: set[str] = set()                 # 1.5.0: the stop-loss, every session
+        cause: dict[str, str] = {}            # 2026-10-19: why a holding was forced out
         if rule.stop_loss:
             for symbol in current:
                 price = fp.price(symbol, position)
                 if np.isfinite(price) and price < peak[symbol] * (1 - rule.stop_loss):
                     out.add(symbol)
                     stopped[symbol] = count
+                    cause[symbol] = f"從買進後的最高價跌超過 {rule.stop_loss:.0%}（停損）"
         if risk_veto == "dl1x" and current:          # the deep risk model: the riskiest twentieth sold, every session
-            out |= {symbol for symbol in current if symbol in fp.risky(position, RISK_EXIT_SHARE)}
+            risky_out = {symbol for symbol in current if symbol in fp.risky(position, RISK_EXIT_SHARE)}
+            out |= risky_out
+            cause.update({symbol: "深度風險模型：下跌機率最高的 5%" for symbol in risky_out})
         risk_off = rule.market_filter != "none" and not fp.risk_on(position)
         if not decide:
             if not (current or pending_slots):
@@ -1209,6 +1216,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             for symbol in exit_agent.sells(position, left, held_for, buy_price, peak, ranked):
                 out.add(symbol)
                 stopped[symbol] = count
+                cause[symbol] = "出場模型判斷賣出"
         if stopped:
             barred = {symbol for symbol, at in stopped.items() if count - at < cooldown}
             ranked = [symbol for symbol in ranked if symbol not in barred]
@@ -1261,6 +1269,38 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
         pending_slots = 0 if risk_off else refused_buys + asked
         if not decide and not lost and set(wanted) == set(holding):
             continue
+        if trace is not None and set(wanted) != set(holding):
+            places = {symbol: number for number, symbol in enumerate(ranked, start=1)}
+            zone = rule.top * rule.keep
+
+            def why_in(symbol: str) -> str:
+                place = places.get(symbol)
+                where = f"（當天第 {place} 名）" if place else ""
+                if decide:
+                    return f"新進前 {rule.top} 名{where}"
+                return f"補進前一天沒買到的位置{where}"
+
+            def why_out(symbol: str) -> str:
+                if symbol in cause:
+                    return cause[symbol]
+                if risk_off:
+                    return "大盤跌破 200 日均線，全部出場（大盤濾網）"
+                if symbol not in eligible:
+                    return "不再符合選股條件（股價低於門檻、成交值不足或沒有分數）"
+                place = places.get(symbol)
+                text = f"跌出前 {zone} 名（當天第 {place} 名）"
+                if hold == "trend":
+                    text += "，而且跌破月線"
+                elif rule.min_hold:
+                    text += f"，已持有滿 {rule.min_hold} 個交易日"
+                if switch is not None and decide:
+                    text += "；換成排名更前的股票，扣掉一來一回的成本仍划算"
+                if symbol in refused_before:
+                    text = "前一天跌停或沒成交賣不掉，今天賣出：" + text
+                return text
+            notes = {symbol: why_in(symbol) for symbol in wanted if symbol not in holding}
+            notes.update({symbol: why_out(symbol) for symbol in holding if symbol not in wanted})
+            trace.setdefault("why", {})[when] = notes
         current = wanted
         bought = {symbol: bought.get(symbol, count) for symbol in current}
         if tracked:

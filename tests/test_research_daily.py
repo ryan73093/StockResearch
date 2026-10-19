@@ -670,3 +670,33 @@ def test_a_winner_grown_past_trim_above_times_its_target_is_sold_back_to_it():
     assert trimmed[-1][1] < 1_000 and run.sold > 30_000                    # sold back and the money put to work
     assert DailyRule(name="x", factors={"trend_200": 1.0}).rule_hash == \
         DailyRule(name="x", factors={"trend_200": 1.0}, trim_above=0.0).rule_hash   # off: the same rule
+
+
+def test_each_entry_and_exit_says_why():
+    """2026-10-19 (使用者：每一筆買賣要有原因): the ranking says why a stock came in or left on the day it decided."""
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 5))
+    script = {days[0]: ["A", "B", "C", "D", "E"], days[1]: ["D", "E", "F", "A", "B", "C"],
+              days[2]: ["D", "E", "F", "A", "B", "C"]}
+    panel = ScriptedPanel(days, script)
+    base = {"name": "x", "factors": {"momentum_3": 1.0}, "top": 3, "keep": 1}
+    trace = {}
+    daily_rankings(panel, DailyRule(**base, min_hold=0), days[0], days[2], trace=trace)
+    assert trace["why"][days[0]]["A"] == "新進前 3 名（當天第 1 名）"
+    assert trace["why"][days[1]]["D"] == "新進前 3 名（當天第 1 名）"
+    assert trace["why"][days[1]]["A"] == "跌出前 3 名（當天第 4 名）"
+    held = {}
+    daily_rankings(panel, DailyRule(**base, min_hold=2), days[0], days[2], trace=held)
+    assert days[1] not in held["why"]                                     # kept: no trade, nothing to explain
+    assert held["why"][days[2]]["C"] == "跌出前 3 名（當天第 6 名），已持有滿 2 個交易日"
+
+
+def test_a_stop_loss_exit_says_so():
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 12))
+    script = {day: ["A", "B", "C", "D", "E"] for day in days}
+    a = [100.0, 100.0, 100.0, 120.0, 110.0, 101.0] + [101.0] * (len(days) - 6)
+    panel = PricedPanel(days, script, {name: a if name == "A" else [100.0] * len(days) for name in "ABCDE"})
+    trace = {}
+    daily_rankings(panel, DailyRule(name="x", factors={"trend_200": 1.0}, top=3, keep=1, stop_loss=0.15),
+                   days[0], days[-1], trace=trace)
+    # A, stopped out, is barred from the day's ranking: D is third among the rest
+    assert trace["why"][days[5]] == {"A": "從買進後的最高價跌超過 15%（停損）", "D": "新進前 3 名（當天第 3 名）"}
