@@ -52,6 +52,9 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # 2026-10-20 (使用者：持續優化每一個策略): model G's ensemble on every factor now — the insiders' notices to
           # sell and the buyback programs added (chips.DISCLOSURE_FACTORS); judged against gbm-2.2.0
           "ml_gbm_h": {"version": "gbm-2.3.0", "label": "ensemble", "features": "extended_h"},
+          # 2026-10-20: model G refitted every month (its 57 features; _train_ensemble's "refit": "monthly"); judged
+          # against gbm-2.2.0
+          "ml_gbm_ext_monthly": {"version": "gbm-2.4.0", "label": "ensemble", "features": "extended", "refit": "monthly"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -353,20 +356,43 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
     y60 = label_block(fp, samples, eligible, "excess", 60)
     years = years or list(range(FIRST_YEAR, fp.sessions[-1].year + 1))
     diagnostics = {}
+    # 2026-10-20 (gbm-2.4.0): refitted every month — each month's ensemble learns the labels ended before the month's
+    # first session and is kept as monthly/<the last session before it>.pkl (scores() takes the latest usable model)
+    monthly = VERSIONS.get(version, {}).get("refit") == "monthly"
     for number, year in enumerate(years):
         if job:
             job.update(done=number, current=f"{year} 年的集成模型（{len(KINDS)} 類成員）", force=True)
-        cols20 = training_columns(fp, samples, year, HORIZON)
-        cols60 = training_columns(fp, samples, year, 60)
-        if not cols20 or not cols60:
+        firsts = ({month: next(index for index, day in enumerate(fp.sessions) if day.year == year and day.month == month)
+                   for month in sorted({day.month for day in fp.sessions if day.year == year})} if monthly else {})
+        periods = list(firsts.items()) if monthly else [(None, None)]
+        fitted: dict[object, object] = {}
+        cols20: list[int] = []
+        for month, first in periods:
+            if month is None:
+                cols20, cols60 = training_columns(fp, samples, year, HORIZON), training_columns(fp, samples, year, 60)
+            else:
+                cols20 = [column for column in samples if column + HORIZON < first]
+                cols60 = [column for column in samples if column + 60 < first]
+            if not cols20 or not cols60:
+                continue
+            rows20 = [samples.index(column) for column in cols20]
+            rows60 = [samples.index(column) for column in cols60]
+            ensemble = fit_year(x, y20, rank20, y60, rows20, rows60, PARAMS)
+            if month is None:
+                (out / f"{year}.pkl").write_bytes(pickle.dumps(ensemble, protocol=5))
+            else:
+                (out / MONTHLY).mkdir(parents=True, exist_ok=True)
+                (out / MONTHLY / f"{fp.sessions[first - 1].isoformat()}.pkl").write_bytes(pickle.dumps(ensemble, protocol=5))
+                if job:
+                    job.update(current=f"{year} 年 {month} 月的集成模型（每月重訓）", force=True)
+            fitted[month] = ensemble
+        if not fitted:
             continue
-        rows20 = [samples.index(column) for column in cols20]
-        rows60 = [samples.index(column) for column in cols60]
-        ensemble = fit_year(x, y20, rank20, y60, rows20, rows60, PARAMS)
-        (out / f"{year}.pkl").write_bytes(pickle.dumps(ensemble, protocol=5))
-        tests = [index for index, column in enumerate(samples) if fp.sessions[column].year == year]
+        tests = [index for index, column in enumerate(samples) if fp.sessions[column].year == year
+                 and (None if not monthly else fp.sessions[column].month) in fitted]
         found: dict[str, list] = {"ensemble": [], **{kind: [] for kind in KINDS}}
         for index in tests:
+            ensemble = fitted[None if not monthly else fp.sessions[samples[index]].month]
             if not np.isfinite(rank20[index]).any():
                 continue
             live = np.isfinite(x[index]).any(axis=1)

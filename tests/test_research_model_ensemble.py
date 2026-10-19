@@ -72,3 +72,29 @@ def test_the_technical_model_reads_only_the_robot_s_price_and_volume_factors():
     assert names == tuple(TECH_FEATURES) and model.VERSIONS["gbm-2.1.0"]["label"] == "ensemble"
     rules = daily.BATCHES["techmodel"]()
     assert len(rules) == 1 and rules[0].factors == {"ml_tech_ens": 1.0}
+
+
+def test_the_monthly_version_refits_every_month_and_scores_with_the_months_model(tmp_path, monkeypatch):
+    """2026-10-20: gbm-2.4.0 (model G refitted every month): monthly/<the last session before the month>.pkl, each
+    learning only labels ended before its month; scores() uses the month's model."""
+    monkeypatch.setattr(model, "PARAMS", {**model.PARAMS, "max_iter": 20, "min_samples_leaf": 50})
+    fitted = []
+    real = model_ensemble.fit_year
+
+    def spy(x, y20, rank20, y60, rows20, rows60, params):
+        fitted.append(max(rows20))
+        return real(x, y20, rank20, y60, rows20, rows60, params)
+    monkeypatch.setattr(model_ensemble, "fit_year", spy)
+    fp = FactorPanel(Panel(planted()))
+    folder = tmp_path / "gbm-2.4.0"
+    meta = model.train(fp, folder, "data:x", [2016], label="ensemble", version="gbm-2.4.0")
+    kept = sorted(path.stem for path in (folder / model.MONTHLY).glob("*.pkl"))
+    assert len(kept) == 12 and not list(folder.glob("*.pkl")) and len(fitted) == 12
+    assert kept[0] == "2015-12-31" and all(stamp < "2016-12-31" for stamp in kept)
+    assert fitted == sorted(fitted) and fitted[-1] > fitted[0]                     # later months learn more
+    samples = model.sample_columns(len(fp.sessions))
+    first_june = next(index for index, day in enumerate(fp.sessions) if day.year == 2016 and day.month == 6)
+    assert samples[fitted[5]] + model.HORIZON < first_june                          # June learned before June
+    assert meta["years"]["2016"]["top20_gain"] is not None
+    score = model.scores(fp, folder)
+    assert np.isfinite(score[len(fp.sessions) - 1]).sum() > 20 and np.isnan(score[first_june - 200]).all()
