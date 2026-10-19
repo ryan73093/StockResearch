@@ -328,9 +328,10 @@ def main() -> int:
     parser.add_argument("--sleeves-version", default="rl-sleeves-2.0.0",
                         choices=("rl-sleeves-1.0.0", "rl-sleeves-1.1.0", "rl-sleeves-2.0.0"),
                         help="rl-sleeves：版本（1.1.0 隨機起點；2.0.0 第三個位置是現金、回撤懲罰加倍）")
-    parser.add_argument("--model-version", default="gbm-1.2.0",
-                        choices=("gbm-1.0.0", "gbm-1.1.0", "gbm-1.2.0", "gbm-1.3.0", "gbm-1.4.0", "gbm-2.0.0",
-                                 "gbm-2.1.0", "gbm-2.2.0", "dl-1.0.0", "dl-risk-1.0.0", "dl-2.0.0", "dl-2.1.0", "dl-risk-2.0.0", "dl-3.0.0", "dl-2.2.0"),
+    from quant_platform.research.model import VERSIONS as MODEL_VERSIONS
+
+    # 2026-10-20: every registered version (a hand-kept list left gbm-2.3.0 and dl-2.4.0 out and their runs failed)
+    parser.add_argument("--model-version", default="gbm-1.2.0", choices=sorted(MODEL_VERSIONS),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
@@ -365,7 +366,7 @@ def main() -> int:
     parser.add_argument("--only-new", action="store_true",
                         help="rolling --step select：只評這個月還沒評過的規則，加進原本的名單（2026-10-18：組合帳戶）")
     parser.add_argument("--calm", action="store_true",
-                        help="scan：最後名單只挑開發期 0050 每次大跌（10% 以上）都沒有比 0050 多跌超過 1 個百分點的（使用者 2026-10-18）")
+                        help="scan：最後名單只挑開發期 0050 每次大跌（10%% 以上）都沒有比 0050 多跌超過 1 個百分點的（使用者 2026-10-18）")
     parser.add_argument("--prefilter", action="store_true",
                         help="scan：先在開發期單獨篩每個訊號，只用單獨贏過 0050 的訊號組合（GPU 用來跑 4 個一組）")
     parser.add_argument("--require-new", action="store_true",

@@ -269,3 +269,19 @@ def test_the_volatility_adjusted_version_learns_excess_over_volatility_and_train
     raw = seen["judged"][1][column]
     known = np.isfinite(raw) & (deviation > 0)
     assert np.allclose(seen["labels"][column][known], raw[known] / deviation[known])   # learned: excess ÷ volatility
+
+
+def test_the_command_line_takes_every_registered_model_version(monkeypatch):
+    """2026-10-20: a hand-kept list of versions left gbm-2.3.0 and dl-2.4.0 out and their training never ran."""
+    import sys
+
+    from quant_platform.research import __main__ as cli
+    from quant_platform.research.model import VERSIONS
+
+    seen = {}
+    monkeypatch.setattr(sys, "argv", ["x", "model", "--model-version", "dl-2.4.0", "--help"])
+    try:
+        cli.main()
+    except SystemExit as stop:
+        seen["code"] = stop.code
+    assert seen["code"] == 0 and {"gbm-2.3.0", "dl-2.4.0"} <= set(VERSIONS)
