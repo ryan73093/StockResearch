@@ -235,3 +235,21 @@ def test_the_robot_32_has_todays_models_and_a_defensive_slot(monkeypatch, tmp_pa
     assert meta["version"] == rl_timing.ROLLING32_VERSION and meta["factors"] == ["動能", "跌市穩"]
     robot = rl_timing.scores(fp, tmp_path, "robot", rl_timing.ROLLING32_VERSION)
     assert np.isfinite(robot).sum() > 10
+
+
+def test_the_robot_33_holds_the_slots_alike_before_it_has_a_record(monkeypatch, tmp_path):
+    """2026-10-20: 3.2 sat in cash before its first test year; 3.3 holds the slots alike then (and so does its yardstick)."""
+    data, fp = _blocks_market(monkeypatch)
+    monkeypatch.setattr(rl_timing, "SLOTS_32", {"動能": ("momentum_3", "reversal_1"), "跌市穩": ("low_volatility_60",)})
+    monkeypatch.setattr(rl_timing, "SELECT_FROM", date(2015, 1, 1))
+    monkeypatch.setattr(rl_timing, "SELECT_LEAST", 60)
+    meta = rl_timing.walk_forward_rolling(fp, rl_timing.benchmark_units(data, fp.sessions), tmp_path,
+                                          version=rl_timing.ROLLING33_VERSION)
+    warm = [year for year, item in meta["yearly"].items() if item.get("warm")]
+    assert warm and all(int(year) < rl_timing.FIRST_TEST_YEAR for year in warm)
+    early = [day for day in meta["weights"] if int(day[:4]) < rl_timing.FIRST_TEST_YEAR]
+    assert early and all(np.allclose(meta["weights"][day], 0.5) for day in early)
+    robot = rl_timing.scores(fp, tmp_path, "robot", rl_timing.ROLLING33_VERSION)
+    alike = rl_timing.scores(fp, tmp_path, "equal", rl_timing.ROLLING33_VERSION)
+    first = fp.index[min(date.fromisoformat(day) for day in early)]
+    assert np.isfinite(robot[first]).sum() > 10 and np.allclose(robot[first], alike[first], equal_nan=True)

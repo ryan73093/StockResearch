@@ -91,12 +91,18 @@ ROLLING32_VERSION = "block-rl-3.2.0"
 SLOTS_32 = {**{slot: members for slot, members in SLOTS.items() if slot != "模型"},
             "模型": ("ml_gbm_ens", "ml_gbm_ext", "ml_deep2_top"),
             "跌市穩": ("low_volatility_60", "low_volatility_250", "low_ivol_60", "low_max_return")}
-ROLLING_VERSIONS = (ROLLING_VERSION, ROLLING32_VERSION)
+# 3.3.0 (2026-10-20): 3.2 beat its nine alike in the engine in both periods (+74.5% against −16.0%, +99.0% against
+# −10.4%) but sat in cash from 2015-06 to 2017-12 — no scores before its first test year — and its one-year windows lost
+# for it. 3.3 is 3.2 with the years before FIRST_TEST_YEAR held by the slots alike (the robot abstains when it has no
+# record to learn from), each year's slot factors still chosen before the year; its yardstick the same.
+ROLLING33_VERSION = "block-rl-3.3.0"
+ROLLING_VERSIONS = (ROLLING_VERSION, ROLLING32_VERSION, ROLLING33_VERSION)
+WARM = (ROLLING33_VERSION,)
 
 
 def _slots(version: str) -> dict[str, tuple[str, ...]]:
     """A rolling robot's slots (looked up when called, so a test can swap them)."""
-    return SLOTS_32 if version == ROLLING32_VERSION else SLOTS
+    return SLOTS_32 if version in (ROLLING32_VERSION, ROLLING33_VERSION) else SLOTS
 # 2026-10-16 (使用者：訓練一個賠最多的模型，反著做，看看會怎樣): the robot 3.0's learning with the reward turned around —
 # it learns the eight blocks' weights that lose the most to 0050 (abstaining, i.e. the blocks alike, when its
 # held-out fifth does not lose more than them). A curiosity and a check: a robot that can lose on purpose shows the
@@ -480,6 +486,16 @@ def walk_forward_rolling(fp, benchmark: np.ndarray, out_dir: Path, job=None,
     years = sorted({day.year for day in timelines[0].days if day.year >= FIRST_TEST_YEAR})
     weights: dict[str, list[float]] = {}
     yearly, members = {}, {}
+    if version in WARM:                     # 3.3: the years without a record to learn from, the slots alike
+        for year in sorted({day.year for day in timelines[0].days if day.year < FIRST_TEST_YEAR}):
+            first_session = next(day for day in fp.sessions if day.year == year)
+            chosen = choose_members(fp, first_session, version)
+            days = [day for day in timelines[0].days if day.year == year]
+            members[str(year)] = chosen
+            for day in days:
+                weights[day.isoformat()] = [round(float(value), 6) for value in equal]
+            yearly[str(year)] = {"decisions": len(days), "members": chosen, "warm": True, "abstained": True,
+                                 "robot_excess": 0.0, "equal_excess": 0.0}
     for number, year in enumerate(years):
         first_session = next(day for day in fp.sessions if day.year == year)
         chosen = choose_members(fp, first_session, version)
