@@ -56,7 +56,7 @@ CORRELATION_LIMIT = 0.9
 # overlays; 2026-10-19 the insiders' notices and the buybacks failed their registered event study (research_method §7):
 # features for the models (model H), not signals for the search
 LEFT_OUT = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "dl_risk", "dl_risk2", "low_insider_sell_60",
-            "buyback_60")
+            "buyback_60", "pledge_heavy", "low_pledge")     # 2026-10-20: the pledges wait for their event study
 SHORT = {
     "momentum_12_1": "12 月動能", "momentum_6": "6 月動能", "momentum_3": "3 月動能", "reversal_1": "1 月反轉",
     "reversal_5d": "5 日反轉", "low_volatility_60": "60 日低波", "low_volatility_250": "250 日低波",
@@ -68,7 +68,7 @@ SHORT = {
     "earnings_yield": "本益比低", "book_to_price": "淨值比低", "roe_ttm": "ROE", "gross_margin": "毛利率",
     "operating_margin_change": "營益率增", "eps_growth": "EPS 成長", "low_debt": "負債低", "fip_12": "趨勢連續",
     "imom_12": "日內動能", "resid_mom_12": "殘差動能", "ml_gbm": "模型A", "ml_gbm_excess": "模型B",
-    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "ml_gbm_ext": "模型G", "ml_gbm_h": "模型H", "ml_deep2_volneutral": "深度2同波動", "ml_deep2_riskadj": "深度2波動調整", "low_insider_sell_60": "內部人不賣", "buyback_60": "庫藏股", "ml_deep": "深度模型", "ml_deep2": "深度模型2", "ml_deep2_top": "深度模型2前一成", "ml_deep3": "深度模型3", "ml_deep2_wide": "深度模型2加上櫃", "rl_tech": "技術機器人",
+    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "ml_gbm_ext": "模型G", "ml_gbm_h": "模型H", "ml_deep2_volneutral": "深度2同波動", "ml_deep2_riskadj": "深度2波動調整", "low_insider_sell_60": "內部人不賣", "buyback_60": "庫藏股", "low_pledge": "質押低", "pledge_heavy": "質押過半", "ml_deep": "深度模型", "ml_deep2": "深度模型2", "ml_deep2_top": "深度模型2前一成", "ml_deep3": "深度模型3", "ml_deep2_wide": "深度模型2加上櫃", "rl_tech": "技術機器人",
     "high_52w_count_60": "新高次數", "range_position_60": "區間位置", "low_ivol_60": "特質低波",
     "low_pv_corr_20": "量價背離", "overnight_reversal_12": "隔夜反轉", "rl_tech_weekly": "技術機器人週",
     "season_month": "同月季節性", "dividend_ahead": "即將除息", "trust_quarter_end": "投信季底作帳",

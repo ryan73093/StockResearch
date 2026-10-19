@@ -98,6 +98,14 @@ DISCLOSURE_FACTORS = {
     "buyback_60": "庫藏股買回（60 日內董事會決議要買回的股數佔發行股數）",
 }
 DISCLOSURE_SESSIONS = 60
+# 2026-10-20: directors' and supervisors' pledged shares against what they hold (research/history/pledge.py), each
+# month's from the first session after the 15th of the next month (the filing deadline), until the next month's; a
+# company missing from a month's page has none that month. Heavy pledging deepens falls (margin calls).
+PLEDGE_FACTORS = {
+    "low_pledge": "董監質押低（董監持股中設質的比例，反向）",
+    "pledge_heavy": "董監質押過半（董監持股設質 ≥ 50% 記為 1）",
+}
+PLEDGE_HEAVY = 50.0
 # 2026-10-16 (股本膨脹): new shares over 250 sessions against the shares issued — cash capital increases, convertible
 # bonds and employee shares turned into stock, shares issued in mergers (net share issuance, Pontiff & Woodgate 2008).
 # A stock dividend's new shares are not issuance: the first jump in the shares issued within 70 sessions after its
@@ -445,6 +453,38 @@ class ChipStore:
         frame = pd.DataFrame(share, index=sessions).ffill(limit=CORPORATE_SESSIONS - 1).fillna(0.0)
         frame.loc[frame.index <= first] = np.nan  # before the first announcement nothing is known
         return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
+
+    def pledge_available(self) -> bool:
+        return (self._folder.parent / "pledge" / "ratios.parquet").is_file()
+
+    def pledge_matrix(self, factor: str) -> np.ndarray:
+        """symbols × sessions, PLEDGE_FACTORS: the latest usable month's percent (from its ``usable_from`` session on),
+        reversed (low_pledge) or 1 when at least PLEDGE_HEAVY (pledge_heavy); NaN before the data and for a company
+        not on the latest usable month's page."""
+        table = pq.read_table(self._folder.parent / "pledge" / "ratios.parquet").to_pandas()
+        if self.until is not None:
+            table = table[pd.to_datetime(table["usable_from"]) <= pd.Timestamp(self.until)]
+        sessions = pd.to_datetime(pd.Index(self.sessions))
+        output = np.full((len(self._codes), len(sessions)), np.nan, dtype=np.float32)
+        if not len(table):
+            return output
+        table = table.assign(at=sessions.searchsorted(pd.to_datetime(table["usable_from"]).to_numpy(), side="left"),
+                             code=table["code"].astype(str))
+        starts = sorted(set(table["at"]))
+        column: dict[str, list[int]] = {}                 # a code may be two symbols (listed and TPEx)
+        for index, code in enumerate(self._codes):
+            column.setdefault(code, []).append(index)
+        for number, start in enumerate(starts):
+            if start >= len(sessions):
+                continue
+            end = starts[number + 1] if number + 1 < len(starts) else len(sessions)
+            month = table[table["at"] == start].drop_duplicates("code", keep="last")
+            values = month["percent"].to_numpy(dtype=np.float64)
+            values = -values / 100 if factor == "low_pledge" else (values >= PLEDGE_HEAVY).astype(np.float64)
+            for code, value in zip(month["code"], values, strict=True):
+                for row in column.get(code, ()):
+                    output[row, start:end] = value
+        return output
 
     def disclosure_path(self, factor: str) -> Path:
         history = self._folder.parent

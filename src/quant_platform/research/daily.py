@@ -147,6 +147,7 @@ from quant_platform.research.chips import (
     CORPORATE_FACTORS,
     DEALER_FACTORS,
     DISCLOSURE_FACTORS,
+    PLEDGE_FACTORS,
     ISSUANCE_FACTORS,
     EVENT_FACTORS,
     LENDING_FACTORS,
@@ -209,7 +210,7 @@ def quarter_weights(sessions) -> np.ndarray:
     return weights
 FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS, **EVENT_FACTORS, **TREND_QUALITY,
                  **RAW_V2, **TIME_FACTORS, **SHORT_FACTORS, **ALERT_FACTORS, **LENDING_FACTORS, **CORPORATE_FACTORS,
-                 **ISSUANCE_FACTORS, **DEALER_FACTORS, **DISCLOSURE_FACTORS}
+                 **ISSUANCE_FACTORS, **DEALER_FACTORS, **DISCLOSURE_FACTORS, **PLEDGE_FACTORS}
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
 MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
                  "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
@@ -601,6 +602,10 @@ class FactorPanel:
             if self.chips is None or not self.chips.available() or not self.chips.issuance_available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
             return self.chips.issuance_matrix().T                                  # back to sessions × symbols
+        if factor in PLEDGE_FACTORS:                                                # 2026-10-20
+            if self.chips is None or not self.chips.pledge_available():
+                return np.full((len(self.sessions), len(self.symbols)), np.nan)
+            return self.chips.pledge_matrix(factor).T                              # back to sessions × symbols
         if factor in DISCLOSURE_FACTORS:                                            # 2026-10-19
             if self.chips is None or not self.chips.available() or not self.chips.disclosure_available(factor):
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
