@@ -3085,23 +3085,37 @@ def meta1_batch() -> list[DailyRule]:
     return rules
 
 
-def trend_all_batch() -> list:
-    """2026-10-20 (使用者：已持有滿 20 個交易日——20 天限制還在？): the trend version of every forward account (live or
-    stopped since 10-17) whose rule or a sleeve holds a fixed number of sessions, registered with a full backtest."""
+def trend_all_batch(part: int = 0, parts: int = 1) -> list:
+    """2026-10-20 (使用者：已持有滿 20 個交易日——20 天限制還在？所以回測都亂跑？): the trend version of every passing
+    newest-engine rule (and every forward account) whose rule or a sleeve holds a fixed number of sessions, registered
+    with a full backtest; ``part`` of ``parts`` (by the trend version's hash order) so they run side by side."""
+    import json as _json
+
     from quant_platform.research.blend import parse_spec
+    from quant_platform.research.registry import TrialRegistry, newest
     from quant_platform.research.stock_forward import StockForwardTracker, trend_version
 
+    research = Path("instance") / "research"
+    specs = [item["rule"] for item in StockForwardTracker(research).tracked() if item.get("kind") in ("daily", "blend")]
+    latest = newest([record for record in TrialRegistry(research / "trials.jsonl").records()
+                     if record.kind == "candidate" and record.period == "recent"
+                     and str(record.metrics.get("engine", "")).startswith("daily-1.5")])
+    for record in latest.values():
+        if tier(record.metrics)[0] in PASSING_TIERS:
+            try:
+                specs.append(_json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"])
+            except (OSError, ValueError, KeyError):
+                continue
     output = {}
-    for item in StockForwardTracker(Path("instance") / "research").tracked():
-        if item.get("kind") not in ("daily", "blend"):
-            continue
+    for spec in specs:
         try:
-            trend = trend_version(parse_spec(item["rule"]))
+            trend = trend_version(parse_spec(spec))
         except (KeyError, ValueError, TypeError):
             continue
         if trend is not None:
             output[trend.rule_hash] = trend
-    return list(output.values())
+    ordered = [output[key] for key in sorted(output)]
+    return ordered[part::parts]
 
 
 def role_split_batch() -> list:
@@ -3547,7 +3561,8 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "trendall": trend_all_batch, "robot34": robot34_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "trendall": trend_all_batch,
+           "trendall_a": lambda: trend_all_batch(0, 2), "trendall_b": lambda: trend_all_batch(1, 2), "robot34": robot34_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

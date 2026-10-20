@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -284,6 +285,10 @@ def _daily(args, registry: TrialRegistry) -> int:
         stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
         passed = 0
         for index, rule in enumerate(rules):
+            # 2026-10-20 (AGENTS.md: research runs keep out of 13:30–14:40, the after-close orders): wait between rules
+            while datetime.now(TAIPEI).weekday() < 5 and "13:30" <= datetime.now(TAIPEI).strftime("%H:%M") < "14:40":
+                job.update(current="13:30～14:40 盤後單時段，暫停", force=True)
+                time.sleep(60)
             if rule.universe not in loaded:          # each universe once (R6: TPEx stocks too)
                 job.update(current=f"載入 2013 年起全市場行情（{'上市＋上櫃' if rule.universe == 'all' else '上市'}）",
                            force=True)

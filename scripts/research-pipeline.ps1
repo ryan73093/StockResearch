@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "trendall", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "trendall", "trendall_a", "trendall_b", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -877,12 +877,18 @@ switch ($Name) {
     "trendall" {
         # 2026-10-20 (使用者：20 天持有限制還在？): the month graded again with every fixed-hold rule in its trend version,
         # the trend versions' full backtests registered, the forward accounts and the board
-        Invoke-Step "1-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "3", "--broker", "cathay")
+        Invoke-Step "1-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "4", "--broker", "cathay")
         Invoke-Step "2-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
         Invoke-Step "3-forward" @("-m", "quant_platform.research", "forward")
-        Invoke-Step "4-rules" @("-m", "quant_platform.research", "daily", "--name", "trendall", "--broker", "cathay")
-        Invoke-Step "5-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
-        Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+        Invoke-Step "4-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "trendall_a" {
+        # 2026-10-20: half of the trend versions' full backtests (the other half trendall_b, side by side)
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "trendall_a", "--broker", "cathay")
+    }
+    "trendall_b" {
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "trendall_b", "--broker", "cathay")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "rolesplit" {
         # 2026-10-20 (使用者：因子、策略、DL、RL、ML 各負責什麼): the two role accounts, the statistics, the month's list,
