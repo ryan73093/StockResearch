@@ -269,14 +269,6 @@ def _daily(args, registry: TrialRegistry) -> int:
     if args.name not in daily_research.BATCHES:
         raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(daily_research.BATCHES)}")
     rules = daily_research.BATCHES[args.name]()
-    # 2026-10-20 (使用者 10-13：固定持有是限制不是策略): a rule or blend holding a fixed number of sessions runs only in its
-    # trend version (kept while above its 20-session average, sold once below)
-    from quant_platform.research.stock_forward import trend_version
-
-    converted = [trend_version(rule) for rule in rules]
-    if any(item is not None for item in converted):
-        print(f"固定持有的 {sum(item is not None for item in converted)} 個規則改成月線上續抱版本", flush=True)
-    rules = list({rule.rule_hash: rule for rule in (item or rule for item, rule in zip(converted, rules, strict=True))}.values())
     costs = broker_costs(args.broker)
     command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
     with JobLog(RESEARCH).start(f"每天決策規則・{args.name}（2015-06 起、啟動資金 30 萬＋每月 1 萬）", command,

@@ -154,10 +154,5 @@ def test_the_months_rules_include_blends_without_0050(tmp_path):
         registry.register(spec_hash=spec.rule_hash, spec_name=spec.name, kind="candidate", period="recent",
                           input_hash=str(number), data_fingerprint="x", metrics={"engine": "daily-1.5.0+blend-1.0.0"},
                           report_file=f"{number}.json")
-    graded = rolling.rules(tmp_path)
-    names = [item["spec"]["name"] for item in graded]
-    # the blend with 0050 is left out; 2026-10-20: a fixed holding (DailyRule's default min_hold 20) is graded only in
-    # its trend version, a blend's fixed sleeves too
-    assert names == ["a、月線上續抱", "組合：a＋b、月線上續抱"]
-    assert graded[0]["spec"]["hold"] == "trend"
-    assert all(sleeve["rule"]["hold"] == "trend" for sleeve in graded[1]["spec"]["sleeves"])
+    names = [item["spec"]["name"] for item in rolling.rules(tmp_path)]
+    assert names == ["a", "組合：a＋b"]                                   # the blend with 0050 is left out
