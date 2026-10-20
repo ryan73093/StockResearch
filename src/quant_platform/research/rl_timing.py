@@ -599,18 +599,20 @@ def scores(fp, folder: str | Path, kind: str = "robot", version: str = VERSION) 
 
     if version in ROLLING_VERSIONS:
         return _rolling_scores(fp, folder, kind, version)
-    names = factor_names(version)
+    path = Path(folder) / "meta.json"
+    meta = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    # 2026-10-20: the inputs it was trained on (meta "factors"): factor_names(ALL_VERSION) grows with every new factor
+    # (47 when robot 2.1 was trained on 10-14, 59 on 10-20), and its weights fit only the 47
+    names = list((meta or {}).get("factors") or factor_names(version))
     eligible = eligibility(fp)
     percentiles = np.stack([_rank(np.where(eligible, fp.matrix(name), np.nan).T)
                             for name in names])                                 # factor × session × symbol
     if kind == "equal":
         with np.errstate(invalid="ignore"):
             return np.nanmean(percentiles, axis=0)
-    path = Path(folder) / "meta.json"
     output = np.full((len(fp.sessions), len(fp.symbols)), np.nan, dtype=np.float32)
-    if not path.is_file():
+    if meta is None:
         return output
-    meta = json.loads(path.read_text(encoding="utf-8"))
     decided = sorted((date.fromisoformat(day), np.array(values)) for day, values in meta["weights"].items())
     if not decided:
         return output

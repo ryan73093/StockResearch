@@ -15,6 +15,7 @@ import argparse
 import json
 import sys
 import time
+import traceback
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -275,7 +276,7 @@ def _daily(args, registry: TrialRegistry) -> int:
                                 total=len(rules)) as job:
         loaded: dict[str, tuple] = {}
         stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
-        passed = 0
+        passed, failed = 0, []
         for index, rule in enumerate(rules):
             # 2026-10-20 (AGENTS.md: research runs keep out of 13:30–14:40, the after-close orders): wait between rules
             while datetime.now(TAIPEI).weekday() < 5 and "13:30" <= datetime.now(TAIPEI).strftime("%H:%M") < "14:40":
@@ -288,22 +289,29 @@ def _daily(args, registry: TrialRegistry) -> int:
                                          daily_research.fingerprint(Path(args.base), rule.universe), {})
             data, fp, fingerprint, cache = loaded[rule.universe]
             job.update(done=index, current=rule.name)
-            if getattr(rule, "kind", None) == "blend":    # 2026-10-09: one account across strategy families
-                from quant_platform.research.blend import run_blend_trial
+            try:
+                if getattr(rule, "kind", None) == "blend":    # 2026-10-09: one account across strategy families
+                    from quant_platform.research.blend import run_blend_trial
 
-                record, report = run_blend_trial(rule, args.base, registry, RESEARCH / "reports", costs, data, fp,
-                                                 fingerprint, cache)
-            else:
-                record, report = daily_research.run_trial(rule, args.base, registry, RESEARCH / "reports", costs, data,
-                                                          fp, fingerprint, cache, stamp)
+                    record, report = run_blend_trial(rule, args.base, registry, RESEARCH / "reports", costs, data, fp,
+                                                     fingerprint, cache)
+                else:
+                    record, report = daily_research.run_trial(rule, args.base, registry, RESEARCH / "reports", costs,
+                                                              data, fp, fingerprint, cache, stamp)
+            except Exception as error:  # noqa: BLE001 - 2026-10-20: one rule's error no longer ends a 379-rule batch
+                failed.append(f"{rule.name}：{type(error).__name__}: {str(error)[:160]}")
+                print(f"{rule.name}：失敗 {type(error).__name__}: {error}", flush=True)
+                traceback.print_exc()
+                continue
             reasons = record.metrics.get("reasons") or []
             passed += not reasons
             verdict = "過門檻" if not reasons else "；".join(reasons)
             print(f"{rule.name}：2015-06 起比 0050 {report['full_period_excess']:+.1%}、"
                   f"2020-10 起 {report['since_2020']['excess']:+.1%}；{verdict}", flush=True)
         job.update(done=len(rules), force=True)
-        job.payload["summary"] = f"{len(rules)} 個規則、{passed} 個過門檻"
-    return 0
+        job.payload["summary"] = (f"{len(rules)} 個規則、{passed} 個過門檻"
+                                  + (f"、{len(failed)} 個失敗（第一個：{failed[0]}）" if failed else ""))
+    return 1 if failed else 0
 
 
 def main() -> int:

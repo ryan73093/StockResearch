@@ -259,3 +259,17 @@ def test_the_robot_34_weighs_only_the_three_roles():
     assert list(rl_timing.SLOTS_34) == ["進攻", "趨勢因子", "防守"]
     assert rl_timing._slots(rl_timing.ROLLING34_VERSION) is rl_timing.SLOTS_34
     assert rl_timing.factor_names(rl_timing.ROLLING34_VERSION)[0] == "ml_deep2_top"
+
+
+def test_a_robot_scores_with_the_factors_it_was_trained_on_not_todays_longer_list(tmp_path):
+    days = weekdays(date(2016, 1, 4), date(2017, 6, 30))
+    _data, fp = market(days, stocks=6)
+    trained = ["momentum_3", "reversal_1"]                       # the list saved at training (factor-rl-2.1.0: 47)
+    (tmp_path / "meta.json").write_text(json.dumps({"factors": trained, "weights": {days[300].isoformat(): [1.0, 0.0]}}),
+                                        encoding="utf-8")
+    assert len(rl_timing.factor_names(rl_timing.ALL_VERSION)) > len(trained)
+    scores = rl_timing.scores(fp, tmp_path, "robot", rl_timing.ALL_VERSION)       # 10-20: matmul 59 ≠ 47
+    momentum = fp.matrix("momentum_3")[:, 330]
+    assert int(np.nanargmax(scores[330])) == int(np.nanargmax(momentum))
+    alike = rl_timing.scores(fp, tmp_path, "equal", rl_timing.ALL_VERSION)
+    assert np.isfinite(alike[330]).any()
