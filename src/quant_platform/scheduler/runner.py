@@ -519,6 +519,27 @@ def start_rolling(container: "Container", now: datetime | None = None, launch=No
     return name
 
 
+def start_llm_trader(container: "Container", now: datetime | None = None, launch=None) -> str | None:
+    """2026-10-20 (使用者：LLM 能不能做成交易 agent): on trading days at 15:20, once the day's prices are in, the LLM
+    trader's decision in its own process (scripts/start-research.ps1 -Name llmtrader; research/llm_trader.py)."""
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if not container.market_calendar.calendar("TW").is_trading_day(local_now.date()):
+        return None
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch("llmtrader")
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Name",
+                        "llmtrader"], check=False, timeout=120)
+    return "llmtrader"
+
+
 def retrain_models(container: "Container", now: datetime | None = None) -> object | None:
     """Every trading day at 22:45: a model that a forward-observed rule uses and that has no model for this
     year yet gets one (trained on everything before the year's first session). Once a year in practice."""
@@ -966,6 +987,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=6 * 3600,
+    )
+    scheduler.add_job(
+        start_llm_trader,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=20, timezone=timezone),
+        id="llm_trader",
+        name="LLM 交易員（交易日 15:20 收盤資料進來後決定，隔天收盤成交；前向實驗）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=2 * 3600,
     )
     scheduler.add_job(
         check_invariants,

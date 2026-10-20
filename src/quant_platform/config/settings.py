@@ -137,6 +137,7 @@ class Settings:
     llm_monthly_budget_usd: float = 5.0
     news_events_enabled: bool = True
     news_events_monthly_budget_usd: float = 4.0
+    llm_trader_monthly_budget_usd: float = 0.5      # 2026-10-20: the LLM trader, inside the US$5 total
     # 2026-10-13: the owner's hypothesis checks (research/hypothesis.py), inside the same total
     hypothesis_monthly_budget_usd: float = 0.5
     rag_local_dimensions: int = 384
@@ -234,6 +235,7 @@ class Settings:
             research_agent_monthly_budget_usd=max(0.0, float(os.getenv("RESEARCH_AGENT_MONTHLY_BUDGET_USD", "1"))),
             llm_monthly_budget_usd=max(0.0, float(os.getenv("LLM_MONTHLY_BUDGET_USD", "5"))),
             news_events_enabled=os.getenv("NEWS_EVENTS_ENABLED", "true").lower() in {"1", "true", "yes"},
+            llm_trader_monthly_budget_usd=max(0.0, float(os.getenv("LLM_TRADER_MONTHLY_BUDGET_USD", "0.5"))),
             news_events_monthly_budget_usd=max(0.0, float(os.getenv("NEWS_EVENTS_MONTHLY_BUDGET_USD", "4"))),
             hypothesis_monthly_budget_usd=max(0.0, float(os.getenv("HYPOTHESIS_MONTHLY_BUDGET_USD", "0.5"))),
             research_agent_rounds_per_night=max(0, min(10, int(os.getenv("RESEARCH_AGENT_ROUNDS_PER_NIGHT", "3")))),

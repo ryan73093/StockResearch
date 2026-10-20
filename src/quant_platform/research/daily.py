@@ -277,7 +277,11 @@ META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現�
                 "rolling34_equal": "三個角色平均（機器人 3.4 的對照）",
                 "rolling33_equal": "9 個逐年挑選的槽位平均，2015-06 起（機器人 3.3 的對照）",
                 "rl_free": "RL 機器人 4.0 的每檔比重（每天自己決定買哪些、各多少、留多少現金；只受交易所規則限制）",
-                "rl_free41": "RL 機器人 4.1 的每檔比重（同 4.0，訓練帳戶是 30 萬＋每月 1 萬、最低手續費、整股）"}
+                "rl_free41": "RL 機器人 4.1 的每檔比重（同 4.0，訓練帳戶是 30 萬＋每月 1 萬、最低手續費、整股）",
+                # 2026-10-20 (使用者：LLM 能不能做成交易 agent): the LLM trader's daily choice and its mechanical twin
+                # (research/llm_trader.py), forward only
+                "llm_trader": "LLM 交易員每天收盤後的選擇（從 #5163 三個子帳戶的前 20 名挑，隔天收盤成交）",
+                "llm_control": "LLM 交易員的對照組（同樣的候選，固定規則：留下仍在候選的持股，依名次補滿）"}
 # 2026-10-20 (使用者：持續優化每一個策略; the factor correlations: the deep model's score ran −0.70 with low volatility
 # and +0.63 with the predicted drop): a model's score ranked within its volatility tenth of the day — what it says beyond
 # picking volatile stocks (factor neutralization). Not a model feature (not in FACTOR_LABELS).
@@ -574,6 +578,11 @@ class FactorPanel:
     def _compute(self, factor: str):
         if factor in NEUTRAL_FACTORS:                 # 2026-10-20: the score's percentile within the volatility tenth
             return volatility_neutral(self.matrix(NEUTRAL_OF[factor]), -self.matrix("low_volatility_60")).T
+        if factor in ("llm_trader", "llm_control"):              # 2026-10-20: the LLM trader's stored choices
+            from quant_platform.research.llm_trader import scores as llm_scores
+
+            research = Path(self.models).parent if self.models is not None else Path("missing")
+            return llm_scores(self, research, "llm" if factor == "llm_trader" else "control")
         if factor in META_FACTORS:
             from quant_platform.research.factor_timing import scores as timing_scores
             from quant_platform.research.rl_timing import ALL_VERSION, BLOCK_VERSION, VERSION as ROBOT_VERSION

@@ -311,7 +311,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "worst-rl", "free-rl4", "free-rl41", "rolling"),
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
@@ -354,6 +354,7 @@ def main() -> int:
     parser.add_argument("--period", default="full", choices=tuple(PERIODS))
     parser.add_argument("--monthly", type=float, default=10_000)
     parser.add_argument("--day", type=int, default=5)
+    parser.add_argument("--decision-day", help="llm-trader：決定哪一天收盤後（YYYY-MM-DD，預設今天）")
     parser.add_argument("--windows", default="36,60")
     parser.add_argument("--cost-scale", type=float, default=1.0)
     parser.add_argument("--broker", default="conservative", choices=tuple(BROKERS), help="券商手續費設定")
@@ -904,6 +905,24 @@ def main() -> int:
             alike = sum(item["equal_excess"] for item in meta["yearly"].values())
             job.payload["summary"] = f"{len(meta['yearly'])} 年樣本外：反向機器人比 0050 {robot:+.3f}、平均 {alike:+.3f}"
         print(job.payload["summary"])
+        return 0
+
+    if args.command == "llm-trader":
+        # 2026-10-20 (使用者：LLM 有沒有辦法做成交易 agent): the day's decision of the LLM trader and its twin
+        from quant_platform.config.settings import Settings
+        from quant_platform.research import llm_trader
+        from quant_platform.research.jobs import JobLog
+
+        day = date.fromisoformat(args.decision_day) if args.decision_day else datetime.now(TAIPEI).date()
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start(f"LLM 交易員：{day} 收盤後的決定", command) as job:
+            client = llm_trader.build_client(Settings.from_env(), RESEARCH)
+            record = llm_trader.run_day(Path(args.base), RESEARCH, day, client)
+            job.payload["summary"] = ("已經決定過或不是交易日" if record is None else
+                                      f"LLM 持有 {len(record['llm']['hold'])} 檔"
+                                      + (f"（{record['llm']['fallback']}）" if record['llm'].get('fallback') else "")
+                                      + f"；對照組 {len(record['control']['hold'])} 檔")
+        print(job.payload["summary"], flush=True)
         return 0
 
     if args.command == "scan-large":

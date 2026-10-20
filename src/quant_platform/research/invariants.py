@@ -35,7 +35,12 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
                          f"{len(live)} 個帳戶；含 0050 的 {len(held_0050)} 個" + (f"：{held_0050[:3]}" if held_0050 else "")))
 
     start = common_start(today).isoformat()
-    wrong_start = [item["name"] for item in live if item.get("since") != start]
+    from quant_platform.research.stock_forward import llm_trader_start
+
+    llm_start = llm_trader_start(research)       # the LLM trader's pair start at its first decision (no history)
+    wrong_start = [item["name"] for item in live if item.get("since") != (
+        llm_start if any(name in (item.get("rule") or {}).get("factors", {}) for name in ("llm_trader", "llm_control"))
+        else start)]
     checks.append(_check("前向帳戶從當月截止日隔天起算", "AGENTS.md：前向觀察與挑策略一律每月滾動",
                          not wrong_start, f"起算日應為 {start}；不是的 {len(wrong_start)} 個"
                          + (f"：{wrong_start[:3]}" if wrong_start else "")))
