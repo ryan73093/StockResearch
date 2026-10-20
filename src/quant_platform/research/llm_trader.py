@@ -161,6 +161,7 @@ def news_of(history: Path, codes: set[str], day: date) -> dict[str, list[str]]:
 def run_day(base: Path, research: Path, day: date, client=None, now: datetime | None = None) -> dict[str, object] | None:
     """Decide ``day`` once (None when already decided or not a session); the record appended to decisions.jsonl."""
     from quant_platform.research import daily
+    from quant_platform.research.agent.llm import call_cost
     from quant_platform.research.stock_forward import _names
 
     if any(item["date"] == day.isoformat() for item in decisions(research)):
@@ -209,7 +210,8 @@ def run_day(base: Path, research: Path, day: date, client=None, now: datetime | 
                 llm = {"hold": held_llm, "fallback": f"沿用前一天：{problem}", "raw": answer}
             else:
                 llm = {"hold": codes, "reasons": dict(zip(codes, reasons, strict=True)),
-                       "view": str(answer.get("view", ""))[:120], "cost_usd": usage.get("cost_usd")}
+                       "view": str(answer.get("view", ""))[:120],
+                       "cost_usd": call_cost(getattr(client, "model", ""), usage)}   # as the usage ledger
         except Exception as error:  # noqa: BLE001 - a failed call keeps yesterday's choice, recorded
             llm = {"hold": held_llm, "fallback": f"沿用前一天：{str(error)[:120]}"}
     record["llm"] = llm
