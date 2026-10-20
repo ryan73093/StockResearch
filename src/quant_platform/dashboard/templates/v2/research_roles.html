@@ -126,13 +126,26 @@
 <section class="card" data-tab="持有方式">
   <div class="card__head"><h2>持有方式比較 <span class="badge">{{ holding.rows|length }} 個策略</span></h2><span class="muted small">同一個策略只換持有方式：固定持有 20 天、月線上續抱、不設最短持有——三種都是策略的一部分，不是規定</span></div>
   <p class="small" style="margin:0 0 10px">三種都跑過的 {{ holding.complete }} 個策略裡，期末最多的是：{% for style, count in holding.wins.items() %}<b>{{ style }}</b> {{ count }} 個{% if not loop.last %}、{% endif %}{% endfor %}。</p>
+  {% if holding.by_family %}
+  <div class="table-wrap table-wrap--stack" style="margin-bottom:12px">
+    <table class="table--stack">
+      <thead><tr><th>家族（三種都跑過的策略）</th><th class="num">固定 20 天最多</th><th class="num">月線續抱最多</th><th class="num">不設最短最多</th></tr></thead>
+      <tbody>
+      {% for family, counts in holding.by_family.items() %}
+        <tr><td data-primary>{{ family }}</td>
+          {% for style, short in (("固定持有 20 天", "固定 20 天"), ("月線上續抱", "月線續抱"), ("不設最短持有", "不設最短")) %}<td class="num" data-label="{{ short }}">{{ counts[style] }}</td>{% endfor %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
   <div class="table-wrap table-wrap--stack table-wrap--tall">
     <table class="table--stack">
       <thead><tr><th>策略</th><th class="num">固定持有 20 天</th><th class="num">月線上續抱</th><th class="num">不設最短持有</th></tr></thead>
       <tbody>
       {% for row in holding.rows[:60] %}
         <tr>
-          <td data-primary class="small">{{ row.name }}</td>
+          <td data-primary class="small"><span class="badge">{{ row.family }}</span> {{ row.name }}</td>
           {% for style, short in (("固定持有 20 天", "固定 20 天"), ("月線上續抱", "月線續抱"), ("不設最短持有", "不設最短")) %}{% set cell = row.styles.get(style) %}
           <td class="num" data-label="{{ short }}">{% if cell %}<span><a href="/research/rules/{{ cell.rule_hash }}" class="{{ 'up' if style == row.best else '' }}">{{ '{:,.0f}'.format((cell.final_value or 0) / 10000) }} 萬</a><br><span class="muted small">2020-10 起 {{ '{:,.0f}'.format((cell.since_2020 or 0) / 10000) }} 萬・回撤 {{ '{:.0%}'.format(cell.drawdown or 0) }}</span><br><span class="badge">{{ cell.tier }}</span></span>{% else %}<span class="muted small">還沒跑</span>{% endif %}</td>
           {% endfor %}
@@ -141,6 +154,21 @@
       </tbody>
     </table>
   </div>
+  {% if holding.llm %}
+  <h3 style="margin:16px 0 6px">LLM 新聞策略（沒有歷史新聞，只能前向觀察，9/1 起）</h3>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>帳戶</th><th>持有方式</th><th class="num">交易日</th><th class="num">比 0050</th></tr></thead>
+      <tbody>
+      {% for item in holding.llm %}
+        <tr><td data-primary class="small"><a href="/research/forward/{{ item.rule_hash }}">{{ '新聞利空不買（LLM）' if item.veto else '對照組（不看新聞）' }}</a></td>
+          <td data-label="持有方式">{{ item.style }}</td><td class="num" data-label="交易日">{{ item.sessions }}</td>
+          <td class="num {{ 'up' if (item.excess or 0) > 0 else 'down' }}" data-label="比 0050">{{ '{:+.2%}'.format(item.excess) if item.excess is not none else '下一個交易日起記錄' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
   <p class="col-help"><b>欄位說明</b>　每列是同一個策略（同樣的因子、名次、決策頻率、配置），只換持有方式。<b>固定持有 20 天</b>：新買的至少放 20 個交易日才會因為掉出名單而賣。<b>月線上續抱</b>：掉出名單時還站在 20 日均線上就續抱，跌破才賣。<b>不設最短持有</b>：掉出名單就賣。紅字是三種裡期末最多的；數字都是 2015-06 起 30 萬＋每月 1 萬、照台股交易規則（0050 同樣的錢 982 萬）。點數字看那個版本的回測。</p>
 </section>
 {% endif %}
