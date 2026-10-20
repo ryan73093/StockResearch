@@ -158,12 +158,19 @@ def to_rule(candidate: dict):
     if candidate["check"] == "weekly":
         parts.append("每週決策")
     hold = candidate.get("hold", "days")
+    # 2026-10-20 (使用者：持有 20 天、月線上續抱都是策略): three holding styles, each named — "days" holds every buy a
+    # fixed MIN_HOLD sessions, "trend" keeps it while above its 20-session average, "free" sells once out of the zone
     if hold == "trend":
         parts.append("月線上續抱")
+    elif hold == "free":
+        parts.append("不設最短持有")
+    elif candidate.get("named_hold"):
+        parts.append(f"持有 {MIN_HOLD} 天")
     return DailyRule(name="、".join(parts)[:80], factors={name: 1.0 for name in candidate["factors"]}, top=TOP,
-                     check=candidate["check"], keep=KEEP, min_hold=MIN_HOLD, industry_cap=INDUSTRY_SHARE,
-                     weighting=candidate["weighting"], large_caps=LARGE if candidate["universe"] == "large" else 0,
-                     hold=hold)
+                     check=candidate["check"], keep=KEEP, min_hold=0 if hold == "free" else MIN_HOLD,
+                     industry_cap=INDUSTRY_SHARE, weighting=candidate["weighting"],
+                     large_caps=LARGE if candidate["universe"] == "large" else 0,
+                     hold="days" if hold == "free" else hold)
 
 
 # --- stage 1 arrays ------------------------------------------------------------------------------
@@ -254,7 +261,7 @@ def score_of(arrays: Arrays, candidate: dict) -> np.ndarray:
 
 def account(score: np.ndarray, checks: np.ndarray, industry: np.ndarray, next_returns: np.ndarray,
             calm: np.ndarray | None, cost_in: float, cost_out: float, record: bool = False,
-            rising: np.ndarray | None = None, liquidity: np.ndarray | None = None):
+            rising: np.ndarray | None = None, liquidity: np.ndarray | None = None, minimum: int = MIN_HOLD):
     """Daily returns after costs of the top-20 rule on ``score`` (symbols × sessions, NaN = not ranked),
     deciding on ``checks``; with ``record`` also the holdings after each session. With ``rising`` (hold
     "trend") a holding out of the zone stays while it is rising, instead of for its first MIN_HOLD sessions."""
@@ -282,7 +289,7 @@ def account(score: np.ndarray, checks: np.ndarray, industry: np.ndarray, next_re
                     kept = [row for row in held if row in zone or (not np.isnan(column[row]) and rising[row, t])]
                 else:
                     kept = [row for row in held
-                            if row in zone or (not np.isnan(column[row]) and t - bought[row] < MIN_HOLD)]
+                            if row in zone or (not np.isnan(column[row]) and t - bought[row] < minimum)]
                 taken = set(kept)
                 counts = Counter(int(industry[row]) for row in kept)
                 for row in order:
@@ -371,7 +378,8 @@ def evaluate(arrays: Arrays, candidate: dict, costs, record: bool = False):
     if trend and arrays.rising is None:
         raise ValueError("這次掃描的陣列沒有月線資料（scan 1.2.0 以前），不能評估月線上續抱")
     outcome = account(score_of(arrays, candidate), checks, arrays.industry, arrays.next_returns, calm,
-                      fee + slippage, fee + tax + slippage, record, arrays.rising if trend else None, arrays.liquidity)
+                      fee + slippage, fee + tax + slippage, record, arrays.rising if trend else None, arrays.liquidity,
+                      0 if candidate.get("hold") == "free" else MIN_HOLD)
     years = (arrays.days[-1] - arrays.days[0]).days / 365.25
     return metrics(outcome[0], arrays.bench, years, outcome[1]), outcome
 

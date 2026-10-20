@@ -311,7 +311,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "worst-rl", "free-rl4", "free-rl41", "rolling"),
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
@@ -362,6 +362,7 @@ def main() -> int:
     parser.add_argument("--base", default=str(DEFAULT_BASE))
     parser.add_argument("--workers", type=int, default=6, help="scan：第一階段同時跑幾個程序")
     parser.add_argument("--finalists", type=int, default=80, help="scan：第二階段用完整引擎跑幾個")
+    parser.add_argument("--holds", help="scan-large：持有方式，逗號分隔（days＝固定持有 20 天、trend＝月線上續抱、free＝不設最短持有；預設三種）")
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
     parser.add_argument("--require", help="scan：只跑含這個訊號的組（例如新模型 ml_gbm_quality）")
@@ -903,6 +904,24 @@ def main() -> int:
             alike = sum(item["equal_excess"] for item in meta["yearly"].values())
             job.payload["summary"] = f"{len(meta['yearly'])} 年樣本外：反向機器人比 0050 {robot:+.3f}、平均 {alike:+.3f}"
         print(job.payload["summary"])
+        return 0
+
+    if args.command == "scan-large":
+        # 2026-10-20 (使用者：沒看到 1 億個策略不要說有在研究): the streamed search, every holding style a dimension
+        from quant_platform.research import scan_large
+        from quant_platform.research.jobs import JobLog
+
+        sizes = list(range(args.signals_min, args.signals_max + 1))
+        holds = tuple((args.holds or ",".join(scan_large.HOLDS)).split(","))
+        folder = Path(args.resume) if args.resume else None
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start(f"大規模搜尋（串流）：{args.signals_min}～{args.signals_max} 個訊號一組 × 3 種持有方式 × 8 種設定",
+                                    command) as job:
+            summary = scan_large.run(Path(args.base), RESEARCH, broker_costs(args.broker), sizes, holds,
+                                     count=args.finalists, job=job, folder=folder)
+            job.payload["summary"] = (f"{summary['candidates']:,} 個策略、{summary['passed_screen']:,} 個過第一階段、"
+                                      f"{summary['finalists']} 個進引擎：{summary['tiers']}")
+        print(json.dumps({key: value for key, value in summary.items() if key != "results"}, ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "meta-label":

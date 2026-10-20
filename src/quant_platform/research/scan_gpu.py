@@ -75,6 +75,7 @@ def accounts(gpu: Device, items: list[dict], costs) -> tuple[np.ndarray, np.ndar
     checks = gpu.arrays.weekly_days if first["check"] == "weekly" else np.ones(gpu.sessions, dtype=bool)
     calm = first["weighting"] == "inverse_vol"
     trend = first.get("hold") == "trend"
+    minimum = 0 if first.get("hold") == "free" else MIN_HOLD       # 2026-10-20: "free" sells once out of the zone
     if trend and gpu.rising is None:
         raise ValueError("這次掃描的陣列沒有月線資料（scan 1.2.0 以前），不能評估月線上續抱")
     cost_in, cost_out = _costs(costs)
@@ -114,7 +115,7 @@ def accounts(gpu: Device, items: list[dict], costs) -> tuple[np.ndarray, np.ndar
             if trend:
                 staying = zone | (valid & rising[None, :])
             else:
-                staying = zone | (valid & (t - bought < MIN_HOLD) & (bought >= 0))
+                staying = zone | (valid & (t - bought < minimum) & (bought >= 0))
             kept = held & staying
             if checks[t]:
                 counts = torch.zeros((count, gpu.industries), dtype=torch.long, device=where)
