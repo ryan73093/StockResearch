@@ -50,6 +50,33 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
     checks.append(_check("前向帳戶現金流是 30 萬＋每月 1 萬", "需求 §8 策略帳戶（使用者 2026-10-04）", not plans,
                          f"不是的 {len(plans)} 個" + (f"：{plans[:3]}" if plans else "")))
 
+    # 2026-10-20: the money actually put in, from the trading calendar (the setting alone missed the LLM pair given
+    # October's contribution on its first day, the 20th)
+    from quant_platform.research.history.dataset import read_series
+    from quant_platform.research.stock_rules import SeedPlan
+
+    calendar_path = research / "history" / "daily" / "0050.parquet"
+    latest_of: dict[str, dict] = {}
+    for record in tracker.records():
+        if record["date"] >= latest_of.get(record["rule_hash"], {}).get("date", ""):
+            latest_of[record["rule_hash"]] = record
+    paid_wrong: list[str] = []
+    if calendar_path.is_file():
+        calendar = sorted(row["date"] for row in read_series(calendar_path))
+        for item in live:
+            record = latest_of.get(item["rule_hash"])
+            if record is None:
+                continue
+            since, last = date.fromisoformat(item["since"]), date.fromisoformat(record["date"])
+            sessions = [day for day in calendar if since <= day <= last]
+            expected = sum(amount for _day, amount in SeedPlan(calendar=calendar).schedule(sessions, since, last))
+            if abs(float(record["contributed"]) - expected) > 1:
+                paid_wrong.append(item["name"])
+    checks.append(_check("前向帳戶實際投入＝啟動 30 萬＋每月 5 日 1 萬（照交易日曆）", "需求 §8 策略帳戶（使用者 2026-10-04）",
+                         calendar_path.is_file() and not paid_wrong,
+                         f"投入金額不對的 {len(paid_wrong)} 個" + (f"：{paid_wrong[:3]}" if paid_wrong else "")
+                         + ("" if calendar_path.is_file() else "；找不到交易日曆")))
+
     cutoff = cutoff_for(today)
     month = rolling_folder(research) / f"{cutoff.isoformat()}.json"
     graded: set[str] = set()

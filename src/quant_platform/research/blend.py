@@ -93,7 +93,7 @@ def scaled(plan, share: float):
     from quant_platform.research.stock_rules import SeedPlan
 
     return SeedPlan(initial=plan.initial * share, monthly_amount=plan.monthly_amount * share,
-                    day_of_month=plan.day_of_month)
+                    day_of_month=plan.day_of_month, calendar=getattr(plan, "calendar", None))
 
 
 def combine(name: str, runs: list[RunResult]) -> RunResult:

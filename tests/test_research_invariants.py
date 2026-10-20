@@ -27,3 +27,30 @@ def test_an_account_whose_rule_differs_from_the_months_list_is_caught(tmp_path):
     assert not {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 20))}["前向帳戶從當月截止日隔天起算"]["ok"]
     tile = invariants.tile({"at": "2026-10-20T16:00:00", "checks": list(checks.values())})
     assert tile["badge"] == "badge--bad" and "不符" in tile["state"]
+
+
+def test_an_account_paid_a_month_it_started_after_is_caught(tmp_path):
+    from datetime import timedelta
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    rule = DailyRule(name="LLM", factors={"llm_trader": 1.0})
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    (folder / "tracked.json").write_text(json.dumps([{"rule_hash": rule.rule_hash, "name": rule.name, "kind": "daily",
+                                                      "rule": rule.canonical(), "since": "2026-10-20",
+                                                      "initial": 300_000, "monthly": 10_000}]), encoding="utf-8")
+    calendar = [date(2026, 9, 1) + timedelta(days) for days in range(50)]
+    (tmp_path / "history" / "daily").mkdir(parents=True)
+    pq.write_table(pa.table({"date": calendar}), tmp_path / "history" / "daily" / "0050.parquet")
+    name = "前向帳戶實際投入＝啟動 30 萬＋每月 5 日 1 萬（照交易日曆）"
+
+    def paid(amount):
+        (folder / "log.jsonl").write_text(json.dumps({"date": "2026-10-20", "rule_hash": rule.rule_hash,
+                                                      "contributed": amount, "cash": amount, "value": amount,
+                                                      "holdings": []}) + "\n", encoding="utf-8")
+        return {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 20))}[name]["ok"]
+
+    assert not paid(310_000)                    # October's 1 萬 on the 20th: the 5th had passed
+    assert paid(300_000)

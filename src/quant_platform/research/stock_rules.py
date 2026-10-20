@@ -444,17 +444,22 @@ class SeedPlan:
     """A starting capital at the first session, then ``monthly_amount`` on the first session on or
     after the ``day_of_month`` of every month (the first month too): the owner's account."""
 
-    def __init__(self, initial: float = SEED_CAPITAL, monthly_amount: float = SEED_MONTHLY, day_of_month: int = 5) -> None:
+    def __init__(self, initial: float = SEED_CAPITAL, monthly_amount: float = SEED_MONTHLY, day_of_month: int = 5,
+                 calendar: list[date] | None = None) -> None:
         self.initial = float(initial)
         self.monthly_amount = float(monthly_amount)
         self.day_of_month = day_of_month
+        self.calendar = calendar
 
     def schedule(self, sessions: list[date], start: date, end: date) -> list[tuple[date, float]]:
         first = next((day for day in sessions if start <= day <= end), None)
         if first is None:
             return []
         monthly = ContributionPlan(monthly_amount=self.monthly_amount, day_of_month=self.day_of_month)
-        merged = dict(monthly.schedule(sessions, start, end))
+        # 2026-10-20: ``calendar`` (every session, not only the account's) places a month's contribution on its real
+        # session, so an account started after the 5th has none that month (the LLM trader's pair from 10/20 was given
+        # October's on its first day). Forward accounts pass it; the registered backtests keep the account's sessions.
+        merged = dict(monthly.schedule(self.calendar or sessions, start, end))
         merged[first] = merged.get(first, 0.0) + self.initial
         return sorted(merged.items())
 

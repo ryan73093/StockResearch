@@ -58,11 +58,13 @@ META_STOPPED = ("2026-10-15：AI 研究員暫停中、還沒有合格的規則�
                 "（使用者 2026-10-09），停止追蹤（紀錄保留）。AI 研究員重開、有合格規則時再以 100% 個股的版本重新開始")
 
 
-def plan_of(item: dict[str, object]):
+def plan_of(item: dict[str, object], calendar: list | None = None):
     """A tracked rule's cash flow: one lump sum (the owner's NT$300,000 account, the default since
-    2026-10-04) or the monthly plan (items written before that carry no ``plan``)."""
+    2026-10-04) or the monthly plan (items written before that carry no ``plan``). ``calendar``: every session, so a
+    month's contribution falls on its real session (none in the start month of an account started after the 5th)."""
     if item.get("plan") == "seed":
-        return SeedPlan(float(item.get("initial") or SEED_CAPITAL), float(item.get("monthly") or SEED_MONTHLY))
+        return SeedPlan(float(item.get("initial") or SEED_CAPITAL), float(item.get("monthly") or SEED_MONTHLY),
+                        calendar=calendar)
     if item.get("plan") == "lump_sum":
         return LumpSumPlan(float(item.get("amount") or LUMP_SUM))
     return STANDARD_PLAN
@@ -540,7 +542,7 @@ class StockForwardTracker:
             start, last = date.fromisoformat(item["since"]), days[-1]
             ledger: list[dict[str, object]] = []
             snapshots: dict = {}
-            plan = plan_of(item)
+            plan = plan_of(item, list(data.sessions))
             if item.get("kind") in ("daily", "blend", "meta-ai"):
                 from quant_platform.research.blend import BlendAccount, BlendRule
                 from quant_platform.research.daily import (
@@ -739,7 +741,8 @@ class StockForwardTracker:
             if carry is None:
                 segment_plan = plan
             else:
-                segment_plan = SeedPlan(initial=carry, monthly_amount=plan.monthly_amount, day_of_month=plan.day_of_month)
+                segment_plan = SeedPlan(initial=carry, monthly_amount=plan.monthly_amount, day_of_month=plan.day_of_month,
+                                        calendar=getattr(plan, "calendar", None))   # a segment from mid-month: no second payment
             part_ledger, part_book = [], {}
             if decision.get("spec"):
                 rule = DailyRule.model_validate(decision["spec"])
