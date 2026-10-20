@@ -96,12 +96,20 @@ SLOTS_32 = {**{slot: members for slot, members in SLOTS.items() if slot != "模�
 # for it. 3.3 is 3.2 with the years before FIRST_TEST_YEAR held by the slots alike (the robot abstains when it has no
 # record to learn from), each year's slot factors still chosen before the year; its yardstick the same.
 ROLLING33_VERSION = "block-rl-3.3.0"
-ROLLING_VERSIONS = (ROLLING_VERSION, ROLLING32_VERSION, ROLLING33_VERSION)
+# 3.4.0 (2026-10-20; 使用者：因子、DL、RL、ML 各負責什麼): the robot given only the roles to weigh — attack (the deep
+# model), trend factors, defence (calm stocks) — each slot's member chosen before the year as before; the role
+# diagnosis (research_method §7) found the defenders win in 0050's falling months and the deep model in its strong ones
+ROLLING34_VERSION = "block-rl-3.4.0"
+SLOTS_34 = {"進攻": ("ml_deep2_top",), "趨勢因子": ("high_52w", "trend_200", "momentum_6"),
+            "防守": ("low_volatility_250", "low_volatility_60", "low_ivol_60", "low_max_return")}
+ROLLING_VERSIONS = (ROLLING_VERSION, ROLLING32_VERSION, ROLLING33_VERSION, ROLLING34_VERSION)
 WARM = (ROLLING33_VERSION,)
 
 
 def _slots(version: str) -> dict[str, tuple[str, ...]]:
     """A rolling robot's slots (looked up when called, so a test can swap them)."""
+    if version == ROLLING34_VERSION:
+        return SLOTS_34
     return SLOTS_32 if version in (ROLLING32_VERSION, ROLLING33_VERSION) else SLOTS
 # 2026-10-16 (使用者：訓練一個賠最多的模型，反著做，看看會怎樣): the robot 3.0's learning with the reward turned around —
 # it learns the eight blocks' weights that lose the most to 0050 (abstaining, i.e. the blocks alike, when its

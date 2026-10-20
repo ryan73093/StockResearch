@@ -57,3 +57,32 @@ def test_a_blend_already_registered_is_not_run_again():
     assert first["finalists"]
     again = bs.search(members, taken={item["blend"].rule_hash for item in first["finalists"]})
     assert again["finalists"] == []
+
+
+def test_the_role_accounts_take_their_shares_by_risk_parity(monkeypatch):
+    """2026-10-20: one sleeve a role (ROLE_SPLITS), shares by 1 / the development months' volatility."""
+    import numpy as np
+
+    from quant_platform.research import blend_scan
+    from quant_platform.research.daily import DailyRule
+
+    months = [f"20{15 + index // 12}-{index % 12 + 1:02d}" for index in range(12)]
+    paid = np.arange(12, dtype=float) * 10_000 + 300_000
+    rng = np.random.default_rng(1)
+
+    def member(trial, swing):
+        growth = np.cumprod(1 + rng.normal(0.01, swing, 12))
+        return {"trial": trial, "name": f"規則 {trial}", "tier": "T0 候選", "months": months,
+                "rule": DailyRule(name=f"規則 {trial}", factors={"trend_200": 1.0}),
+                "values": paid * growth, "bench": paid * 1.0, "paid": paid}
+    pool = [member(4941, 0.10), member(4589, 0.05), member(5052, 0.05), member(4547, 0.02), member(5040, 0.08)]
+    monkeypatch.setattr(blend_scan, "pool", lambda research=None: pool)
+    blends = blend_scan.role_blends()
+    assert len(blends) == len(blend_scan.ROLE_SPLITS)
+    shares = [sleeve.share for sleeve in blends[0].sleeves]
+    volatility = [blend_scan.month_returns(item["values"], paid).std(ddof=1) for item in pool[:4]]
+    expected = (1 / np.array(volatility)) / (1 / np.array(volatility)).sum()
+    assert np.allclose(shares, expected, atol=0.002) and abs(sum(shares) - 1) < 1e-9
+    assert shares[0] == min(shares)                                   # the most volatile role gets the least
+    monkeypatch.setattr(blend_scan, "pool", lambda research=None: pool[1:])
+    assert blend_scan.role_blends() == []                             # a member missing: no account

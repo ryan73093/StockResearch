@@ -185,6 +185,45 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
             "finalists": chosen}
 
 
+ROLE_SPLITS = (
+    # 2026-10-20 (使用者：因子、策略、DL、RL、ML 各負責什麼): one account a role — the deep model attacks (it alone beats
+    # 0050 in 0050's strong months), the factor rules defend (they beat 0050 in its falling months), each its own
+    # sleeve, shares by risk parity on the development months (as the search)
+    ("分工帳戶：深度學習進攻＋共識、穩健、跌市穩三個防守", (("深度學習進攻", 4941), ("共識防守", 4589), ("穩健防守", 5052),
+                                          ("跌市穩防守", 4547))),
+    ("分工帳戶：深度學習與機器學習進攻＋穩健、跌市穩防守", (("深度學習進攻", 4941), ("機器學習進攻", 5040), ("穩健防守", 5052),
+                                         ("跌市穩防守", 4547))),
+)
+
+
+def role_blends(research: str | Path = Path("instance") / "research") -> list:
+    """The ROLE_SPLITS as blends: each member's share by risk parity on its development months (volatility of its
+    month returns to DEV_END); the development measures printed."""
+    from quant_platform.research.blend import BlendRule, Sleeve
+
+    members = {item["trial"]: item for item in pool(research)}
+    output = []
+    for name, parts in ROLE_SPLITS:
+        found = [members.get(trial) for _role, trial in parts]
+        if any(item is None for item in found):
+            print(f"{name}：成員不在組合池（{[trial for (_role, trial), item in zip(parts, found) if item is None]}）", flush=True)
+            continue
+        paid, bench = found[0]["paid"], found[0]["bench"]
+        values = np.stack([item["values"] for item in found])
+        volatility = month_returns(values, paid).std(axis=1, ddof=1)
+        shares = (1 / volatility) / (1 / volatility).sum()
+        rounded = [round(float(share), 3) for share in shares[:-1]]
+        rounded.append(round(1 - sum(rounded), 3))
+        blended = np.einsum("m,mt->t", np.array(rounded), values)[None]
+        measured = measure(blended, bench, paid, falls(month_returns(bench, paid)))
+        label_ = "＋".join(f"{role}#{trial} {share:.0%}" for (role, trial), share in zip(parts, rounded))
+        print(f"{name}：{label_}；開發期比 0050 {measured['excess'][0]:+.1%}、月底回撤 {measured['drawdown'][0]:.1%}、"
+              f"跌市最糟 {measured['gap'][0]:+.1%}", flush=True)
+        output.append(BlendRule(name=f"{name}（{label_}）"[:80],
+                                sleeves=tuple(Sleeve(rule=item["rule"], share=share) for item, share in zip(found, rounded))))
+    return output
+
+
 def batch(research: str | Path = Path("instance") / "research") -> list:
     """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json."""
     from quant_platform.research.registry import TrialRegistry

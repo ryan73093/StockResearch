@@ -253,3 +253,9 @@ def test_the_robot_33_holds_the_slots_alike_before_it_has_a_record(monkeypatch, 
     alike = rl_timing.scores(fp, tmp_path, "equal", rl_timing.ROLLING33_VERSION)
     first = fp.index[min(date.fromisoformat(day) for day in early)]
     assert np.isfinite(robot[first]).sum() > 10 and np.allclose(robot[first], alike[first], equal_nan=True)
+
+
+def test_the_robot_34_weighs_only_the_three_roles():
+    assert list(rl_timing.SLOTS_34) == ["進攻", "趨勢因子", "防守"]
+    assert rl_timing._slots(rl_timing.ROLLING34_VERSION) is rl_timing.SLOTS_34
+    assert rl_timing.factor_names(rl_timing.ROLLING34_VERSION)[0] == "ml_deep2_top"
