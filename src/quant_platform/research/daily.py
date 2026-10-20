@@ -3100,6 +3100,16 @@ HOLDING_STYLES = (("固定持有 20 天", {"hold": "days", "min_hold": 20}),
 HOLDING_TOP = 30
 
 
+def _stem(name: str) -> str:
+    """A rule's name without the holding style it states (research/holding.HOLD_WORDS)."""
+    from quant_platform.research.holding import HOLD_WORDS
+
+    stem = name.split("｜持有：")[0]
+    for word in HOLD_WORDS:
+        stem = stem.replace(word, "")
+    return stem
+
+
 def holding_key(spec: dict) -> str:
     """A rule's spec without its holding style or name: the strategy the holding styles are compared on."""
     import hashlib
@@ -3137,9 +3147,7 @@ def holding_batch() -> list:
         if key in seen:
             continue
         seen.add(key)
-        stem = base.name
-        for word in ("、月線上續抱", "、不設最短持有", "，月線上續抱", "＋月線上續抱"):
-            stem = stem.replace(word, "")
+        stem = _stem(base.name)
         own = ("trend" if base.hold == "trend" else "days", 0 if base.hold == "trend" else base.min_hold)
         for label, style in HOLDING_STYLES:
             if (style["hold"], style["min_hold"]) == own:
@@ -3185,8 +3193,10 @@ def holding_families_batch() -> list:
                 continue
             blends += 1
             for label, style in HOLDING_STYLES:
-                sleeves = tuple(Sleeve(rule=DailyRule.model_validate({**sleeve.rule.model_dump(), **style}),
-                                       share=sleeve.share) for sleeve in rule.sleeves)
+                sleeves = tuple(Sleeve(rule=DailyRule.model_validate(           # the sleeve's name says its style
+                    {**sleeve.rule.model_dump(), **style,
+                     "name": f"{_stem(sleeve.rule.name)[: 79 - len(label) - 4]}｜持有：{label}"}),
+                    share=sleeve.share) for sleeve in rule.sleeves)
                 if all(new.rule.canonical() == old.rule.canonical() for new, old in zip(sleeves, rule.sleeves, strict=True)):
                     continue
                 output.append(BlendRule(name=f"{rule.name[: 79 - len(label) - 4]}｜持有：{label}", core=rule.core,
@@ -3202,9 +3212,7 @@ def holding_families_batch() -> list:
             continue
         seen.add(key)
         per_family[family] = per_family.get(family, 0) + 1
-        stem = rule.name.split("｜持有：")[0]
-        for word in ("、月線上續抱", "、不設最短持有", "，月線上續抱", "＋月線上續抱"):
-            stem = stem.replace(word, "")
+        stem = _stem(rule.name)
         own = ("trend" if rule.hold == "trend" else "days", 0 if rule.hold == "trend" else rule.min_hold)
         for label, style in HOLDING_STYLES:
             if (style["hold"], style["min_hold"]) == own:

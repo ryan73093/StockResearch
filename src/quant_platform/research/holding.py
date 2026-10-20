@@ -25,6 +25,19 @@ def style_of(spec: dict) -> str | None:
     return "不設最短持有" if not minimum else None
 
 
+HOLD_WORDS = ("、月線上續抱", "、不設最短持有", "，月線上續抱", "＋月線上續抱")
+
+
+def named(spec: dict) -> str:
+    """A rule's name stating the holding style it has (a blend's sleeves restyled by holding_families_batch kept the
+    name of the style they came from, e.g. 「…、月線上續抱」 on a sleeve holding with no minimum)."""
+    stem = str(spec.get("name", "")).split("｜持有：")[0]
+    for word in HOLD_WORDS:
+        stem = stem.replace(word, "")
+    style = style_of(spec)
+    return f"{stem}｜持有：{style}" if style else stem
+
+
 def blend_key(rule) -> str:
     """A blend's sleeves and shares without the sleeves' holding styles or names."""
     import hashlib
@@ -95,7 +108,7 @@ def compare(research: str | Path) -> dict[str, object]:
         if style not in known or record.trial_id > known[style]["trial"]:
             known[style] = entry
         base = record.spec_name.split("｜持有：")[0]
-        for word in ("、月線上續抱", "、不設最短持有", "，月線上續抱", "＋月線上續抱"):
+        for word in HOLD_WORDS:
             base = base.replace(word, "")
         names.setdefault(group, base)
     rows, wins = [], {style: 0 for style in STYLES}

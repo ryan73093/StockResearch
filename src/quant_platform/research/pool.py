@@ -326,7 +326,9 @@ def describe_rule(spec: dict) -> list[str]:
     if spec.get("kind") == "blend":                     # 2026-10-09: one account across strategy families
         lines = [f"帳戶分成 {len(spec['sleeves']) + (1 if spec.get('core') else 0)} 份，每份各自照自己的規則操作，"
                  "啟動資金與每月投入都照比例分；各份之間不再平衡"]
-        lines += [f"{sleeve['share']:.0%}：{sleeve['rule']['name']}" for sleeve in spec["sleeves"]]
+        from quant_platform.research.holding import named
+
+        lines += [f"{sleeve['share']:.0%}：{named(sleeve['rule'])}" for sleeve in spec["sleeves"]]
         if spec.get("core"):
             lines.append(f"{spec['core']:.0%}：0050（錢進來就買，不賣）")
         return lines
