@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,6 +57,16 @@ FIXED_HOLD = ("2026-10-14 平台把固定持有天數的規則改成「月線上
               "2026-10-20 使用者更正：持有天數與月線上續抱都是策略的一部分，平台不該替規則改，這個轉換已撤回")
 META_STOPPED = ("2026-10-15：AI 研究員暫停中、還沒有合格的規則，這個帳戶整個放 0050，等於比較基準本身；策略一律 100% 個股"
                 "（使用者 2026-10-09），停止追蹤（紀錄保留）。AI 研究員重開、有合格規則時再以 100% 個股的版本重新開始")
+
+
+_SUMMARY: dict[str, object] = {}
+_HELD_OLD = re.compile(r"，已持有滿 (\d+) 個交易日")
+
+
+def reworded(text: str) -> str:
+    """A reason written before 2026-10-20 noon in today's words: the minimum holding is the strategy's own setting
+    (使用者 2026-10-20：持有 20 天也是策略), not a rule of the platform. The decision records keep what was written."""
+    return _HELD_OLD.sub(lambda match: f"；這個策略設定買進後至少持有 {match.group(1)} 個交易日，已滿", str(text))
 
 
 def plan_of(item: dict[str, object], calendar: list | None = None):
@@ -644,14 +655,27 @@ class StockForwardTracker:
         }
 
     def summary(self) -> list[dict[str, object]]:
-        """Per tracked rule: the latest record, days recorded, the latest trades and any problem."""
+        """Per tracked rule: the latest record, days recorded, the latest trades and any problem. 2026-10-20: kept until
+        the records, the accounts, the rebase marks or the trial registry change (the research pages ask up to three
+        times a view; 264 accounts, 9,232 records took about 1.2 s each)."""
+        paths = (self.log_path, self.tracked_path, self.rebases_path, Path(self._base) / "trials.jsonl")
+        key = (str(self._folder.resolve()), str(self._costs),
+               tuple((path.stat().st_mtime_ns, path.stat().st_size) if path.is_file() else 0 for path in paths))
+        if _SUMMARY.get("key") != key:
+            _SUMMARY.update(key=key, rows=self._summary())
+        return [dict(row) for row in _SUMMARY["rows"]]
+
+    def _summary(self) -> list[dict[str, object]]:
         records = self.records()
         marks = self.rebases()
         problems = reconcile(records, marks)
         finals = final_validation(self._base)
         rows = []
+        by_rule: dict[str, list[dict[str, object]]] = {}
+        for record in records:
+            by_rule.setdefault(record["rule_hash"], []).append(record)
         for item in self.tracked():
-            mine = [record for record in records if record["rule_hash"] == item["rule_hash"]]
+            mine = by_rule.get(item["rule_hash"], [])
             latest = mine[-1] if mine else None
             traded = next((record for record in reversed(mine) if record["trades_today"]), None)
             based = marks.get(item["rule_hash"]) or {}
@@ -859,7 +883,7 @@ class StockForwardTracker:
         for name in ([decision_key(rule_hash, start, number) for number in range(sleeves)] if sleeves
                      else [decision_key(rule_hash, start)]):
             for day, notes in store.why(name).items():
-                why.setdefault(day, {}).update(notes)
+                why.setdefault(day, {}).update({code: reworded(text) for code, text in notes.items()})
         trades, results = explain_trades(days, why, float((item.get("rule") or {}).get("trim_above") or 0.0))
         adjustments = [{**entry, "date": record["date"]} for record in reversed(days)
                        for entry in record.get("adjustments_today") or []]

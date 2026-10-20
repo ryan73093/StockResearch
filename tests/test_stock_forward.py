@@ -479,3 +479,11 @@ def test_selling_everything_today_returns_the_cash_after_fees_tax_and_slippage()
     bench = 290_000 * (1 - 0.001)
     assert out["bench_back"] == pytest.approx(bench - max(20, int(bench * 0.001425)) - int(bench * 0.001))   # ETF tax 0.1%
     assert out["ahead"] == pytest.approx(out["cash_back"] - out["bench_back"])
+
+
+def test_a_reason_written_before_the_holding_correction_reads_as_the_strategys_setting():
+    from quant_platform.research.stock_forward import reworded
+
+    assert reworded("跌出前 60 名（當天第 82 名），已持有滿 20 個交易日") == \
+        "跌出前 60 名（當天第 82 名）；這個策略設定買進後至少持有 20 個交易日，已滿"
+    assert reworded("跌出前 60 名（當天第 82 名）") == "跌出前 60 名（當天第 82 名）"

@@ -15,7 +15,7 @@ def accepted(path: Path) -> list[str]:
 
 def test_every_pipeline_name_is_one_case_and_both_scripts_accept_the_same_names():
     text = (ROOT / "scripts" / "research-pipeline.ps1").read_text(encoding="utf-8-sig")
-    cases = re.findall(r'^    "([A-Za-z0-9\-]+)" \{', text, re.M)
+    cases = re.findall(r'^    "([A-Za-z0-9_\-]+)" \{', text, re.M)        # 2026-10-20: names like holding2_a
     assert [name for name, count in Counter(cases).items() if count > 1] == []
     pipeline = accepted(ROOT / "scripts" / "research-pipeline.ps1")
     starter = accepted(ROOT / "scripts" / "start-research.ps1")

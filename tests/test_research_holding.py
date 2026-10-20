@@ -53,3 +53,30 @@ def test_every_passing_strategy_gets_the_holding_styles_it_has_not_run(tmp_path,
     register(DailyRule(name="輸的", factors={"momentum_6": 1.0}, top=20), False)     # not passing: not studied
     rules = daily.holding_all_batch()
     assert [(rule.name, rule.min_hold, rule.hold) for rule in rules] == [("趨勢｜持有：不設最短持有", 0, "days")]
+
+
+def test_a_strategy_run_in_one_style_only_gets_the_other_two(tmp_path, monkeypatch):
+    import json
+
+    from quant_platform.research import daily
+    from quant_platform.research.registry import TrialRegistry
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(daily, "HOLDING_REST_BEFORE", "9999")         # trials registered now are in the list
+    research = tmp_path / "instance" / "research"
+    (research / "reports").mkdir(parents=True)
+    registry = TrialRegistry(research / "trials.jsonl")
+
+    def register(rule):
+        name = f"{rule.rule_hash[:12]}.json"
+        (research / "reports" / name).write_text(json.dumps({"spec": rule.canonical()}), encoding="utf-8")
+        registry.register(kind="candidate", period="recent", spec_hash=rule.rule_hash, spec_name=rule.name,
+                          input_hash=rule.rule_hash, data_fingerprint="x", report_file=name,
+                          metrics={"engine": daily.ENGINE_VERSION, "final_value": 1.0})
+
+    register(DailyRule(name="動能、月線上續抱", factors={"momentum_6": 1.0}, top=20, hold="trend", min_hold=0))
+    register(DailyRule(name="趨勢", factors={"trend_200": 1.0}, top=20))                    # two styles: done
+    register(DailyRule(name="趨勢｜持有：不設最短持有", factors={"trend_200": 1.0}, top=20, min_hold=0))
+    rules = daily.holding_rest_batch()
+    assert sorted((rule.name, rule.hold, rule.min_hold) for rule in rules) == [
+        ("動能｜持有：不設最短持有", "days", 0), ("動能｜持有：固定持有 20 天", "days", 20)]
