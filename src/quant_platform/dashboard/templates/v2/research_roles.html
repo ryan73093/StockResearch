@@ -122,6 +122,28 @@
   <p class="col-help"><b>欄位說明</b>　<b>相關</b>：兩個規則每月比 0050 多多少的相關，1＝完全同步、0＝無關；越低放在同一個帳戶越能互相抵銷。<b>持股相同檔數</b>：兩個前向帳戶今天持有的股票有幾檔一樣（各約 20 檔）。</p>
 </section>
 {% endif %}
+{% if holding and holding.rows %}
+<section class="card" data-tab="持有方式">
+  <div class="card__head"><h2>持有方式比較 <span class="badge">{{ holding.rows|length }} 個策略</span></h2><span class="muted small">同一個策略只換持有方式：固定持有 20 天、月線上續抱、不設最短持有——三種都是策略的一部分，不是規定</span></div>
+  <p class="small" style="margin:0 0 10px">三種都跑過的 {{ holding.complete }} 個策略裡，期末最多的是：{% for style, count in holding.wins.items() %}<b>{{ style }}</b> {{ count }} 個{% if not loop.last %}、{% endif %}{% endfor %}。</p>
+  <div class="table-wrap table-wrap--stack table-wrap--tall">
+    <table class="table--stack">
+      <thead><tr><th>策略</th><th class="num">固定持有 20 天</th><th class="num">月線上續抱</th><th class="num">不設最短持有</th></tr></thead>
+      <tbody>
+      {% for row in holding.rows[:60] %}
+        <tr>
+          <td data-primary class="small">{{ row.name }}</td>
+          {% for style in ("固定持有 20 天", "月線上續抱", "不設最短持有") %}{% set cell = row.styles.get(style) %}
+          <td class="num" data-label="{{ style }}">{% if cell %}<span><a href="/research/rules/{{ cell.rule_hash }}" class="{{ 'up' if style == row.best else '' }}">{{ '{:,.0f}'.format((cell.final_value or 0) / 10000) }} 萬</a><br><span class="muted small">2020-10 起 {{ '{:,.0f}'.format((cell.since_2020 or 0) / 10000) }} 萬・回撤 {{ '{:.0%}'.format(cell.drawdown or 0) }}</span><br><span class="badge">{{ cell.tier }}</span></span>{% else %}<span class="muted small">還沒跑</span>{% endif %}</td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　每列是同一個策略（同樣的因子、名次、決策頻率、配置），只換持有方式。<b>固定持有 20 天</b>：新買的至少放 20 個交易日才會因為掉出名單而賣。<b>月線上續抱</b>：掉出名單時還站在 20 日均線上就續抱，跌破才賣。<b>不設最短持有</b>：掉出名單就賣。紅字是三種裡期末最多的；數字都是 2015-06 起 30 萬＋每月 1 萬、照台股交易規則（0050 同樣的錢 982 萬）。點數字看那個版本的回測。</p>
+</section>
+{% endif %}
 <section class="card" data-tab="怎麼看">
   <div class="card__head"><h2>怎麼看這一頁</h2></div>
   <ul class="rules">

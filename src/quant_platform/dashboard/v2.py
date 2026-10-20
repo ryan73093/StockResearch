@@ -1107,9 +1107,16 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         except Exception:
             logger.exception("Division of labour failed")
             division = None
+        try:                      # 2026-10-20 (使用者：20 天、月線上都沒看到): the holding styles side by side
+            from quant_platform.research.holding import compare
+
+            holding = compare(research_dir)
+        except Exception:
+            logger.exception("Holding comparison failed")
+            holding = None
         return render_template("v2/research_roles.html", active_nav="research", research_tab="roles",
                                growth=summary(research_dir), rolling=rolling, jobs=JobLog(research_dir).jobs(),
-                               division=division)
+                               division=division, holding=holding)
 
     @blueprint.get("/research/rl")
     def research_rl():
