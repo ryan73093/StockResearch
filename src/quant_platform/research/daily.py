@@ -3267,7 +3267,7 @@ def holding_all_batch() -> list:
     return output
 
 
-HOLDING_REST_BEFORE = "2026-10-20T17:45:00"
+HOLDING_REST_BEFORE = "2026-10-20T17:31:00"    # before the first run registered any
 
 
 def holding_rest_batch() -> list:
