@@ -133,8 +133,8 @@
       {% for row in holding.rows[:60] %}
         <tr>
           <td data-primary class="small">{{ row.name }}</td>
-          {% for style in ("固定持有 20 天", "月線上續抱", "不設最短持有") %}{% set cell = row.styles.get(style) %}
-          <td class="num" data-label="{{ style }}">{% if cell %}<span><a href="/research/rules/{{ cell.rule_hash }}" class="{{ 'up' if style == row.best else '' }}">{{ '{:,.0f}'.format((cell.final_value or 0) / 10000) }} 萬</a><br><span class="muted small">2020-10 起 {{ '{:,.0f}'.format((cell.since_2020 or 0) / 10000) }} 萬・回撤 {{ '{:.0%}'.format(cell.drawdown or 0) }}</span><br><span class="badge">{{ cell.tier }}</span></span>{% else %}<span class="muted small">還沒跑</span>{% endif %}</td>
+          {% for style, short in (("固定持有 20 天", "固定 20 天"), ("月線上續抱", "月線續抱"), ("不設最短持有", "不設最短")) %}{% set cell = row.styles.get(style) %}
+          <td class="num" data-label="{{ short }}">{% if cell %}<span><a href="/research/rules/{{ cell.rule_hash }}" class="{{ 'up' if style == row.best else '' }}">{{ '{:,.0f}'.format((cell.final_value or 0) / 10000) }} 萬</a><br><span class="muted small">2020-10 起 {{ '{:,.0f}'.format((cell.since_2020 or 0) / 10000) }} 萬・回撤 {{ '{:.0%}'.format(cell.drawdown or 0) }}</span><br><span class="badge">{{ cell.tier }}</span></span>{% else %}<span class="muted small">還沒跑</span>{% endif %}</td>
           {% endfor %}
         </tr>
       {% endfor %}
