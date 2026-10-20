@@ -118,6 +118,15 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
             traits.append("依波動度配置")
         if spec.get("industry_cap"):
             traits.append("產業上限")
+        # 2026-10-20 (使用者：持有 20 天是策略、月線上續抱也是策略): every rule shows its own holding style
+        if spec.get("hold") == "trend":
+            traits.append("持有：月線上續抱")
+        elif spec.get("min_hold", 20) in (None, 20) and not spec.get("free"):
+            traits.append("持有：買進後至少 20 個交易日")
+        elif spec.get("min_hold"):
+            traits.append(f"持有：買進後至少 {spec['min_hold']} 個交易日")
+        else:
+            traits.append("持有：不設最短持有")
         if spec.get("universe") == "all":
             traits.append("上市＋上櫃")
         if spec.get("switching") not in (None, "none"):

@@ -318,7 +318,7 @@ def main() -> int:
     parser.add_argument("--events", help="factors：事件因子分析，逗號分隔（例如 low_insider_sell_60,buyback_60）")
     parser.add_argument("--explain", action="store_true",
                         help="forward：替 2026-10-19 以前的決定補上買賣原因（重算排名，和當時一樣的才補）")
-    parser.add_argument("--trend-from", help="forward：把固定持有天數的規則換成月線上續抱版本，從這天起追蹤（YYYY-MM-DD）")
+    parser.add_argument("--trend-from", help="forward：（2026-10-20 停用）平台不替規則轉換持有方式")
     parser.add_argument("--freeze", action="store_true",
                         help="forward：把每個帳戶最新紀錄背後的決定寫下來（之後重算不再改變已做的決定）")
     parser.add_argument("--rebase", help="forward：把接不上前一天的紀錄標成重算基準，附上原因")
@@ -853,7 +853,7 @@ def main() -> int:
                     job.update(done=done, total=total, current=f"{row.get('name', '')[:40]}：{'過' if row.get('passed') else '沒過'}")
                 kept = [row for row in payload.get("graded") or [] if not row.get("error")] if args.only_new else []
                 graded = kept + rolling.select(Path(args.base), RESEARCH, cutoff, args.broker, args.workers, progress,
-                                               skip={row["trial"] for row in kept})
+                                               skip={row["rule_hash"] for row in kept})
                 payload.update(graded=graded, selected_at=datetime.now().isoformat(timespec="seconds"),
                                engine=daily_research.ENGINE_VERSION)
                 rolling.save(RESEARCH, cutoff, payload)
@@ -1209,6 +1209,9 @@ def main() -> int:
                 print(f"  {item['date']} {item['name']}：紀錄 {len(item['recorded'])} 檔、重算 {len(item['replayed'])} 檔", flush=True)
             return 0
         if args.trend_from:                     # 2026-10-14: fixed-holding rules give way to their trend versions
+            # 2026-10-20 (使用者：持有 20 天也是策略、月線上續抱也是策略，不是規則): the platform never converts a rule's
+            # holding style
+            raise SystemExit("不再提供：持有方式是策略的一部分，平台不替規則轉換（使用者 2026-10-20）")
             switched = tracker.switch_to_trend(day, date.fromisoformat(args.trend_from))
             print(f"改追蹤月線上續抱版本：{len(switched)} 個（{args.trend_from} 起）", flush=True)
         written = tracker.record(day)

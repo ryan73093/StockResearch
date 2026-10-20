@@ -5,7 +5,7 @@ from quant_platform.research.categories import classify, summary
 
 def test_categories_follow_the_factors():
     assert classify({"factors": {"trend_200": 1.0}, "core": 0.5, "check": "weekly"}) == {
-        "family": "趨勢動能", "families": ["趨勢動能"], "detail": "", "traits": ["一半放 0050", "每週決策"]}
+        "family": "趨勢動能", "families": ["趨勢動能"], "detail": "", "traits": ["一半放 0050", "每週決策", "持有：買進後至少 20 個交易日"]}
     assert classify({"factors": {"rsi_14": -1.0}})["family"] == "反轉"            # buying the oversold
     assert classify({"factors": {"ml_gbm_statements": 1.0, "trend_200": 1.0}})["family"] == "機器學習"
     mixed = classify({"factors": {"trend_200": 1.0, "revenue_yoy": 1.0}, "weighting": "inverse_vol", "stop_loss": 0.15})

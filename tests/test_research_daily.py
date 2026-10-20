@@ -687,7 +687,7 @@ def test_each_entry_and_exit_says_why():
     held = {}
     daily_rankings(panel, DailyRule(**base, min_hold=2), days[0], days[2], trace=held)
     assert days[1] not in held["why"]                                     # kept: no trade, nothing to explain
-    assert held["why"][days[2]]["C"] == "跌出前 3 名（當天第 6 名），已持有滿 2 個交易日"
+    assert held["why"][days[2]]["C"] == "跌出前 3 名（當天第 6 名）；這個策略設定買進後至少持有 2 個交易日，已滿"
 
 
 def test_a_stop_loss_exit_says_so():

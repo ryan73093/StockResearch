@@ -98,10 +98,13 @@ def _grade(item: dict, cutoff: str) -> dict:
 
 
 def select(base: str | Path, research: str | Path, cutoff: date, broker: str = "cathay", workers: int = 2,
-           progress=None, skip: set[int] | None = None) -> list[dict]:
+           progress=None, skip: set[str] | None = None) -> list[dict]:
     """Every rule graded on 2015-06..cutoff, in ``workers`` processes (each loads the data once); 2026-10-18: but
-    the trials in ``skip`` (already graded this month — only the new ones are added)."""
-    items = [item for item in rules(research) if item["trial"] not in (skip or set())]
+    the rules in ``skip`` (already graded this month — only the new ones are added). 2026-10-20 (the audit): ``skip``
+    holds rule hashes, not trial numbers — a trial's spec graded under another hash is graded again."""
+    from quant_platform.research.blend import parse_spec
+
+    items = [item for item in rules(research) if parse_spec(item["spec"]).rule_hash not in (skip or set())]
     output = []
     with ProcessPoolExecutor(max_workers=max(1, workers), initializer=_init, initargs=(str(base), broker)) as pool:
         for done, row in enumerate(pool.map(_grade, items, [cutoff.isoformat()] * len(items), chunksize=4), start=1):

@@ -1418,7 +1418,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                 if hold == "trend":
                     text += "，而且跌破月線"
                 elif rule.min_hold:
-                    text += f"，已持有滿 {rule.min_hold} 個交易日"
+                    text += f"；這個策略設定買進後至少持有 {rule.min_hold} 個交易日，已滿"
                 if switch is not None and decide:
                     text += "；換成排名更前的股票，扣掉一來一回的成本仍划算"
                 if symbol in refused_before:
