@@ -4,7 +4,7 @@ The owner: a strategy can trade every trading day, not only on the monthly contr
 market of 2005 (7% price limits, call auctions, no day trading, no intraday odd lots) says little about
 today. So rules here are chosen on 2015-06-01 (the ±10% limit) to 2026-09-30, are checked separately
 from 2020-10-26 (continuous trading since 2020-03, intraday odd lots since 2020-10-26), and are judged
-in the end by forward observation from 2026-10-05; data before 2015-06 is not used to choose rules.
+in the end by the monthly rolling forward observation (2026-10-17: each account from the day after the cutoff); data before 2015-06 is not used to choose rules.
 
 The account is the owner's: NT$300,000 to start, NT$10,000 on the 5th of every month, everything
 tradable. Every trading day after the close the rule ranks the eligible listed stocks by its factors
