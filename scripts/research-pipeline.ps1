@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -884,6 +884,36 @@ switch ($Name) {
         Invoke-Step "1-scan" $arguments
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "bigscan2" {
+        # 2026-10-20 (使用者：沒看到 1 億個策略不要說有在研究): the second round — every 5-signal set of the 50 signals
+        # passing the first round's stage 1 most often x the whole market x 2 weightings x 2 calendars x 3 holding styles
+        # (25,425,120). It waits for the first round to end, sends that round's finalists to the month's list and the
+        # forward accounts, then searches; a stopped second round goes on from its own folder.
+        while (Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
+                $_.CommandLine -like "*scan-large*--signals-min 3*" }) {
+            Start-Sleep -Seconds 300
+        }
+        Invoke-Step "0-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "3", "--broker", "cathay")
+        Invoke-Step "0-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "0-forward" @("-m", "quant_platform.research", "forward")
+        $first = Join-Path $root "instance/research/scans/scan-large-1.0.0-20261020-105730"
+        $arguments = @("-m", "quant_platform.research", "scan-large", "--broker", "cathay", "--signals-min", "5", "--signals-max", "5",
+                       "--universes", "all", "--signals-top", "50", "--signals-from", $first, "--finalists", "80")
+        $marker = Join-Path $root "instance/research/scans/bigscan-current.txt"
+        if (Test-Path $marker) {
+            $folder = (Get-Content $marker -Raw).Trim()
+            $progress = Join-Path $folder "progress.json"
+            if ((Test-Path $progress) -and ((Get-Content $progress -Raw -Encoding UTF8 | ConvertFrom-Json).sizes -contains 5)) {
+                $arguments += @("--resume", $folder)
+            }
+        }
+        Invoke-Step "1-scan" $arguments
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "3", "--broker", "cathay")
+        Invoke-Step "4-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "5-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "holding2_a" {
         # 2026-10-20 (使用者：ML、DL、RL、技術分析、LLM 都要加入評估): half of every family's holding styles

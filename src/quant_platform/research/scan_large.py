@@ -31,20 +31,33 @@ CHECKS = ("daily", "weekly")
 SAMPLE_EVERY = 500
 
 
-def keys(holds=HOLDS) -> list[tuple[str, str, str, str]]:
-    return [(universe, weighting, check, hold) for universe in UNIVERSES for weighting in WEIGHTINGS
+def keys(holds=HOLDS, universes=UNIVERSES) -> list[tuple[str, str, str, str]]:
+    return [(universe, weighting, check, hold) for universe in universes for weighting in WEIGHTINGS
             for check in CHECKS for hold in holds]
 
 
-def total(names: list[str], sizes: list[int], holds=HOLDS) -> int:
-    return sum(comb(len(names), size) for size in sizes) * len(keys(holds))
+def total(names: list[str], sizes: list[int], holds=HOLDS, universes=UNIVERSES) -> int:
+    return sum(comb(len(names), size) for size in sizes) * len(keys(holds, universes))
 
 
-def blocks(names: list[str], sizes: list[int], holds=HOLDS, block: int = 2048):
+def frequent(folder: Path, top: int) -> list[str]:
+    """2026-10-20: the ``top`` signals appearing most often in a finished run's first-stage passes (development period
+    only), for a larger next round (5 signals a set) on fewer signals."""
+    from collections import Counter
+
+    counts: Counter = Counter()
+    for path in Path(folder).glob("screen-s*.jsonl"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                counts.update(json.loads(line)["factors"])
+    return [name for name, _count in counts.most_common(top)]
+
+
+def blocks(names: list[str], sizes: list[int], holds=HOLDS, block: int = 2048, universes=UNIVERSES):
     """(block number, candidates sharing one key) in a fixed order — the same numbers on every run."""
     number = 0
     for size in sizes:
-        for universe, weighting, check, hold in keys(holds):
+        for universe, weighting, check, hold in keys(holds, universes):
             batch = []
             for group in combinations(names, size):
                 batch.append({"factors": list(group), "universe": universe, "weighting": weighting, "check": check,
@@ -59,7 +72,7 @@ def blocks(names: list[str], sizes: list[int], holds=HOLDS, block: int = 2048):
 
 
 def screen_stream(arrays_folder: Path, names: list[str], sizes: list[int], costs, out: Path, holds=HOLDS, job=None,
-                  accounts=None) -> dict[str, object]:
+                  accounts=None, universes=UNIVERSES) -> dict[str, object]:
     """Stage 1 over every candidate, block by block (see the module text); returns the progress record."""
     from quant_platform.research.scan import load_arrays, metrics, passes
 
@@ -77,11 +90,13 @@ def screen_stream(arrays_folder: Path, names: list[str], sizes: list[int], costs
     bench = arrays.bench
     path = out / "progress.json"
     progress = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {
-        "version": VERSION, "names": names, "sizes": sizes, "holds": list(holds), "total": total(names, sizes, holds),
+        "version": VERSION, "names": names, "sizes": sizes, "holds": list(holds), "universes": list(universes),
+        "total": total(names, sizes, holds, universes),
         "screened": 0, "passed": 0, "next_block": 0, "started_at": datetime.now().isoformat(timespec="seconds")}
+    universes = tuple(progress.get("universes") or UNIVERSES)      # a resumed run keeps its own
     began, counted = time.time(), progress["screened"]
     index = 0
-    for number, chunk in blocks(names, sizes, holds):
+    for number, chunk in blocks(names, sizes, holds, universes=universes):
         if number < progress["next_block"]:
             index += len(chunk)
             continue
@@ -119,8 +134,9 @@ def screen_stream(arrays_folder: Path, names: list[str], sizes: list[int], costs
 
 
 def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count: int = 80, job=None,
-        folder: Path | None = None) -> dict[str, object]:
-    """Stage 1 streamed (``folder``: an unfinished run to go on with), then stage 2 as the scan's; the summary."""
+        folder: Path | None = None, universes=UNIVERSES, only: list[str] | None = None) -> dict[str, object]:
+    """Stage 1 streamed (``folder``: an unfinished run to go on with), then stage 2 as the scan's; the summary.
+    ``only``: the signals to combine (default every scan signal); a resumed run keeps the ones it started with."""
     from collections import Counter
 
     from quant_platform.research import daily
@@ -142,8 +158,12 @@ def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count:
         arrays = load_arrays(folder / "arrays")
     else:
         arrays = prepare(data, fp, costs, folder / "arrays")
-    names = [name for name in signals() if name in arrays.names]
-    progress = screen_stream(folder / "arrays", names, sizes, costs, folder, holds, job)
+    started_with = folder / "progress.json"
+    if started_with.is_file():
+        names = json.loads(started_with.read_text(encoding="utf-8"))["names"]
+    else:
+        names = [name for name in (only or signals()) if name in arrays.names]
+    progress = screen_stream(folder / "arrays", names, sizes, costs, folder, holds, job, universes=universes)
     rows = [json.loads(line) for path in sorted(folder.glob("screen-s*.jsonl"))
             for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     seeds = earlier_finalists(research)
@@ -163,7 +183,8 @@ def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count:
                         "since_2020": report["since_2020"]["excess"], "drawdown": report["strategy"]["max_drawdown"],
                         "tier": daily.tier(record.metrics)[0]})
     summary = {"version": VERSION, "stamp": stamp, "development": [str(arrays.days[0]), str(DEV_END)],
-               "signals": names, "sizes": sizes, "holds": list(holds), "candidates": progress["screened"],
+               "signals": names, "sizes": sizes, "holds": list(holds), "universes": list(progress.get("universes") or universes),
+               "candidates": progress["screened"],
                "passed_screen": sum(passes(row) for row in rows), "effective_trials": effective,
                "earlier_finalists": len(seeds), "finalists": len(chosen),
                "minutes": round((time.time() - started) / 60, 1), "results": results,

@@ -61,3 +61,13 @@ def test_a_free_hold_is_named_and_has_no_minimum():
     named = scan.to_rule({"factors": ["trend_200"], "universe": "all", "weighting": "equal", "check": "weekly",
                           "hold": "days", "named_hold": True})
     assert named.min_hold == scan.MIN_HOLD and "持有 20 天" in named.name
+
+
+def test_a_round_on_one_universe_and_the_signals_passing_most_often(tmp_path):
+    names = [f"s{index}" for index in range(7)]
+    made = [item for _number, block in scan_large.blocks(names, [5], block=10, universes=("all",)) for item in block]
+    assert len(made) == scan_large.total(names, [5], universes=("all",)) == comb(7, 5) * 12
+    assert {item["universe"] for item in made} == {"all"}
+    rows = [{"factors": ["a", "b"]}, {"factors": ["a", "c"]}, {"factors": ["a", "b", "d"]}]
+    (tmp_path / "screen-s000000.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    assert scan_large.frequent(tmp_path, 2) == ["a", "b"]

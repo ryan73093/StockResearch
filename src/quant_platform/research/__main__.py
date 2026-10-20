@@ -371,6 +371,9 @@ def main() -> int:
     parser.add_argument("--base", default=str(DEFAULT_BASE))
     parser.add_argument("--workers", type=int, default=6, help="scan：第一階段同時跑幾個程序")
     parser.add_argument("--finalists", type=int, default=80, help="scan：第二階段用完整引擎跑幾個")
+    parser.add_argument("--universes", help="scan-large：股票池，逗號分隔（all＝全部上市、large＝市值前 100；預設兩種）")
+    parser.add_argument("--signals-top", type=int, help="scan-large：只用前一輪過第一階段時出現最多的前 N 個訊號")
+    parser.add_argument("--signals-from", help="scan-large：--signals-top 依據的前一輪搜尋資料夾")
     parser.add_argument("--holds", help="scan-large：持有方式，逗號分隔（days＝固定持有 20 天、trend＝月線上續抱、free＝不設最短持有；預設三種）")
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
@@ -946,12 +949,17 @@ def main() -> int:
 
         sizes = list(range(args.signals_min, args.signals_max + 1))
         holds = tuple((args.holds or ",".join(scan_large.HOLDS)).split(","))
+        universes = tuple((args.universes or ",".join(scan_large.UNIVERSES)).split(","))
+        only = (scan_large.frequent(Path(args.signals_from), args.signals_top)
+                if args.signals_top and args.signals_from else None)
         folder = Path(args.resume) if args.resume else None
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
-        with JobLog(RESEARCH).start(f"大規模搜尋（串流）：{args.signals_min}～{args.signals_max} 個訊號一組 × 3 種持有方式 × 8 種設定",
-                                    command) as job:
+        settings = len(scan_large.keys(holds, universes)) // len(holds)
+        with JobLog(RESEARCH).start(f"大規模搜尋（串流）：{args.signals_min}～{args.signals_max} 個訊號一組"
+                                    + (f"（最常過篩的 {len(only)} 個訊號）" if only else "")
+                                    + f" × {len(holds)} 種持有方式 × {settings} 種設定", command) as job:
             summary = scan_large.run(Path(args.base), RESEARCH, broker_costs(args.broker), sizes, holds,
-                                     count=args.finalists, job=job, folder=folder)
+                                     count=args.finalists, job=job, folder=folder, universes=universes, only=only)
             job.payload["summary"] = (f"{summary['candidates']:,} 個策略、{summary['passed_screen']:,} 個過第一階段、"
                                       f"{summary['finalists']} 個進引擎：{summary['tiers']}")
         print(json.dumps({key: value for key, value in summary.items() if key != "results"}, ensure_ascii=False), flush=True)
