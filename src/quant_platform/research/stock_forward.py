@@ -253,6 +253,7 @@ class StockForwardTracker:
                     rule = parse_spec(row["spec"])          # 2026-10-18: a blend that passes too
                 except (KeyError, ValueError):
                     continue
+                rule = trend_version(rule) or rule          # 2026-10-20: never a fixed number of sessions (10-13)
                 target[rule.rule_hash] = (rule, f"每月滾動：只用 {cutoff.isoformat()} 以前的資料挑出（{row.get('tier')}）")
         target.update(experiments)
         if not target:

@@ -70,6 +70,8 @@ def pool(research: str | Path) -> list[dict]:
             continue
         if uses_0050(report["spec"]) or rule.free or rule.universe != "twse":
             continue
+        if getattr(rule, "hold", "days") != "trend" and rule.min_hold:     # 2026-10-20: no fixed holding (10-13)
+            continue
         curve = report.get("curve") or {}
         months = [month for month in curve if month <= DEV_END]
         if not months or months[0] != START:

@@ -53,7 +53,9 @@ def rules(research: str | Path) -> list[dict]:
     latest = newest(TrialRegistry(path).records(),
                     lambda record: record.kind == "candidate" and record.period == "recent"
                     and str((record.metrics or {}).get("engine", "")).startswith("daily-"))
-    output = []
+    from quant_platform.research.stock_forward import trend_version
+
+    output, seen = [], set()
     for record in sorted(latest.values(), key=lambda record: record.trial_id):
         try:
             spec = json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
@@ -63,6 +65,14 @@ def rules(research: str | Path) -> list[dict]:
         members = [sleeve.rule for sleeve in rule.sleeves] if isinstance(rule, BlendRule) else [rule]
         if uses_0050(spec) or any(member.free for member in members):
             continue
+        # 2026-10-20 (使用者 10-13：固定持有 20 天是限制，不是策略；10-20 又在前向看到「已持有滿 20 個交易日」): a rule
+        # (or a blend's sleeve) holding a fixed number of sessions is graded only in its trend version
+        trend = trend_version(rule)
+        if trend is not None:
+            rule, spec = trend, trend.canonical()
+        if rule.rule_hash in seen:
+            continue
+        seen.add(rule.rule_hash)
         output.append({"trial": record.trial_id, "spec": spec})
     return output
 

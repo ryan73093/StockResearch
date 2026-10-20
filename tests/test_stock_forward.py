@@ -119,6 +119,7 @@ def test_the_accounts_follow_the_months_rolling_selection_from_the_day_after_the
     written = tracker.record(date(2026, 10, 2), now=at(date(2026, 10, 2)))
     item = tracker.tracked()[0]
     assert len(tracker.tracked()) == 1 and item["since"] == "2026-09-01" and "2026-08-31" in item["reason"]
+    assert item["rule"]["hold"] == "trend"            # 2026-10-20: a fixed holding never enters an account (10-13)
     assert written[0]["date"] == "2026-09-01" and written[0]["contributed"] == 300_000 and len(written[0]["holdings"]) == 3
     records = tracker.records()
     assert records[-1]["date"] == "2026-10-02" and records[-1]["contributed"] == 310_000 and reconcile(records) == {}
@@ -138,8 +139,8 @@ def test_a_blend_in_the_months_selection_is_tracked_as_a_blend(tmp_path):
 
     days = weekdays(date(2024, 1, 1), date(2026, 10, 9))
     build(tmp_path, days)
-    one = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3)
-    two = DailyRule(name="每天 6 個月動能：前 3 名", factors={"momentum_6": 1.0}, top=3)
+    one = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3, hold="trend")
+    two = DailyRule(name="每天 6 個月動能：前 3 名", factors={"momentum_6": 1.0}, top=3, hold="trend")
     blend = BlendRule(name="組合：3 個月動能 60%＋6 個月動能 40%", sleeves=(Sleeve(rule=one, share=0.6), Sleeve(rule=two, share=0.4)))
     folder = tmp_path / "rolling"
     folder.mkdir()
