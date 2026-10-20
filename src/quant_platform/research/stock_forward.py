@@ -132,12 +132,19 @@ def forward_only() -> list[tuple[object, str]]:
 
     base = DailyRule(name="機器學習（含財報）：前 20 名、同產業最多 3 成、每週決策",
                      factors={"ml_gbm_statements": 1.0}, industry_cap=0.3, check="weekly")
-    return [
+    output = [
         (base.model_copy(update={"name": base.name + "、新聞利空不買（LLM）", "news_veto": "v1"}),
          "R15 D 新聞否決實驗：LLM 標出利空且有數字或風險旗標的股票不新買（只前向；和下一列同一天開始比）"),
         (base.model_copy(update={"name": base.name + "、新聞否決對照組", "news_veto": "v1-off"}),
          "R15 D 對照組：同一規則、同一天開始、不看新聞（和上一列比）"),
     ]
+    # 2026-10-20 (使用者：ML、DL、RL、技術分析、LLM 都要加入評估；持有方式都是策略): the same pair in the other two
+    # holding styles, forward only (no news before 2026-10-05)
+    for label, style in (("月線上續抱", {"hold": "trend", "min_hold": 0}), ("不設最短持有", {"min_hold": 0})):
+        for rule, reason in list(output[:2]):
+            output.append((DailyRule.model_validate({**rule.model_dump(), **style, "name": f"{rule.name}｜持有：{label}"}),
+                           f"{reason}（持有：{label}）"))
+    return output
 
 
 def qualifying_daily(research_dir: str | Path) -> list[tuple[object, str]]:

@@ -25,9 +25,39 @@ def style_of(spec: dict) -> str | None:
     return "不設最短持有" if not minimum else None
 
 
+def blend_key(rule) -> str:
+    """A blend's sleeves and shares without the sleeves' holding styles or names."""
+    import hashlib
+
+    parts = [{"share": sleeve.share, "rule": {key: value for key, value in sleeve.rule.canonical().items()
+                                              if key not in ("name", "hold", "min_hold")}} for sleeve in rule.sleeves]
+    return "blend:" + hashlib.sha256(json.dumps({"core": rule.core, "sleeves": parts}, sort_keys=True,
+                                                ensure_ascii=False).encode()).hexdigest()
+
+
+def llm_forward(research: Path) -> list[dict[str, object]]:
+    """The LLM news experiments (forward only: no news before 2026-10-05), each holding style, from the accounts."""
+    from quant_platform.research.stock_forward import StockForwardTracker
+
+    output = []
+    try:
+        for row in StockForwardTracker(research).summary():
+            if row.get("stopped") or "新聞" not in row["name"]:
+                continue
+            style = row["name"].split("｜持有：")[1] if "｜持有：" in row["name"] else "固定持有 20 天"
+            output.append({"name": row["name"].split("｜持有：")[0], "style": style, "since": row["since"],
+                           "sessions": row["sessions"], "excess": row["excess"], "rule_hash": row["rule_hash"],
+                           "veto": "利空不買" in row["name"]})
+    except (OSError, ValueError, KeyError):
+        return []
+    return sorted(output, key=lambda item: (not item["veto"], item["style"]))
+
+
 def compare(research: str | Path) -> dict[str, object]:
     """{"rows": [{"name", "styles": {style: {...} | None}, "best"}], "wins": {style: n}} (cached by the registry)."""
-    from quant_platform.research.daily import ENGINE_VERSION, DailyRule, holding_key, tier
+    from quant_platform.research.blend import BlendRule, parse_spec
+    from quant_platform.research.categories import classify
+    from quant_platform.research.daily import ENGINE_VERSION, holding_key, tier
     from quant_platform.research.registry import TrialRegistry, newest
 
     research = Path(research)
@@ -39,17 +69,24 @@ def compare(research: str | Path) -> dict[str, object]:
     names: dict[str, str] = {}
     records = TrialRegistry(path).records() if path.is_file() else []
     latest = newest([record for record in records if record.kind == "candidate" and record.period == "recent"
-                     and str(record.metrics.get("engine", "")) == ENGINE_VERSION])
+                     and str(record.metrics.get("engine", "")).startswith(ENGINE_VERSION.split("+")[0])])
+    families: dict[str, str] = {}
     for record in latest.values():
         try:
             spec = json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
-            rule = DailyRule.model_validate(spec)
-        except (OSError, ValueError, KeyError):
+            rule = parse_spec(spec)
+        except (OSError, ValueError, KeyError, TypeError):
             continue
-        style = style_of(rule.canonical())
+        if isinstance(rule, BlendRule):               # 2026-10-20: a blend whose sleeves all hold one way
+            styles_of = {style_of(sleeve.rule.canonical()) for sleeve in rule.sleeves}
+            style = styles_of.pop() if len(styles_of) == 1 else None
+            group = blend_key(rule) if style else None
+        else:
+            style = style_of(rule.canonical())
+            group = holding_key(rule.canonical())
         if style is None:
             continue
-        group = holding_key(rule.canonical())
+        families.setdefault(group, classify(spec)["family"])
         metrics = record.metrics
         entry = {"trial": record.trial_id, "rule_hash": record.spec_hash, "tier": tier(metrics)[0],
                  "final_value": metrics.get("final_value"), "since_2020": metrics.get("since_2020_final_value"),
@@ -68,9 +105,16 @@ def compare(research: str | Path) -> dict[str, object]:
         best = max(styles, key=lambda style: styles[style]["final_value"] or 0)
         if len(styles) == len(STYLES):
             wins[best] += 1
-        rows.append({"name": names[group], "styles": {style: styles.get(style) for style in STYLES}, "best": best,
+        rows.append({"name": names[group], "family": families.get(group, ""),
+                     "styles": {style: styles.get(style) for style in STYLES}, "best": best,
                      "top": max(item["final_value"] or 0 for item in styles.values())})
     rows.sort(key=lambda row: -row["top"])
-    value = {"rows": rows, "wins": wins, "complete": sum(1 for row in rows if all(row["styles"].values()))}
+    by_family: dict[str, dict[str, int]] = {}
+    for row in rows:
+        if all(row["styles"].values()):
+            counts = by_family.setdefault(row["family"], {style: 0 for style in STYLES})
+            counts[row["best"]] += 1
+    value = {"rows": rows, "wins": wins, "complete": sum(1 for row in rows if all(row["styles"].values())),
+             "by_family": by_family, "llm": llm_forward(research)}
     _cache.update(key=key, value=value)
     return value

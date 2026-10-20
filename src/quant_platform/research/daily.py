@@ -3140,6 +3140,72 @@ def holding_batch() -> list:
     return output
 
 
+HOLDING_PER_FAMILY = 3
+HOLDING_BLENDS = 5
+
+
+def holding_families_batch() -> list:
+    """2026-10-20 (使用者：不是叫你 ML、DL、RL、技術分析、LLM 都要加入評估嗎): the holding comparison for every family —
+    the best HOLDING_PER_FAMILY single rules of each (newest engine, by end value, any tier: the RL robots and the
+    technical robot have none passing) and the best HOLDING_BLENDS blends (the style applied to every sleeve), each in
+    the holding styles it has not run yet. The LLM news rules have no history (news from 2026-10-05): their three
+    styles are forward experiments (stock_forward.forward_only)."""
+    import json as _json
+
+    from quant_platform.research.blend import BlendRule, Sleeve, parse_spec
+    from quant_platform.research.categories import classify, uses_0050
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = Path("instance") / "research"
+    latest = newest([record for record in TrialRegistry(research / "trials.jsonl").records()
+                     if record.kind == "candidate" and record.period == "recent"
+                     and str(record.metrics.get("engine", "")).startswith("daily-1.5")])
+    ranked = sorted(latest.values(), key=lambda record: -(record.metrics.get("final_value") or 0))
+    per_family: dict[str, int] = {}
+    seen, output, blends = set(), [], 0
+    for record in ranked:
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            rule = parse_spec(spec)
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if uses_0050(spec):
+            continue
+        if isinstance(rule, BlendRule):
+            if blends >= HOLDING_BLENDS or not tier(record.metrics)[0] in PASSING_TIERS:
+                continue
+            blends += 1
+            for label, style in HOLDING_STYLES:
+                sleeves = tuple(Sleeve(rule=DailyRule.model_validate({**sleeve.rule.model_dump(), **style}),
+                                       share=sleeve.share) for sleeve in rule.sleeves)
+                if all(new.rule.canonical() == old.rule.canonical() for new, old in zip(sleeves, rule.sleeves, strict=True)):
+                    continue
+                output.append(BlendRule(name=f"{rule.name[: 79 - len(label) - 4]}｜持有：{label}", core=rule.core,
+                                        sleeves=sleeves))
+            continue
+        if rule.free or rule.exit_model != "none":
+            continue                                       # the free robots and learned exits hold by themselves
+        family = classify(spec)["family"]
+        if family == "反向（學著賠）" or per_family.get(family, 0) >= HOLDING_PER_FAMILY:   # a check, not a strategy
+            continue
+        key = holding_key(rule.canonical())
+        if key in seen:
+            continue
+        seen.add(key)
+        per_family[family] = per_family.get(family, 0) + 1
+        stem = rule.name.split("｜持有：")[0]
+        for word in ("、月線上續抱", "、不設最短持有", "，月線上續抱", "＋月線上續抱"):
+            stem = stem.replace(word, "")
+        own = ("trend" if rule.hold == "trend" else "days", 0 if rule.hold == "trend" else rule.min_hold)
+        for label, style in HOLDING_STYLES:
+            if (style["hold"], style["min_hold"]) == own:
+                continue
+            output.append(DailyRule.model_validate({**rule.model_dump(), **style,
+                                                    "name": f"{stem[: 79 - len(label) - 4]}｜持有：{label}"}))
+    print(f"各家族：{per_family}；組合帳戶 {blends} 個", flush=True)
+    return output
+
+
 def role_split_batch() -> list:
     """2026-10-20 (使用者：研究這些策略能否互相輔助——因子、策略、DL、RL、ML 各負責什麼): two accounts with one sleeve a
     role (research/blend_scan.ROLE_SPLITS). Registered (research_method §7): each passes if it is a T0 候選 (high-risk
@@ -3583,7 +3649,8 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "robot34": robot34_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch,
+           "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
