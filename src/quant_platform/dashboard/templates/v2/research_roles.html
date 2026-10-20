@@ -69,6 +69,60 @@
   </div>
   <p class="col-help">每一天是當天結束時這個角色最好的規則（每個規則用它當時最新的引擎結果）。上升＝找到更強的規則；下降＝引擎改得更真實後重算（10/13 的 1.4.0 加了漲跌停、整股零股、股利實際入帳；10/16 的 1.5.0 加了減資等）。</p>
 </section>
+{% if division and division.roles %}
+{% macro excess_cell(cell) %}{% if cell %}<span class="{{ 'up' if cell.mean > 0 else 'down' }}">{{ '{:+.2f}%'.format(cell.mean * 100) }}</span><br><span class="muted small">贏 {{ '{:.0f}%'.format(cell.win * 100) }}</span>{% else %}—{% endif %}{% endmacro %}
+<section class="card" data-tab="分工">
+  <div class="card__head"><h2>誰負責什麼 <span class="badge">{{ division.since }}～{{ division.until }}</span></h2><span class="muted small">每一類的代表規則，每個月比 0050 多多少（扣掉當月投入的錢）</span></div>
+  <ul class="rules">
+    <li><b>深度學習＝進攻選股</b>：0050 大漲的月份只有它贏，高波動時賺最多；0050 大跌時會多跌。</li>
+    <li><b>因子規則（共識、穩健、跌市穩）＝防守</b>：0050 大跌的月份反而贏 0050（約三分之二的月份），大漲時追不上。</li>
+    <li><b>機器學習＝第二個進攻手</b>：和深度學習同風格（每月超額相關 0.79），但挑的股票幾乎不同，可以分散進攻端。</li>
+    <li><b>規則的持有與出場</b>（保留區、看成本換股、贏家續抱）＝控制換手、抱住贏家。</li>
+    <li><b>RL＝分配比重</b>；事先看不出哪個月該防守（防守贏在 0050 大跌的同一個月），所以<b>固定比例的組合帳戶</b>（攻守各一份錢，例如 #5054）是目前最有效的分工。</li>
+  </ul>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>市場狀況</th><th class="num">月數</th>{% for role in division.roles %}<th class="num">{{ role.name }}<br><span class="muted small">#{{ role.trial }}・{{ role.job }}</span></th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in division.states + division.known %}
+        <tr>
+          <td data-primary>{{ row.state }}</td>
+          <td class="num" data-label="月數">{{ row.months }}</td>
+          {% for role in division.roles %}<td class="num" data-label="{{ role.name }}">{{ excess_cell(row.cells.get(role.name)) }}</td>{% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　每格是這種月份平均比 0050 多幾個百分點，下面是贏 0050 的月份比例。前六列是<b>當月</b>的市場狀況（事後才知道）；最後四列是<b>月初就知道</b>的狀態（上個月底 0050 在 10 個月均線上或下），開發期與 2020-10 起分開——用來看能不能事先決定攻守。RL 機器人從 2018 起才有分數。</p>
+</section>
+<section class="card" data-tab="互補程度">
+  <div class="card__head"><h2>彼此像不像</h2><span class="muted small">每月超額報酬的相關（越低越互補）與前向帳戶目前持股重疊</span></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>相關</th>{% for role in division.roles %}<th class="num">{{ role.name }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in division.correlations %}
+        <tr><td>{{ row.name }}</td>{% for role in division.roles %}{% set value = row["values"].get(role.name) %}<td class="num">{% if value is not none and role.name != row.name %}{{ '%.2f' % value }}{% else %}—{% endif %}</td>{% endfor %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if division.overlap %}
+  <div class="table-wrap" style="margin-top:12px">
+    <table>
+      <thead><tr><th>持股相同檔數</th><th class="num">持股</th>{% for row in division.overlap %}<th class="num">{{ row.name }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in division.overlap %}
+        <tr><td>{{ row.name }}</td><td class="num">{{ row.count }}</td>{% for other in division.overlap %}<td class="num">{{ row["values"].get(other.name, '—') }}</td>{% endfor %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <p class="col-help"><b>欄位說明</b>　<b>相關</b>：兩個規則每月比 0050 多多少的相關，1＝完全同步、0＝無關；越低放在同一個帳戶越能互相抵銷。<b>持股相同檔數</b>：兩個前向帳戶今天持有的股票有幾檔一樣（各約 20 檔）。</p>
+</section>
+{% endif %}
 <section class="card" data-tab="怎麼看">
   <div class="card__head"><h2>怎麼看這一頁</h2></div>
   <ul class="rules">

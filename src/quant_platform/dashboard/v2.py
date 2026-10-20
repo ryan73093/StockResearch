@@ -1100,8 +1100,16 @@ def create_v2_blueprint(dependencies) -> Blueprint:
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         rolling = rolling_test.summary(rolling_test.latest(research_dir)) or rolling_test.pending(research_dir)
+        try:                      # 2026-10-20 (使用者：因子、DL、RL、ML 各負責什麼): the division of labour
+            from quant_platform.research.division import diagnose
+
+            division = diagnose(research_dir)
+        except Exception:
+            logger.exception("Division of labour failed")
+            division = None
         return render_template("v2/research_roles.html", active_nav="research", research_tab="roles",
-                               growth=summary(research_dir), rolling=rolling, jobs=JobLog(research_dir).jobs())
+                               growth=summary(research_dir), rolling=rolling, jobs=JobLog(research_dir).jobs(),
+                               division=division)
 
     @blueprint.get("/research/rl")
     def research_rl():
