@@ -1309,6 +1309,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         from quant_platform.application import test_runs     # 2026-10-20: the weekly test suite
 
         items.append(test_runs.tile(test_runs.latest(_project_root() / "instance" / "test_runs"), now))
+        from quant_platform.research import invariants         # 2026-10-20: the owner's decisions checked daily
+
+        items.append(invariants.tile(invariants.latest(_instance_dir(dependencies.settings.database_url) / "research")))
         items.append(line_tile())
         access_on = dependencies.settings.auth_mode == "cloudflare-access"
         items.append({

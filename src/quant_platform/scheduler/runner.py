@@ -671,6 +671,23 @@ def collect_market_news(container: "Container", now: datetime | None = None, get
     return found
 
 
+def check_invariants(container: "Container", now: datetime | None = None) -> object | None:
+    """2026-10-20 (使用者：專案需求跟 AGENTS.md 有沒有在看): the owner's decisions checked as code on trading days at 16:00,
+    after the forward records (research/invariants.py); a failure is notified."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import invariants
+
+    instance = _instance_dir(container.settings.database_url)
+    local = (now or datetime.now(ZoneInfo(container.settings.scheduler_timezone)))
+    checks = invariants.run(instance / "research", local.date(), instance / "backups" / "daily")
+    invariants.save(instance / "research", checks, local)
+    failed = [item for item in checks if not item["ok"]]
+    if failed:
+        _notify_failure(container, f"invariants:{local.date()}", "需求檢查",
+                        "；".join(f"{item['name']}（{item['detail']}）" for item in failed[:4]))
+    return checks
+
+
 def run_test_suite(container: "Container", runner=None) -> object | None:
     """2026-10-20 (docs/project_risks.md item 9): the whole test suite every Sunday at 04:30, the result on the System
     page (application/test_runs.py); a failure is notified."""
@@ -945,6 +962,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         trigger=CronTrigger(day_of_week="mon-fri", hour=7, minute=40, timezone=timezone),
         id="disclosure_refresh",
         name="補抓內部人申報、庫藏股、董監質押（交易日 07:40，模型 H 的特徵）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
+    )
+    scheduler.add_job(
+        check_invariants,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=16, minute=0, timezone=timezone),
+        id="invariant_checks",
+        name="需求檢查（交易日 16:00，前向紀錄之後；對照需求與 AGENTS.md）",
         replace_existing=True,
         coalesce=True,
         max_instances=1,
