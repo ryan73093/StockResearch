@@ -1,4 +1,4 @@
-param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+﻿param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -11,6 +11,16 @@ $python = Join-Path $root ".venv\Scripts\python.exe"
 $logs = Join-Path $root "instance\research\logs"
 New-Item -ItemType Directory -Force $logs | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+# 2026-10-20 (使用者：沒講 cmd 在幹嘛、也沒有 log): what this run is, in its title should a window ever show, and every
+# step with its time in <name>-<stamp>-pipeline.log
+$pipelineLog = Join-Path $logs "$Name-$stamp-pipeline.log"
+try { $Host.UI.RawUI.WindowTitle = "StockResearch 研究流程：$Name（進度：網站 研究 › 執行中的程式；紀錄：$pipelineLog）" } catch { }
+function Write-Note([string]$Text) {
+    $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Text"
+    Write-Host $line
+    Add-Content -Path $pipelineLog -Value $line -Encoding UTF8
+}
+Write-Note "開始研究流程 $Name（PID $PID）"
 # 2026-10-14: a record of this run (running, then done) so a reboot's casualty is started again when the services
 # start (scripts/resume-research.ps1)
 $records = Join-Path $root "instance\research\pipelines"
@@ -37,8 +47,10 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
     }
     $out = Join-Path $logs "$Name-$stamp-$Label.log"
     $err = Join-Path $logs "$Name-$stamp-$Label.err.log"
-    Start-Process -FilePath $python -ArgumentList $Arguments -WorkingDirectory $root -NoNewWindow -Wait `
+    Write-Note "步驟 $Label 開始：python $($Arguments -join ' ')（輸出：$out）"
+    $process = Start-Process -FilePath $python -ArgumentList $Arguments -WorkingDirectory $root -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput $out -RedirectStandardError $err
+    Write-Note "步驟 $Label 結束（結束碼 $($process.ExitCode)）"
 }
 
 switch ($Name) {
@@ -1164,6 +1176,13 @@ switch ($Name) {
         }
         Invoke-Step "1-forward" @("-m", "quant_platform.research", "forward")
         Invoke-Step "2-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "listupdate" {
+        # 2026-10-20 23:0x: the month's list already graded (rolling --step select) but its forward test, forward accounts
+        # and board stopped (the owner closed the windows): those three steps only
+        Invoke-Step "1-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "2-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "3-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "rolling-holdout" {
         # 2026-10-16: the month's passing rules' forward test refreshed through the day (the worker, trading days 22:30)
