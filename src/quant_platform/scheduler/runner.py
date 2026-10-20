@@ -520,7 +520,7 @@ def start_rolling(container: "Container", now: datetime | None = None, launch=No
 
 
 def start_llm_trader(container: "Container", now: datetime | None = None, launch=None) -> str | None:
-    """2026-10-20 (使用者：LLM 能不能做成交易 agent): on trading days at 15:20, once the day's prices are in, the LLM
+    """2026-10-20 (使用者：LLM 能不能做成交易 agent): on trading days at 15:35, once the day's prices are in, the LLM
     trader's decision in its own process (scripts/start-research.ps1 -Name llmtrader; research/llm_trader.py)."""
     import subprocess
     from pathlib import Path as FilePath
@@ -991,9 +991,9 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
     scheduler.add_job(
         start_llm_trader,
         args=[container],
-        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=20, timezone=timezone),
+        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=35, timezone=timezone),
         id="llm_trader",
-        name="LLM 交易員（交易日 15:20 收盤資料進來後決定，隔天收盤成交；前向實驗）",
+        name="LLM 交易員（交易日 15:35 收盤資料進來後決定，隔天收盤成交；前向實驗）",
         replace_existing=True,
         coalesce=True,
         max_instances=1,

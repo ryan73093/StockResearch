@@ -917,7 +917,13 @@ def main() -> int:
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         with JobLog(RESEARCH).start(f"LLM 交易員：{day} 收盤後的決定", command) as job:
             client = llm_trader.build_client(Settings.from_env(), RESEARCH)
-            record = llm_trader.run_day(Path(args.base), RESEARCH, day, client)
+            for attempt in range(7):                # the day's prices may still be on their way (15:15 refresh)
+                if attempt:
+                    job.update(current=f"還沒有 {day} 的收盤資料，5 分鐘後再試（第 {attempt} 次）", force=True)
+                    time.sleep(300)
+                record = llm_trader.run_day(Path(args.base), RESEARCH, day, client)
+                if record is not None or any(item["date"] == day.isoformat() for item in llm_trader.decisions(RESEARCH)):
+                    break
             job.payload["summary"] = ("已經決定過或不是交易日" if record is None else
                                       f"LLM 持有 {len(record['llm']['hold'])} 檔"
                                       + (f"（{record['llm']['fallback']}）" if record['llm'].get('fallback') else "")
