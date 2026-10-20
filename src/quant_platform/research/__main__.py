@@ -1280,7 +1280,9 @@ def main() -> int:
             print(f"{row['name']}（{row['since']} 起）：{row['sessions']} 個交易日、投入 {row['contributed']:,.0f}、"
                   f"資產 {row['value']:,.0f}、0050 {row['benchmark_value']:,.0f}、持股 {len(row['holdings'])} 檔、"
                   f"費稅 {row['costs']:,}；對帳 {'正常' if not row['problems'] else '；'.join(row['problems'])}")
-        return 0 if not reconcile(tracker.records()) else 1
+        # 2026-10-20: reconcile lists every account (an empty list when it is fine) and needs the rebase marks — the old
+        # test returned 1 on every run
+        return 0 if not any(reconcile(tracker.records(), tracker.rebases()).values()) else 1
 
     if args.command == "stats" and args.family == "daily":
         from quant_platform.research import daily as daily_research
