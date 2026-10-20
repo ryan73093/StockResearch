@@ -270,6 +270,9 @@ def _daily(args, registry: TrialRegistry) -> int:
     if args.name not in daily_research.BATCHES:
         raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(daily_research.BATCHES)}")
     rules = daily_research.BATCHES[args.name]()
+    from quant_platform.research.pool import record_sources
+
+    record_sources(RESEARCH, rules, f"每天決策批次 {args.name}")       # 2026-10-21: the pool reads it
     costs = broker_costs(args.broker)
     command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
     with JobLog(RESEARCH).start(f"每天決策規則・{args.name}（2015-06 起、啟動資金 30 萬＋每月 1 萬）", command,

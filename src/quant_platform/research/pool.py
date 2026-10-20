@@ -76,7 +76,7 @@ def _sources(research_dir: Path) -> dict[str, str]:
     import io
 
     marks = []
-    for name in ("trials.jsonl", "journal.jsonl"):
+    for name in ("trials.jsonl", "journal.jsonl", SOURCES_LOG):
         path = Path(research_dir) / name
         marks.append((path.stat().st_mtime_ns, path.stat().st_size) if path.is_file() else None)
     key = (str(Path(research_dir).resolve()), tuple(marks))
@@ -86,7 +86,53 @@ def _sources(research_dir: Path) -> dict[str, str]:
     return dict(_SOURCES["origin"])
 
 
+SOURCES_FILE = "pool_sources.json"      # every batch's rules, built once (_every_batch)
+SOURCES_LOG = "sources.jsonl"           # the rules each daily batch run went through, appended by the CLI
+
+
+def record_sources(research_dir: Path, rules, label: str) -> None:
+    """2026-10-21: a daily batch run writes down its rules' source as it starts (the pool reads it instead of
+    rebuilding every batch — the blend search alone took 5 s, all batches 13.5 s after every registry change)."""
+    lines = "".join(json.dumps({"spec_hash": rule.rule_hash, "source": label}, ensure_ascii=False) + "\n"
+                    for rule in rules)
+    if lines:
+        with (Path(research_dir) / SOURCES_LOG).open("a", encoding="utf-8") as handle:
+            handle.write(lines)
+
+
 def _build_sources(research_dir: Path) -> dict[str, str]:
+    """The snapshot of every batch's rules (built the first time, then kept), the batch runs since and the AI
+    researcher's journal."""
+    snapshot = research_dir / SOURCES_FILE
+    if snapshot.is_file():
+        origin = json.loads(snapshot.read_text(encoding="utf-8"))
+    else:
+        origin = _every_batch()
+        partial = snapshot.with_suffix(".partial")
+        partial.write_text(json.dumps(origin, ensure_ascii=False), encoding="utf-8")
+        partial.replace(snapshot)
+    log = research_dir / SOURCES_LOG
+    if log.is_file():
+        for line in log.read_text(encoding="utf-8").splitlines():
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            origin.setdefault(entry["spec_hash"], entry["source"])
+    journal = research_dir / "journal.jsonl"
+    if journal.is_file():
+        for line in journal.read_text(encoding="utf-8").splitlines():
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            for item in entry.get("accepted") or []:
+                if item.get("spec_hash"):
+                    origin.setdefault(item["spec_hash"], f"AI 研究員 {entry.get('round_id', '')}")
+    return origin
+
+
+def _every_batch() -> dict[str, str]:
     from quant_platform.research.batches import BATCHES
     from quant_platform.research.daily import BATCHES as DAILY_BATCHES
     from quant_platform.research.stock_rules import BATCHES as STOCK_BATCHES
@@ -105,16 +151,6 @@ def _build_sources(research_dir: Path) -> dict[str, str]:
     for name, batch in BATCHES.items():
         for spec in batch():
             origin.setdefault(spec.spec_hash, f"規則批次 {name}")
-    journal = research_dir / "journal.jsonl"
-    if journal.is_file():
-        for line in journal.read_text(encoding="utf-8").splitlines():
-            try:
-                entry = json.loads(line)
-            except ValueError:
-                continue
-            for item in entry.get("accepted") or []:
-                if item.get("spec_hash"):
-                    origin.setdefault(item["spec_hash"], f"AI 研究員 {entry.get('round_id', '')}")
     return origin
 
 
