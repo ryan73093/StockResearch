@@ -196,14 +196,22 @@ ROLE_SPLITS = (
 )
 
 
-def role_blends(research: str | Path = Path("instance") / "research") -> list:
-    """The ROLE_SPLITS as blends: each member's share by risk parity on its development months (volatility of its
-    month returns to DEV_END); the development measures printed."""
+TOP10_SPLITS = (
+    # 2026-10-20 (#5983 深度學習前 10 名固定持有 20 天，5,256 萬，但 0050 大跌時多跌 10.4 點): #5155 and #5163 with their
+    # deep sleeve replaced by #5983 — the blend search's stage 1 (at most 1 point further in each fall) leaves it out
+    ("組合：深度學習前 10 名＋跌市穩", (("深度學習前 10 名", 5983), ("跌市穩", 5106))),
+    ("組合：共識＋深度學習前 10 名＋跌市穩", (("共識", 4317), ("深度學習前 10 名", 5983), ("跌市穩", 5106))),
+)
+
+
+def role_blends(research: str | Path = Path("instance") / "research", splits=ROLE_SPLITS) -> list:
+    """The ``splits`` (ROLE_SPLITS, TOP10_SPLITS) as blends: each member's share by risk parity on its development
+    months (volatility of its month returns to DEV_END); the development measures printed."""
     from quant_platform.research.blend import BlendRule, Sleeve
 
     members = {item["trial"]: item for item in pool(research)}
     output = []
-    for name, parts in ROLE_SPLITS:
+    for name, parts in splits:
         found = [members.get(trial) for _role, trial in parts]
         if any(item is None for item in found):
             print(f"{name}：成員不在組合池（{[trial for (_role, trial), item in zip(parts, found) if item is None]}）", flush=True)
