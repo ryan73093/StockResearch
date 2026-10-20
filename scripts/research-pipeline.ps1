@@ -888,16 +888,16 @@ switch ($Name) {
     "bigscan2" {
         # 2026-10-20 (使用者：沒看到 1 億個策略不要說有在研究): the second round — every 5-signal set of the 50 signals
         # passing the first round's stage 1 most often x the whole market x 2 weightings x 2 calendars x 3 holding styles
-        # (25,425,120). It waits for the first round to end, sends that round's finalists to the month's list and the
-        # forward accounts, then searches; a stopped second round goes on from its own folder.
-        while (Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
-                $_.CommandLine -like "*scan-large*--signals-min 3*" }) {
+        # (25,425,120). It waits for the first round to finish (its summary.json written — 10-20 22:4x the first round
+        # stopped on a GPU error and its process was gone without finishing), sends that round's finalists to the month's
+        # list and the forward accounts, then searches; a stopped second round goes on from its own folder.
+        $first = Join-Path $root "instance/research/scans/scan-large-1.0.0-20261020-105730"
+        while (-not (Test-Path (Join-Path $first "summary.json"))) {
             Start-Sleep -Seconds 300
         }
         Invoke-Step "0-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "3", "--broker", "cathay")
         Invoke-Step "0-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
         Invoke-Step "0-forward" @("-m", "quant_platform.research", "forward")
-        $first = Join-Path $root "instance/research/scans/scan-large-1.0.0-20261020-105730"
         $arguments = @("-m", "quant_platform.research", "scan-large", "--broker", "cathay", "--signals-min", "5", "--signals-max", "5",
                        "--universes", "all", "--signals-top", "50", "--signals-from", $first, "--finalists", "80")
         $marker = Join-Path $root "instance/research/scans/bigscan-current.txt"

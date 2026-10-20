@@ -71,3 +71,22 @@ def test_a_round_on_one_universe_and_the_signals_passing_most_often(tmp_path):
     rows = [{"factors": ["a", "b"]}, {"factors": ["a", "c"]}, {"factors": ["a", "b", "d"]}]
     (tmp_path / "screen-s000000.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
     assert scan_large.frequent(tmp_path, 2) == ["a", "b"]
+
+
+def test_a_block_waits_for_the_gpu_memory_and_other_errors_still_stop(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(scan_large, "OOM_WAIT", 0)
+    calls = []
+
+    def busy(chunk):
+        calls.append(chunk)
+        if len(calls) < 3:
+            raise RuntimeError("CUDA error: out of memory")
+        return "returns", "entries"
+    assert scan_large._with_room(busy, ["c"]) == ("returns", "entries") and len(calls) == 3
+
+    def broken(chunk):
+        raise ValueError("shape mismatch")
+    with pytest.raises(ValueError):
+        scan_large._with_room(broken, ["c"])

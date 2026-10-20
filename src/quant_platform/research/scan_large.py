@@ -71,6 +71,33 @@ def blocks(names: list[str], sizes: list[int], holds=HOLDS, block: int = 2048, u
                 number += 1
 
 
+OOM_RETRIES = 30
+OOM_WAIT = 120
+
+
+def _with_room(accounts, chunk, job=None):
+    """``accounts(chunk)``, waiting for the GPU's memory when another process holds it (2026-10-20 22:4x: the month's
+    rolling run retrained the deep model on the GPU and the first round stopped on "CUDA error: out of memory"); the
+    block is tried again after OOM_WAIT seconds, at most OOM_RETRIES times. Any other error stops the run as before."""
+    for attempt in range(OOM_RETRIES + 1):
+        try:
+            return accounts(chunk)
+        except Exception as error:  # noqa: BLE001 - torch's error types differ by version; matched by text
+            if "out of memory" not in str(error).lower() or attempt == OOM_RETRIES:
+                raise
+            try:
+                import torch
+
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001
+                pass
+            if job:
+                job.update(current=f"顯示卡記憶體不足（另一個程序在用），{OOM_WAIT} 秒後重試這一批（第 {attempt + 1} 次）",
+                           force=True)
+            time.sleep(OOM_WAIT)
+    raise RuntimeError("unreachable")
+
+
 def screen_stream(arrays_folder: Path, names: list[str], sizes: list[int], costs, out: Path, holds=HOLDS, job=None,
                   accounts=None, universes=UNIVERSES) -> dict[str, object]:
     """Stage 1 over every candidate, block by block (see the module text); returns the progress record."""
@@ -100,7 +127,7 @@ def screen_stream(arrays_folder: Path, names: list[str], sizes: list[int], costs
         if number < progress["next_block"]:
             index += len(chunk)
             continue
-        returns, entries = accounts(chunk)
+        returns, entries = _with_room(accounts, chunk, job)
         excess = (returns - bench[None, : returns.shape[1]]).astype(np.float16)
         kept, sampled, lines = [], [], []
         for offset, (item, row_returns, row_entries) in enumerate(zip(chunk, returns, entries, strict=True)):
