@@ -26,3 +26,30 @@ def test_a_sleeve_is_shown_with_the_style_it_holds_not_the_one_its_name_came_fro
     blend = BlendRule(name="組合", core=0.0, sleeves=(Sleeve(rule=free, share=0.6), Sleeve(rule=trend, share=0.4)))
     lines = describe_rule(blend.canonical())
     assert lines[1:] == ["60%：掃描：技術模型、每週決策｜持有：不設最短持有", "40%：趨勢｜持有：月線上續抱"]
+
+
+def test_every_passing_strategy_gets_the_holding_styles_it_has_not_run(tmp_path, monkeypatch):
+    import json
+
+    from quant_platform.research import daily
+    from quant_platform.research.registry import TrialRegistry
+
+    monkeypatch.chdir(tmp_path)
+    research = tmp_path / "instance" / "research"
+    (research / "reports").mkdir(parents=True)
+    registry = TrialRegistry(research / "trials.jsonl")
+    monkeypatch.setattr(daily, "tier", lambda metrics: ("T0 候選" if metrics.get("ok") else "T3", []))
+
+    def register(rule, ok):
+        name = f"{rule.rule_hash[:12]}.json"
+        (research / "reports" / name).write_text(json.dumps({"spec": rule.canonical()}), encoding="utf-8")
+        registry.register(kind="candidate", period="recent", spec_hash=rule.rule_hash, spec_name=rule.name,
+                          input_hash=rule.rule_hash, data_fingerprint="x", report_file=name,
+                          metrics={"engine": daily.ENGINE_VERSION, "ok": ok, "final_value": 1.0})
+
+    passing = DailyRule(name="趨勢、月線上續抱", factors={"trend_200": 1.0}, top=20, hold="trend", min_hold=0)
+    register(passing, True)
+    register(DailyRule(name="趨勢", factors={"trend_200": 1.0}, top=20), False)      # its fixed style: already run
+    register(DailyRule(name="輸的", factors={"momentum_6": 1.0}, top=20), False)     # not passing: not studied
+    rules = daily.holding_all_batch()
+    assert [(rule.name, rule.min_hold, rule.hold) for rule in rules] == [("趨勢｜持有：不設最短持有", 0, "days")]
