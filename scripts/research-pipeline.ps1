@@ -880,7 +880,7 @@ switch ($Name) {
         # (the folder is kept in instance/research/scans/bigscan-current.txt), then the statistics and the board
         $marker = Join-Path $root "instance/research/scans/bigscan-current.txt"
         $arguments = @("-m", "quant_platform.research", "scan-large", "--broker", "cathay", "--signals-min", "3", "--signals-max", "4", "--finalists", "80")
-        if (Test-Path $marker) { $arguments += @("--resume", (Get-Content $marker -Raw).Trim()) }
+        if (Test-Path $marker) { $arguments += @("--resume", (Get-Content $marker -Raw -Encoding UTF8).Trim()) }
         Invoke-Step "1-scan" $arguments
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
@@ -902,7 +902,7 @@ switch ($Name) {
                        "--universes", "all", "--signals-top", "50", "--signals-from", $first, "--finalists", "80")
         $marker = Join-Path $root "instance/research/scans/bigscan-current.txt"
         if (Test-Path $marker) {
-            $folder = (Get-Content $marker -Raw).Trim()
+            $folder = (Get-Content $marker -Raw -Encoding UTF8).Trim()
             $progress = Join-Path $folder "progress.json"
             if ((Test-Path $progress) -and ((Get-Content $progress -Raw -Encoding UTF8 | ConvertFrom-Json).sizes -contains 5)) {
                 $arguments += @("--resume", $folder)
