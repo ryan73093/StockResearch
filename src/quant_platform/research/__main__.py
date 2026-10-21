@@ -323,7 +323,7 @@ def main() -> int:
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
-                            "window-weight", "intraday", "limits-check"),
+                            "window-weight", "intraday", "limits-check", "live-flow"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
@@ -977,6 +977,24 @@ def main() -> int:
                                       f"（重算 {refreshed.get('holdout_run', 0)} 個，其餘讀前向帳戶紀錄）"
                                       if refreshed else "這個月還沒挑策略")
         print(job.payload["summary"])
+        return 0
+
+    if args.command == "live-flow":
+        # 2026-10-22 (使用者 2026-10-20：我也要這個——盤中資金流向): research/live_flow.py, 09:00-13:30
+        from quant_platform.research import live_flow
+        from quant_platform.research.history.finmind import env_token, plan
+        from quant_platform.research.jobs import JobLog
+
+        token = env_token(Path.cwd())
+        found_plan = plan(token) if token else None
+        if not found_plan or (found_plan.get("limit") or 0) <= 600:
+            print("FinMind 不是付費方案（即時快照只限 Sponsor），今天不抓", file=sys.stderr)
+            return 3
+        with JobLog(RESEARCH).start("盤中資金流（每 15 秒全市場快照，09:00～13:30）",
+                                    "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+            found = live_flow.run(Path(args.base), RESEARCH, token, job=job)
+            job.payload["summary"] = f"{found['snapshots']} 次快照、{found['stocks']} 檔、失敗 {found['errors']} 次"
+        print(json.dumps(found, ensure_ascii=False))
         return 0
 
     if args.command == "limits-check":

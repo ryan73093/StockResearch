@@ -1176,6 +1176,38 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         return render_template("v2/market.html", active_nav="market", market=market_view(load_snapshot(research_dir)))
 
+    @blueprint.get("/market/live")
+    def market_live():
+        """2026-10-22 (使用者 2026-10-20：我也要這個——盤中資金流向): the session's money by industry and stock, bought at
+        the ask or sold at the bid, from FinMind's snapshots (research/live_flow.py; display only)."""
+        from quant_platform.research import live_flow
+        from quant_platform.research.snapshot import load as load_snapshot
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        page = live_flow.latest(research_dir)
+        names = {code: item.get("name", "") for code, item in ((load_snapshot(research_dir) or {}).get("stocks") or {}).items()}
+        if page:
+            for row in page["stocks"] + page["industries"]:
+                code = row.get("code") or row.get("leader")
+                row["name"] = names.get(code or "", "")
+            total = sum(entry["amount"] for entry in page["industries"])
+            page["total"] = total
+            page["net"] = sum(entry["net"] for entry in page["industries"])
+            page["up"] = sum(entry["up"] for entry in page["industries"])
+            page["down"] = sum(entry["down"] for entry in page["industries"])
+            page["buyers"] = [row for row in page["stocks"] if row["net"] > 0][:30]
+            page["sellers"] = sorted((row for row in page["stocks"] if row["net"] < 0), key=lambda row: row["net"])[:30]
+        now = datetime.now(TAIPEI)
+        live = (dependencies.market_calendar.calendar("TW").is_trading_day(now.date())
+                and time(8, 59) <= now.time() <= time(13, 31))
+        return render_template("v2/live.html", active_nav="market", page=page, live=live)
+
+    @blueprint.get("/market/live.json")
+    def market_live_json():
+        from quant_platform.research import live_flow
+
+        return jsonify(live_flow.latest(_instance_dir(dependencies.settings.database_url) / "research") or {})
+
     @blueprint.get("/stock")
     def stock_search():
         """S9-W05: find a stock by code or name (listed and TPEx)."""

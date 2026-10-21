@@ -540,6 +540,28 @@ def start_llm_trader(container: "Container", now: datetime | None = None, launch
     return "llmtrader"
 
 
+def start_live_flow(container: "Container", now: datetime | None = None, launch=None) -> str | None:
+    """2026-10-22 (使用者 2026-10-20：我也要這個——盤中資金流向): on trading days at 08:57, the session's snapshots in their
+    own process until 13:30 (scripts/start-research.ps1 -Name liveflow; research/live_flow.py; it stops at once
+    without a paid FinMind plan)."""
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if not container.market_calendar.calendar("TW").is_trading_day(local_now.date()):
+        return None
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch("liveflow")
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Name",
+                        "liveflow"], check=False, timeout=120)
+    return "liveflow"
+
+
 def start_finmind_paid(container: "Container", now: datetime | None = None, launch=None, limit=None) -> str | None:
     """2026-10-21 (使用者：FinMind Sponsor 你要做什麼分析; 為什麼 API 次數使用是 0): every hour at :20, the plan of the
     FinMind token the project's .env has now (written to research/history/raw/finmind/plan.json for the system page);
@@ -1090,6 +1112,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=2 * 3600,
+    )
+    scheduler.add_job(
+        start_live_flow,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=8, minute=57, timezone=timezone),
+        id="live_flow",
+        name="盤中資金流（交易日 08:57 啟動，每 15 秒全市場快照到 13:30；只顯示）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3 * 3600,
     )
     scheduler.add_job(
         start_finmind_paid,

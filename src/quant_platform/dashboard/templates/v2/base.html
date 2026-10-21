@@ -51,7 +51,8 @@
         </div>
       </nav>
       <nav class="sidenav sidenav--sub" aria-label="市場與個股">
-        <a href="/market"{% if active_nav == 'market' %} aria-current="page"{% endif %}>{{ icon('market') }}<span>市場總覽</span></a>
+        <a href="/market"{% if active_nav == 'market' and request.path != '/market/live' %} aria-current="page"{% endif %}>{{ icon('market') }}<span>市場總覽</span></a>
+        <a href="/market/live"{% if request.path == '/market/live' %} aria-current="page"{% endif %}>{{ icon('market') }}<span>盤中資金流</span></a>
       </nav>
       <a class="sidesearch-link" href="/stock"{% if active_nav == 'stock' %} aria-current="page"{% endif %}>{{ icon('search') }}<span>查個股</span></a>
       <form class="sidesearch" action="/stock" method="get" role="search">

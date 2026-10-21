@@ -368,6 +368,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "invariant_checks",
             "llm_trader",
             "finmind_paid",
+            "live_flow",
             "trade_audit",
             "disclosure_refresh",
             "close_availability_probe",

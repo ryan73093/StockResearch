@@ -1,0 +1,91 @@
+{% extends "v2/base.html" %}
+{% block title %}盤中資金流 · 交易研究分析平台{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>盤中資金流</h1>
+    <p class="page-head__sub">{% if page %}{{ page.date }}・更新到 {{ page.updated[11:19] }}{% if live %}（盤中每 30 秒自動更新）{% else %}（今天的盤中已結束或還沒開始）{% endif %}{% else %}交易日 09:00～13:30 每 15 秒抓一次全市場快照{% endif %}</p>
+  </div>
+  <div class="page-head__meta"><a href="/market">市場總覽</a>・<a href="/">回今日</a></div>
+</header>
+{% endblock %}
+{% block content %}
+{% macro stock_table(rows) %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>股票</th><th>產業</th><th class="num">成交值</th><th class="num">外盤減內盤</th><th class="num">外盤比</th><th class="num">價格</th><th class="num">漲跌</th></tr></thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td data-primary><a href="/stock/{{ row.code }}">{{ row.code }} {{ row.name }}</a></td>
+          <td data-label="產業">{{ row.industry or '—' }}</td>
+          <td class="num" data-label="成交值">{% if row.amount >= 1e8 %}{{ '{:,.1f}'.format(row.amount / 1e8) }} 億{% else %}{{ '{:,.0f}'.format(row.amount / 1e4) }} 萬{% endif %}</td>
+          <td class="num {{ 'up' if row.net > 0 else 'down' }}" data-label="外盤減內盤">{% if row.net|abs >= 1e8 %}{{ '{:,.1f}'.format(row.net / 1e8) }} 億{% else %}{{ '{:,.0f}'.format(row.net / 1e4) }} 萬{% endif %}</td>
+          <td class="num" data-label="外盤比">{{ '{:.0%}'.format(row.bought) if row.bought is not none else '—' }}</td>
+          <td class="num" data-label="價格">{{ row.close if row.close is not none else '—' }}</td>
+          <td class="num {{ 'up' if (row.change or 0) > 0 else ('down' if (row.change or 0) < 0 else '') }}" data-label="漲跌">{{ '{:+.2f}%'.format(row.change) if row.change is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　<b>外盤減內盤</b>：買方主動減賣方主動的估計金額（見「說明」）。<b>外盤比</b>：外盤佔外盤加內盤的比例。<b>漲跌</b>：相對昨天收盤。</p>
+{% endmacro %}
+{% if not page %}
+<section class="card"><p class="muted">還沒有盤中資料。交易日 08:57 自動啟動，09:00 起每 15 秒抓一次 FinMind 全市場快照（需要 Sponsor 方案）。</p></section>
+{% else %}
+{% macro money(value) %}{% if value is none %}—{% elif value|abs >= 1e8 %}{{ '{:,.1f}'.format(value / 1e8) }} 億{% else %}{{ '{:,.0f}'.format(value / 1e4) }} 萬{% endif %}{% endmacro %}
+<div class="kpis kpis--page kpis--four" data-notab>
+  <div class="kpi"><div class="kpi__label">個股成交值（上市＋上櫃）</div><div class="kpi__value">{{ money(page.total) }}</div></div>
+  <div class="kpi"><div class="kpi__label">外盤減內盤（主動買超）</div><div class="kpi__value {{ 'up' if page.net > 0 else 'down' }}">{{ money(page.net) }}</div></div>
+  <div class="kpi"><div class="kpi__label">上漲／下跌家數</div><div class="kpi__value"><span class="up">{{ page.up }}</span><small>／</small><span class="down">{{ page.down }}</span></div></div>
+  <div class="kpi"><div class="kpi__label">產業數</div><div class="kpi__value">{{ page.industries|length }}</div></div>
+</div>
+
+<section class="card" data-tab="產業" id="industries">
+  <div class="card__head"><h2>產業（依外盤減內盤排序）</h2></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>產業</th><th class="num">成交值</th><th class="num">佔大盤</th><th class="num">比上個交易日同時</th><th class="num">外盤減內盤</th><th class="num">外盤比</th><th class="num">漲／跌家數</th><th>主動買超最多</th></tr></thead>
+      <tbody>
+      {% for entry in page.industries %}
+        <tr>
+          <td data-primary><strong>{{ entry.industry }}</strong></td>
+          <td class="num" data-label="成交值">{{ money(entry.amount) }}</td>
+          <td class="num" data-label="佔大盤">{{ '{:.1%}'.format(entry.share) }}</td>
+          <td class="num {{ 'up' if (entry.share_change or 0) > 0 else ('down' if (entry.share_change or 0) < 0 else '') }}" data-label="比上個交易日同時">{{ '{:+.1%}'.format(entry.share_change) if entry.share_change is not none else '—' }}</td>
+          <td class="num {{ 'up' if entry.net > 0 else ('down' if entry.net < 0 else '') }}" data-label="外盤減內盤">{{ money(entry.net) }}</td>
+          <td class="num" data-label="外盤比">{{ '{:.0%}'.format(entry.bought) if entry.bought is not none else '—' }}</td>
+          <td class="num" data-label="漲／跌家數"><span class="up">{{ entry.up }}</span>／<span class="down">{{ entry.down }}</span></td>
+          <td data-label="主動買超最多">{% if entry.leader %}<a href="/stock/{{ entry.leader }}">{{ entry.leader }} {{ entry.name }}</a>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　<b>成交值</b>：今天到更新時間為止的累計成交金額（只算普通股，不含 ETF）。<b>佔大盤</b>：佔所有個股成交值的比例。<b>比上個交易日同時</b>：佔比和上一個交易日同一時間比，增加代表資金往這個產業移。<b>外盤減內盤</b>：買方主動（成交在賣價）減賣方主動（成交在買價）的金額；每 15 秒用快照最後一筆的方向估算兩次快照之間的成交，是估計值。<b>外盤比</b>：外盤佔外盤加內盤的比例，50% 以上是買方較積極。</p>
+</section>
+
+<section class="card" data-tab="主動買超個股" id="buyers">
+  <div class="card__head"><h2>外盤減內盤最多的 30 檔</h2></div>
+  {{ stock_table(page.buyers) }}
+</section>
+
+<section class="card" data-tab="主動賣超個股" id="sellers">
+  <div class="card__head"><h2>內盤減外盤最多的 30 檔</h2></div>
+  {{ stock_table(page.sellers) }}
+</section>
+
+<section class="card" data-tab="說明" id="about">
+  <div class="card__head"><h2>這頁怎麼算</h2></div>
+  <p>交易日 09:00～13:30，每 15 秒向 FinMind 抓一次全市場即時快照（約每 10 秒更新），每檔股票兩次快照之間增加的成交金額，依快照當下最後一筆成交是外盤（買方主動）或內盤（賣方主動）歸類；第一次快照以前已經成交的金額方向不明，不算進外盤或內盤。13:30 的收盤集合競價不在內（研究程式避開 13:30～14:40）。</p>
+  <p class="muted">只顯示，不會下單；真實下單永久關閉。這是盤中的估計，研究與回測一律用收盤後的正式資料。</p>
+</section>
+{% endif %}
+{% if live %}
+<script>
+  // 2026-10-22: during the session the page reloads every 30 s (the open tab is kept by the address's #)
+  setTimeout(() => location.reload(), 30000);
+</script>
+{% endif %}
+{% endblock %}

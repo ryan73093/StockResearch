@@ -6,7 +6,7 @@
     <h1>市場總覽</h1>
     <p class="page-head__sub">{% if market %}{{ market.date }} 收盤・上市＋上櫃普通股 {{ '{:,}'.format(market.traded) }} 檔有成交{% else %}台股整體狀況{% endif %}</p>
   </div>
-  <div class="page-head__meta"><a href="/stock">查個股</a>・<a href="/">回今日</a></div>
+  <div class="page-head__meta"><a href="/market/live">盤中資金流</a>・<a href="/stock">查個股</a>・<a href="/">回今日</a></div>
 </header>
 {% endblock %}
 {% block content %}
