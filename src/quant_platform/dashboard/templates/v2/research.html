@@ -379,7 +379,7 @@
       {% for job in jobs %}
         <tr>
           <td data-primary><strong>{{ job.name }}</strong></td>
-          <td data-label="狀態"><span class="badge {{ 'badge--warn' if job.status == 'running' else ('badge--ok' if job.status == 'done' else 'badge--bad') }}">{{ job.status_label }}</span></td>
+          <td data-label="狀態"><span class="badge {{ 'badge--warn' if job.status in ('running', 'waiting') else ('badge--ok' if job.status == 'done' else 'badge--bad') }}">{{ job.status_label }}</span></td>
           <td data-label="進度">{% if job.total %}<div class="progress"><span style="width:{{ job.percent or 0 }}%"></span></div><span class="small">{{ job.done }}／{{ job.total }}（{{ job.percent }}%）</span>{% else %}<span class="small">{{ job.current or '—' }}</span>{% endif %}</td>
           <td class="small" data-label="開始">{{ job.started_at[5:16].replace('T', ' ') }}</td>
           <td class="small" data-label="預計完成">{{ job.eta or (job.finished_at[5:16].replace('T', ' ') if job.finished_at else '—') }}</td>

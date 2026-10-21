@@ -450,3 +450,13 @@ def test_new_negative_challenger_does_not_hide_replayable_model():
     )
 
     assert selected == (replayable,)
+
+
+def test_a_paused_modules_button_does_nothing(tmp_path, monkeypatch):
+    """2026-10-21 (稽核：舊版頁面的按鈕仍會跑已暫停的舊盤後 AI 並送出模擬委託)."""
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'paused.db'}"))
+    ran = []
+    monkeypatch.setattr(container.daily_decision_pipeline, "run", lambda market: ran.append(market))
+    response = create_app(container).test_client().post("/ai-trading/run", headers={"Referer": "/ai-trading"})
+    assert response.status_code == 302 and ran == []                       # legacy_research is paused by default
+    assert create_app(container).test_client().get("/stock/0050").status_code == 302      # an ETF: the market page

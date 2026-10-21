@@ -451,6 +451,11 @@ class SeedPlan:
         self.day_of_month = day_of_month
         self.calendar = calendar
 
+    def as_dict(self) -> dict[str, object]:
+        """The plan as the reports record it (the legacy engine's ``plan.as_dict()``, the ETF baselines' accounts)."""
+        return {"kind": "SeedPlan", "initial": self.initial, "monthly_amount": self.monthly_amount,
+                "day_of_month": self.day_of_month}
+
     def schedule(self, sessions: list[date], start: date, end: date) -> list[tuple[date, float]]:
         first = next((day for day in sessions if start <= day <= end), None)
         if first is None:

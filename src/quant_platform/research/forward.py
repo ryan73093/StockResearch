@@ -25,6 +25,10 @@ from quant_platform.research.spec import BASELINES, StrategySpec
 TAIPEI = ZoneInfo("Asia/Taipei")
 FORWARD_START = date(2026, 10, 1)        # the first start; 2026-10-17 on, ``start_for`` (rolls monthly)
 STANDARD_PLAN = ContributionPlan(monthly_amount=10_000, day_of_month=5)
+# 2026-10-21 (AGENTS：評估基準是相同現金流，使用者 2026-10-04；稽核：ETF 基準帳戶只有每月 1 萬): the owner's account —
+# NT$300,000 to start, NT$10,000 on every 5th — as the strategy accounts. Records carry their plan; the older
+# monthly-only records stay in the log and are no longer shown.
+SEED = "seed"
 
 
 def start_for(today: date) -> date:
@@ -35,10 +39,13 @@ def start_for(today: date) -> date:
 
 
 class ForwardTracker:
-    def __init__(self, research_dir: str | Path, plan: ContributionPlan = STANDARD_PLAN) -> None:
+    def __init__(self, research_dir: str | Path, plan=None) -> None:
+        from quant_platform.research.stock_rules import SeedPlan
+
         self._base = Path(research_dir)
         self._folder = self._base / "forward"
-        self._plan = plan
+        self._plan = plan or SeedPlan()
+        self._label = SEED if plan is None or isinstance(plan, SeedPlan) else "dca"
 
     @property
     def log_path(self) -> Path:
@@ -62,7 +69,8 @@ class ForwardTracker:
         """Append every session from the month's start (``start_for``) through the latest one on or before today that
         a tracked spec has no record of yet; each record carries its start (``since``)."""
         start = start_for(today)
-        seen = {(item["date"], item["spec_hash"], item.get("since", FORWARD_START.isoformat())) for item in self.records()}
+        seen = {(item["date"], item["spec_hash"], item.get("since", FORWARD_START.isoformat()))
+                for item in self.records() if item.get("plan", "dca") == self._label}
         written = []
         moment = datetime.now(TAIPEI).isoformat(timespec="seconds")
         for spec in self.tracked():
@@ -83,6 +91,7 @@ class ForwardTracker:
                     "spec_hash": spec.spec_hash,
                     "name": spec.name,
                     "since": start.isoformat(),
+                    "plan": self._label,
                     "value": round(value, 2),
                     "contributed": round(contributed, 2),
                     "trades_today": [
@@ -106,7 +115,7 @@ class ForwardTracker:
         latest: dict[str, dict[str, object]] = {}
         days: dict[str, set[str]] = {}
         for record in self.records():
-            if record.get("since", FORWARD_START.isoformat()) != start:
+            if record.get("since", FORWARD_START.isoformat()) != start or record.get("plan", "dca") != self._label:
                 continue
             latest[record["spec_hash"]] = record
             days.setdefault(record["spec_hash"], set()).add(record["date"])

@@ -21,6 +21,16 @@ function Write-Note([string]$Text) {
     Add-Content -Path $pipelineLog -Value $line -Encoding UTF8
 }
 Write-Note "開始研究流程 $Name（PID $PID）"
+# 2026-10-21 (使用者 2026-10-16：隨時看得到研究有沒有在跑；稽核：排隊中的流程網頁上看不到): a wait shows on
+# 研究 › 執行中的程式 as 等待中 with its reason, and in the step log
+function Wait-While([string]$Reason, [scriptblock]$Condition, [int]$Seconds = 120) {
+    if (-not (& $Condition)) { return }
+    $waitId = (& $python -m quant_platform.research pipeline-wait --pipeline $Name --reason $Reason --pid $PID | Select-Object -Last 1)
+    Write-Note "等待：$Reason"
+    while (& $Condition) { Start-Sleep -Seconds $Seconds }
+    if ($waitId) { & $python -m quant_platform.research pipeline-wait --finish $waitId | Out-Null }
+    Write-Note "等待結束：$Reason"
+}
 # 2026-10-14: a record of this run (running, then done) so a reboot's casualty is started again when the services
 # start (scripts/resume-research.ps1)
 $records = Join-Path $root "instance\research\pipelines"
@@ -39,10 +49,9 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
     # board and the month's list are rebuilt by one run at a time — wait while another research process runs the same
     foreach ($exclusive in @("forward-board", "--step select", "--step holdout")) {
         if (($Arguments -join " ") -like "*$exclusive*") {
-            while (Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
-                    $_.CommandLine -like "*quant_platform.research*$exclusive*" }) {
-                Start-Sleep -Seconds 60
-            }
+            Wait-While "等另一個研究流程的 $exclusive 步驟跑完（同時只跑一個）" {
+                Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
+                    $_.CommandLine -like "*quant_platform.research*$exclusive*" } } 60
         }
     }
     $out = Join-Path $logs "$Name-$stamp-$Label.log"
@@ -479,9 +488,7 @@ switch ($Name) {
         # factor that passes the novelty gate; then — only if model G passes its registered gate against gbm-2.0.0 —
         # its rule and every set with it; the statistics, the board and the leak check. Keeps out of 12:00–14:45 and
         # 19:30–22:15 (the 21:30 chip update rewrites the same files).
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-chips" @("-m", "quant_platform.research.history", "chips")
         Invoke-Step "2-factors" @("-m", "quant_platform.research", "factors", "--recent")
         Invoke-Step "3-model-g" @("-m", "quant_platform.research", "model", "--model-version", "gbm-2.2.0")
@@ -499,9 +506,7 @@ switch ($Name) {
         # factor that passes the novelty gate; then — only if model G passes its registered gate against gbm-2.0.0 —
         # its rule and every set with it; the statistics, the board and the leak check. Keeps out of 12:00–14:45 and
         # 19:30–22:15 (the 21:30 chip update rewrites the same files).
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-chips" @("-m", "quant_platform.research.history", "chips")
         Invoke-Step "2-factors" @("-m", "quant_platform.research", "factors", "--recent")
         Invoke-Step "3-model-g" @("-m", "quant_platform.research", "model", "--model-version", "gbm-2.2.0")
@@ -516,9 +521,7 @@ switch ($Name) {
         # 2026-10-16 (使用者：RL 找不到 T0？學習策略有問題還是因子不夠？): the robot 3.0 — eight blocks, four offsets, a
         # held-out fifth, abstaining when it does not beat the blocks alike — then its rule and its yardstick, and the
         # statistics. The rules wait out 21:15–21:50 (the chip update rewrites the files they read).
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "block-rl3")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "robot30", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -527,9 +530,7 @@ switch ($Name) {
         # 2026-10-16 (使用者：不要給 RL 加一堆限制，只受交易所規則；RL 沒打贏 0050 之前不要停): the robot 4.0 — every session
         # its own weights for every stock and for cash, learned from every session (research/rl_free.py) — then its
         # rule (free: executed under the exchange's rules) and the statistics. The rule waits out 21:15–21:50.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "free-rl4", "--broker", "cathay")
         Invoke-Step "2-rule" @("-m", "quant_platform.research", "daily", "--name", "robot40", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -556,18 +557,14 @@ switch ($Name) {
         # 2026-10-17 (使用者：深度學習繼續優化; docs/research_dl_exits_review.md D1): the second deep version, Huber +
         # top-weighted ListNet (dl-2.0.0) — the development years first, the other years only past its registered gate
         # (research/model_deep2.py); then its rule (deep2_batch: only past the gate) and the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.0.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "deep2b" {
         # 2026-10-17: the same second version learning the day's top tenth (dl-2.1.0), its own registered gate.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.1.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -575,9 +572,7 @@ switch ($Name) {
     "deep2cost" {
         # 2026-10-17 (使用者：你覺得要分析什麼就分析): stage 0 of the review (free), then the three registered rules with
         # cost-aware switching (deep2_cost_batch: dl-2.1.0, model G, the half-and-half blend), then the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-diagnose" @("-m", "quant_platform.research", "deep2-diagnose")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2cost", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -585,33 +580,25 @@ switch ($Name) {
     "deep2leak" {
         # 2026-10-17: the cost-aware dl-2.1.0 rule (#4913) ended at 3,659 萬 against 0050's 982 萬 — before believing
         # it, its scores are rebuilt from data cut at six sampled sessions and compared with the kept ones.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-leakcheck" @("-m", "quant_platform.research", "deep2-leakcheck")
     }
     "deep2risk" {
         # 2026-10-17 (R1): the three cost-aware rules with each pick's money set by its predicted drop probability.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2risk", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "deep2cluster" {
         # 2026-10-17 (R2): the three cost-aware rules, at most 3 in 10 picks from one group of stocks that moved together.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2cluster", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "deep2r3" {
         # 2026-10-17 (R3): the vol-neutral drop-risk model (its gate in meta.json), then — only past it — the three
         # cost-aware rules without the riskiest tenth of each volatility-and-momentum group, then the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-risk-2.0.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2r3", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -620,41 +607,31 @@ switch ($Name) {
         # 2026-10-17 (使用者：繼續): the two-stage search with the second deep model's score in every set — each signal
         # alone first over the development period (only those beating 0050 alone), sets of up to four with it, the
         # finalists through the engine; then the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-scan" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "2", "--finalists", "80", "--pool", "5000", "--signals-min", "1", "--signals-max", "4", "--require", "ml_deep2_top", "--prefilter")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "deep2large" {
         # 2026-10-17: the three cost-aware rules ranking only the 100 largest listed stocks, then the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2large", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "exit2" {
         # 2026-10-17 (E2): the weekly optimal-stopping exit on dl-2.1.0's ranking — the models and the model gate first.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "exit2")
     }
     "coresat" {
         # 2026-10-17: the T0 consensus (cost-aware) 63% + the deep rule 37% in one account, then the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "coresat", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "deep3" {
         # 2026-10-17 (D3): dl-3.0.0 — the development years first, the rest only past its gate against dl-2.1.0;
         # then its rules (deep3_batch: only past the gate) and the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-3.0.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep3", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -662,27 +639,21 @@ switch ($Name) {
     "deep2wide" {
         # 2026-10-18 (S9-W15): dl-2.2.0 learning from the TPEx and small stocks too — the development years first, the
         # rest only past its gate against dl-2.1.0; then its rules (only past the gate) and the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.2.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2wide", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
     "robustness" {
         # 2026-10-18: the ten best T0 candidates with every cost doubled and filled a session late (a diagnostic).
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-check" @("-m", "quant_platform.research", "robustness", "--broker", "cathay", "--top", "60")
     }
     "rolling-regrade" {
         # 2026-10-18 (使用者：回撤上限放寬並標註高風險): the month's rolling selection graded again on the new tiers — every
         # registered rule (the ones made since the first grading too) on data up to the cutoff — then its forward test,
         # the forward accounts (high-risk passers from the day after the cutoff) and the common-start board.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--workers", "2", "--broker", "cathay")
         Invoke-Step "2-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
         Invoke-Step "3-forward" @("-m", "quant_platform.research", "forward")
@@ -693,9 +664,7 @@ switch ($Name) {
         # with the calm scan rule; the consensus, the deep rule and the calm rule); then the statistics, and the month's
         # rolling selection adds them and the other blends (only the rules not yet graded this month), their forward
         # test, the forward accounts and the common-start board.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "spread", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
@@ -707,9 +676,7 @@ switch ($Name) {
         # 2026-10-18 (使用者：繼續研究有什麼更好的策略): the deep rule #4916 filled at the next session's close and open;
         # then the statistics; once the spread pipeline is done (one writer of the month's selection at a time), the
         # month's rolling selection adds the new rules, their forward test, the forward accounts and the board.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2timing", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         $spreadRecord = Join-Path $records "spread.json"
@@ -728,9 +695,7 @@ switch ($Name) {
         # 2026-10-18 (使用者：繼續研究有什麼更好的策略): the deep rules and the T0 consensus, a holding grown past twice its
         # target sold back to it; the statistics; once spread and deep2timing are done (one writer of the month's
         # selection at a time), the month adds the new rules, their forward test, the forward accounts and the board.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "trim", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         foreach ($other in @("spread", "deep2timing")) {
@@ -752,9 +717,7 @@ switch ($Name) {
         # members' registered development months (research/blend_scan.py), the 20 finalists run as blends and
         # registered; the statistics; the month's rolling selection adds them, their forward test, the forward accounts
         # and the board.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "blendscan", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
@@ -771,9 +734,7 @@ switch ($Name) {
     "buybackdata" {
         # 2026-10-19 (使用者：還有什麼方法可以找到更好的策略): companies' buyback programs from the Market Observation
         # Post System, listed and OTC, one request per market and year since 2015.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-download" @("-m", "quant_platform.research.history", "buyback")
     }
     "disclosurestudy" {
@@ -788,25 +749,19 @@ switch ($Name) {
                 Start-Sleep -Seconds 120
             }
         }
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-events" @("-m", "quant_platform.research", "factors", "--events", "low_insider_sell_60,buyback_60")
     }
     "factorcorr" {
         # 2026-10-20 (使用者：那些因子有高度相關): every pair of factors' rankings, averaged; the families that move together
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-correlations" @("-m", "quant_platform.research", "factors", "--correlations")
     }
     "modelh" {
         # 2026-10-20 (使用者：持續優化每一個策略): model H (gbm-2.3.0: model G with the insiders' notices and the buybacks),
         # walk-forward; its rules only past its registered gate against gbm-2.2.0; the statistics; the month's rolling
         # selection adds what is new, the forward test, the accounts and the board.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-model" @("-m", "quant_platform.research", "model", "--model-version", "gbm-2.3.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "modelh", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -818,9 +773,7 @@ switch ($Name) {
     "deep2neutral" {
         # 2026-10-20 (使用者：持續優化每一個策略): the deep rules with the score ranked within each volatility tenth; the
         # statistics; the month's rolling selection adds what is new, the forward test, the accounts and the board.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "deep2neutral", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
@@ -832,9 +785,7 @@ switch ($Name) {
         # 2026-10-20 (使用者：持續優化每一個策略): dl-2.4.0 learns the top tenth of the volatility-adjusted excess — the
         # development years first, the rest only past its gate; its rules (only past the gate); the statistics; once the
         # other pipelines that add to the month are done, the month's rolling selection adds what is new and the rest.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.4.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep24", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -878,9 +829,7 @@ switch ($Name) {
     }
     "robot33" {
         # 2026-10-20: the robot 3.3 (3.2 without the cash years) and its yardstick (research_method §7)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "block-rl33")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "robot33", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -904,9 +853,7 @@ switch ($Name) {
         # stopped on a GPU error and its process was gone without finishing), sends that round's finalists to the month's
         # list and the forward accounts, then searches; a stopped second round goes on from its own folder.
         $first = Join-Path $root "instance/research/scans/scan-large-1.0.0-20261020-105730"
-        while (-not (Test-Path (Join-Path $first "summary.json"))) {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "等大規模搜尋第一輪跑完（summary.json）" { -not (Test-Path (Join-Path $first "summary.json")) } 300
         Invoke-Step "0-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "3", "--broker", "cathay")
         Invoke-Step "0-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
         Invoke-Step "0-forward" @("-m", "quant_platform.research", "forward")
@@ -942,9 +889,7 @@ switch ($Name) {
     "holding3" {
         # 2026-10-20 (使用者：20 天、月線上都沒看到): every passing strategy in the holding styles it has not run, the
         # statistics, the month's list, the forward accounts and the board (research_method §7)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "holding3", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "3", "--broker", "cathay")
@@ -959,9 +904,8 @@ switch ($Name) {
     "holding4_b" {
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "holding4_b", "--broker", "cathay")
         # the other half first: the statistics and the month's list see both
-        while (Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*--name holding4_a*" }) {
-            Start-Sleep -Seconds 120
-        }
+        Wait-While "等另一半（holding4_a）跑完" {
+            Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*--name holding4_a*" } }
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "3", "--broker", "cathay")
         Invoke-Step "4-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
@@ -971,9 +915,7 @@ switch ($Name) {
     "top10blend" {
         # 2026-10-20: #5983 (the deep model's top 10 held 20 sessions) sharing an account with the calm and consensus
         # rules, the statistics, the month's list, the forward accounts and the board (research_method §7)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "top10blend", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
@@ -998,9 +940,7 @@ switch ($Name) {
     "rolesplit" {
         # 2026-10-20 (使用者：因子、策略、DL、RL、ML 各負責什麼): the two role accounts, the statistics, the month's list,
         # the forward accounts and the board (research_method §7)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "rolesplit", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
@@ -1010,9 +950,7 @@ switch ($Name) {
     }
     "robot34" {
         # 2026-10-20 (使用者：RL 負責什麼): the robot 3.4 over the three roles and its yardstick (research_method §7)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "block-rl34")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "robot34", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -1020,9 +958,7 @@ switch ($Name) {
     "modelgm" {
         # 2026-10-20: model G refitted every month (gbm-2.4.0), its gate against gbm-2.2.0, its rule, the statistics, the
         # month's list, the forward accounts and the board (research_method §7)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-model" @("-m", "quant_platform.research", "model", "--model-version", "gbm-2.4.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "modelgm", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -1034,9 +970,7 @@ switch ($Name) {
     "deep26" {
         # 2026-10-20: dl-2.1.0 refitted every month (dl-2.6.0), its gate against dl-2.1.0, its two rules, the statistics,
         # the month's list, the forward accounts and the board (research_method §7)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.6.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep26", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -1048,9 +982,7 @@ switch ($Name) {
     "winner" {
         # 2026-10-20: the frontier's single rules with the winners running on (winner_hold 0.5), the statistics, the
         # month's list and the forward accounts (research_method §7)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "winner", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
@@ -1061,9 +993,7 @@ switch ($Name) {
     "meta1" {
         # 2026-10-20 (使用者：前向都是賠錢；持續優化每一個策略): the meta-label model on the deep model's picks, its
         # registered gate, then the veto on #4941 and #4913 (research_method §7)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "meta-label")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "meta1", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -1073,9 +1003,7 @@ switch ($Name) {
         # 2026-10-20 (使用者：RL 你還有沒有在優化？): the robot 3.2 — 3.1's yearly slots with model G and the deep model in
         # the model slot and a defensive slot — its two rules (robot and the nine alike), the statistics, the board
         # (research_method §7)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "block-rl32")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "robot32", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -1094,9 +1022,7 @@ switch ($Name) {
                 Start-Sleep -Seconds 120
             }
         }
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.5.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "techdeep", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -1118,9 +1044,7 @@ switch ($Name) {
                 Start-Sleep -Seconds 120
             }
         }
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-factors" @("-m", "quant_platform.research", "factors", "--recent")
         Invoke-Step "2-scan" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "6", "--finalists", "80", "--signals-min", "1", "--signals-max", "4", "--require-industry")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -1130,9 +1054,7 @@ switch ($Name) {
     "pledgestudy" {
         # 2026-10-20 (使用者：持續優化每一個策略): directors' pledged shares, a page a month since 2015; then the event
         # study of heavy pledging (research_method §7, criteria written first)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-download" @("-m", "quant_platform.research.history", "pledge")
         Invoke-Step "2-events" @("-m", "quant_platform.research", "factors", "--events", "pledge_heavy")
     }
@@ -1145,9 +1067,7 @@ switch ($Name) {
         # 2026-10-18: blends of daily rules (no 0050 part) join the monthly rolling selection — only the rules not yet
         # graded this month are graded on data up to the cutoff and added; then the forward test, the forward accounts
         # (a passing blend from the day after the cutoff) and the common-start board.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
         Invoke-Step "2-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
         Invoke-Step "3-forward" @("-m", "quant_platform.research", "forward")
@@ -1156,9 +1076,7 @@ switch ($Name) {
     "scancalm" {
         # 2026-10-18 (使用者：市場不好時不要比 0050 跌得多；繼續再研究): the two-stage search whose finalists also never
         # fell more than a point further than 0050 in its 10% falls of the development period; then the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-scan" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "2", "--finalists", "40", "--pool", "8000", "--signals-min", "1", "--signals-max", "4", "--prefilter", "--calm")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
     }
@@ -1181,12 +1099,9 @@ switch ($Name) {
         # 2026-10-21 (使用者 2026-10-16：每月滾動，模型也要更新；稽核：深度學習只有逐年模型): once the GPU is free (the
         # streamed search uses it), every model the forward accounts read refitted to the month's cutoff, the accounts
         # reading them recorded again from their start, the board
-        while (Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*scan-large*" }) {
-            Start-Sleep -Seconds 300
-        }
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "等顯示卡空出來（大規模搜尋在用）" {
+            Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*scan-large*" } } 300
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-models" @("-m", "quant_platform.research", "rolling", "--step", "models", "--refit-accounts")
         Invoke-Step "2-forward" @("-m", "quant_platform.research", "forward")
         Invoke-Step "3-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
@@ -1194,9 +1109,7 @@ switch ($Name) {
     "llmreplay" {
         # 2026-10-21 (使用者：不要跟我說前向觀察只能做一天): the LLM trader's decisions from the cutoff day (8/31) to the
         # latest session, each with that day's information, then the forward accounts from 9/1 and the board
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-replay" @("-m", "quant_platform.research", "llm-trader", "--replay-from", "2026-08-31")
         Invoke-Step "2-forward" @("-m", "quant_platform.research", "forward")
         Invoke-Step "3-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
@@ -1208,9 +1121,8 @@ switch ($Name) {
     "exec_b" {
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "exec_b", "--broker", "cathay")
         # the other half first: the statistics and the month's list see both
-        while (Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*--name exec_a*" }) {
-            Start-Sleep -Seconds 120
-        }
+        Wait-While "等另一半（exec_a）跑完" {
+            Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*--name exec_a*" } }
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "3", "--broker", "cathay")
         Invoke-Step "4-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
@@ -1220,9 +1132,7 @@ switch ($Name) {
     "robustfront" {
         # 2026-10-21: the money-against-falls frontier (#5983, #4941, #5050, #6086, #6087, #5054) and the blends they
         # replaced (#5155, #5163) with every cost doubled and filled a session late (a diagnostic, not a trial)
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-check" @("-m", "quant_platform.research", "robustness", "--broker", "cathay", "--trials", "5983,4941,5050,6086,6087,5054,5155,5163")
     }
     "listupdate" {
@@ -1264,9 +1174,7 @@ switch ($Name) {
     }
     "worst" {
         # 2026-10-16 (使用者：訓練一個賠最多的模型，反著做的趣味): the reverse robot (GPU), then the three reverse rules.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "worst-rl")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "worst", "--broker", "cathay")
     }
@@ -1274,9 +1182,7 @@ switch ($Name) {
         # 2026-10-16 (the mechanism audit): engine 1.5.0 — capital reductions, idle cash reinvested on decision days,
         # refused orders retried alone, the stop-loss and the market filter every session, stock dividends credited on
         # distribution. Every rule not yet on 1.5.0 again, the statistics, the board, the trade audit, the leak check.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rerun-all" @("-m", "quant_platform.research", "daily", "--name", "rerun_all", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
@@ -1287,9 +1193,7 @@ switch ($Name) {
         # 2026-10-16: engine 1.4.3 (a trend holding out of the zone and below its average is sold that session, the
         # rule's decision days or not). After tonight's other pipelines: every rule not yet on 1.4.3 again, the
         # statistics, the board, the trade audit and the leak check.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rerun-all" @("-m", "quant_platform.research", "daily", "--name", "rerun_all", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "3-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
@@ -1299,9 +1203,7 @@ switch ($Name) {
     "deep1" {
         # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): the recurrent network over each stock's last 40 sessions,
         # then — only past its registered gate against gbm-2.0.0 — its two rules and every set with it, the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-1.0.0")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deep", "--broker", "cathay")
         Invoke-Step "3-scan" @("-m", "quant_platform.research", "scan", "--broker", "cathay", "--workers", "4", "--finalists", "80", "--pool", "5000", "--signals-min", "1", "--signals-max", "3", "--require", "ml_deep")
@@ -1309,9 +1211,7 @@ switch ($Name) {
     }
     "robot41" {
         # 2026-10-16: the robot 4.1 — the free agent trained in the owner's account — then its rule and the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "free-rl41", "--broker", "cathay")
         Invoke-Step "2-rule" @("-m", "quant_platform.research", "daily", "--name", "robot41", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
@@ -1323,9 +1223,7 @@ switch ($Name) {
     "robot31" {
         # 2026-10-16 (the audit: 3.0's blocks were chosen on years it was tested on): the robot 3.1 — each test year's
         # slot factors chosen from what was known before the year — then its rule and its yardstick, the statistics.
-        while ((Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40") {
-            Start-Sleep -Seconds 300
-        }
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "block-rl31")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "robot31", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")

@@ -1199,6 +1199,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         code = code.upper().removesuffix(".TWO").removesuffix(".TW")
         if not re.fullmatch(r"[0-9A-Z]{4,6}", code):
             abort(404)
+        if code.startswith("00"):          # 2026-10-21 (稽核：/stock/0050 是 404): an ETF has no stock page — the market's
+            return redirect("/market")
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         snapshot, verdicts = _stock_context(research_dir)
         holders = []

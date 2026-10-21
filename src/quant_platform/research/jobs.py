@@ -21,7 +21,7 @@ from typing import Self
 from zoneinfo import ZoneInfo
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-STATUS_LABELS = {"running": "執行中", "done": "完成", "failed": "失敗", "stopped": "中斷"}
+STATUS_LABELS = {"running": "執行中", "waiting": "等待中", "done": "完成", "failed": "失敗", "stopped": "中斷"}
 WRITE_EVERY = 3.0   # seconds between progress writes
 RETRIES, RETRIES_FORCED, RETRY_PAUSE = 3, 20, 0.25
 
@@ -148,7 +148,7 @@ class JobLog:
             except (OSError, ValueError):
                 continue
             started = datetime.fromisoformat(item["started_at"]) if item.get("started_at") else None
-            if item.get("status") == "running" and not _alive(int(item.get("pid") or 0), started):
+            if item.get("status") in ("running", "waiting") and not _alive(int(item.get("pid") or 0), started):
                 item["status"] = "stopped"
                 item["summary"] = item.get("summary") or "程式已不在執行（可能被停止或電腦重開）"
             item["status_label"] = STATUS_LABELS.get(item["status"], item["status"])
@@ -161,11 +161,32 @@ class JobLog:
                 remaining = elapsed / done * (total - done)
                 item["eta"] = datetime.fromtimestamp(_now().timestamp() + remaining, TAIPEI).strftime("%m/%d %H:%M")
             rows.append(item)
-        rows.sort(key=lambda row: (row["status"] != "running", row.get("started_at") or ""), reverse=False)
-        running = [row for row in rows if row["status"] == "running"]
-        others = sorted((row for row in rows if row["status"] != "running"), key=lambda row: row.get("started_at") or "",
+        live = ("running", "waiting")              # 2026-10-21: a queued pipeline shows with what it waits for
+        rows.sort(key=lambda row: (row["status"] not in live, row.get("started_at") or ""), reverse=False)
+        running = [row for row in rows if row["status"] in live]
+        others = sorted((row for row in rows if row["status"] not in live), key=lambda row: row.get("started_at") or "",
                         reverse=True)
         return running + others
+
+    def waiting(self, name: str, reason: str, pid: int) -> str:
+        """2026-10-21 (使用者 2026-10-16：隨時看得到研究有沒有在跑；稽核：bigscan2 排隊 5 小時網頁上看不到): a research
+        pipeline (``pid``, the PowerShell process) waiting before its next step; the id, to finish it."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        started = _now()
+        job_id = f"{started:%Y%m%d-%H%M%S}-{pid}-wait"
+        payload = {"id": job_id, "name": f"研究流程 {name}：等待中", "command": f"research-pipeline.ps1 -Name {name}",
+                   "pid": pid, "status": "waiting", "started_at": started.isoformat(timespec="seconds"), "done": 0,
+                   "total": None, "current": reason, "summary": "", "finished_at": None}
+        Job(self.folder / f"{job_id}.json", payload)
+        return job_id
+
+    def end_wait(self, job_id: str) -> None:
+        path = self.folder / f"{job_id}.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        Job(path, payload).finish("done", f"等完了：{payload.get('current', '')}")
 
     def running(self) -> int:
         return sum(1 for row in self.jobs() if row["status"] == "running")

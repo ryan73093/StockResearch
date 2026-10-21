@@ -3002,6 +3002,32 @@ def create_app(container: Container | None = None) -> Flask:
             "bar_coverage": bar_coverage,
         })
 
+    # 2026-10-21 (稽核：舊版頁面有 26 頁、605 個執行按鈕仍可按，`/ai-trading/run` 會跑已暫停的舊盤後 AI 並送出模擬委託):
+    # an action of a paused module does nothing; the page says so
+    paused_actions = {
+        "legacy_research": ("/ai-trading/run", "/ai-trading/expand-universe", "/decisions/run/", "/ensembles/run/",
+                            "/models/run/", "/portfolios/run/", "/backtests/run/", "/factors/research/",
+                            "/features/build/", "/reports/generate/"),
+        "shadow_trading": ("/shadow-trading/",),
+        "promotions": ("/promotions/",),
+        "model_governance": ("/model-governance/",),
+        "point_in_time": ("/point-in-time-data/run",),
+        "intraday_features": ("/intraday-features/run",),
+        "rag_index": ("/reports/reindex",),
+    }
+
+    @app.before_request
+    def refuse_paused_actions():
+        if request.method != "POST":
+            return None
+        from quant_platform.config.settings import PAUSABLE_MODULES
+
+        for module, prefixes in paused_actions.items():
+            if request.path.startswith(prefixes) and dependencies.settings.is_paused(module):
+                flash(f"「{PAUSABLE_MODULES[module]}」已暫停（路線圖 S8 決定去留），這個按鈕不會執行。", "error")
+                return redirect(request.referrer or "/system")
+        return None
+
     return app
 
 

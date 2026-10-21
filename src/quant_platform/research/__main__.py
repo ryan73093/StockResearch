@@ -322,7 +322,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "worst-rl", "free-rl4", "free-rl41", "rolling"),
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
@@ -366,6 +366,10 @@ def main() -> int:
     parser.add_argument("--period", default="full", choices=tuple(PERIODS))
     parser.add_argument("--monthly", type=float, default=10_000)
     parser.add_argument("--day", type=int, default=5)
+    parser.add_argument("--pipeline", help="pipeline-wait：等待中的研究流程名稱")
+    parser.add_argument("--reason", help="pipeline-wait：在等什麼")
+    parser.add_argument("--pid", type=int, help="pipeline-wait：研究流程（PowerShell）的 PID")
+    parser.add_argument("--finish", help="pipeline-wait：等完了，結束這筆紀錄（pipeline-wait 印出的編號）")
     parser.add_argument("--decision-day", help="llm-trader：決定哪一天收盤後（YYYY-MM-DD，預設今天）")
     parser.add_argument("--replay-from", help="llm-trader：從這一天起補做每個交易日的決定到 --decision-day（只用當天以前的資料）")
     parser.add_argument("--windows", default="36,60")
@@ -944,6 +948,15 @@ def main() -> int:
             alike = sum(item["equal_excess"] for item in meta["yearly"].values())
             job.payload["summary"] = f"{len(meta['yearly'])} 年樣本外：反向機器人比 0050 {robot:+.3f}、平均 {alike:+.3f}"
         print(job.payload["summary"])
+        return 0
+
+    if args.command == "pipeline-wait":      # 2026-10-21: a queued research pipeline shows on 執行中的程式
+        from quant_platform.research.jobs import JobLog
+
+        if args.finish:
+            JobLog(RESEARCH).end_wait(args.finish)
+            return 0
+        print(JobLog(RESEARCH).waiting(args.pipeline or "?", args.reason or "", int(args.pid or 0)), flush=True)
         return 0
 
     if args.command == "llm-trader":

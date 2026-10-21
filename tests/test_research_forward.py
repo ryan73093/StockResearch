@@ -36,8 +36,11 @@ def test_records_are_appended_once_per_day_and_summarised(tmp_path):
     assert {item["name"] for item in first} == {spec.name for spec in BASELINES.values()}
     assert len(first) == 4 * 25 and again == []                # the four baselines, 09-01 to 10-05, once per day
     assert {item["since"] for item in first} == {"2026-09-01"} and min(item["date"] for item in first) == "2026-09-01"
+    # 2026-10-21 (相同現金流，使用者 2026-10-04): 30 萬 on the first session, 1 萬 on the session after every 5th
+    opening = next(item for item in first if item["name"] == "定期定額基準" and item["date"] == "2026-09-01")
     dca = next(item for item in first if item["name"] == "定期定額基準" and item["date"] == "2026-09-07")
-    assert dca["contributed"] == 10_000 and dca["trades_today"][0]["shares"] == 99   # the 5th was a Saturday
+    assert opening["contributed"] == 300_000 and dca["contributed"] == 310_000      # the 5th was a Saturday
+    assert {item["plan"] for item in first} == {"seed"}
     rows = tracker.summary(date(2026, 10, 6))
     assert rows[0]["benchmark"] and rows[0]["sessions"] == 26 and rows[0]["date"] == "2026-10-06"
     assert all(row["excess"] is not None for row in rows if not row["benchmark"])
