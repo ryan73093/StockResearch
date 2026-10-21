@@ -55,7 +55,8 @@ def test_proposals_are_checked_and_near_repeats_refused(tmp_path):
         proposal("第三個", {"eps_growth": 1.0}),
     ]}
     accepted, rejected = researcher.validate(payload, researcher.tried())
-    assert [rule.name for rule, _notes in accepted] == ["AI：營收加速＋外資", "AI：低波動反轉"]
+    assert [rule.name for rule, _notes in accepted] == ["AI：營收加速＋外資｜持有：固定持有 20 天",
+                                                         "AI：低波動反轉｜持有：固定持有 20 天"]
     reasons = {item["name"]: item["reason"] for item in rejected}
     assert "相同" in reasons["同一組因子"] and "因子" in reasons["沒有的因子"] and "因子" in reasons["舊模型"]
     assert "選項" in reasons["前 12 名"] and "超過" in reasons["第三個"] and "0050" in reasons["一半放 0050"]
@@ -90,7 +91,7 @@ def test_a_round_is_registered_before_it_runs_and_shows_in_the_pool(tmp_path, mo
     entry = dr.DailyResearcher(tmp_path, FakeClient()).run_round(tmp_path / "history", load=lambda history: (None, None))
     assert order == [["registered"]]                                       # on record before it ran
     (item,) = entry["accepted"]
-    assert entry["status"] == "ok" and item["trial_id"] == 99 and item["name"] == "AI：營收加速"
+    assert entry["status"] == "ok" and item["trial_id"] == 99 and item["name"] == "AI：營收加速｜持有：固定持有 20 天"
     assert item["early_gap"] == 0.012 * 12                                  # 2024 is not shown back to it
     assert dr.proposals(tmp_path)[0]["spec_hash"] == item["spec_hash"]
     from quant_platform.research.pool import _sources
@@ -116,3 +117,20 @@ def test_factors_written_as_a_list_are_read():
         "trend_200": 1.0, "revenue_yoy": 0.5}
     assert dr._factors([["eps_growth", -1]]) == {"eps_growth": -1.0} and dr._factors(["rsi_14"]) == {"rsi_14": 1.0}
     assert dr._factors("trend_200") is None and dr._factors([{"name": "x", "weight": "強"}]) is None
+
+
+def test_the_researcher_chooses_the_holding_style(tmp_path):
+    """2026-10-21 (使用者 2026-10-20：持有 20 天、月線上續抱都是策略): days by default, trend or free when asked."""
+    researcher = dr.DailyResearcher(tmp_path, None)
+
+    def proposal(name, factors, **settings):
+        return {"family": "x", "hypothesis": "h", "rationale": "r", "failure": "f",
+                "rule": {"name": name, "factors": factors, **settings}}
+
+    payload = {"proposals": [proposal("沒寫持有方式", {"eps_growth": 1.0}),
+                             proposal("月線上", {"foreign_buy_20": 1.0}, hold="trend"),
+                             proposal("亂寫", {"high_52w": 1.0}, hold="forever")]}
+    accepted, rejected = researcher.validate(payload, researcher.tried())
+    held = {rule.name: (rule.hold, rule.min_hold) for rule, _notes in accepted}
+    assert held == {"AI：沒寫持有方式｜持有：固定持有 20 天": ("days", 20), "AI：月線上｜持有：月線上續抱": ("trend", 0)}
+    assert [item["name"] for item in rejected] == ["亂寫"]

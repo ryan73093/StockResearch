@@ -225,51 +225,20 @@ def test_accounts_that_hold_0050_stop_and_new_ones_are_not_tracked(tmp_path):
     assert written == []                                 # the stopped 0050 account is not recorded
 
 
-def test_fixed_holding_rules_give_way_to_their_trend_versions(tmp_path):
-    """2026-10-14 (使用者：前向從 10/1 只有買入，哪來的賣出): a fixed 20-session holding cannot sell for weeks."""
-    from quant_platform.research.daily import DailyRule
-
-    fixed = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3)
-    free = DailyRule(name="每天 6 個月動能：前 3 名", factors={"momentum_6": 1.0}, top=3, min_hold=0)
-    folder = tmp_path / "forward" / "stocks"
-    folder.mkdir(parents=True)
-    (folder / "tracked.json").write_text(json.dumps([
-        {"rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.canonical(), "kind": "daily", "plan": "seed",
-         "since": "2026-10-04"} for rule in (fixed, free)], ensure_ascii=False), encoding="utf-8")
-    tracker = StockForwardTracker(tmp_path, experiments=False)
-    added = tracker.switch_to_trend(date(2026, 10, 14), date(2026, 10, 1))
-    assert len(added) == 1 and added[0]["since"] == "2026-10-01" and added[0]["rule"]["hold"] == "trend"
-    items = {item["rule_hash"]: item for item in tracker.tracked()}
-    assert items[fixed.rule_hash]["stopped"] == "2026-10-14" and not items[free.rule_hash].get("stopped")
-    assert tracker.switch_to_trend(date(2026, 10, 15), date(2026, 10, 1)) == []          # done once
-
-
-def test_blends_with_fixed_holding_sleeves_give_way_too_and_the_ai_account_stops(tmp_path):
-    """2026-10-15: the three tracked blends still held each sleeve a fixed 20 sessions; the AI researcher's account
-    held nothing but 0050 (paused, no qualifying rule)."""
-    from quant_platform.research.blend import BlendRule, Sleeve
-    from quant_platform.research.daily import DailyRule
+def test_the_ai_account_stops_once_and_is_not_added_again(tmp_path):
+    """2026-10-15: the AI researcher's account held nothing but 0050 (no qualifying rule). 2026-10-21: the platform no
+    longer converts holding styles (使用者 2026-10-20), so the conversion part of this test went with its code."""
     from quant_platform.research.stock_forward import META_AI, META_STOPPED
 
-    fixed = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3)
-    trend = DailyRule(name="每天 6 個月動能：前 3 名", factors={"momentum_6": 1.0}, top=3, min_hold=0, hold="trend")
-    blend = BlendRule(name="組合：動能各半", sleeves=(Sleeve(rule=fixed, share=0.5), Sleeve(rule=trend, share=0.5)))
     folder = tmp_path / "forward" / "stocks"
     folder.mkdir(parents=True)
-    (folder / "tracked.json").write_text(json.dumps([
-        {"rule_hash": blend.rule_hash, "name": blend.name, "rule": blend.canonical(), "kind": "blend", "plan": "seed",
-         "since": "2026-10-09"},
-        {**META_AI, "rule": {}, "plan": "seed", "since": "2026-10-12"}], ensure_ascii=False), encoding="utf-8")
+    (folder / "tracked.json").write_text(json.dumps([{**META_AI, "rule": {}, "plan": "seed", "since": "2026-10-12"}],
+                                                    ensure_ascii=False), encoding="utf-8")
     tracker = StockForwardTracker(tmp_path, experiments=False)
-    added = tracker.switch_to_trend(date(2026, 10, 15), date(2026, 10, 1))
-    assert len(added) == 1 and added[0]["kind"] == "blend" and added[0]["since"] == "2026-10-01"
-    sleeves = added[0]["rule"]["sleeves"]
-    assert [sleeve["rule"]["hold"] for sleeve in sleeves] == ["trend", "trend"] and sleeves[1]["rule"] == trend.canonical()
-    assert "1 個子策略" in added[0]["reason"]
     assert tracker.stop(META_AI["rule_hash"], date(2026, 10, 15), META_STOPPED)
     assert not tracker.stop(META_AI["rule_hash"], date(2026, 10, 16), META_STOPPED)      # already stopped
     items = {item["rule_hash"]: item for item in tracker.tracked()}
-    assert items[blend.rule_hash]["stopped"] == "2026-10-15" and "0050" in items[META_AI["rule_hash"]]["stop_reason"]
+    assert "0050" in items[META_AI["rule_hash"]]["stop_reason"]
     assert tracker.sync(date(2026, 10, 16)) == []             # and the AI account is not added again
 
 
@@ -487,3 +456,20 @@ def test_a_reason_written_before_the_holding_correction_reads_as_the_strategys_s
     assert reworded("跌出前 60 名（當天第 82 名），已持有滿 20 個交易日") == \
         "跌出前 60 名（當天第 82 名）；這個策略設定買進後至少持有 20 個交易日，已滿"
     assert reworded("跌出前 60 名（當天第 82 名）") == "跌出前 60 名（當天第 82 名）"
+
+
+def test_a_t1_rule_on_the_months_list_is_tracked_too(tmp_path):
+    """REQUIREMENTS 選手池分級（使用者 2026-10-04）：T1 與 T0 候選自動進入前向觀察."""
+    from quant_platform.research.daily import DailyRule
+
+    days = weekdays(date(2024, 1, 1), date(2026, 10, 9))
+    build(tmp_path, days)
+    t1 = DailyRule(name="T1 規則", factors={"momentum_3": 1.0}, top=3)
+    t2 = DailyRule(name="T2 規則", factors={"momentum_6": 1.0}, top=3)
+    (tmp_path / "rolling").mkdir()
+    (tmp_path / "rolling" / "2026-08-31.json").write_text(json.dumps({"cutoff": "2026-08-31", "graded": [
+        {"passed": False, "tier": "T1", "spec": t1.canonical()},
+        {"passed": False, "tier": "T2", "spec": t2.canonical()}]}, ensure_ascii=False), encoding="utf-8")
+    tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
+    tracker.sync(date(2026, 10, 2))
+    assert [(item["name"], item["since"]) for item in tracker.tracked()] == [("T1 規則", "2026-09-01")]

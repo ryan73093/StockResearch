@@ -226,3 +226,18 @@ def test_a_blends_ledgers_add_up_through_a_capital_reduction():
     adjust = [row for row in joint if row["side"] == "ADJUST"]
     assert {row["kind"] for row in adjust} == {"split"} and all(row["shares"] < 0 for row in adjust)
     assert "negative" not in audit(data, sorted(joint, key=lambda row: row["day"]), FREE)
+
+
+def test_an_opening_fill_is_judged_at_the_open_not_the_close():
+    """2026-10-21: the 1.5.0 audit flagged 452 next-open buys as bought at a locked limit-up close."""
+    from quant_platform.research.trade_audit import audit
+
+    days = weekdays(date(2024, 7, 1), date(2024, 7, 5))
+    data = market(days, {"1101.TW": {days[0]: 10.0, days[1]: 11.0, days[2]: 11.0}}, turnover=1_000_000.0)
+    import dataclasses
+    data = dataclasses.replace(data, opens={"1101.TW": {days[1]: 10.2, days[2]: 12.1}})
+    costs = CostModel(fee_rate=0.001425, minimum_fee=1, slippage_bps=0.0)
+    bought = {"day": days[1], "symbol": "1101.TW", "side": "BUY", "shares": 100, "price": 10.2, "fee": 1, "tax": 0}
+    assert "limit_up_buy" not in audit(data, [bought], costs, execution="open")     # it opened below the limit
+    assert "limit_up_buy" in audit(data, [bought], costs)                           # a close fill there is locked
+    assert "limit_up_buy" not in audit(data, [bought], costs, execution=None)       # a blend: nearer the open

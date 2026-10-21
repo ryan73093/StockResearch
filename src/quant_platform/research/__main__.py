@@ -1289,9 +1289,7 @@ def main() -> int:
         if args.trend_from:                     # 2026-10-14: fixed-holding rules give way to their trend versions
             # 2026-10-20 (使用者：持有 20 天也是策略、月線上續抱也是策略，不是規則): the platform never converts a rule's
             # holding style
-            raise SystemExit("不再提供：持有方式是策略的一部分，平台不替規則轉換（使用者 2026-10-20）")
-            switched = tracker.switch_to_trend(day, date.fromisoformat(args.trend_from))
-            print(f"改追蹤月線上續抱版本：{len(switched)} 個（{args.trend_from} 起）", flush=True)
+            raise SystemExit("不再提供：持有方式是策略的一部分，平台不替規則轉換（使用者 2026-10-20；轉換程式 10-21 已刪除）")
         written = tracker.record(day)
         print(f"{day}：寫入 {len(written)} 筆個股規則前向紀錄", flush=True)
         for row in tracker.summary():

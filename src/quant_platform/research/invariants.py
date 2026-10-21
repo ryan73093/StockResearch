@@ -78,7 +78,8 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
     graded: set[str] = set()
     if month.is_file():
         payload = json.loads(month.read_text(encoding="utf-8"))
-        graded = {str(row.get("rule_hash")) for row in payload.get("graded") or [] if row.get("passed")}
+        graded = {str(row.get("rule_hash")) for row in payload.get("graded") or []
+                  if row.get("passed") or row.get("tier") == "T1"}             # T1 goes forward too (REQUIREMENTS)
     experiments = {rule.rule_hash for rule, _reason in forward_only()}
     foreign = [item["name"] for item in live if item["rule_hash"] not in graded | experiments]
     checks.append(_check("前向帳戶的規則和每月名單上評過分的一模一樣（平台不轉換任何設定）",
@@ -105,12 +106,23 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
 
     from quant_platform.research.daily import FORWARD_SESSIONS
 
+    # 2026-10-21 (稽核：board.json 沒有 tier 欄位，這項原本永遠通過): the grades as the pool computes them — each
+    # newest run with its chained forward record (pool.rule_rows)
+    from quant_platform.research.daily import tier
+    from quant_platform.research.registry import TrialRegistry, newest
+
     early = []
-    pool_path = research / "forward" / "stocks" / "board.json"
-    if pool_path.is_file():
-        board = json.loads(pool_path.read_text(encoding="utf-8"))
-        early = [row.get("name") for row in board.get("rows") or [] if str(row.get("tier", "")).startswith("T0（")
-                 or row.get("tier") == "T0"]
+    registry_path = research / "trials.jsonl"
+    if registry_path.is_file():
+        latest = newest(TrialRegistry(registry_path).records(),
+                        lambda record: record.kind == "candidate" and record.period == "recent")
+        summary = {row["rule_hash"]: row for row in tracker.summary()}
+        judged = {key: {**value, "problems": (summary.get(key) or {}).get("problems") or []}
+                  for key, value in tracker.chained(today).items()}
+        for key, record in latest.items():
+            grade = tier(record.metrics, judged.get(key))[0]
+            if grade.startswith("T0") and not grade.startswith("T0 候選"):
+                early.append(record.spec_name)
     checks.append(_check("12/28 以前沒有規則被標成 T0", f"路線圖判定準則：串接前向滿 {FORWARD_SESSIONS} 個交易日",
                          today >= date(2026, 12, 28) or not early, f"被標成 T0 的 {len(early)} 個"))
 

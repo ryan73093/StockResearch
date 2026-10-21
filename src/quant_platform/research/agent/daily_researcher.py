@@ -49,11 +49,13 @@ INSTRUCTIONS = """你是台股量化研究員，只負責提出「每天收盤�
 - industry_cap：同產業最多佔幾成，0（不限）、0.2、0.3。
 - weighting：equal（等額）或 inverse_vol（依波動度，波動小的買多）。
 - core：一律 0。帳戶全部買個股；0050 是使用者自己另外持有的部位，不要放進規則。
+- hold：持有方式，days（買進後至少持有 20 個交易日）、trend（掉出名單時站在月線上就續抱）、free（不設最短持有，掉出名單就賣）。持有方式是策略的一部分，依你的假設選。
 規範：
 1. 你只看得到 2015-06～2020-09 的結果；2020-10 以後的結果、規則的等級與前向紀錄都不提供，也不要猜。
 2. 每一個提出的規則都算一次試驗，試越多越難證明有效。每次最多 {max_proposals} 個，只提出有明確經濟理由、而且和已試過的不同的想法：不要只改參數（例如前 20 改前 30），因子組合與 0050 比例和已試過的一樣的會被拒絕。
 3. 規則會用 2015-06～2026-09 的完整資料、同一套門檻檢驗，過的才會進前向觀察。
-rule 的寫法範例：{{"name": "AI：趨勢＋營收", "factors": {{"trend_200": 1.0, "revenue_yoy": 0.5}}, "top": 20, "check": "weekly", "industry_cap": 0.3, "weighting": "equal", "core": 0}}
+rule 的寫法範例：{{"name": "AI：趨勢＋外資", "factors": {{"trend_200": 1.0, "foreign_buy_20": 0.5}}, "top": 20, "check": "weekly", "industry_cap": 0.3, "weighting": "equal", "core": 0, "hold": "days"}}
+月營收是落後指標（使用者 2026-10-10），不要以它為主要因子。
 只輸出一個 JSON 物件：
 {{"analysis": "對目前結果的觀察",
   "proposals": [{{"family": "押注的因子類別", "hypothesis": "假設", "rationale": "為什麼可能贏 0050", "failure": "可能失敗的原因", "rule": {{...}}}}]}}"""
@@ -186,7 +188,13 @@ class DailyResearcher:
                                                             for w in factors.values()):
                 rejected.append({"name": name, "reason": f"因子不合規定：{', '.join(unknown) or '數量或權重'}"})
                 continue
-            settings = {"top": raw.get("top", 20), "check": raw.get("check", "daily"), "hold": "trend", "min_hold": 0,
+            # 2026-10-21 (使用者 2026-10-20：持有 20 天、月線上續抱都是策略): the researcher chooses the holding style
+            style = {"days": {"hold": "days", "min_hold": 20}, "trend": {"hold": "trend", "min_hold": 0},
+                     "free": {"hold": "days", "min_hold": 0}}.get(str(raw.get("hold") or "days"))
+            if style is None:
+                rejected.append({"name": name, "reason": "持有方式只能是 days、trend、free"})
+                continue
+            settings = {"top": raw.get("top", 20), "check": raw.get("check", "daily"), **style,
                         "industry_cap": float(raw.get("industry_cap") or 0), "weighting": raw.get("weighting", "equal"),
                         "core": float(raw.get("core") or 0)}
             if settings["core"] not in CORES:
@@ -198,8 +206,11 @@ class DailyResearcher:
                 rejected.append({"name": name, "reason": "設定超出允許的選項"})
                 continue
             titled = name if name.startswith("AI：") else "AI：" + name
+            label = {"trend": "月線上續抱"}.get(settings["hold"]) or ("不設最短持有" if not settings["min_hold"]
+                                                                    else "固定持有 20 天")
             try:
-                rule = DailyRule(name=titled[:40], factors={key: float(value) for key, value in factors.items()}, **settings)
+                rule = DailyRule(name=f"{titled[:40]}｜持有：{label}",          # the name says how it holds
+                                 factors={key: float(value) for key, value in factors.items()}, **settings)
             except ValidationError as exc:
                 rejected.append({"name": name, "reason": f"不符合規則格式：{exc.errors()[0].get('msg', '')}"})
                 continue

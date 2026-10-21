@@ -54,3 +54,19 @@ def test_an_account_paid_a_month_it_started_after_is_caught(tmp_path):
 
     assert not paid(310_000)                    # October's 1 萬 on the 20th: the 5th had passed
     assert paid(300_000)
+
+
+def test_a_rule_graded_t0_before_the_first_possible_day_is_caught(tmp_path, monkeypatch):
+    from quant_platform.research import daily
+    from quant_platform.research.registry import TrialRegistry
+
+    (tmp_path / "forward" / "stocks").mkdir(parents=True)
+    (tmp_path / "forward" / "stocks" / "tracked.json").write_text("[]", encoding="utf-8")
+    TrialRegistry(tmp_path / "trials.jsonl").register(kind="candidate", period="recent", spec_hash="h", spec_name="早到的",
+                                                       input_hash="h", data_fingerprint="x", metrics={})
+    name = "12/28 以前沒有規則被標成 T0"
+    monkeypatch.setattr(daily, "tier", lambda metrics, forward=None: ("T0 候選", ""))
+    assert {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 21))}[name]["ok"]
+    monkeypatch.setattr(daily, "tier", lambda metrics, forward=None: ("T0", ""))
+    found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 21))}[name]
+    assert not found["ok"] and "1 個" in found["detail"]

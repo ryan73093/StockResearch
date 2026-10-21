@@ -46,9 +46,13 @@ def _instrument(symbol: str) -> bool:
     return code == "0050" or (len(code) == 4 and code.isdigit() and code[0] != "0" and not code.startswith("91"))
 
 
-def audit(data, ledger: list[dict], costs: CostModel, limit: float | None = None) -> dict[str, list[dict]]:
+def audit(data, ledger: list[dict], costs: CostModel, limit: float | None = None,
+          execution: str | None = "same") -> dict[str, list[dict]]:
     """check -> the orders that break it (each with the day, the symbol and what was wrong); ``limit`` is the
-    order's largest share of the day's turnover (the rule's ``daily.participation``)."""
+    order's largest share of the day's turnover (the rule's ``daily.participation``). ``execution``: where the rule
+    fills — "open" is judged at the session's open (the engine's market_locks("open")), "same"/"next" at the close;
+    None (a blend whose sleeves fill differently) takes, order by order, whichever of the two the fill is nearer.
+    2026-10-21 (稽核：1.5.0 的稽核把隔天開盤成交的 452 筆買進當成收盤鎖漲停還買進)."""
     from quant_platform.research import daily
     from quant_platform.research.legacy_challenger import _tax_kind
 
@@ -77,16 +81,22 @@ def audit(data, ledger: list[dict], costs: CostModel, limit: float | None = None
             held[symbol] -= shares
             continue
         close = data.closes.get(symbol, {}).get(day)
+        opened = (getattr(data, "opens", None) or {}).get(symbol, {}).get(day)
+        if execution == "open" or (execution is None and opened is not None and close is not None
+                                   and abs(fill - opened) < abs(fill - close)):
+            at, word = opened, "開盤"
+        else:
+            at, word = close, "收盤"
         if not _instrument(symbol):
             flag("instrument", entry, symbol)
         if close is None:
             flag("traded", entry, "沒有收盤價")
         else:
             low, high = daily.price_limits(data, symbol, day)
-            if side == "BUY" and high is not None and close >= high - 1e-6:
-                flag("limit_up_buy", entry, f"收盤 {close}＝漲停 {high}")
-            if side == "SELL" and low is not None and close <= low + 1e-6:
-                flag("limit_down_sell", entry, f"收盤 {close}＝跌停 {low}")
+            if side == "BUY" and high is not None and at is not None and at >= high - 1e-6:
+                flag("limit_up_buy", entry, f"{word} {at}＝漲停 {high}")
+            if side == "SELL" and low is not None and at is not None and at <= low + 1e-6:
+                flag("limit_down_sell", entry, f"{word} {at}＝跌停 {low}")
             if (high is not None and fill > high + 1e-6) or (low is not None and fill < low - 1e-6):
                 flag("inside_limits", entry, f"成交 {fill}，範圍 {low}～{high}")
         if not _on_tick(fill, symbol):
@@ -145,8 +155,15 @@ def run(history: Path, research_dir: Path, costs: CostModel, job=None) -> dict[s
                                         ledger=ledger, weights=daily.daily_weights(fp, rule, ranks),
                                         parked=daily.account_parking(data, fp, rule, costs),
                                         exposure=daily.exposure_schedule(data, fp, rule, costs))
+        if rule is None:
+            execution = "same"
+        elif isinstance(rule, daily.DailyRule):
+            execution = rule.execution
+        else:
+            kinds = {sleeve.rule.execution for sleeve in rule.sleeves}
+            execution = kinds.pop() if len(kinds) == 1 else None
         found = audit(data, ledger, costs, daily.participation(rule) if isinstance(rule, daily.DailyRule)
-                      else daily.SAME_DAY_PARTICIPATION)
+                      else daily.SAME_DAY_PARTICIPATION, execution)
         trades = [entry for entry in ledger if entry["side"] in ("BUY", "SELL")]
         orders += len(trades)
         for check, items in found.items():

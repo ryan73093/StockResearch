@@ -55,8 +55,8 @@ UNITS_TOLERANCE = 1e-3
 
 FIXED_HOLD = ("2026-10-14 平台把固定持有天數的規則改成「月線上續抱」版本追蹤（紀錄保留）；"
               "2026-10-20 使用者更正：持有天數與月線上續抱都是策略的一部分，平台不該替規則改，這個轉換已撤回")
-META_STOPPED = ("2026-10-15：AI 研究員暫停中、還沒有合格的規則，這個帳戶整個放 0050，等於比較基準本身；策略一律 100% 個股"
-                "（使用者 2026-10-09），停止追蹤（紀錄保留）。AI 研究員重開、有合格規則時再以 100% 個股的版本重新開始")
+META_STOPPED = ("2026-10-15：AI 研究員還沒有合格的規則，這個帳戶整個放 0050，等於比較基準本身，不符合策略一律 100% 個股"
+                "（使用者 2026-10-09），停止追蹤（紀錄保留）；研究員（10-09 已重開）有合格規則時再以 100% 個股的版本重新開始")
 
 
 _SUMMARY: dict[str, object] = {}
@@ -290,7 +290,8 @@ class StockForwardTracker:
         target: dict[str, tuple] = {}
         if month and month.get("graded"):
             for row in month["graded"]:
-                if not row.get("passed"):
+                # 2026-10-21 (REQUIREMENTS 選手池分級，使用者 2026-10-04：T1 與 T0 候選自動進入前向觀察): T1 too
+                if not row.get("passed") and row.get("tier") != "T1":
                     continue
                 try:
                     rule = parse_spec(row["spec"])          # 2026-10-18: a blend that passes too
@@ -383,46 +384,6 @@ class StockForwardTracker:
         if not self.log_path.is_file():
             return []
         return [json.loads(line) for line in self.log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-    def switch_to_trend(self, today: date, start: date) -> list[dict[str, object]]:
-        """2026-10-14 (使用者：前向觀察從 10/1 只有買入，哪來的賣出): a tracked daily rule that holds every stock a fixed
-        number of sessions cannot sell in its first weeks, a restriction the owner rejected on 10-13. It stops (its
-        records stay) and its trend version — kept while above its 20-session average, sold once below — is tracked
-        from ``start`` instead; the days from ``start`` are recorded as late on the next record. 2026-10-15: a blend
-        whose sleeves hold a fixed number of sessions gives way the same way, every such sleeve in its trend version."""
-        from quant_platform.research.blend import parse_spec
-        from quant_platform.research.daily import DailyRule
-
-        items = self.tracked()
-        known = {item["rule_hash"] for item in items}
-        moment = datetime.now(TAIPEI).isoformat(timespec="seconds")
-        added = []
-        for item in items:
-            if item.get("stopped") or item.get("kind") not in ("daily", "blend"):
-                continue
-            if item["kind"] == "blend":
-                rule = parse_spec(item["rule"])
-                trend = trend_version(rule)
-                if trend is None:
-                    continue
-                count = sum(1 for sleeve in rule.sleeves if _fixed_hold(sleeve.rule))
-                why = f"取代子策略固定持有的版本（{count} 個子策略改月線上續抱；{item['name'][:40]}）"
-            else:
-                rule = DailyRule.model_validate(item["rule"])
-                trend = trend_version(rule)
-                if trend is None:
-                    continue
-                why = f"取代固定持有 {rule.min_hold} 個交易日的版本（{item['name'][:40]}）"
-            item.update(stopped=today.isoformat(), stop_reason=FIXED_HOLD)
-            if trend.rule_hash in known:
-                continue
-            added.append({**{key: item[key] for key in ("kind", "plan", "initial", "monthly") if key in item},
-                          "rule_hash": trend.rule_hash, "name": trend.name, "rule": trend.canonical(),
-                          "since": start.isoformat(), "added_at": moment, "reason": why})
-            known.add(trend.rule_hash)
-        self._folder.mkdir(parents=True, exist_ok=True)
-        self.tracked_path.write_text(json.dumps(items + added, ensure_ascii=False, indent=1), encoding="utf-8")
-        return added
 
     @property
     def rebases_path(self) -> Path:
@@ -668,6 +629,8 @@ class StockForwardTracker:
         return [dict(row) for row in _SUMMARY["rows"]]
 
     def _summary(self) -> list[dict[str, object]]:
+        from quant_platform.research.holding import named
+
         records = self.records()
         marks = self.rebases()
         problems = reconcile(records, marks)
@@ -689,7 +652,9 @@ class StockForwardTracker:
                                               float((item.get("rule") or {}).get("trim_above") or 0.0))
             cashed = sell_all(latest, self._costs) if latest else None
             rows.append({
-                "rule_hash": item["rule_hash"], "name": item["name"], "since": item["since"], "reason": item.get("reason"),
+                "rule_hash": item["rule_hash"], "since": item["since"], "reason": item.get("reason"),
+                # 2026-10-21 (AGENTS：名稱寫出持有方式): a daily rule's name states the holding style it has
+                "name": named(item["rule"]) if item.get("kind") == "daily" and item.get("rule") else item["name"],
                 "plan": item.get("plan", "dca"), "amount": item.get("amount"),
                 "sessions": len(mine), "first": mine[0]["date"] if mine else None,
                 "date": latest["date"] if latest else None,
@@ -1043,30 +1008,6 @@ def trade_chart(trades: list[dict], results: dict | None, width: int = 640, heig
             "paper": f"{x(len(totals) - 1)},{y(totals[-1])} {x(len(totals))},{y(final)}", "paper_y": y(final),
             "paper_x": x(len(totals)), "realized": running, "unrealized": unrealized, "final": final,
             "first": sales[0]["date"], "last": sales[-1]["date"], "sales": len(sales), "high": high, "low": low}
-
-
-def _fixed_hold(rule) -> bool:
-    return getattr(rule, "hold", "days") != "trend" and bool(getattr(rule, "min_hold", 0))
-
-
-def trend_version(rule):
-    """A daily rule or blend that holds a fixed number of sessions, in its trend version (kept while above its
-    20-session average, sold once below; 使用者 2026-10-13 固定持有是限制不是策略); None when nothing holds fixed."""
-    from quant_platform.research.blend import BlendRule, Sleeve
-    from quant_platform.research.daily import DailyRule
-
-    def trend_of(daily: DailyRule) -> DailyRule:
-        return DailyRule.model_validate({**daily.model_dump(), "hold": "trend", "name": (daily.name + "、月線上續抱")[:80]})
-
-    if getattr(rule, "kind", None) == "blend":
-        if not any(_fixed_hold(sleeve.rule) for sleeve in rule.sleeves):
-            return None
-        return BlendRule(name=(rule.name + "、月線上續抱")[:80], core=rule.core,
-                         sleeves=tuple(Sleeve(rule=trend_of(sleeve.rule) if _fixed_hold(sleeve.rule) else sleeve.rule,
-                                              share=sleeve.share) for sleeve in rule.sleeves))
-    if not isinstance(rule, DailyRule) or not _fixed_hold(rule):
-        return None
-    return trend_of(rule)
 
 
 def final_validation(research_dir: str | Path) -> dict[str, dict[str, object]]:
