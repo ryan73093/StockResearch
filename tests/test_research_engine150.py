@@ -298,3 +298,21 @@ def test_the_ranking_sees_the_open_locks_for_the_opening_auction():
     _traded, up_close, _down = fp.market_locks()
     traded, up_open, _down = fp.market_locks("open")
     assert not up_close[row, 2] and up_open[row, 2] and traded[row, 2]       # closed at 10, opened at limit-up 11
+
+
+def test_the_split_fill_sells_at_the_open_and_buys_at_the_close():
+    """2026-10-22 (盤中成交時機研究): execution "split" — sells in the next session's opening auction, buys in its
+    closing auction; a sell refused by a limit-down open, a buy by a limit-up close."""
+    days = DAYS[:6]
+    closes = {"A.TW": {day: 10.0 for day in days}, "B.TW": {day: 10.0 for day in days}}
+    data = replace(market(days, closes), opens={"A.TW": {day: 9.8 for day in days}, "B.TW": {day: 10.2 for day in days}})
+    ledger = []
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=3, execution="split")
+    assert daily.lag_of(rule) == 1 and daily.participation(rule) == daily.NEXT_DAY_PARTICIPATION
+    simulate_daily(data, rule, FREE, days[0], days[-1], {days[1]: ["A.TW"], days[3]: ["B.TW"]}, SeedPlan(100_000, 0),
+                   ledger=ledger)
+    trades = {(row["day"], row["symbol"], row["side"]): row["price"] for row in ledger if row["side"] in ("BUY", "SELL")}
+    assert trades[(days[1], "A.TW", "BUY")] == 10.0                     # bought at the close, not the 9.8 open
+    assert trades[(days[3], "A.TW", "SELL")] == 9.8                     # sold at the open
+    assert trades[(days[3], "B.TW", "BUY")] == 10.0
+    assert rule.canonical()["execution"] == "split"

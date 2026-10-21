@@ -380,7 +380,10 @@ class DailyRule(BaseModel):
     # platform's numbers come after 15:14, so this is what it can actually do. Left out of the hash when "same".
     # 2026-10-16 (使用者：除了盤後，盤前或盤中買會不會比較好？): "open" = decide on the close, fill in the next session's
     # opening auction at its open (09:00); a buy refused when the open is at limit-up, a sell when at limit-down.
-    execution: Literal["same", "next", "open"] = "same"
+    # 2026-10-22 (盤中成交時機研究: the strongest rules' sells fetched 0.46% more at the next open than the next close,
+    # their buys paid 0.27% less at the close than the open): "split" sells in the next session's opening auction and
+    # buys in its closing auction (both a session after the decision)
+    execution: Literal["same", "next", "open", "split"] = "same"
     # 2026-10-16 (RL 4.0; 使用者：月線上續抱、每週決策是策略不是規則，不要給 RL 加一堆奇怪的限制): the account holds the
     # weights its one factor gives each stock (the rest in cash), rebalanced every session; top, keep, min_hold, check,
     # hold, the industry cap and the weighting do not apply — only the exchange's rules, the costs and the turnover cap.
@@ -1241,6 +1244,9 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             exit_agent = TechAgent(fp, Path(fp.models) / TECH_FACTOR_VERSION[factor], factor)
     opening = getattr(rule, "execution", "same") == "open"
     locks = ((fp.market_locks("open") if opening else fp.market_locks()) if hasattr(fp, "market_locks") else None)
+    # "split" (2026-10-22): a buy is refused by the close's limit-up, a sell by the open's limit-down
+    sell_locks = (fp.market_locks("open") if getattr(rule, "execution", "same") == "split" and hasattr(fp, "market_locks")
+                  else None)
     gone = fp.gone() if hasattr(fp, "gone") else {}
     lag = lag_of(rule)
     hold = getattr(rule, "hold", "days")
@@ -1435,9 +1441,10 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                     refused_buys += 1          # not bought: limit-up or no trade today
                     continue
                 final.append(symbol)
+            sell_traded, sell_down = (sell_locks[0], sell_locks[2]) if sell_locks is not None else (traded, locked_down)
             for symbol in holding:
                 row = fp.row.get(symbol)
-                if symbol not in wanted and row is not None and (not traded[row, act] or locked_down[row, act]):
+                if symbol not in wanted and row is not None and (not sell_traded[row, act] or sell_down[row, act]):
                     refused_sells.add(symbol)  # not sold: limit-down or no trade today (a suspension too)
                     final.append(symbol)
             wanted = final
@@ -1522,12 +1529,13 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
 
     blocked = False                              # an order the market refused today: try again tomorrow
 
-    opening = rule is not None and getattr(rule, "execution", "same") == "open"
+    execution = getattr(rule, "execution", "same") if rule is not None else "same"
     opens = getattr(data, "opens", None) or {}
 
-    def fill_base(symbol: str, day: date) -> float | None:
-        """The price an order fills around: the close, or the open for the opening auction (2026-10-16)."""
-        if opening and symbol != BENCHMARK:
+    def fill_base(symbol: str, day: date, side: str = "BUY") -> float | None:
+        """The price an order fills around: the close, or the open for the opening auction (2026-10-16; "split",
+        2026-10-22: the sells)."""
+        if (execution == "open" or (execution == "split" and side == "SELL")) and symbol != BENCHMARK:
             value = opens.get(symbol, {}).get(day)
             return value if value and data.closes.get(symbol, {}).get(day) is not None else None
         return data.closes.get(symbol, {}).get(day)
@@ -1536,7 +1544,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         """The market's rule: no trade on a session without a close, no buy at a locked limit-up close, no
         sell at a locked limit-down close (for the opening auction: the open)."""
         nonlocal blocked
-        close = fill_base(symbol, day)
+        close = fill_base(symbol, day, side)
         locked = False
         if close is not None:
             low, high = price_limits(data, symbol, day)
@@ -1633,7 +1641,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
     def sell_all(symbol: str, day: date, amount: float | None = None) -> None:
         """Sell the whole holding, or whole shares worth about ``amount``."""
         nonlocal cash
-        close = fill_base(symbol, day)
+        close = fill_base(symbol, day, "SELL")
         if units[symbol] <= 0 or refused(symbol, day, "SELL"):
             return
         shares, fill = units[symbol], fill_price(close, "SELL", costs.slippage_bps, _tick(symbol))
@@ -1862,13 +1870,13 @@ def write_off_days(data: LegacyData) -> dict[str, date]:
 def participation(rule) -> float:
     """An order's share of the stock's turnover in the session it fills, at most (engine 1.4.0; the opening auction
     as the closing one, 2026-10-16)."""
-    return NEXT_DAY_PARTICIPATION if getattr(rule, "execution", "same") in ("next", "open") else SAME_DAY_PARTICIPATION
+    return NEXT_DAY_PARTICIPATION if getattr(rule, "execution", "same") in ("next", "open", "split") else SAME_DAY_PARTICIPATION
 
 
 def lag_of(rule) -> int:
     """Sessions between the decision and the fill: 0 the same day's after-hours sessions, 1 the next session's
     closing auction ("next") or opening auction ("open")."""
-    return 1 if getattr(rule, "execution", "same") in ("next", "open") else 0
+    return 1 if getattr(rule, "execution", "same") in ("next", "open", "split") else 0
 
 
 def actions_digest(data: LegacyData) -> str:
@@ -3694,6 +3702,34 @@ def j_deep_batch() -> list[DailyRule]:
     return output
 
 
+# 2026-10-22 (盤中成交時機研究; research_method §7「開盤賣、收盤買」, written before the run): the strongest single
+# rules (the frontier's and the most money's) with execution "split" — the same rule otherwise; rules that differ only
+# in their fill time become one.
+SPLIT_RULES = (6090, 5983, 6093, 4941, 5050, 6485, 6483, 6139, 5271, 4415)
+
+
+def split_batch() -> list[DailyRule]:
+    from quant_platform.research.holding import style_of
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    output, seen = [], set()
+    for trial in SPLIT_RULES:
+        base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
+        key = execution_key(base.canonical())
+        if key in seen:
+            continue
+        seen.add(key)
+        stem = base.name.split("｜持有：")[0]
+        for word in ("＋隔天收盤成交", "＋隔天開盤成交", "＋當天盤後成交"):
+            stem = stem.replace(word, "")
+        suffix = f"＋開盤賣、收盤買（#{trial}）｜持有：{style_of(base.canonical()) or '固定持有 20 天'}"
+        output.append(DailyRule.model_validate({**base.model_dump(), "execution": "split",
+                                                "name": stem[: 80 - len(suffix)] + suffix}))
+    return output
+
+
 def deep27_batch() -> list[DailyRule]:
     """2026-10-22 (集保因子第五版; research_method §7): dl-2.7.0 (dl-2.1.0 with model I's features) — only past its
     registered gate against dl-2.1.0 — in the four strongest deep rules' own frames (HOLDER_FRAME_RULES)."""
@@ -4148,4 +4184,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch}
+           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch}

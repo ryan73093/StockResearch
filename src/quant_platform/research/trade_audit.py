@@ -85,8 +85,8 @@ def audit(data, ledger: list[dict], costs: CostModel, limit: float | None = None
             continue
         close = data.closes.get(symbol, {}).get(day)
         opened = (getattr(data, "opens", None) or {}).get(symbol, {}).get(day)
-        if execution == "open" or (execution is None and opened is not None and close is not None
-                                   and abs(fill - opened) < abs(fill - close)):
+        if execution == "open" or (execution == "split" and side == "SELL") or (
+                execution is None and opened is not None and close is not None and abs(fill - opened) < abs(fill - close)):
             at, word = opened, "開盤"
         else:
             at, word = close, "收盤"
