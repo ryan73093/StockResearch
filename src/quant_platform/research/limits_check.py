@@ -42,7 +42,7 @@ def compare(sessions: list[date], symbols: list[str], close: np.ndarray, up: np.
             locked: tuple[np.ndarray, np.ndarray] | None = None) -> dict[str, object]:
     """Every (stock, session) from ``start`` with both: the limits that differ and the locks that differ (the engine's
     own locks, ``locked`` = market_locks' up and down, when given)."""
-    compared = differ = lock_differ = 0
+    compared = differ = lock_differ = beyond = 0
     by_year: Counter = Counter()
     examples: list[dict] = []
     locks = Counter()
@@ -65,7 +65,10 @@ def compare(sessions: list[date], symbols: list[str], close: np.ndarray, up: np.
             else:
                 mine = ("up" if price >= up[row, column] - TOLERANCE else "down" if price <= down[row, column] + TOLERANCE
                         else None)
-            theirs = "up" if price >= high - TOLERANCE else "down" if price <= low + TOLERANCE else None
+            # locked when the close sits on the exchange's limit (a close beyond it is a data mismatch, not a lock)
+            theirs = "up" if abs(price - high) <= TOLERANCE else "down" if abs(price - low) <= TOLERANCE else None
+            if price > high + TOLERANCE or price < low - TOLERANCE:
+                beyond += 1
             if mine or theirs:
                 locks[(mine, theirs)] += 1
             if wrong:
@@ -77,7 +80,7 @@ def compare(sessions: list[date], symbols: list[str], close: np.ndarray, up: np.
                     examples.append({"code": symbol.split(".")[0], "date": day.isoformat(), "close": float(price),
                                      "engine": [float(down[row, column]), float(up[row, column])], "exchange": [low, high],
                                      "engine_lock": mine, "exchange_lock": theirs})
-    return {"compared": compared, "limits_differ": differ, "locks_differ": lock_differ,
+    return {"compared": compared, "limits_differ": differ, "locks_differ": lock_differ, "close_beyond_exchange": beyond,
             "limits_differ_by_year": {str(year): count for year, count in sorted(by_year.items())},
             "locks": {f"{mine or '-'}/{theirs or '-'}": count for (mine, theirs), count in sorted(locks.items(), key=str)},
             "examples": examples}
