@@ -248,7 +248,8 @@ def _spearman(left: np.ndarray, right: np.ndarray) -> float | None:
 
 
 def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] | None = None,
-          job=None, label: str = "rank", version: str = MODEL_VERSION, horizon: int = HORIZON) -> dict[str, object]:
+          job=None, label: str = "rank", version: str = MODEL_VERSION, horizon: int = HORIZON,
+          months: list[int] | None = None) -> dict[str, object]:
     """Fit and save one model per year; returns the out-of-sample diagnostics. A version keeps the feature
     list it was first trained with (a later year of the same version uses the same features)."""
     if label == "deep":                      # 2026-10-16: the recurrent network (research/model_deep.py)
@@ -258,7 +259,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
     if label == "deep2":                     # 2026-10-17: the second version (research/model_deep2.py)
         from quant_platform.research.model_deep2 import train as train_deep2
 
-        return train_deep2(fp, out_dir, version, years, job)
+        return train_deep2(fp, out_dir, version, years, job, only_months=months)
     if label == "deep_risk2":                # 2026-10-17: the vol-neutral fall (research/model_risk2.py)
         from quant_platform.research.model_risk2 import train as train_risk2
 
@@ -422,9 +423,10 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
     return meta
 
 
-def train_year(history: str | Path, version: str, year: int, job=None) -> dict[str, object]:
+def train_year(history: str | Path, version: str, year: int, job=None, months: list[int] | None = None) -> dict[str, object]:
     """The model that scores ``year``, trained on everything up to that year's first session (the yearly
-    retrain, 2026-10-06); the version's other years stay as they are."""
+    retrain, 2026-10-06); the version's other years stay as they are. ``months``: a monthly deep version's new
+    month only (2026-10-21)."""
     from quant_platform.research.daily import (
         RECENT_START,
         ChipStore,
@@ -443,7 +445,7 @@ def train_year(history: str | Path, version: str, year: int, job=None) -> dict[s
                      market_closes(history, panel.sessions))
     fingerprint = stock_fingerprint(history, first, year)
     return train(fp, model_dir(history, version), fingerprint, [year], job=job, label=VERSIONS[version]["label"],
-                 version=version, horizon=VERSIONS[version].get("horizon", HORIZON))
+                 version=version, horizon=VERSIONS[version].get("horizon", HORIZON), months=months)
 
 
 MONTHLY = "monthly"        # 2026-10-16: the monthly retrains, ``monthly/<cutoff>.pkl`` (research/rolling.py)

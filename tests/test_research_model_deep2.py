@@ -339,6 +339,14 @@ def test_the_monthly_version_refits_every_month_on_labels_ended_before_it(monkey
     assert all(held + model.HORIZON < first for (_train, held), first in zip(fits, firsts, strict=True))
     assert fits[-1][1] > fits[0][1]                                                  # later months learn more
     assert model_deep2.gate(tmp_path, "dl-2.6.0")["reason"] == "not trained"          # no dl-2.1.0 yardstick here
+    # 2026-10-21: the nightly refit of a new month fits that month only; the other months' scores stay as they were
+    before = model_deep2._load_scores(tmp_path / "dl-2.6.0", fp.symbols)
+    fits.clear()
+    model.train(fp, tmp_path / "dl-2.6.0", years=[2017], label="deep2", version="dl-2.6.0", months=[months[-1]])
+    after = model_deep2._load_scores(tmp_path / "dl-2.6.0", fp.symbols)
+    assert len(fits) == 1 and fits[0][1] + model.HORIZON < firsts[-1]
+    earlier = [day for day in before if day < fp.sessions[firsts[-1]].isoformat()]
+    assert earlier and all(np.array_equal(before[day], after[day], equal_nan=True) for day in earlier)
 
 
 def test_a_monthly_cutoff_refit_scores_every_session_after_it(monkeypatch, tmp_path):

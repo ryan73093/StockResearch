@@ -394,6 +394,8 @@ def main() -> int:
     parser.add_argument("--cutoff", help="rolling：截止日（預設：兩個月前的月底）")
     parser.add_argument("--only-new", action="store_true",
                         help="rolling --step select：只評這個月還沒評過的規則，加進原本的名單（2026-10-18：組合帳戶）")
+    parser.add_argument("--all-rules", action="store_true",
+                        help="rolling --step select：全部重評（預設：上月比 0050 少三成以上的 T3 沿用上月結果，每季全部重評）")
     parser.add_argument("--calm", action="store_true",
                         help="scan：最後名單只挑開發期 0050 每次大跌（10%% 以上）都沒有比 0050 多跌超過 1 個百分點的（使用者 2026-10-18）")
     parser.add_argument("--prefilter", action="store_true",
@@ -879,12 +881,18 @@ def main() -> int:
                 def progress(done, total, row):
                     job.update(done=done, total=total, current=f"{row.get('name', '')[:40]}：{'過' if row.get('passed') else '沒過'}")
                 kept = [row for row in payload.get("graded") or [] if not row.get("error")] if args.only_new else []
+                # 2026-10-21 (使用者：每個月都要跑那麼久，我時間很多是不是): a T3 rule that ended under 70% of 0050 last
+                # month cannot pass a month later — its grade is carried; every rule again each quarter
+                carried = ([] if args.only_new or args.all_rules
+                           else rolling.carried(RESEARCH, cutoff, daily_research.ENGINE_VERSION))
+                kept = kept + carried
                 graded = kept + rolling.select(Path(args.base), RESEARCH, cutoff, args.broker, args.workers, progress,
                                                skip={row["rule_hash"] for row in kept})
                 payload.update(graded=graded, selected_at=datetime.now().isoformat(timespec="seconds"),
                                engine=daily_research.ENGINE_VERSION)
                 rolling.save(RESEARCH, cutoff, payload)
-                job.payload["summary"] = f"{len(graded)} 個規則、{sum(1 for row in graded if row.get('passed'))} 個過截止日門檻"
+                job.payload["summary"] = (f"{len(graded)} 個規則、{sum(1 for row in graded if row.get('passed'))} 個過截止日門檻"
+                                          + (f"（{len(carried)} 個上月比 0050 少三成以上的 T3 沿用上月結果）" if carried else ""))
             print(job.payload["summary"])
             return 0
         if args.step == "models":
@@ -953,10 +961,14 @@ def main() -> int:
             print(job.payload["summary"])
             return 0
         with JobLog(RESEARCH).start(f"每月滾動：{cutoff} 之後的前向測試（過門檻的策略各用新的 30 萬帳戶）", command) as job:
-            data, fp = daily_research.load(Path(args.base))
-            refreshed = rolling.refresh(RESEARCH, data, fp, broker_costs(args.broker), cutoff)
+            from quant_platform.research.stock_forward import StockForwardTracker
+
+            # 2026-10-21: the forward accounts already ran these rules to the day at 15:30 — read, don't run again
+            refreshed = rolling.refresh(RESEARCH, lambda: daily_research.load(Path(args.base)), broker_costs(args.broker),
+                                        cutoff, records=StockForwardTracker(RESEARCH).records())
             usable = [row for row in (refreshed or {}).get("holdout") or [] if row["usable"]]
             job.payload["summary"] = (f"{len((refreshed or {}).get('holdout') or [])} 個策略前向測試、{len(usable)} 個贏 0050"
+                                      f"（重算 {refreshed.get('holdout_run', 0)} 個，其餘讀前向帳戶紀錄）"
                                       if refreshed else "這個月還沒挑策略")
         print(job.payload["summary"])
         return 0

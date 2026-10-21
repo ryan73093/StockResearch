@@ -114,6 +114,40 @@ def select(base: str | Path, research: str | Path, cutoff: date, broker: str = "
     return output
 
 
+HOPELESS = 0.7          # 2026-10-21: under 70% of 0050's account — a month cannot lift it over 0050
+
+
+def carried(research: str | Path, cutoff: date, engine: str) -> list[dict]:
+    """2026-10-21 (使用者：每個月都要跑那麼久，我時間很多是不是): the rules not run again this month — last month's T3
+    whose account ended under ``HOPELESS`` of the same money in 0050 (it would have to beat 0050 by more than 40% in
+    one month; 789 of the 2,041 rules graded at 2026-08-31) — with last month's grade, marked ``carried_from``.
+    None in a quarter's month (a cutoff at the end of March, June, September, December: every rule again), nor when
+    the engine changed since."""
+    if cutoff.month % 3 == 0:
+        return []
+    earlier = []
+    for path in folder(research).glob("*.json") if folder(research).is_dir() else []:
+        try:
+            if date.fromisoformat(path.stem) < cutoff:
+                earlier.append(path)
+        except ValueError:
+            continue
+    if not earlier:
+        return []
+    previous = json.loads(max(earlier).read_text(encoding="utf-8"))
+    if previous.get("engine") != engine:
+        return []
+    output = []
+    for row in previous.get("graded") or []:
+        metrics = row.get("metrics") or {}
+        bench = metrics.get("benchmark_final_value")
+        if row.get("error") or row.get("tier") != "T3" or not bench:
+            continue
+        if (metrics.get("final_value") or 0) / bench < HOPELESS:
+            output.append({**row, "carried_from": row.get("carried_from") or previous["cutoff"]})
+    return output
+
+
 def holdout(data, fp, rows: list[dict], cutoff: date, costs, end: date | None = None) -> list[dict]:
     """Each passing rule's (or blend's) fresh owner's account from the first session after ``cutoff`` to ``end``
     (the latest)."""
@@ -175,17 +209,70 @@ def latest(research: str | Path) -> dict | None:
     return json.loads(found[-1].read_text(encoding="utf-8"))
 
 
-def refresh(research: str | Path, data, fp, costs, cutoff: date | None = None) -> dict | None:
-    """The holdout of the month's passing rules again, through the latest session."""
+def from_records(records: list[dict], rows: list[dict], cutoff: date) -> tuple[list[dict], list[dict]]:
+    """2026-10-21 (使用者：每個月都要跑那麼久，我時間很多是不是): the month's forward test read from the forward accounts'
+    own records — research/stock_forward.py keeps the same account (the rule from the first session after the cutoff,
+    NT$300,000 and NT$10,000 every 5th, against the same money in 0050) and runs it to the day at 15:30 — instead of
+    running every passing rule again at 22:30 (about 10 minutes every trading night). Returns the rows read and the
+    passing rules with no account recorded through the newest day (the month's first evening: run them)."""
+    from quant_platform.research.metrics import unit_values
+
+    newest = max((str(record.get("date")) for record in records), default="")
+    series: dict[tuple[str, str], list[dict]] = {}
+    for record in records:
+        since = str(record.get("since") or "")
+        if since > cutoff.isoformat():
+            series.setdefault((record["rule_hash"], since), []).append(record)
+    output, missing = [], []
+    for row in rows:
+        starts = sorted(since for rule_hash, since in series if rule_hash == row["rule_hash"])
+        days = sorted(series[(row["rule_hash"], starts[0])], key=lambda record: record["date"]) if starts else []
+        if not days or days[-1]["date"] != newest:
+            missing.append(row)
+            continue
+        values = [float(record["value"]) for record in days]
+        paid = [float(record["contributed"]) for record in days]
+        units = unit_values(values, [paid[0]] + [later - earlier for earlier, later in zip(paid, paid[1:])])
+        bench = [float(record["benchmark_value"]) for record in days]
+        bench_units = unit_values(bench, [paid[0]] + [later - earlier for earlier, later in zip(paid, paid[1:])])
+        peak, drawdown = 0.0, 0.0
+        for value in units:
+            peak = max(peak, value)
+            drawdown = min(drawdown, value / peak - 1 if peak else 0.0)
+        last = days[-1]
+        output.append({"trial": row["trial"], "rule_hash": row["rule_hash"], "name": row["name"],
+                       "start": days[0]["date"], "end": last["date"], "sessions": len(days),
+                       "value": round(float(last["value"]), 0), "benchmark_value": round(float(last["benchmark_value"]), 0),
+                       "contributed": round(float(last["contributed"]), 0),
+                       "excess": round((float(last["value"]) - float(last["benchmark_value"])) / float(last["contributed"]), 6)
+                       if last["contributed"] else None,
+                       "return": round(units[-1] / units[0] - 1, 6) if units[0] else None,
+                       "benchmark_return": round(bench_units[-1] / bench_units[0] - 1, 6) if bench_units[0] else None,
+                       "drawdown": round(drawdown, 4), "trades": int(last.get("trades_total") or 0),
+                       "usable": float(last["value"]) >= float(last["benchmark_value"]), "from_records": True})
+    return output, missing
+
+
+def refresh(research: str | Path, load, costs, cutoff: date | None = None, records: list[dict] | None = None) -> dict | None:
+    """The holdout of the month's passing rules again, through the latest session: 2026-10-21, read from the forward
+    accounts' records where they are up to date (``from_records``); only the others are run (``load`` → data, fp)."""
     path = folder(research) / f"{cutoff.isoformat()}.json" if cutoff else None
     payload = json.loads(path.read_text(encoding="utf-8")) if path and path.is_file() else latest(research)
     if not payload:
         return None
     month_cutoff = date.fromisoformat(payload["cutoff"])
     passed = [row for row in payload["graded"] if row.get("passed")]
-    payload["holdout"] = holdout(data, fp, passed, month_cutoff, costs)
+    rows, missing = from_records(records or [], passed, month_cutoff)
+    through = max((row["end"] for row in rows), default=None)
+    if missing:
+        data, fp = load()
+        rows += holdout(data, fp, missing, month_cutoff, costs)
+        through = fp.sessions[-1].isoformat()
+    rows.sort(key=lambda item: -(item["excess"] or -9))
+    payload["holdout"] = rows
+    payload["holdout_run"] = len(missing)
     payload["holdout_refreshed_at"] = datetime.now(UTC).isoformat(timespec="seconds")
-    payload["data_through"] = fp.sessions[-1].isoformat()
+    payload["data_through"] = through
     save(research, month_cutoff, payload)
     return payload
 

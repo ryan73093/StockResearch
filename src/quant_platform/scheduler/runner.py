@@ -576,16 +576,34 @@ def retrain_models(container: "Container", now: datetime | None = None) -> objec
     used = {name for item in StockForwardTracker(research).tracked() if item.get("kind") == "daily"
             for name in (item.get("rule") or {}).get("factors", {}) if name in MODEL_FACTORS}
     trained = []
+    import json
+
+    from quant_platform.research.model_deep2 import MONTHLY as DEEP_MONTHLY
+
     for name in sorted(used):
         version = MODELS[name]["version"]
         folder = model_dir(base, version)
+        months = None
+        this_year = (folder / f"{local_now.year}.pkl").is_file() or any(folder.glob(f"{local_now.year}-*.pt"))
+        if version in DEEP_MONTHLY and this_year:
+            # 2026-10-21: a network refitted every month — the new month once (about 7 minutes), not the whole year
+            # again every night (it was, 72 minutes, by the check below missing it)
+            try:
+                fitted = json.loads((folder / "meta.json").read_text(encoding="utf-8")).get("trained_at") or ""
+                when = datetime.fromisoformat(fitted).astimezone(zone) if fitted else None
+            except (OSError, ValueError):
+                when = None
+            if when is not None and (when.year, when.month) == (local_now.year, local_now.month):
+                continue
+            months = [local_now.month]
         # 2026-10-21 (使用者：每個月都要重跑那麼久，我時間很多嗎): a deep model keeps <year>-<seed>.pt, not <year>.pkl —
         # the check missed it and dl-2.1.0 and dl-2.6.0 were retrained every trading night (about 80 minutes)
-        if (folder / f"{local_now.year}.pkl").is_file() or any(folder.glob(f"{local_now.year}-*.pt")):
+        elif this_year:
             continue
-        with JobLog(research).start(f"重訓機器學習模型（{version}，{local_now.year} 年）", "scheduler retrain_models",
+        label = f"{local_now.year} 年" + (f" {local_now.month} 月" if months else "")
+        with JobLog(research).start(f"重訓機器學習模型（{version}，{label}）", "scheduler retrain_models",
                                     total=1) as job:
-            meta = train_year(base, version, local_now.year, job=job)
+            meta = train_year(base, version, local_now.year, job=job, **({"months": months} if months else {}))
             job.payload["summary"] = f"{local_now.year} 年模型：訓練 {meta['years'].get(str(local_now.year), {}).get('train_rows')} 筆"
         trained.append(version)
     if trained:

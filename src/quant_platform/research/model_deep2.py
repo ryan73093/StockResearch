@@ -494,8 +494,11 @@ def train_until(fp, out_dir: str | Path, version: str, cutoff, job=None) -> dict
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
 
 
-def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None, job=None) -> dict[str, object]:
-    """Fit ten seeds per year, the development years first; the other years only past the gate (module text)."""
+def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None, job=None,
+          only_months: list[int] | None = None) -> dict[str, object]:
+    """Fit ten seeds per year, the development years first; the other years only past the gate (module text).
+    2026-10-21 (使用者：每個月都要跑那麼久，我時間很多是不是): ``only_months`` refits only those months of a MONTHLY
+    version (the new month, once), the year's other months kept as they were."""
     import torch
 
     from quant_platform.research.gpu import name as device_name
@@ -539,6 +542,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
         session_columns = [column for column, day in enumerate(fp.sessions) if day.year == year and column >= LENGTH]
         # the periods refitted: the year (one fit) or each month of it (MONTHLY); the last period's networks are kept
         months = sorted({fp.sessions[column].month for column in session_columns}) if version in MONTHLY else [None]
+        if only_months and version in MONTHLY:
+            months = [month for month in months if month in only_months]
         train_days, held_days, curves = [], [], []
         for month in months:
             period = [column for column in session_columns if month is None or fp.sessions[column].month == month]

@@ -156,3 +156,44 @@ def test_the_months_rules_include_blends_without_0050(tmp_path):
                           report_file=f"{number}.json")
     names = [item["spec"]["name"] for item in rolling.rules(tmp_path)]
     assert names == ["a", "組合：a＋b"]                                   # the blend with 0050 is left out
+
+
+def test_the_month_forward_test_is_read_from_the_forward_accounts_records():
+    # 2026-10-21 (使用者：每個月都要跑那麼久，我時間很多是不是): the forward accounts already run the month's passing
+    # rules from the first session after the cutoff every day — read their records, run only the ones without them
+    def day(when, value, paid, bench, trades):
+        return {"date": when, "rule_hash": "a", "since": "2024-11-01", "value": value, "contributed": paid,
+                "benchmark_value": bench, "trades_total": trades}
+
+    records = [day("2024-11-01", 300_000, 300_000, 300_000, 5), day("2024-11-04", 330_000, 300_000, 303_000, 6),
+               day("2024-11-05", 307_000, 310_000, 313_000, 6),
+               {"date": "2024-11-05", "rule_hash": "old", "since": "2024-10-01", "value": 1, "contributed": 1,
+                "benchmark_value": 1},                                   # an account of another month: not this one
+               {"date": "2024-11-04", "rule_hash": "late", "since": "2024-11-01", "value": 1, "contributed": 1,
+                "benchmark_value": 1}]                                   # not recorded through the newest day
+    rows = [{"trial": 1, "rule_hash": "a", "name": "A"}, {"trial": 2, "rule_hash": "old", "name": "O"},
+            {"trial": 3, "rule_hash": "late", "name": "L"}, {"trial": 4, "rule_hash": "none", "name": "N"}]
+    found, missing = rolling.from_records(records, rows, date(2024, 10, 31))
+    assert [row["rule_hash"] for row in missing] == ["old", "late", "none"]
+    item = found[0]
+    assert (item["start"], item["end"], item["sessions"], item["trades"]) == ("2024-11-01", "2024-11-05", 3, 6)
+    assert item["value"] == 307_000 and item["benchmark_value"] == 313_000 and item["contributed"] == 310_000
+    assert item["excess"] == pytest.approx((307_000 - 313_000) / 310_000, abs=1e-6) and item["usable"] is False
+    # units: 1 → 1.1 → (307,000 − 10,000) / 330,000 × 1.1 = 0.99; the deepest fall from 1.1 to 0.99
+    assert item["return"] == pytest.approx(-0.01, abs=1e-6) and item["drawdown"] == pytest.approx(-0.1, abs=1e-4)
+
+
+def test_a_hopeless_t3_rule_carries_last_months_grade_except_each_quarter(tmp_path):
+    # 2026-10-21 (使用者：每個月都要跑那麼久): under 70% of 0050 last month cannot pass a month later
+    def row(rule_hash, tier, value):
+        return {"rule_hash": rule_hash, "tier": tier, "passed": False,
+                "metrics": {"final_value": value, "benchmark_final_value": 100.0}}
+
+    rolling.save(tmp_path, date(2026, 10, 31), {"cutoff": "2026-10-31", "engine": "daily-1.5.0",
+                                                 "graded": [row("far", "T3", 60.0), row("near", "T3", 80.0),
+                                                            row("t2", "T2", 50.0), {"rule_hash": "bad", "error": "x"}]})
+    found = rolling.carried(tmp_path, date(2026, 11, 30), "daily-1.5.0")
+    assert [item["rule_hash"] for item in found] == ["far"] and found[0]["carried_from"] == "2026-10-31"
+    assert rolling.carried(tmp_path, date(2026, 12, 31), "daily-1.5.0") == []      # a quarter: every rule again
+    assert rolling.carried(tmp_path, date(2026, 11, 30), "daily-1.6.0") == []      # a new engine: every rule again
+    assert rolling.carried(tmp_path, date(2026, 10, 31), "daily-1.5.0") == []      # only an earlier month counts
