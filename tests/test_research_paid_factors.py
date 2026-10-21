@@ -96,3 +96,20 @@ def test_the_new_data_rules_pair_the_strong_new_factors_with_the_strong_old_ones
     assert signs == {"big_holder_up_4w": 1.0, "margin_safe": -1.0, "broker_concentration_5": 1.0}
     # no monthly revenue (lagging, the owner's rule) and one a family: foreign buying is the same family as the trusts'
     assert partners == ["trust_buy_20", "high_52w"]
+
+
+def test_the_holder_filter_vetoes_the_fifth_whose_chips_disperse_most():
+    # 2026-10-22 (集保因子第三版): exclude "h1"/"h2" — no new buys of the lowest fifth of the factor that day
+    from types import SimpleNamespace
+
+    from quant_platform.research import daily
+
+    values = np.arange(100, dtype=float)[:, None].repeat(2, axis=1)
+    values[0, 1] = np.nan
+    panel = SimpleNamespace(matrix=lambda factor: values, symbols=[f"{1000 + n}.TW" for n in range(100)])
+    vetoed = daily.FactorPanel.holder_vetoed(panel, 0, "retail_down_4w")
+    assert vetoed == {f"{1000 + n}.TW" for n in range(20)}            # values 0..19.8: the lowest fifth
+    few = SimpleNamespace(matrix=lambda factor: values[:40], symbols=panel.symbols[:40])
+    assert daily.FactorPanel.holder_vetoed(few, 0, "retail_down_4w") == set()        # under 50 known: none
+    rule = daily.DailyRule(name="x", factors={"ml_deep2_top": 1.0}, exclude="h1")
+    assert rule.canonical()["exclude"] == "h1" and "exclude" not in daily.DailyRule(name="x", factors={"ml_deep2_top": 1.0}).canonical()

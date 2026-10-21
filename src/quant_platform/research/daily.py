@@ -358,7 +358,9 @@ class DailyRule(BaseModel):
     # 2026-10-10: "v1" = no new buys of lottery-like stocks — the stocks in the top fifth by 60-session
     # idiosyncratic volatility (against TAIEX) or the top tenth by the largest one-day gain in 21
     # sessions; holdings are kept by the usual rules. Left out of the hash when "none".
-    exclude: Literal["none", "v1"] = "none"
+    # 2026-10-22 (集保因子第三版): "h1" = no new buys of the fifth whose small holders' share rose the most in 4 weeks
+    # (retail_down_4w lowest), "h2" = of the fifth whose holders grew the most (holders_down_4w lowest)
+    exclude: Literal["none", "v1", "h1", "h2"] = "none"
     # 2026-10-12 (全面研究「之後再試」第 1 項): "cost1" = a holding that leaves the keep zone is replaced only when
     # the replacement's expected next-20-session excess beats the holding's by more than a round trip (about
     # 0.99%: fee both ways, the sell tax, slippage both ways). The expectation is the rule's own score
@@ -887,6 +889,16 @@ class FactorPanel:
         spread = frame.rolling(window, min_periods=window // 2).std()
         return (total / spread.where(spread > 0)).shift(skip).to_numpy()
 
+    def holder_vetoed(self, position: int, factor: str) -> set[str]:
+        """exclude "h1"/"h2" (2026-10-22): the stocks in the lowest HOLDER_VETO_SHARE of ``factor`` at ``position`` —
+        the small holders' share or the holders' count rising most (chips dispersing); none without the data."""
+        values = self.matrix(factor)[:, position]
+        known = np.flatnonzero(np.isfinite(values))
+        if known.size < 50:
+            return set()
+        cut = np.quantile(values[known], HOLDER_VETO_SHARE)
+        return {self.symbols[row] for row in known if values[row] <= cut}
+
     def excluded(self, position: int) -> set[str]:
         """exclude "v1": the traded stocks in the top fifth by 60-session idiosyncratic volatility or the
         top tenth by their largest one-day gain in 21 sessions, at ``position``."""
@@ -1282,6 +1294,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
         vetoed = fp.news_vetoed(position) if getattr(rule, "news_veto", "none") == "v1" else set()
         if getattr(rule, "exclude", "none") == "v1":
             vetoed = vetoed | fp.excluded(position)       # no new buys; holdings keep their usual rules
+        elif getattr(rule, "exclude", "none") in HOLDER_EXCLUDES:   # 2026-10-22: chips dispersing, no new buys
+            vetoed = vetoed | fp.holder_vetoed(position, HOLDER_EXCLUDES[rule.exclude])
         if exit_agent is not None and hasattr(exit_agent, "refuses"):
             vetoed = vetoed | exit_agent.refuses(position)  # tech1: the robot buys only what it wants
         if risk_veto == "meta1":              # 2026-10-20: the meta-label model expects it to lose to 0050
@@ -3159,6 +3173,8 @@ HOLDING_STYLES = (("固定持有 20 天", {"hold": "days", "min_hold": 20}),
                   ("月線上續抱", {"hold": "trend", "min_hold": 0}),
                   ("不設最短持有", {"hold": "days", "min_hold": 0}))
 HOLDING_TOP = 30
+HOLDER_EXCLUDES = {"h1": "retail_down_4w", "h2": "holders_down_4w"}
+HOLDER_VETO_SHARE = 0.2
 
 # 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」, written before the
 # strength results): the new data's factors that the strength analysis calls strong (or reversed: bet the other way),
@@ -3264,6 +3280,29 @@ def holders2_batch() -> list[DailyRule]:
                     f"｜持有：{style_of(spec) or '固定持有 20 天'}")
             output.append(DailyRule.model_validate({**base.model_dump(), "name": name,
                                                     "factors": {**base.factors, factor: 1.0}}))
+    return output
+
+
+# 2026-10-22 (第三版; research_method §7「集保因子第三版」, written before the run): the second version added the holder
+# factors to the deep rules' ranking and cost them 60-80% of the money (a weak signal pushed the deep model's best
+# picks out). Literature uses a weak signal as a filter: the deep ranking as it is, no new buys of the fifth whose
+# small holders' share (h1) or holders' count (h2) rose the most in 4 weeks.
+def holders3_batch() -> list[DailyRule]:
+    from quant_platform.research.holding import style_of
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    timing = {"same": "當天盤後", "next": "隔天收盤", "open": "隔天開盤"}
+    words = {"h1": "不買散戶大增的五分之一", "h2": "不買股東大增的五分之一"}
+    output = []
+    for trial in HOLDER_FRAME_RULES:
+        base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
+        spec = base.canonical()
+        for exclude, word in words.items():
+            name = (f"深度學習前一成・{word}（#{trial} 的設定、前 {base.top} 名、{timing.get(spec.get('execution', 'same'))}成交）"
+                    f"｜持有：{style_of(spec) or '固定持有 20 天'}")
+            output.append(DailyRule.model_validate({**base.model_dump(), "name": name, "exclude": exclude}))
     return output
 
 
@@ -4017,4 +4056,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch}
+           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch}
