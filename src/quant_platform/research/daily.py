@@ -3672,6 +3672,28 @@ def model_j_batch() -> list[DailyRule]:
                       switching="cost1")]
 
 
+def j_deep_batch() -> list[DailyRule]:
+    """2026-10-22 (research_method §7「模型 J＋深度學習放進最強的框架」): model J with the deep model's ranking (each half)
+    in the four strongest deep rules' own frames (HOLDER_FRAME_RULES: money by predicted drop, their fill time, holding
+    and top) — #6485 (the two in the plain cost-aware frame) had 3,246 萬 with a drawdown 12 points shallower than the
+    deep model alone there."""
+    from quant_platform.research.holding import style_of
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    timing = {"same": "當天盤後", "next": "隔天收盤", "open": "隔天開盤"}
+    output = []
+    for trial in HOLDER_FRAME_RULES:
+        base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
+        spec = base.canonical()
+        name = (f"模型 J＋深度學習前一成（#{trial} 的設定、前 {base.top} 名、{timing.get(spec.get('execution', 'same'))}成交）"
+                f"｜持有：{style_of(spec) or '固定持有 20 天'}")
+        output.append(DailyRule.model_validate({**base.model_dump(), "name": name,
+                                                "factors": {**base.factors, "ml_gbm_j": 1.0}}))
+    return output
+
+
 def deep27_batch() -> list[DailyRule]:
     """2026-10-22 (集保因子第五版; research_method §7): dl-2.7.0 (dl-2.1.0 with model I's features) — only past its
     registered gate against dl-2.1.0 — in the four strongest deep rules' own frames (HOLDER_FRAME_RULES)."""
@@ -4126,4 +4148,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch}
+           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch}
