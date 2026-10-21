@@ -241,3 +241,17 @@ def test_an_opening_fill_is_judged_at_the_open_not_the_close():
     assert "limit_up_buy" not in audit(data, [bought], costs, execution="open")     # it opened below the limit
     assert "limit_up_buy" in audit(data, [bought], costs)                           # a close fill there is locked
     assert "limit_up_buy" not in audit(data, [bought], costs, execution=None)       # a blend: nearer the open
+
+
+def test_a_blends_order_is_judged_by_the_sleeve_that_placed_it():
+    """2026-10-21: 30,899 turnover flags, nearly all in blends whose next-day sleeves may order more."""
+    from quant_platform.research import daily
+    from quant_platform.research.trade_audit import audit
+
+    days = weekdays(date(2024, 7, 1), date(2024, 7, 5))
+    data = market(days, {"1101.TW": {day: 10.0 for day in days}}, turnover=1_000_000.0)
+    costs = CostModel(fee_rate=0.001425, minimum_fee=1, slippage_bps=0.0)
+    size = int(1_000_000 * (daily.SAME_DAY_PARTICIPATION + daily.NEXT_DAY_PARTICIPATION) / 2 / 10)   # between the two
+    order = {"day": days[1], "symbol": "1101.TW", "side": "BUY", "shares": size, "price": 10.0, "fee": 100, "tax": 0}
+    assert "turnover" in audit(data, [order], costs)                                           # a same-day order
+    assert "turnover" not in audit(data, [order], costs, each=[(daily.NEXT_DAY_PARTICIPATION, "next")])

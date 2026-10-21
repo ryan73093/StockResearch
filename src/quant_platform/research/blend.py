@@ -155,9 +155,11 @@ class BlendAccount:
             ledgers.append(part_ledger)
             books.append(part_book)
         if ledger is not None:
-            merged = [entry for part in ledgers for entry in part]
-            merged.sort(key=lambda entry: entry["day"])          # stable: each sleeve's order within a day kept
-            ledger.extend(merged)
+            tagged = [(entry, number) for number, part in enumerate(ledgers) for entry in part]
+            tagged.sort(key=lambda pair: pair[0]["day"])          # stable: each sleeve's order within a day kept
+            ledger.extend(entry for entry, _number in tagged)
+            # 2026-10-21 (交易稽核): which sleeve each order came from (the core after the sleeves), entry by entry
+            self.ledger_sleeves = [number for _entry, number in tagged]
         if snapshots is not None:
             for day in books[0]:
                 cash, units = 0.0, defaultdict(float)

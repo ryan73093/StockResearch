@@ -47,12 +47,13 @@ def _instrument(symbol: str) -> bool:
 
 
 def audit(data, ledger: list[dict], costs: CostModel, limit: float | None = None,
-          execution: str | None = "same") -> dict[str, list[dict]]:
+          execution: str | None = "same", each: list[tuple[float, str]] | None = None) -> dict[str, list[dict]]:
     """check -> the orders that break it (each with the day, the symbol and what was wrong); ``limit`` is the
     order's largest share of the day's turnover (the rule's ``daily.participation``). ``execution``: where the rule
     fills — "open" is judged at the session's open (the engine's market_locks("open")), "same"/"next" at the close;
     None (a blend whose sleeves fill differently) takes, order by order, whichever of the two the fill is nearer.
-    2026-10-21 (稽核：1.5.0 的稽核把隔天開盤成交的 452 筆買進當成收盤鎖漲停還買進)."""
+    2026-10-21 (稽核：1.5.0 的稽核把隔天開盤成交的 452 筆買進當成收盤鎖漲停還買進). ``each``: a blend's (limit,
+    execution) order by order, from the sleeve that placed it (BlendAccount.ledger_sleeves)."""
     from quant_platform.research import daily
     from quant_platform.research.legacy_challenger import _tax_kind
 
@@ -64,7 +65,9 @@ def audit(data, ledger: list[dict], costs: CostModel, limit: float | None = None
     def flag(check: str, entry: dict, detail: str) -> None:
         found[check].append({"day": entry["day"].isoformat(), "symbol": entry["symbol"], "detail": detail})
 
-    for entry in ledger:
+    default_limit, default_execution = limit, execution
+    for position, entry in enumerate(ledger):
+        limit, execution = each[position] if each is not None else (default_limit, default_execution)
         side, symbol, day = entry["side"], entry["symbol"], entry["day"]
         if side == "ADJUST":
             if entry.get("shares") is not None:            # the change in shares (a blend's sleeves each log theirs)
@@ -93,6 +96,11 @@ def audit(data, ledger: list[dict], costs: CostModel, limit: float | None = None
             flag("traded", entry, "沒有收盤價")
         else:
             low, high = daily.price_limits(data, symbol, day)
+            if opened is not None and low is not None and high is not None and (opened > high + 1e-6 or opened < low - 1e-6):
+                # 2026-10-21: it opened beyond the limits computed from the last close — a session after a halt or a
+                # capital change, whose reference the exchange set otherwise (6949 on 2026-09-07 opened at 81.9
+                # against 61.0～74.5); the engine has no other limits for it, so the day's limits are not judged
+                low = high = None
             if side == "BUY" and high is not None and at is not None and at >= high - 1e-6:
                 flag("limit_up_buy", entry, f"{word} {at}＝漲停 {high}")
             if side == "SELL" and low is not None and at is not None and at <= low + 1e-6:
@@ -143,18 +151,21 @@ def run(history: Path, research_dir: Path, costs: CostModel, job=None) -> dict[s
         job.update(total=len(accounts), done=0, force=True)
     for number, (rule, name) in enumerate(accounts):
         ledger: list[dict] = []
+        sleeve_of = None
         if rule is None:
             run_ = daily.simulate_daily(data, None, costs, daily.RECENT_START, daily.RECENT_END, plan=SeedPlan(),
                                         ledger=ledger)
         elif not isinstance(rule, daily.DailyRule):          # a blend: every sleeve's orders are in the ledger
-            run_ = BlendAccount(data, fp, rule, costs, daily.RECENT_START, daily.RECENT_END).run(
-                daily.RECENT_START, daily.RECENT_END, SeedPlan(), ledger=ledger)
+            account = BlendAccount(data, fp, rule, costs, daily.RECENT_START, daily.RECENT_END)
+            run_ = account.run(daily.RECENT_START, daily.RECENT_END, SeedPlan(), ledger=ledger)
+            sleeve_of = getattr(account, "ledger_sleeves", None)
         else:
             ranks = daily.daily_rankings(fp, rule, daily.RECENT_START, daily.RECENT_END)
             run_ = daily.simulate_daily(data, rule, costs, daily.RECENT_START, daily.RECENT_END, ranks, plan=SeedPlan(),
                                         ledger=ledger, weights=daily.daily_weights(fp, rule, ranks),
                                         parked=daily.account_parking(data, fp, rule, costs),
                                         exposure=daily.exposure_schedule(data, fp, rule, costs))
+        each = None
         if rule is None:
             execution = "same"
         elif isinstance(rule, daily.DailyRule):
@@ -162,8 +173,12 @@ def run(history: Path, research_dir: Path, costs: CostModel, job=None) -> dict[s
         else:
             kinds = {sleeve.rule.execution for sleeve in rule.sleeves}
             execution = kinds.pop() if len(kinds) == 1 else None
+            if sleeve_of is not None and len(sleeve_of) == len(ledger):    # each order judged by its own sleeve
+                rules = [sleeve.rule for sleeve in rule.sleeves]
+                each = [(daily.participation(rules[number]), rules[number].execution) if number < len(rules)
+                        else (daily.SAME_DAY_PARTICIPATION, "same") for number in sleeve_of]
         found = audit(data, ledger, costs, daily.participation(rule) if isinstance(rule, daily.DailyRule)
-                      else daily.SAME_DAY_PARTICIPATION, execution)
+                      else daily.SAME_DAY_PARTICIPATION, execution, each)
         trades = [entry for entry in ledger if entry["side"] in ("BUY", "SELL")]
         orders += len(trades)
         for check, items in found.items():
