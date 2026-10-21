@@ -578,7 +578,10 @@ def retrain_models(container: "Container", now: datetime | None = None) -> objec
     trained = []
     for name in sorted(used):
         version = MODELS[name]["version"]
-        if (model_dir(base, version) / f"{local_now.year}.pkl").is_file():
+        folder = model_dir(base, version)
+        # 2026-10-21 (使用者：每個月都要重跑那麼久，我時間很多嗎): a deep model keeps <year>-<seed>.pt, not <year>.pkl —
+        # the check missed it and dl-2.1.0 and dl-2.6.0 were retrained every trading night (about 80 minutes)
+        if (folder / f"{local_now.year}.pkl").is_file() or any(folder.glob(f"{local_now.year}-*.pt")):
             continue
         with JobLog(research).start(f"重訓機器學習模型（{version}，{local_now.year} 年）", "scheduler retrain_models",
                                     total=1) as job:
