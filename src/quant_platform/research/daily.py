@@ -3238,6 +3238,35 @@ def new_data_batch() -> list[DailyRule]:
     return output
 
 
+# 2026-10-22 (第二版; research_method §7「集保因子第二版」, written before the run): the first version put the holder
+# factors in a plain frame — only the deep model with fewer holders passed (#6396: more money and a drawdown 10 points
+# shallower than the deep model alone). Now each of the strongest deep rules' own frames (cost-aware switching, money
+# by predicted drop, its fill time and holding) with fewer holders, or with the small holders leaving, added to its
+# ranking at the same weight.
+HOLDER_FRAME_RULES = (6090, 5983, 6093, 4941)
+HOLDER_WORDS = (("holders_down_4w", "股東人數減少"), ("retail_down_4w", "散戶減少"))
+
+
+def holders2_batch() -> list[DailyRule]:
+    from quant_platform.research.holding import style_of
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    timing = {"same": "當天盤後", "next": "隔天收盤", "open": "隔天開盤"}
+    output = []
+    for trial in HOLDER_FRAME_RULES:
+        base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
+        spec = base.canonical()
+        for factor, word in HOLDER_WORDS:
+            # the frame named by its trial (the rule page shows every setting), the fill time and the holding style
+            name = (f"深度學習前一成＋{word}（#{trial} 的設定、前 {base.top} 名、{timing.get(spec.get('execution', 'same'))}成交）"
+                    f"｜持有：{style_of(spec) or '固定持有 20 天'}")
+            output.append(DailyRule.model_validate({**base.model_dump(), "name": name,
+                                                    "factors": {**base.factors, factor: 1.0}}))
+    return output
+
+
 def _json_load(path: Path) -> dict:
     import json as _json
 
@@ -3988,4 +4017,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch, "newdata": new_data_batch}
+           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch}
