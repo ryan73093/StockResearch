@@ -389,6 +389,8 @@ def main() -> int:
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
     parser.add_argument("--require", help="scan：只跑含這個訊號的組（例如新模型 ml_gbm_quality）")
+    parser.add_argument("--missing-only", action="store_true",
+                        help="rolling --step models：只重訓還沒有這個截止日版本的模型（月中新增的模型）")
     parser.add_argument("--refit-accounts", action="store_true",
                         help="rolling --step models：重訓後，讀到這些模型的前向帳戶從起算日重新記錄（舊紀錄與決定封存）")
     parser.add_argument("--step", choices=("select", "models", "holdout"),
@@ -915,6 +917,15 @@ def main() -> int:
             deep = sorted({spec["version"] for factor, spec in research_model.MODELS.items()
                            if spec["label"] == "deep2" and factor in read and spec["version"] not in model_deep2.MONTHLY
                            and research_model.model_dir(Path(args.base), spec["version"]).is_dir()})
+            # 2026-10-22: --missing-only — the models without this cutoff's refit yet (a model made mid-month, its
+            # rules' forward accounts from the cutoff); the others are not trained again
+            month = cutoff.isoformat()
+
+            def refitted(version: str, name: str) -> bool:
+                return args.missing_only and (research_model.model_dir(Path(args.base), version) / "monthly" / name).is_file()
+
+            versions = [version for version in versions if not refitted(version, f"{month}.pkl")]
+            deep = [version for version in deep if not refitted(version, f"{month}-0.pt")]
             with JobLog(RESEARCH).start(f"每月滾動：用 {cutoff} 以前的資料重訓 {len(versions) + len(deep)} 個模型", command,
                                         total=len(versions) + len(deep)) as job:
                 data, fp = daily_research.load(Path(args.base))
@@ -928,14 +939,15 @@ def main() -> int:
                     job.update(done=number, current=version, force=True)
                     trained.append(model_deep2.train_until(fp, research_model.model_dir(Path(args.base), version), version,
                                                            cutoff, job))
-                risky = bool(read & {"dl1", "dl1x", "dl_risk"})          # the risk overlay and weights
+                risky = (bool(read & {"dl1", "dl1x", "dl_risk"})          # the risk overlay and weights
+                         and not refitted(research_model.MODELS["dl_risk"]["version"], f"{month}-0.pt"))
                 if risky:
                     from quant_platform.research import model_risk
 
                     trained.append(model_risk.train_until(
                         fp, research_model.model_dir(Path(args.base), research_model.MODELS["dl_risk"]["version"]), cutoff,
                         job))
-                payload["models"] = trained
+                payload["models"] = ((payload.get("models") or []) + trained) if args.missing_only else trained
                 rolling.save(RESEARCH, cutoff, payload)
                 from quant_platform.research import rl_timing
 
@@ -945,22 +957,28 @@ def main() -> int:
                           "rolling33_equal": rl_timing.ROLLING33_VERSION, "rl_rolling34": rl_timing.ROLLING34_VERSION,
                           "rolling34_equal": rl_timing.ROLLING34_VERSION}
                 benchmark = None
+                robots_done: set[str] = set()
                 for version in sorted({robots[factor] for factor in read if factor in robots}):
                     folder = research_model.model_dir(Path(args.base), version)
                     if not (folder / "meta.json").is_file():
                         continue
+                    if args.missing_only and month in (json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+                                                       .get("monthly") or {}):
+                        continue
+                    robots_done.add(version)
                     benchmark = benchmark if benchmark is not None else rl_timing.benchmark_units(data, fp.sessions)
                     job.update(current=f"{version}：重訓到 {cutoff}", force=True)
                     trained.append(rl_timing.refit_until(fp, benchmark, folder, version, cutoff, job))
-                if "meta1" in read:                                    # the meta-label veto (it reads the deep model)
-                    from quant_platform.research import meta_label
+                from quant_platform.research import meta_label
 
+                meta_due = "meta1" in read and not refitted(meta_label.VERSION, f"{month}.pkl")
+                if meta_due:                                           # the meta-label veto (it reads the deep model)
                     trained.append(meta_label.train_until(fp, research_model.model_dir(Path(args.base), meta_label.VERSION),
                                                           cutoff))
                 retrained = ({factor for factor, spec in research_model.MODELS.items()
                               if spec["version"] in set(versions) | set(deep)}
-                             | ({"dl1", "dl1x", "dl_risk"} if risky else set()) | ({"meta1"} & read)
-                             | {factor for factor in read if factor in robots})
+                             | ({"dl1", "dl1x", "dl_risk"} if risky else set()) | ({"meta1"} if meta_due else set())
+                             | {factor for factor in read if factor in robots and robots[factor] in robots_done})
                 again = tracker.refit(retrained, f"模型重訓到 {cutoff}（每月滾動），從起算日重新記錄") if args.refit_accounts else []
                 job.payload["summary"] = (f"{len(trained)} 個模型重訓到 {cutoff}（深度學習 {len(deep)} 個）"
                                           + (f"；{len(again)} 個前向帳戶重新記錄" if again else ""))

@@ -239,6 +239,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_ext": "機器學習集成 G（同模型 F 的集成，特徵加上後來的借券、注意處置、借券費率、股利與現增、股本、自營商因子，不含月營收）",
                  "ml_gbm_h": "機器學習集成 H（模型 G 的集成，特徵再加上內部人申報賣股與庫藏股買回）",
                  "ml_gbm_i": "機器學習集成 I（模型 H 再加上集保股權分散的 4 個因子）",
+                 "ml_deep2_holders": "深度學習第二版・前一成（特徵用模型 I 的，含集保股權分散）",
                  "ml_gbm_ext_monthly": "機器學習集成 G・每月重訓（同模型 G，每個月只用之前結束的標籤重新訓練）",
                  "ml_deep2_riskadj": "深度學習第二版・學以波動調整的前一成（不靠挑高波動股）",
                  "ml_deep2_monthly": "深度學習第二版・前一成，每月重新訓練（每個月只用之前結束的標籤，10 個種子）",
@@ -3648,6 +3649,32 @@ def deep26_batch() -> list[DailyRule]:
                       factors={"ml_deep2_monthly": 1.0}, **common)]
 
 
+def deep27_batch() -> list[DailyRule]:
+    """2026-10-22 (集保因子第五版; research_method §7): dl-2.7.0 (dl-2.1.0 with model I's features) — only past its
+    registered gate against dl-2.1.0 — in the four strongest deep rules' own frames (HOLDER_FRAME_RULES)."""
+    from quant_platform.research.holding import style_of
+    from quant_platform.research.model_deep2 import gate
+    from quant_platform.research.registry import TrialRegistry
+
+    check = gate(Path("instance") / "research" / "models", "dl-2.7.0")
+    print(f"dl-2.7.0 門檻（2016-2020 前 20 名多賺，對 dl-2.1.0）：{check}", flush=True)
+    if not check.get("passed"):
+        return []
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    timing = {"same": "當天盤後", "next": "隔天收盤", "open": "隔天開盤"}
+    output = []
+    for trial in HOLDER_FRAME_RULES:
+        base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
+        spec = base.canonical()
+        name = (f"深度學習（含集保特徵）前一成（#{trial} 的設定、前 {base.top} 名、{timing.get(spec.get('execution', 'same'))}成交）"
+                f"｜持有：{style_of(spec) or '固定持有 20 天'}")
+        factors = {("ml_deep2_holders" if factor == "ml_deep2_top" else factor): weight
+                   for factor, weight in base.factors.items()}
+        output.append(DailyRule.model_validate({**base.model_dump(), "name": name, "factors": factors}))
+    return output
+
+
 def tech_deep_batch() -> list[DailyRule]:
     """2026-10-20 (使用者：技術分析機器人有沒有在優化？): the technical robot's third version, dl-2.5.0 (dl-2.1.0 on prices
     and volumes only) — only past its registered gate (the development years' top-20 gain at least the technical
@@ -4076,4 +4103,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch}
+           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch}

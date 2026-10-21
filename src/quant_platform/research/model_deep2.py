@@ -42,7 +42,7 @@ import numpy as np
 import pandas as pd
 
 LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10", "dl-2.2.0": "top10", "dl-2.4.0": "top10",
-          "dl-2.5.0": "top10", "dl-2.6.0": "top10"}
+          "dl-2.5.0": "top10", "dl-2.6.0": "top10", "dl-2.7.0": "top10"}
 # 2026-10-20 (使用者：技術分析機器人有沒有在優化？): the technical robot's third version — dl-2.1.0 seeing prices and
 # volumes only: the sequence without the chip columns and the snapshot of the robot's 20 technical factors
 # (tech_rl.TECH_FEATURES) instead of model G's; judged against the technical ensemble gbm-2.1.0 (PLAIN_AGAINST)
@@ -51,7 +51,10 @@ TECHNICAL = {"dl-2.5.0"}
 # learn from every label that ended before the month's first session and score that month (the forward accounts'
 # models are retrained monthly too); judged against dl-2.1.0 itself
 MONTHLY = {"dl-2.6.0"}
-PLAIN_AGAINST = {"dl-2.5.0": "gbm-2.1.0", "dl-2.6.0": "dl-2.1.0"}
+PLAIN_AGAINST = {"dl-2.5.0": "gbm-2.1.0", "dl-2.6.0": "dl-2.1.0", "dl-2.7.0": "dl-2.1.0"}
+# 2026-10-22 (集保因子第五版; research_method §7): dl-2.1.0 whose snapshot is model I's features (gbm-2.5.0: model G's
+# and the holder brackets) instead of model G's; judged against dl-2.1.0 itself (PLAIN_AGAINST)
+SNAPSHOT_OF = {"dl-2.7.0": "gbm-2.5.0"}
 # 2026-10-20 (使用者：持續優化每一個策略; the factor correlations: dl-2.1.0 ran −0.70 with low volatility): dl-2.1.0 learning
 # the day's top tenth of the excess return divided by the stock's own 60-session volatility (known on the day) — a
 # volatile stock no longer reaches the top tenth for being volatile; still judged (held-out choice, gate) on the excess
@@ -419,7 +422,8 @@ def _prepare(fp, out: Path, version: str):
 
         names = tuple(TECH_FEATURES)
     else:
-        names = trained_features(out.parent / SNAPSHOT_VERSION, SNAPSHOT_VERSION)
+        snapshot = SNAPSHOT_OF.get(version, SNAPSHOT_VERSION)
+        names = trained_features(out.parent / snapshot, snapshot)
     inputs = Inputs(fp, learned, names, chips=version not in TECHNICAL)
     start = LENGTH + 200
     columns = list(range(start, len(fp.sessions)))
