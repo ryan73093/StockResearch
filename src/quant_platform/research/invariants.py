@@ -152,6 +152,17 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
     checks.append(_check("12/28 以前沒有規則被標成 T0", f"路線圖判定準則：串接前向滿 {FORWARD_SESSIONS} 個交易日",
                          today >= date(2026, 12, 28) or not early, f"被標成 T0 的 {len(early)} 個"))
 
+    # 2026-10-21 (使用者 2026-10-14：確實檢查每個時期都照當時的台股規則): the latest trade audit, at most 8 days old
+    audits = sorted((research / "audit").glob("trade-audit-*.json"), key=lambda path: path.stat().st_mtime) \
+        if (research / "audit").is_dir() else []
+    audit = json.loads(audits[-1].read_text(encoding="utf-8")) if audits else {}
+    made = datetime.fromtimestamp(audits[-1].stat().st_mtime) if audits else None
+    counts = {key: value for key, value in (audit.get("violation_counts") or {}).items() if value}
+    checks.append(_check("最新的交易規則稽核 0 違規（8 天內）", "使用者 2026-10-14：每個時期都照當時的台股規則；每週日 06:00 稽核",
+                         bool(audits) and not counts and made is not None and (datetime.now() - made).days <= 8,
+                         (f"{made:%m-%d %H:%M}：{len(audit.get('rules') or [])} 個規則、{audit.get('orders', 0):,} 筆委託、"
+                          f"違規 {sum(counts.values())}" + (f" {counts}" if counts else "")) if audits else "沒有稽核紀錄"))
+
     if backups is not None:
         files = sorted(backups.glob("*"), key=lambda path: path.stat().st_mtime) if backups.is_dir() else []
         newest = datetime.fromtimestamp(files[-1].stat().st_mtime) if files else None

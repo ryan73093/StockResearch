@@ -540,6 +540,24 @@ def start_llm_trader(container: "Container", now: datetime | None = None, launch
     return "llmtrader"
 
 
+def start_trade_audit(container: "Container", now: datetime | None = None, launch=None) -> str | None:
+    """2026-10-21 (使用者 2026-10-14：確實檢查每個時期都照當時的台股規則；稽核：10/17 之後沒再稽核、排程裡沒有): every
+    Sunday 06:00, every rule the forward accounts and the month's list track, order by order (scripts/start-research.ps1
+    -Name audit; research/trade_audit.py); the 16:00 check reads the latest."""
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch("audit")
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Name",
+                        "audit"], check=False, timeout=120)
+    return "audit"
+
+
 def retrain_models(container: "Container", now: datetime | None = None) -> object | None:
     """Every trading day at 22:45: a model that a forward-observed rule uses and that has no model for this
     year yet gets one (trained on everything before the year's first session). Once a year in practice."""
@@ -987,6 +1005,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=6 * 3600,
+    )
+    scheduler.add_job(
+        start_trade_audit,
+        args=[container],
+        trigger=CronTrigger(day_of_week="sun", hour=6, minute=0, timezone=timezone),
+        id="trade_audit",
+        name="交易規則稽核（每週日 06:00：每個規則逐筆檢查漲跌停、整股零股、成交量、費稅）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=12 * 3600,
     )
     scheduler.add_job(
         start_llm_trader,

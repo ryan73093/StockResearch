@@ -70,3 +70,22 @@ def test_a_rule_graded_t0_before_the_first_possible_day_is_caught(tmp_path, monk
     monkeypatch.setattr(daily, "tier", lambda metrics, forward=None: ("T0", ""))
     found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 21))}[name]
     assert not found["ok"] and "1 個" in found["detail"]
+
+
+def test_the_latest_trade_audit_must_be_clean(tmp_path):
+    (tmp_path / "forward" / "stocks").mkdir(parents=True)
+    (tmp_path / "forward" / "stocks" / "tracked.json").write_text("[]", encoding="utf-8")
+    folder = tmp_path / "audit"
+    folder.mkdir()
+    name = "最新的交易規則稽核 0 違規（8 天內）"
+
+    def checked():
+        return {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 21))}[name]
+
+    assert not checked()["ok"] and "沒有稽核紀錄" in checked()["detail"]
+    (folder / "trade-audit-1.json").write_text(json.dumps({"rules": [{}], "orders": 10, "violation_counts":
+                                                           {"turnover": 3}}), encoding="utf-8")
+    assert not checked()["ok"]
+    (folder / "trade-audit-2.json").write_text(json.dumps({"rules": [{}], "orders": 10, "violation_counts": {}}),
+                                               encoding="utf-8")
+    assert checked()["ok"]

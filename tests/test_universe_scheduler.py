@@ -367,6 +367,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "weekly_test_suite",
             "invariant_checks",
             "llm_trader",
+            "trade_audit",
             "disclosure_refresh",
             "close_availability_probe",
             "research_history_refresh",
