@@ -3209,6 +3209,10 @@ def new_data_signs(report: dict) -> tuple[dict[str, float], list[str]]:
             signs[name] = 1.0
         elif item.get("verdict") == "反向":
             signs[name] = -1.0
+    # 2026-10-22: the maintenance ratio is the price over the margin cost (stock value / a loan of 60% of the cost):
+    # margin_in_profit ranks the stocks as margin_safe does (the same strength to four digits) — one of them only
+    if "margin_safe" in signs:
+        signs.pop("margin_in_profit", None)
     from quant_platform.research.categories import FAMILY_FACTORS
     from quant_platform.research.model import MONTHLY_REVENUE
 
