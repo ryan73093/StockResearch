@@ -903,7 +903,7 @@ def main() -> int:
                            and research_model.model_dir(Path(args.base), spec["version"]).is_dir()})
             with JobLog(RESEARCH).start(f"每月滾動：用 {cutoff} 以前的資料重訓 {len(versions) + len(deep)} 個模型", command,
                                         total=len(versions) + len(deep)) as job:
-                _data, fp = daily_research.load(Path(args.base))
+                data, fp = daily_research.load(Path(args.base))
                 trained = []
                 for number, version in enumerate(versions):
                     job.update(done=number, current=version, force=True)
@@ -923,6 +923,21 @@ def main() -> int:
                         job))
                 payload["models"] = trained
                 rolling.save(RESEARCH, cutoff, payload)
+                from quant_platform.research import rl_timing
+
+                robots = {"rl_blocks": rl_timing.BLOCK_VERSION, "rl_rolling": rl_timing.ROLLING_VERSION,
+                          "rolling_equal": rl_timing.ROLLING_VERSION, "rl_rolling32": rl_timing.ROLLING32_VERSION,
+                          "rolling32_equal": rl_timing.ROLLING32_VERSION, "rl_rolling33": rl_timing.ROLLING33_VERSION,
+                          "rolling33_equal": rl_timing.ROLLING33_VERSION, "rl_rolling34": rl_timing.ROLLING34_VERSION,
+                          "rolling34_equal": rl_timing.ROLLING34_VERSION}
+                benchmark = None
+                for version in sorted({robots[factor] for factor in read if factor in robots}):
+                    folder = research_model.model_dir(Path(args.base), version)
+                    if not (folder / "meta.json").is_file():
+                        continue
+                    benchmark = benchmark if benchmark is not None else rl_timing.benchmark_units(data, fp.sessions)
+                    job.update(current=f"{version}：重訓到 {cutoff}", force=True)
+                    trained.append(rl_timing.refit_until(fp, benchmark, folder, version, cutoff, job))
                 if "meta1" in read:                                    # the meta-label veto (it reads the deep model)
                     from quant_platform.research import meta_label
 
@@ -930,7 +945,8 @@ def main() -> int:
                                                           cutoff))
                 retrained = ({factor for factor, spec in research_model.MODELS.items()
                               if spec["version"] in set(versions) | set(deep)}
-                             | ({"dl1", "dl1x", "dl_risk"} if risky else set()) | ({"meta1"} & read))
+                             | ({"dl1", "dl1x", "dl_risk"} if risky else set()) | ({"meta1"} & read)
+                             | {factor for factor in read if factor in robots})
                 again = tracker.refit(retrained, f"模型重訓到 {cutoff}（每月滾動），從起算日重新記錄") if args.refit_accounts else []
                 job.payload["summary"] = (f"{len(trained)} 個模型重訓到 {cutoff}（深度學習 {len(deep)} 個）"
                                           + (f"；{len(again)} 個前向帳戶重新記錄" if again else ""))

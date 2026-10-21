@@ -100,7 +100,7 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
         spec = research_model.MODELS.get(factor)
         if spec is not None:
             version = spec["version"]
-            if spec["label"] == "deep2":
+            if spec["label"] in ("deep2", "deep_risk", "deep_risk2"):   # networks: monthly/<cutoff>-<seed>.pt
                 if version not in DEEP_MONTHLY and not (models / version / "monthly" / f"{cutoff.isoformat()}-0.pt").is_file():
                     stale.add(version)
             elif spec.get("refit") != "monthly" and not (models / version / "monthly" / f"{cutoff.isoformat()}.pkl").is_file():
@@ -116,7 +116,19 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
         elif factor in ("block_equal", "tech_equal"):
             continue                          # fixed factors weighted alike: nothing learned, nothing to refit
         elif factor.startswith(("rl_", "rolling")):
-            stale.add("RL 機器人 " + factor)
+            from quant_platform.research import rl_timing
+
+            version = {"rl_blocks": rl_timing.BLOCK_VERSION, "rl_rolling": rl_timing.ROLLING_VERSION,
+                       "rolling_equal": rl_timing.ROLLING_VERSION}.get(factor) or {
+                "32": rl_timing.ROLLING32_VERSION, "33": rl_timing.ROLLING33_VERSION,
+                "34": rl_timing.ROLLING34_VERSION}.get(factor[-2:] if factor.startswith("rl_rolling") else factor[7:9])
+            meta_path = models / str(version) / "meta.json"
+            try:
+                refits = json.loads(meta_path.read_text(encoding="utf-8")).get("monthly") or {}
+            except (OSError, ValueError):
+                refits = {}
+            if cutoff.isoformat() not in refits:
+                stale.add("RL 機器人 " + factor)
     checks.append(_check("前向帳戶用到的模型都重訓到當月截止日", "AGENTS.md：只用截止日以前的資料挑策略、重訓模型（使用者 2026-10-16）",
                          not stale, f"截止日 {cutoff}；還沒重訓的 {len(stale)} 個" + (f"：{sorted(stale)[:6]}" if stale else "")))
 

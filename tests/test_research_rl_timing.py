@@ -184,6 +184,17 @@ def test_the_robot_31_trains_per_year_on_its_chosen_slots_and_scores_with_them(m
     alike = rl_timing.scores(fp, tmp_path, "equal", rl_timing.ROLLING_VERSION)
     first = fp.index[min(date.fromisoformat(day) for day in meta["weights"])]
     assert np.isnan(robot[first - 1]).all() and np.isfinite(robot[first]).sum() > 10 and np.isfinite(alike[first]).sum() > 10
+    # 2026-10-21 (每月滾動，模型也要更新): refitted to a cutoff, the sessions after it decide by the refit
+    cutoff = [day for day in fp.sessions if day.year == 2019][100]
+    found = rl_timing.refit_until(fp, rl_timing.benchmark_units(data, fp.sessions), tmp_path, rl_timing.ROLLING_VERSION,
+                                  cutoff)
+    assert found["decisions"] > 0 and found["members"] and found["members"][0] == "momentum_3"
+    stored = __import__("json").loads((tmp_path / "meta.json").read_text(encoding="utf-8"))["monthly"][cutoff.isoformat()]
+    assert min(stored["weights"]) > cutoff.isoformat() and stored["train_decisions"] > 0
+    again = rl_timing.scores(fp, tmp_path, "robot", rl_timing.ROLLING_VERSION)
+    past = fp.index[cutoff]
+    assert np.array_equal(np.nan_to_num(again[:past + 1]), np.nan_to_num(robot[:past + 1]))   # up to it: as before
+    assert np.isfinite(again[past + 1:]).any()
 
 
 def test_the_gpu_rewards_match_the_cpu_rewards(monkeypatch):

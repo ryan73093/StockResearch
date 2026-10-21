@@ -557,6 +557,73 @@ def walk_forward_rolling(fp, benchmark: np.ndarray, out_dir: Path, job=None,
     return meta
 
 
+def refit_until(fp, benchmark: np.ndarray, out_dir: Path, version: str, cutoff: date, job=None) -> dict[str, object]:
+    """2026-10-21 (使用者 2026-10-16：每月滾動，模型也要更新): the robot (3.0's blocks, or 3.1-3.4's slots chosen again
+    at the cutoff) trained as for a year, on every decision whose 20-session reward was realised by ``cutoff`` (the last
+    fifth held out), deciding every session after it; the yearly abstention rule kept. Written to meta.json's
+    ``monthly[<cutoff>]``; ``scores`` takes its weights (and members) for every session after the cutoff."""
+    rolling = version in ROLLING_VERSIONS
+    timelines = [Timeline(fp, benchmark, version, offset) for offset in PHASES]
+    boundary = next((day for day in fp.sessions if day > cutoff), None)
+    if boundary is None:
+        return {"version": version, "cutoff": cutoff.isoformat(), "skipped": "截止日之後沒有交易日"}
+    chosen = None
+    if rolling:
+        every = timelines[0].names
+        chosen = choose_members(fp, boundary, version)
+        views = [Slotted(timeline, [every.index(name) for name in chosen]) for timeline in timelines]
+        width = len(_slots(version))
+    else:
+        views = timelines
+        width = len(timelines[0].names)
+    main = views[0]
+    equal = np.full(width, 1 / width)
+    before = [[index for index, position in enumerate(view.positions)
+               if fp.sessions[min(position + STEP, len(fp.sessions) - 1)] <= cutoff] for view in views]
+    dated = sorted(view.days[index] for view, indexes in zip(views, before) for index in indexes)
+    test_at = [index for index, day in enumerate(main.days) if day > cutoff]
+    if len(dated) < 40:
+        return {"version": version, "cutoff": cutoff.isoformat(), "skipped": "截止日以前的決策不夠"}
+    cut = dated[int(len(dated) * (1 - HELD_OUT))]
+    train_pairs = [(view, [index for index in indexes if view.days[index] < cut]) for view, indexes in zip(views, before)]
+    held_pairs = [(view, [index for index in indexes if view.days[index] >= cut]) for view, indexes in zip(views, before)]
+    train_pairs = [pair for pair in train_pairs if pair[1]]
+    held_pairs = [pair for pair in held_pairs if pair[1]]
+    if job:
+        job.update(current=f"{version}：重訓到 {cutoff}", force=True)
+    runs = [train_held_out(train_pairs, held_pairs, seed) for seed in BLOCK_SEEDS]
+    held_states = np.concatenate([view.states[decisions] for view, decisions in held_pairs])
+    held_equal = float(_rewards_of(held_pairs, np.repeat(np.zeros((1, 1, width)), len(held_states), axis=0)).mean())
+    held_robot = float(np.mean([run["held_reward"] for run in runs]))
+    abstain = held_robot <= held_equal
+    if test_at:
+        logits = np.mean([main.states[test_at] @ run["weight"] + run["bias"] for run in runs], axis=0)
+        picked = np.repeat(equal[None, :], len(test_at), axis=0) if abstain else _softmax(logits)
+    else:
+        picked = np.zeros((0, width))
+    found = {"weights": {main.days[index].isoformat(): [round(float(value), 6) for value in row]
+                         for index, row in zip(test_at, picked)},
+             "members": chosen, "abstained": bool(abstain), "held_robot": round(held_robot, 5),
+             "held_equal": round(held_equal, 5), "held_from": cut.isoformat(),
+             "train_decisions": sum(len(pair[1]) for pair in train_pairs),
+             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
+    path = Path(out_dir) / "meta.json"
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    meta.setdefault("monthly", {})[cutoff.isoformat()] = found
+    path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"version": version, "cutoff": cutoff.isoformat(), "abstained": bool(abstain),
+            "decisions": len(test_at), "members": chosen}
+
+
+def _decided(meta: dict) -> list:
+    """The decisions in force: the yearly ones, each monthly refit's replacing those after its cutoff (2026-10-21)."""
+    weights = dict(meta.get("weights") or {})
+    for cutoff, found in sorted((meta.get("monthly") or {}).items()):
+        weights = {day: values for day, values in weights.items() if day <= cutoff}
+        weights.update(found.get("weights") or {})
+    return sorted((date.fromisoformat(day), np.array(values)) for day, values in weights.items())
+
+
 def _rolling_scores(fp, folder: str | Path, kind: str, version: str = ROLLING_VERSION) -> np.ndarray:
     """The robot 3.1's scores (``robot``) or its yardstick's (``equal``: the year's eight factors alike): each session
     uses its year's factors (the latest trained year's after it) and the latest decision's weights."""
@@ -571,10 +638,13 @@ def _rolling_scores(fp, folder: str | Path, kind: str, version: str = ROLLING_VE
     if not members:
         return output
     eligible = eligibility(fp)
-    needed = sorted({name for names in members.values() for name in names})
+    needed = sorted({name for names in members.values() for name in names}
+                    | {name for found in (meta.get("monthly") or {}).values() for name in found.get("members") or []})
     percentiles = {name: _rank(np.where(eligible, fp.matrix(name), np.nan).T).astype(np.float32) for name in needed}
-    decided = sorted((date.fromisoformat(day), np.array(values)) for day, values in meta["weights"].items())
+    decided = _decided(meta)
     years = sorted(members)
+    monthly = sorted((cutoff, found["members"]) for cutoff, found in (meta.get("monthly") or {}).items()
+                     if found.get("members"))
     equal = np.full(len(_slots(version)), 1 / len(_slots(version)))
     index, current = 0, None
     for position, day in enumerate(fp.sessions):
@@ -583,10 +653,15 @@ def _rolling_scores(fp, folder: str | Path, kind: str, version: str = ROLLING_VE
             index += 1
         if current is None:
             continue
-        year = max((item for item in years if item <= str(day.year)), default=None)
-        if year is None:
-            continue
-        stack = np.stack([percentiles[name][position] for name in members[year]])        # slot × symbol
+        month = max((item for item in monthly if item[0] < day.isoformat()), default=None)
+        if month is not None:                     # 2026-10-21: the slots chosen at the monthly cutoff
+            names = month[1]
+        else:
+            year = max((item for item in years if item <= str(day.year)), default=None)
+            if year is None:
+                continue
+            names = members[year]
+        stack = np.stack([percentiles[name][position] for name in names])                # slot × symbol
         weights = equal if kind == "equal" else current
         output[position] = np.where(np.isfinite(stack).any(axis=0), weights @ np.nan_to_num(stack, nan=0.5), np.nan)
     return output
@@ -613,7 +688,7 @@ def scores(fp, folder: str | Path, kind: str = "robot", version: str = VERSION) 
     output = np.full((len(fp.sessions), len(fp.symbols)), np.nan, dtype=np.float32)
     if meta is None:
         return output
-    decided = sorted((date.fromisoformat(day), np.array(values)) for day, values in meta["weights"].items())
+    decided = _decided(meta)
     if not decided:
         return output
     index = 0
