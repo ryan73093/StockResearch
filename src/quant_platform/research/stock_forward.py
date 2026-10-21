@@ -442,6 +442,43 @@ class StockForwardTracker:
                                                     ensure_ascii=False, indent=1), encoding="utf-8")
         return {"accounts": len(live), "archived_records": len(records) - len(kept), "archive": archive.name}
 
+    def uses(self, item: dict) -> set[str]:
+        """The factors (and risk overlays) an account's rule reads, a blend's sleeves included."""
+        rule = item.get("rule") or {}
+        rules = [sleeve.get("rule") or {} for sleeve in rule.get("sleeves") or []] if item.get("kind") == "blend" else [rule]
+        found: set[str] = set()
+        for one in rules:
+            found |= set((one.get("factors") or {}).keys())
+            if one.get("risk_veto") and one.get("risk_veto") != "none":
+                found.add(str(one["risk_veto"]))
+        return found
+
+    def refit(self, factors: set[str], reason: str, now: datetime | None = None) -> list[str]:
+        """2026-10-21 (使用者 2026-10-16：每月滾動，模型也要更新): the live accounts reading a model just retrained to the
+        month's cutoff are recorded again from their start with it — their records moved to log-archive.jsonl and their
+        decisions to decisions-archive.json (kept, not deleted). Returns their names."""
+        from quant_platform.research.decisions import DecisionStore
+
+        moment = (now or datetime.now(TAIPEI)).isoformat(timespec="seconds")
+        items = self.tracked()
+        hit = [item for item in items if not item.get("stopped") and item.get("kind") in ("daily", "blend")
+               and self.uses(item) & factors]
+        if not hit:
+            return []
+        hashes = {item["rule_hash"] for item in hit}
+        self._archive_records(hashes, moment)
+        store = DecisionStore(self._base)
+        moved = store.drop({name for name in store._data if name.split("@")[0] in hashes})
+        if moved:
+            archive = store.path.with_name("decisions-archive.json")
+            kept = json.loads(archive.read_text(encoding="utf-8")) if archive.is_file() else {}
+            kept.update({f"{name}~{moment}": value for name, value in moved.items()})
+            archive.write_text(json.dumps(kept, ensure_ascii=False), encoding="utf-8")
+        for item in hit:
+            item["refit"] = {"at": moment, "reason": reason}
+        self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+        return [item["name"] for item in hit]
+
     def stop(self, rule_hash: str, today: date, reason: str) -> bool:
         """Stop recording one tracked account (its records stay); False when it is not tracked or already stopped."""
         items = self.tracked()

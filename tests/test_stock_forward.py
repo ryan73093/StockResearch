@@ -473,3 +473,30 @@ def test_a_t1_rule_on_the_months_list_is_tracked_too(tmp_path):
     tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
     tracker.sync(date(2026, 10, 2))
     assert [(item["name"], item["since"]) for item in tracker.tracked()] == [("T1 規則", "2026-09-01")]
+
+
+def test_accounts_reading_a_retrained_model_are_recorded_again_from_their_start(tmp_path):
+    """2026-10-21 (使用者 2026-10-16：每月滾動，模型也要更新): records and decisions archived, not deleted."""
+    from quant_platform.research.blend import BlendRule, Sleeve
+    from quant_platform.research.daily import DailyRule
+    from quant_platform.research.decisions import DecisionStore
+
+    deep = DailyRule(name="深度", factors={"ml_deep2_top": 1.0})
+    trend = DailyRule(name="趨勢", factors={"trend_200": 1.0})
+    blend = BlendRule(name="組合", core=0.0, sleeves=(Sleeve(rule=deep, share=0.5), Sleeve(rule=trend, share=0.5)))
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    items = [{"rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.canonical(),
+              "kind": "blend" if rule is blend else "daily", "since": "2026-09-01"} for rule in (deep, trend, blend)]
+    (folder / "tracked.json").write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+    (folder / "log.jsonl").write_text("".join(json.dumps({"rule_hash": item["rule_hash"], "date": "2026-09-01"}) + "\n"
+                                              for item in items), encoding="utf-8")
+    (folder / "decisions.json").write_text(json.dumps({f"{item['rule_hash']}@2026-09-01": {"through": "2026-09-01",
+                                                                                         "days": {}}
+                                                       for item in items}), encoding="utf-8")
+    tracker = StockForwardTracker(tmp_path, experiments=False)
+    assert sorted(tracker.refit({"ml_deep2_top"}, "重訓")) == sorted(["組合", "深度"])
+    assert [record["rule_hash"] for record in tracker.records()] == [trend.rule_hash]
+    assert set(DecisionStore(tmp_path)._data) == {f"{trend.rule_hash}@2026-09-01"}
+    assert len(json.loads((folder / "decisions-archive.json").read_text(encoding="utf-8"))) == 2
+    assert (folder / "log-archive.jsonl").is_file()

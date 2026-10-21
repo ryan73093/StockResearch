@@ -383,6 +383,8 @@ def main() -> int:
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
     parser.add_argument("--require", help="scan：只跑含這個訊號的組（例如新模型 ml_gbm_quality）")
+    parser.add_argument("--refit-accounts", action="store_true",
+                        help="rolling --step models：重訓後，讀到這些模型的前向帳戶從起算日重新記錄（舊紀錄與決定封存）")
     parser.add_argument("--step", choices=("select", "models", "holdout"),
                         help="rolling：每月滾動的哪一步（挑策略／重訓模型／前向測試）")
     parser.add_argument("--cutoff", help="rolling：截止日（預設：兩個月前的月底）")
@@ -882,11 +884,21 @@ def main() -> int:
             print(job.payload["summary"])
             return 0
         if args.step == "models":
+            from quant_platform.research import model_deep2
+            from quant_platform.research.stock_forward import StockForwardTracker
+
             versions = [spec["version"] for spec in research_model.MODELS.values()
                         if spec["label"] in ("rank", "excess", "ensemble")
                         and research_model.model_dir(Path(args.base), spec["version"]).is_dir()]
-            with JobLog(RESEARCH).start(f"每月滾動：用 {cutoff} 以前的資料重訓 {len(versions)} 個模型", command,
-                                        total=len(versions)) as job:
+            # 2026-10-21 (使用者 2026-10-16：模型也要更新；稽核：深度學習只有逐年模型): the deep models the forward
+            # accounts read, refitted to the cutoff too (monthly-refit versions refit themselves)
+            tracker = StockForwardTracker(RESEARCH)
+            read = set().union(*[tracker.uses(item) for item in tracker.tracked() if not item.get("stopped")] or [set()])
+            deep = sorted({spec["version"] for factor, spec in research_model.MODELS.items()
+                           if spec["label"] == "deep2" and factor in read and spec["version"] not in model_deep2.MONTHLY
+                           and research_model.model_dir(Path(args.base), spec["version"]).is_dir()})
+            with JobLog(RESEARCH).start(f"每月滾動：用 {cutoff} 以前的資料重訓 {len(versions) + len(deep)} 個模型", command,
+                                        total=len(versions) + len(deep)) as job:
                 _data, fp = daily_research.load(Path(args.base))
                 trained = []
                 for number, version in enumerate(versions):
@@ -894,9 +906,17 @@ def main() -> int:
                     spec = research_model.VERSIONS[version]
                     trained.append(research_model.train_until(fp, research_model.model_dir(Path(args.base), version), cutoff,
                                                               spec["label"], version, spec.get("horizon", research_model.HORIZON)))
+                for number, version in enumerate(deep, start=len(versions)):
+                    job.update(done=number, current=version, force=True)
+                    trained.append(model_deep2.train_until(fp, research_model.model_dir(Path(args.base), version), version,
+                                                           cutoff, job))
                 payload["models"] = trained
                 rolling.save(RESEARCH, cutoff, payload)
-                job.payload["summary"] = f"{len(trained)} 個模型重訓到 {cutoff}"
+                retrained = {factor for factor, spec in research_model.MODELS.items()
+                             if spec["version"] in set(versions) | set(deep)}
+                again = tracker.refit(retrained, f"模型重訓到 {cutoff}（每月滾動），從起算日重新記錄") if args.refit_accounts else []
+                job.payload["summary"] = (f"{len(trained)} 個模型重訓到 {cutoff}（深度學習 {len(deep)} 個）"
+                                          + (f"；{len(again)} 個前向帳戶重新記錄" if again else ""))
             print(job.payload["summary"])
             return 0
         with JobLog(RESEARCH).start(f"每月滾動：{cutoff} 之後的前向測試（過門檻的策略各用新的 30 萬帳戶）", command) as job:

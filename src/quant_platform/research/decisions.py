@@ -77,6 +77,21 @@ class DecisionStore:
                             "days": {day.isoformat(): list(symbols) for day, symbols in sorted(ranks.items()) if day <= through},
                             "pending": pending or None, "why": reasons}
 
+    def drop(self, names: set[str]) -> dict[str, dict]:
+        """2026-10-21: take these accounts' decisions off the file (an account recorded again from its start with a
+        retrained model); returns what was taken off, for the archive."""
+        try:
+            current = json.loads(self.path.read_text(encoding="utf-8")) if self.path.is_file() else {}
+        except (OSError, ValueError):
+            current = {}
+        taken = {name: current.pop(name) for name in list(current) if name in names}
+        if taken:
+            partial = self.path.with_suffix(".partial")
+            partial.write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
+            os.replace(partial, self.path)
+        self._data = current
+        return taken
+
     def save(self) -> None:
         """Merge what this run kept into the file as it is now (another process may have written meanwhile)."""
         if not self._kept:

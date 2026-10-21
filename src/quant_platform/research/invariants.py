@@ -88,6 +88,32 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
                          f"名單 {cutoff} 過門檻 {len(graded)} 個；帳戶不在名單也不是實驗的 {len(foreign)} 個"
                          + (f"：{foreign[:3]}" if foreign else "") + ("" if graded else "；這個月的名單還沒評")))
 
+    # 2026-10-21 (使用者 2026-10-16：每月滾動，模型也要更新；稽核：深度學習、風險、後設標籤、RL 都只有逐年模型):
+    # every model a live forward account reads has its refit to the month's cutoff
+    from quant_platform.research import model as research_model
+    from quant_platform.research.model_deep2 import MONTHLY as DEEP_MONTHLY
+
+    models = research / "models"
+    read = set().union(*[tracker.uses(item) for item in live] or [set()])
+    stale: set[str] = set()
+    for factor in sorted(read):
+        spec = research_model.MODELS.get(factor)
+        if spec is not None:
+            version = spec["version"]
+            if spec["label"] == "deep2":
+                if version not in DEEP_MONTHLY and not (models / version / "monthly" / f"{cutoff.isoformat()}-0.pt").is_file():
+                    stale.add(version)
+            elif spec.get("refit") != "monthly" and not (models / version / "monthly" / f"{cutoff.isoformat()}.pkl").is_file():
+                stale.add(version)
+        elif factor in ("dl1", "dl1x", "dl2", "dl2x"):
+            stale.add("風險模型 " + factor)
+        elif factor == "meta1":
+            stale.add("後設標籤 meta-1.0.0")
+        elif factor.startswith(("rl_", "rolling", "block_", "tech_")):
+            stale.add("RL 機器人 " + factor)
+    checks.append(_check("前向帳戶用到的模型都重訓到當月截止日", "AGENTS.md：只用截止日以前的資料挑策略、重訓模型（使用者 2026-10-16）",
+                         not stale, f"截止日 {cutoff}；還沒重訓的 {len(stale)} 個" + (f"：{sorted(stale)[:6]}" if stale else "")))
+
     from quant_platform.research.stock_forward import FIXED_HOLD
 
     converted = [item["name"] for item in items if item.get("stop_reason") == FIXED_HOLD

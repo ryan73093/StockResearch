@@ -339,3 +339,32 @@ def test_the_monthly_version_refits_every_month_on_labels_ended_before_it(monkey
     assert all(held + model.HORIZON < first for (_train, held), first in zip(fits, firsts, strict=True))
     assert fits[-1][1] > fits[0][1]                                                  # later months learn more
     assert model_deep2.gate(tmp_path, "dl-2.6.0")["reason"] == "not trained"          # no dl-2.1.0 yardstick here
+
+
+def test_a_monthly_cutoff_refit_scores_every_session_after_it(monkeypatch, tmp_path):
+    """2026-10-21 (使用者 2026-10-16：每月滾動，模型也要更新): retrained on the labels ended by the cutoff, the sessions
+    after the cutoff take its scores; the yearly scores before it stay."""
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0, 1))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "GATE_YEARS", (2017,))
+    monkeypatch.setattr(model_deep2, "GATE_FLOOR", -9.0)
+    monkeypatch.setattr(model_deep2, "GATE_COUNT", 1)
+    snapshot = tmp_path / "gbm-2.2.0"
+    snapshot.mkdir()
+    (snapshot / "meta.json").write_text(json.dumps({"version": "gbm-2.2.0", "features": ["momentum_3", "reversal_1"],
+                                                    "years": {"2017": {"top20_gain": -9.0}}}), encoding="utf-8")
+    _data, fp = _panel()
+    folder = tmp_path / "dl-2.1.0"
+    model.train(fp, folder, years=[2017], label="deep2", version="dl-2.1.0")
+    before = model.scores(fp, folder)
+    cutoff = [day for day in fp.sessions if day.year == 2018][60]
+    found = model_deep2.train_until(fp, folder, "dl-2.1.0", cutoff)
+    assert found["cutoff"] == cutoff.isoformat() and found["scored_days"] > 0
+    assert date.fromisoformat(found["label_until"]) <= cutoff                       # nothing after the cutoff learned
+    assert sorted(path.name for path in (folder / "monthly").glob("*.pt")) == [f"{cutoff}-0.pt", f"{cutoff}-1.pt"]
+    after = model.scores(fp, folder)
+    past = fp.index[cutoff]
+    assert np.array_equal(np.nan_to_num(after[:past + 1]), np.nan_to_num(before[:past + 1]))   # up to it: as before
+    assert not np.array_equal(np.nan_to_num(after[past + 1:]), np.nan_to_num(before[past + 1:]))  # after: refitted
+    assert np.isfinite(after[-1]).sum() >= 50

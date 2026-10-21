@@ -404,26 +404,12 @@ def gate(models_root: str | Path, version: str) -> dict[str, object]:
     return _judge(version, json.loads(paths[0].read_text(encoding="utf-8")), root)
 
 
-def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None, job=None) -> dict[str, object]:
-    """Fit ten seeds per year, the development years first; the other years only past the gate (module text)."""
-    import torch
+def _prepare(fp, out: Path, version: str):
+    """The inputs, labels and sample rows a version learns from (train, train_until)."""
+    from quant_platform.research.model import HORIZON, eligibility, label_block, trained_features
 
-    from quant_platform.research.gpu import name as device_name
-    from quant_platform.research.model import (
-        FIRST_YEAR,
-        HORIZON,
-        _top20,
-        eligibility,
-        label_block,
-        sample_columns,
-        trained_features,
-    )
-
-    torch.set_num_threads(4)
     kind = LOSSES[version]
     architecture = ARCHITECTURES.get(version, "gru")
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
     eligible = eligibility(fp)
     if version in WIDE:          # judged and scored on the eligible listed stocks only, as dl-2.1.0 (not TPEx ".TWO")
         eligible = eligible & np.array([symbol.endswith(".TW") for symbol in fp.symbols])[:, None]
@@ -453,6 +439,80 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
         judged = (rows, labels)
         labels = {column: wide[slot] for slot, column in enumerate(columns)}
         rows = {column: np.flatnonzero(np.isfinite(labels[column]) & learned[:, column]) for column in columns}
+    return kind, architecture, names, eligible, inputs, columns, labels, rows, judged
+
+
+MONTHLY_DIR = "monthly"
+
+
+def train_until(fp, out_dir: str | Path, version: str, cutoff, job=None) -> dict[str, object]:
+    """2026-10-21 (使用者 2026-10-16：每月滾動，模型也要更新): the version's ten seeds refitted on every sample whose label
+    ended by ``cutoff`` (the month's rolling cutoff), as the yearly fit does for a year; saved as
+    monthly/<cutoff>-<seed>.pt, the sessions after the cutoff scored with them (monthly/<cutoff>.npz). ``scores``
+    uses them for every session after the cutoff. The yearly networks and deep.npz stay as they are."""
+    import torch
+
+    from quant_platform.research.model import HORIZON
+
+    torch.set_num_threads(4)
+    out = Path(out_dir)
+    target = out / MONTHLY_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    kind, architecture, _names, eligible, inputs, columns, labels, rows, judged = _prepare(fp, out, version)
+    first = next((index for index, day in enumerate(fp.sessions) if day > cutoff), len(fp.sessions))
+    known = [column for column in columns if column + HORIZON < first and rows[column].size >= 50
+             and (judged is None or judged[0][column].size >= 50)]
+    cut = int(len(known) * (1 - HELD_OUT))
+    held_days = known[cut:]
+    train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]           # purged
+    networks, curves = [], []
+    for seed in SEEDS:
+        state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+        network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
+        network.load_state_dict(state)
+        networks.append(network)
+        curves.append(curve)
+        torch.save(state, target / f"{cutoff.isoformat()}-{seed}.pt")
+        if job:
+            job.update(current=f"{version}：重訓到 {cutoff}，第 {seed + 1}/{len(SEEDS)} 個種子，保留期前 20 名多 {max(curve):+.4f}",
+                       force=True)
+    kept = {}
+    for column in range(first, len(fp.sessions)):
+        live = np.flatnonzero(eligible[:, column])
+        values = np.full(len(fp.symbols), np.nan, dtype=np.float32)
+        if live.size:
+            pairs = np.stack([np.full(live.size, column), live], axis=1)
+            values[live] = _rank_average([inputs.score(network, pairs) for network in networks])
+        kept[fp.sessions[column].isoformat()] = values
+    days = sorted(kept)
+    with open(target / f"{cutoff.isoformat()}.npz", "wb") as handle:
+        np.savez_compressed(handle, days=np.array(days), symbols=np.array(fp.symbols),
+                            scores=np.stack([kept[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0)))
+    return {"version": version, "cutoff": cutoff.isoformat(), "train_days": len(train_days), "held_days": len(held_days),
+            "label_until": fp.sessions[known[-1] + HORIZON].isoformat() if known else None,
+            "held_best": [round(max(curve), 5) for curve in curves], "scored_days": len(days),
+            "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
+
+
+def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None, job=None) -> dict[str, object]:
+    """Fit ten seeds per year, the development years first; the other years only past the gate (module text)."""
+    import torch
+
+    from quant_platform.research.gpu import name as device_name
+    from quant_platform.research.model import (
+        FIRST_YEAR,
+        HORIZON,
+        _top20,
+        eligibility,
+        label_block,
+        sample_columns,
+        trained_features,
+    )
+
+    torch.set_num_threads(4)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    kind, architecture, names, eligible, inputs, columns, labels, rows, judged = _prepare(fp, out, version)
     weekly = set(sample_columns(len(fp.sessions)))
     report_labels = judged[1] if judged else labels
     ranks = {column: pd.Series(report_labels[column]).rank(pct=True).to_numpy() for column in columns}
@@ -592,6 +652,53 @@ def scores(fp, folder: str | Path) -> np.ndarray:
             network.load_state_dict(torch.load(path, weights_only=True, map_location=inputs.on))
             networks.append(network)
         for position in later:
+            live = np.flatnonzero(eligible[:, position])
+            if live.size:
+                pairs = np.stack([np.full(live.size, position), live], axis=1)
+                output[position, live] = _rank_average([inputs.score(network, pairs) for network in networks])
+    return _monthly(fp, folder, output)
+
+
+def _monthly(fp, folder: Path, output: np.ndarray) -> np.ndarray:
+    """2026-10-21: every session after a monthly cutoff takes that cutoff's scores (train_until); the latest cutoff
+    before a session wins. A session after the scored ones is scored with that cutoff's networks."""
+    target = folder / MONTHLY_DIR
+    files = sorted(target.glob("*.npz")) if target.is_dir() else []
+    if not files:
+        return output
+    for path in files:
+        cutoff = date.fromisoformat(path.stem)
+        stored = np.load(path, allow_pickle=False)
+        where = {symbol: index for index, symbol in enumerate(stored["symbols"].tolist())}
+        take = np.array([where.get(symbol, -1) for symbol in fp.symbols])
+        for day, values in zip(stored["days"].tolist(), stored["scores"]):
+            position = fp.index.get(date.fromisoformat(day))
+            if position is None or fp.sessions[position] <= cutoff:
+                continue
+            row = np.full(len(fp.symbols), np.nan, dtype=np.float32)
+            row[take >= 0] = values[take[take >= 0]].astype(np.float32)
+            output[position] = row
+    latest = date.fromisoformat(files[-1].stem)
+    scored = set(np.load(files[-1], allow_pickle=False)["days"].tolist())
+    missing = [position for position, day in enumerate(fp.sessions)
+               if day > latest and day.isoformat() not in scored and position >= LENGTH]
+    saved = sorted(target.glob(f"{latest.isoformat()}-*.pt"))
+    if missing and saved:
+        import torch
+
+        from quant_platform.research.model import eligibility
+
+        meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+        eligible = eligibility(fp)
+        inputs = Inputs(fp, eligible, tuple(meta["features"]),
+                        chips=len(meta.get("sequence") or SEQUENCE) == len(SEQUENCE))
+        networks = []
+        for path in saved:
+            network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2],
+                               meta.get("architecture", "gru")).to(inputs.on)
+            network.load_state_dict(torch.load(path, weights_only=True, map_location=inputs.on))
+            networks.append(network)
+        for position in missing:
             live = np.flatnonzero(eligible[:, position])
             if live.size:
                 pairs = np.stack([np.full(live.size, position), live], axis=1)
