@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch]$Headless)
 
 # Supervises the web, API and worker processes of this project only.
 # Started by the "StockResearchLocalServices" scheduled task (at logon) or by
@@ -7,6 +7,22 @@ param()
 # creating .runtime\services\stop.flag.
 
 $ErrorActionPreference = 'Stop'
+
+# 2026-10-21: with Windows Terminal as the default terminal (Windows 11) the scheduled task's -WindowStyle Hidden is
+# ignored and the supervisor showed as a blank powershell window after every deploy; closing it would stop the site
+# (the owner closed such windows on 10-20). The supervisor starts itself again with no window at all (conhost
+# --headless, created through WMI so it is outside the task) and this visible copy exits.
+if (-not $Headless) {
+    $command = "conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Headless"
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+    $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine = $command; CurrentDirectory = (Split-Path -Parent $PSScriptRoot); ProcessStartupInformation = $startup }
+    if ($created.ReturnValue -ne 0) {
+        throw "Could not start the supervisor without a window: Win32_Process.Create returned $($created.ReturnValue)"
+    }
+    exit 0
+}
+
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $scriptsRoot = Join-Path $projectRoot '.venv\Scripts'
 $instanceRoot = Join-Path $projectRoot 'instance'

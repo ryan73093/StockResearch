@@ -357,6 +357,7 @@ def main() -> int:
     parser.add_argument("--initial", type=float, default=0,
                         help="stocks：啟動資金，之後每月照 --monthly 投入（使用者的帳戶；0＝沒有啟動資金）")
     parser.add_argument("--screen", action="store_true", help="stocks：只算全期間、不算滾動視窗（大掃描第一階段）")
+    parser.add_argument("--trials", help="robustness：指定的試驗編號，逗號分隔（任何等級，含組合帳戶）")
     parser.add_argument("--top", type=int, default=0, help="stocks：只跑登錄檔中全期超額最高的前 N 個規則（第二階段）")
     parser.add_argument("--dry-run", action="store_true", help="agent：只印出提示內容，不呼叫模型")
     parser.add_argument("--check", action="store_true", help="agent：極小的連線檢查呼叫（金鑰、模型、JSON 格式）")
@@ -730,10 +731,13 @@ def main() -> int:
 
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         top = args.top or 10
-        with JobLog(RESEARCH).start(f"穩健性檢查：最好的 {top} 個 T0 候選，成本加倍、晚一個交易日成交", command, total=top) as job:
-            result = robustness.run(Path(args.base), RESEARCH, broker_costs(args.broker), top, job)
-            kept = sum(1 for row in result["rows"] if row["costs_doubled"]["tier"] == "T0 候選")
-            job.payload["summary"] = f"成本加倍後仍是 T0 候選：{kept}／{len(result['rows'])}"
+        trials = [int(item) for item in args.trials.split(",")] if args.trials else None
+        title = (f"穩健性檢查：#{'、#'.join(str(item) for item in trials)}" if trials
+                 else f"穩健性檢查：最好的 {top} 個 T0 候選") + "，成本加倍、晚一個交易日成交"
+        with JobLog(RESEARCH).start(title, command, total=len(trials) if trials else top) as job:
+            result = robustness.run(Path(args.base), RESEARCH, broker_costs(args.broker), top, job, trials)
+            kept = sum(1 for row in result["rows"] if str(row["costs_doubled"]["tier"]).startswith("T0"))
+            job.payload["summary"] = f"成本加倍後仍是 T0 候選（含高風險）：{kept}／{len(result['rows'])}"
         for row in result["rows"]:
             print(json.dumps(row, ensure_ascii=False), flush=True)
         return 0

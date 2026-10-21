@@ -38,33 +38,60 @@ def candidates(research: Path, top: int) -> list[tuple[object, dict]]:
     return chosen[:top]
 
 
-def run(base: Path, research: Path, costs, top: int = 10, job=None) -> dict[str, object]:
+def chosen_trials(research: Path, trials: list[int]) -> list[tuple[object, dict]]:
+    """2026-10-21: named trials of any tier, single rules or blends (the frontier's #5983, #6086, #6087)."""
+    from quant_platform.research.registry import TrialRegistry
+
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()
+               if record.kind == "candidate" and record.period == "recent"}
+    output = []
+    for trial in trials:
+        record = records.get(trial)
+        if record is None:
+            continue
+        spec = json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        output.append((record, spec))
+    return output
+
+
+def run(base: Path, research: Path, costs, top: int = 10, job=None, trials: list[int] | None = None) -> dict[str, object]:
+    from quant_platform.research.blend import BlendRule, Sleeve, evaluate_blend, parse_spec
     from quant_platform.research.daily import (
         ENGINE_VERSION,
         SEED_PLAN,
-        DailyRule,
         evaluate,
         load,
         report_metrics,
         tier,
     )
 
-    chosen = candidates(research, top)
+    chosen = chosen_trials(research, trials) if trials else candidates(research, top)
     data, fp = load(base)
     plain, dearer = {}, {}                      # 0050's runs, one cache per cost model
+
+    def measured(rule, cost_model, cache):
+        if isinstance(rule, BlendRule):
+            return report_metrics(evaluate_blend(data, fp, rule, cost_model, cache), ENGINE_VERSION, SEED_PLAN)
+        return report_metrics(evaluate(data, fp, rule, cost_model, cache), ENGINE_VERSION, SEED_PLAN)
+
     rows = []
     for number, (record, spec) in enumerate(chosen):
-        rule = DailyRule.model_validate(spec)
+        rule = parse_spec(spec)
         if job:
             job.update(done=number, total=len(chosen), current=f"{record.spec_name[:40]}", force=True)
         row = {"trial": record.trial_id, "rule_hash": record.spec_hash, "name": record.spec_name,
                "base": _summary(record.metrics, tier)}
-        doubled = report_metrics(evaluate(data, fp, rule, costs.scaled(COST_FACTOR), dearer), ENGINE_VERSION, SEED_PLAN)
-        row["costs_doubled"] = _summary(doubled, tier)
-        if rule.execution == "same":
+        row["costs_doubled"] = _summary(measured(rule, costs.scaled(COST_FACTOR), dearer), tier)
+        if isinstance(rule, BlendRule):         # every sleeve filled the next session's close where it was same-day
+            late = BlendRule(name=rule.name, core=rule.core, sleeves=tuple(
+                Sleeve(rule=sleeve.rule.model_copy(update={"execution": "next"}) if sleeve.rule.execution == "same"
+                       else sleeve.rule, share=sleeve.share) for sleeve in rule.sleeves))
+            changed = any(sleeve.rule.execution == "same" for sleeve in rule.sleeves)
+        else:
             late = rule.model_copy(update={"execution": "next"})
-            row["next_session"] = _summary(report_metrics(evaluate(data, fp, late, costs, plain), ENGINE_VERSION,
-                                                          SEED_PLAN), tier)
+            changed = rule.execution == "same"
+        if changed:
+            row["next_session"] = _summary(measured(late, costs, plain), tier)
         rows.append(row)
     result = {"engine": ENGINE_VERSION, "cost_factor": COST_FACTOR, "rows": rows,
               "built_at": datetime.now(UTC).isoformat(timespec="seconds")}
