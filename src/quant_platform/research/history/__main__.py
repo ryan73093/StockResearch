@@ -55,6 +55,7 @@ def main() -> int:
                                             "chips", "tpex", "fundamentals", "alerts", "reductions", "insider", "buyback", "pledge", "tdcc",
                                             "holders", "paid"))
     parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報；paid＝付費方案的資料集")
+    parser.add_argument("--per-hour", type=int, help="finmind：這個程序每小時最多幾次（幾個下載同時跑時分配上限）")
     parser.add_argument("--refresh-quarter", help="finmind：季更新，due＝法定期限已過的最新一季；只重抓近期有交易、"
                                                   "還沒有這一季的檔（2026-10-07）")
     parser.add_argument("--codes", default="twse", choices=("twse", "tpex", "all", "lists", "paid-lists"),
@@ -207,7 +208,7 @@ def main() -> int:
                     job.payload["summary"] = f"帳號每小時上限 {limit}：不是付費方案，沒有下載"
                     print(job.payload["summary"], file=sys.stderr)
                     return 3
-                per_hour = int(limit * PAID_SHARE)
+                per_hour = min(int(limit * PAID_SHARE), args.per_hour or limit)   # 2026-10-21: downloaders share it
             result = fetch_all(base, token, codes, datasets, job=job, refresh_before=refresh, per_hour=per_hour)
         print(json.dumps(result, ensure_ascii=False)[:2000], flush=True)
         return 0

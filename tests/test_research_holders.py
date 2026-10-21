@@ -103,9 +103,18 @@ def test_the_paid_download_starts_once_when_the_plan_is_paid(tmp_path):
     assert json.loads((tmp_path / "research" / "history" / "raw" / "finmind" / "plan.json").read_text(encoding="utf-8"))["limit"] == 6000
     assert finmind.plan("x", get=lambda: {"api_request_limit": 600, "user_count": 0, "level_title": "Free",
                                           "SponsorInfo": {"subscription_expired_date": ""}}) == {
-        "title": "Free", "limit": 600, "used": 0, "expires": None}
+        "title": "Free", "limit": 600, "used": 0, "expires": None, "next": None}
 
 
 def test_the_token_is_read_from_the_env_file_as_it_is_now(tmp_path):
     (tmp_path / ".env").write_text("A=1\nFINMIND_TOKEN='new'\n", encoding="utf-8")
     assert finmind.env_token(tmp_path) == "new" and finmind.env_token(tmp_path / "none") == ""
+
+
+def test_a_reached_limit_waits_until_finmind_frees_it():
+    moment = datetime(2026, 10, 22, 0, 0, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    answer = {"api_request_limit": 6000, "next_available_time": "2026-10-22 00:00:56"}
+    assert finmind.quota_wait("x", moment, get=lambda: answer) == 71.0
+    assert finmind.quota_wait("x", moment, get=lambda: {"api_request_limit": 6000, "next_available_time": ""}) == 900.0
+    late = {"api_request_limit": 6000, "next_available_time": "2026-10-21 23:59:00"}
+    assert finmind.quota_wait("x", moment, get=lambda: late) == 60.0

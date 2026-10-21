@@ -118,7 +118,19 @@ def plan(token: str, get: Callable[[], dict] | None = None) -> dict[str, object]
     expires = max((str((payload.get(key) or {}).get("subscription_expired_date") or "")
                    for key in ("BackerInfo", "SponsorInfo", "SponsorProInfo")), default="")
     return {"title": payload.get("level_title"), "limit": limit, "used": payload.get("user_count"),
-            "expires": expires or None}
+            "expires": expires or None, "next": payload.get("next_available_time") or None}
+
+
+def quota_wait(token: str, now: datetime, get: Callable[[], dict] | None = None) -> float:
+    """Seconds until FinMind counts a new hour (its next_available_time: an hour after the window's first request;
+    2026-10-21 two downloaders waited a full hour from hitting the limit though it freed in a minute), 15 s more;
+    between 60 and 3,600; 900 if FinMind does not say."""
+    found = plan(token, get)
+    try:
+        moment = datetime.fromisoformat(str((found or {}).get("next"))).replace(tzinfo=TAIPEI)
+    except (TypeError, ValueError):
+        return 900.0
+    return min(3600.0, max(60.0, (moment - now).total_seconds() + 15))
 
 
 def request_limit(token: str, get: Callable[[], dict] | None = None) -> int | None:
@@ -257,9 +269,10 @@ def fetch_all(base: Path, token: str, codes: Iterable[str], datasets: Iterable[s
                     payload = get(dataset, code, token, now().date())
                     break
                 except QuotaReached:
+                    wait = quota_wait(token, now()) if get is http_get else 3600.0
                     if job:
-                        job.update(current="已達每小時上限，等一小時", force=True)
-                    sleep(3600)
+                        job.update(current=f"已達每小時上限，等 {wait / 60:.0f} 分鐘（FinMind 恢復的時間）", force=True)
+                    sleep(wait)
                 except (urllib.error.URLError, TimeoutError, ValueError) as exc:
                     payload = None
                     if attempt == 2:
