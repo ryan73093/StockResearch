@@ -367,7 +367,7 @@ def main() -> int:
     parser.add_argument("--monthly", type=float, default=10_000)
     parser.add_argument("--day", type=int, default=5)
     parser.add_argument("--pipeline", help="pipeline-wait：等待中的研究流程名稱")
-    parser.add_argument("--reason", help="pipeline-wait：在等什麼")
+    parser.add_argument("--wait-reason", help="pipeline-wait：在等什麼")
     parser.add_argument("--pid", type=int, help="pipeline-wait：研究流程（PowerShell）的 PID")
     parser.add_argument("--finish", help="pipeline-wait：等完了，結束這筆紀錄（pipeline-wait 印出的編號）")
     parser.add_argument("--decision-day", help="llm-trader：決定哪一天收盤後（YYYY-MM-DD，預設今天）")
@@ -956,7 +956,7 @@ def main() -> int:
         if args.finish:
             JobLog(RESEARCH).end_wait(args.finish)
             return 0
-        print(JobLog(RESEARCH).waiting(args.pipeline or "?", args.reason or "", int(args.pid or 0)), flush=True)
+        print(JobLog(RESEARCH).waiting(args.pipeline or "?", args.wait_reason or "", int(args.pid or 0)), flush=True)
         return 0
 
     if args.command == "llm-trader":

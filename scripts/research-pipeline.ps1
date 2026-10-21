@@ -25,7 +25,7 @@ Write-Note "開始研究流程 $Name（PID $PID）"
 # 研究 › 執行中的程式 as 等待中 with its reason, and in the step log
 function Wait-While([string]$Reason, [scriptblock]$Condition, [int]$Seconds = 120) {
     if (-not (& $Condition)) { return }
-    $waitId = (& $python -m quant_platform.research pipeline-wait --pipeline $Name --reason $Reason --pid $PID | Select-Object -Last 1)
+    $waitId = (& $python -m quant_platform.research pipeline-wait --pipeline $Name --wait-reason $Reason --pid $PID | Select-Object -Last 1)
     Write-Note "等待：$Reason"
     while (& $Condition) { Start-Sleep -Seconds $Seconds }
     if ($waitId) { & $python -m quant_platform.research pipeline-wait --finish $waitId | Out-Null }
