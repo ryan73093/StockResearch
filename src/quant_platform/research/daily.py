@@ -238,6 +238,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_tech_ens": "技術模型（同樣的集成，只用 20 個價量技術因子、逐年滾動訓練）",
                  "ml_gbm_ext": "機器學習集成 G（同模型 F 的集成，特徵加上後來的借券、注意處置、借券費率、股利與現增、股本、自營商因子，不含月營收）",
                  "ml_gbm_h": "機器學習集成 H（模型 G 的集成，特徵再加上內部人申報賣股與庫藏股買回）",
+                 "ml_gbm_i": "機器學習集成 I（模型 H 再加上集保股權分散的 4 個因子）",
                  "ml_gbm_ext_monthly": "機器學習集成 G・每月重訓（同模型 G，每個月只用之前結束的標籤重新訓練）",
                  "ml_deep2_riskadj": "深度學習第二版・學以波動調整的前一成（不靠挑高波動股）",
                  "ml_deep2_monthly": "深度學習第二版・前一成，每月重新訓練（每個月只用之前結束的標籤，10 個種子）",
@@ -3681,6 +3682,25 @@ def model_h_batch() -> list[DailyRule]:
                       check="weekly", industry_cap=0.3, hold="trend", min_hold=0)]
 
 
+def model_i_batch() -> list[DailyRule]:
+    """2026-10-22 (集保因子第四版; research_method §7): gbm-2.5.0 (model I: model H with the holder brackets) — only if
+    its development years' top-20 gain is at least gbm-2.3.0's — in model H's two frames, and with the deep model's
+    ranking (each half)."""
+    from quant_platform.research.model_ensemble import gate
+
+    check = gate(Path("instance") / "research" / "models", "gbm-2.5.0", "gbm-2.3.0")
+    print(f"gbm-2.5.0 門檻（2016-2020 前 20 名多賺，對 gbm-2.3.0）：{check}", flush=True)
+    if not check["passed"]:
+        return []
+    return [DailyRule(name="機器學習集成（模型 I）：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股",
+                      factors={"ml_gbm_i": 1.0}, check="weekly", keep=3, min_hold=0, industry_cap=0.3, switching="cost1"),
+            DailyRule(name="機器學習集成（模型 I）：前 20 名、同產業最多 3 成、每週決策、月線上續抱", factors={"ml_gbm_i": 1.0},
+                      check="weekly", industry_cap=0.3, hold="trend", min_hold=0),
+            DailyRule(name="模型 I＋深度學習前一成：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股",
+                      factors={"ml_gbm_i": 1.0, "ml_deep2_top": 1.0}, check="weekly", keep=3, min_hold=0, industry_cap=0.3,
+                      switching="cost1")]
+
+
 def cost_switch_batch() -> list[DailyRule]:
     """2026-10-12: cost-aware switching on the two consensus frames that passed — the T0 consensus top 20
     (#2272) and the development-period consensus top 40 (#2275); each is one new trial."""
@@ -4056,4 +4076,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch}
+           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch}

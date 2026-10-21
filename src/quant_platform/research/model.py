@@ -55,6 +55,9 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # 2026-10-20: model G refitted every month (its 57 features; _train_ensemble's "refit": "monthly"); judged
           # against gbm-2.2.0
           "ml_gbm_ext_monthly": {"version": "gbm-2.4.0", "label": "ensemble", "features": "extended", "refit": "monthly"},
+          # 2026-10-22 (集保因子第四版; research_method §7): model H's ensemble with the four holder-bracket factors too
+          # (chips.HOLDER_FACTORS, FinMind's history from 2010) — let the model weigh them; judged against gbm-2.3.0
+          "ml_gbm_i": {"version": "gbm-2.5.0", "label": "ensemble", "features": "extended_i"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -155,6 +158,9 @@ def version_features(version: str | None) -> tuple[str, ...]:
     if kind == "extended":
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in DISCLOSURE_FACTORS
                      and name not in PLEDGE_FACTORS and name not in INDUSTRY_FACTORS and name not in HOLDER_FACTORS
+                     and name not in PAID_FACTORS)
+    if kind == "extended_i":           # 2026-10-22: H's list and the holder brackets (not the paid tables yet)
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
                      and name not in PAID_FACTORS)
     if kind == "extended_h":
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
