@@ -135,7 +135,13 @@ def test_report_generation_removes_only_legacy_rebuildable_documents(tmp_path) -
 
 
 def test_report_page_generates_and_renders(tmp_path) -> None:
-    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'report-page.db'}"))
+    # 2026-10-21: the legacy report is a paused module's action by default (it says so and does nothing); with the
+    # module running, it generates
+    paused = create_app(build_container(Settings(database_url=f"sqlite:///{tmp_path / 'paused.db'}"))).test_client()
+    refused = paused.post("/reports/generate/TW", follow_redirects=True).get_data(as_text=True)
+    assert "已暫停" in refused and "台股每日量化研究報告" not in refused
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'report-page.db'}",
+                                         paused_modules=frozenset()))
     client = create_app(container).test_client()
     response = client.post("/reports/generate/TW", follow_redirects=True)
     body = response.get_data(as_text=True)

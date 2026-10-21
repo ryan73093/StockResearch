@@ -42,6 +42,9 @@ GROUPS = (
                 "low_issuance_250")),       # 2026-10-14
     ("公司公告與質押", ("low_insider_sell_60", "buyback_60", "low_pledge", "pledge_heavy")),   # 2026-10-19/20
     ("產業", ("industry_mom_6", "industry_mom_1", "industry_laggard_5")),                    # 2026-10-20
+    ("集保大戶", ("big_holder_pct", "big_holder_up_4w", "holders_down_4w", "retail_down_4w")),   # 2026-10-21
+    ("融資、借貸與鉅額交易", ("margin_safe", "margin_in_profit", "low_pledge_loan_20", "block_premium_20",
+                       "block_volume_20", "broker_concentration_5")),                       # 2026-10-21 (FinMind 付費)
 )
 
 

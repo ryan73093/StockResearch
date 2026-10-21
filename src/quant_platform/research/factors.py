@@ -249,8 +249,9 @@ def recent_verdict(periods: dict[str, dict[str, object]]) -> str:
     return "弱"
 
 
-def run_recent(history: str | Path, out_dir: str | Path, job=None) -> Path:
-    """Every factor of the daily engine, ranked every week from 2015-06, against the next 20 sessions."""
+def run_recent(history: str | Path, out_dir: str | Path, job=None, names: list[str] | None = None) -> Path:
+    """Every factor of the daily engine, ranked every week from 2015-06, against the next 20 sessions. 2026-10-21:
+    ``names`` — only those (a new family), written over the latest full report's other factors."""
     from quant_platform.research import daily
     from quant_platform.research.legacy_challenger import BENCHMARK
 
@@ -262,7 +263,7 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None) -> Path:
         growth *= data.factors.get(BENCHMARK, {}).get(day, 1.0)
         benchmark[day] = data.closes[BENCHMARK][day] * growth
     eligibility = daily.DailyRule(name="資格", factors={"momentum_3": 1.0})
-    factors = list(daily.FACTOR_LABELS)
+    factors = [name for name in (names or daily.FACTOR_LABELS) if name in daily.FACTOR_LABELS]
     sessions = fp.sessions
     positions = [index for index, day in enumerate(sessions)
                  if daily.RECENT_START <= day <= daily.RECENT_END and index + HORIZON < len(sessions)][::STEP]
@@ -322,6 +323,10 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None) -> Path:
         summary[factor] = {"label": daily.FACTOR_LABELS[factor], "periods": periods, "verdict": recent_verdict(periods),
                            "spread_by_year": {year: round(statistics.fmean(values) * scale, 4)
                                               for year, values in sorted(by_year.items())}}
+    if names:                                   # the other factors as the latest full report has them
+        earlier = sorted(Path(out_dir).glob("strength-*-recent.json")) if Path(out_dir).is_dir() else []
+        kept = json.loads(earlier[-1].read_text(encoding="utf-8")).get("factors") or {} if earlier else {}
+        summary = {**{key: value for key, value in kept.items() if key not in summary}, **summary}
     report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "design": "recent",
               "universe": "證交所上市普通股（含後來下市），資格同規則；每週排名一次，看之後 20 個交易日",
               "columns": [[key, label] for key, label, _start, _end in RECENT_COLUMNS], "factors": summary,

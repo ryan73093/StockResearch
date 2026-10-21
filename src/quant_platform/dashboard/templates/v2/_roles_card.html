@@ -40,7 +40,7 @@
     <h2>本月可用策略（滾動前向測試）</h2>
     <a class="small" href="/research/roles#rolling">全部結果</a>
   </div>
-  <p class="muted small" style="margin:0 0 8px">只用 {{ rolling.cutoff }} 以前的資料挑策略與訓練模型；{{ rolling.holdout_start or '截止日之後' }} 起到 {{ rolling.data_through or '最新交易日' }} 是挑的時候沒看過的資料，每個策略用新的 30 萬帳戶（每月 5 日加 1 萬）跑，和同樣的錢買 0050 比。</p>
+  <p class="muted small" style="margin:0 0 8px">只用 {{ rolling.cutoff }} 以前的資料挑策略與訓練模型；{{ rolling.holdout_start or '截止日之後' }} 起到 {{ rolling.data_through or '最新交易日' }} 是挑的時候沒看過的資料，每個策略用新的 30 萬帳戶（每月 5 日加 1 萬）跑，和同樣的錢買 0050 比。數字就是前向觀察帳戶的紀錄（每天收盤後當下的決定，之後不改）。</p>
   {% if not rolling.graded %}
     <p class="muted" style="margin:0">這個月的挑選進行中（全部規則回測到 {{ rolling.cutoff }}）。</p>
   {% else %}

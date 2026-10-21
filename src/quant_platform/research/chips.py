@@ -113,6 +113,37 @@ PLEDGE_HEAVY = 50.0
 # 1–10 weeks). A fall (capital reduction, cancelled treasury shares) is left out: a reduction that offsets losses is
 # not a buyback. Higher = fewer new shares.
 ISSUANCE_FACTORS = {"low_issuance_250": "股本沒有膨脹（250 日內新增股數佔發行股數，扣掉配股；反向）"}
+# 2026-10-21 (FinMind Sponsor 計畫，路線圖 S9-W22): the depository's weekly holder brackets (集保戶股權分散表,
+# research/history/tdcc.py: the free open data kept from 2026-10-16, FinMind's TaiwanStockHoldingSharesPer from 2010
+# once bought). A week's table (the Friday's) comes out over the weekend: used from the first session at least
+# HOLDER_DELAY_DAYS after its date, until the next week's (at most HOLDER_HOLD sessions). The share held in lots of
+# 1,000 and more (bracket 15) rising, fewer holders and the small holders' share (under 10 lots, brackets 1-3) falling
+# — chips concentrating — are Taiwan's folk signals; tested like any other factor.
+HOLDER_FACTORS = {
+    "big_holder_pct": "千張大戶持股比例（集保，每週）",
+    "big_holder_up_4w": "千張大戶持股比例增加（4 週變化，集保）",
+    "holders_down_4w": "股東人數減少（4 週變化率，反向，集保）",
+    "retail_down_4w": "散戶持股比例減少（未滿 10 張，4 週變化，反向，集保）",
+}
+HOLDER_DELAY_DAYS = 3
+HOLDER_HOLD = 15
+# 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究): factors from the paid tables (research/history/paid.py), each
+# day's table used from the next session. Margin buyers near a margin call sell (Taiwan's 斷頭 below 130%) and those
+# under water sell into rallies; borrowing against shares for any purpose is leverage that unwinds in falls; block
+# trades at a premium are informed buying; the top branches' net buying is the "main force" (主力) — known only from
+# 2021-06-28, so a rule using it is graded on the short track (daily.short_track).
+PAID_FACTORS = {
+    "margin_safe": "融資維持率高（個股融資維持率；沒有融資的股票不排）",
+    "margin_in_profit": "融資戶沒有套牢（前一天收盤價 ÷ 融資平均成本 − 1）",
+    "low_pledge_loan_20": "不限用途借貸沒有增加（20 日餘額增加佔發行股數，反向）",
+    "block_premium_20": "鉅額交易溢價（20 日內鉅額成交均價相對當天收盤，依股數加權）",
+    "block_volume_20": "鉅額交易量（20 日內鉅額成交股數佔發行股數）",
+    "broker_concentration_5": "主力買超（5 日前 15 大分點買減賣 ÷ 買加賣；2021-06-28 起，短歷史賽道）",
+}
+PAID_SOURCES = {"margin_safe": "TaiwanStockMarginMaintenance", "margin_in_profit": "TaiwanStockMarginMaintenance",
+                "low_pledge_loan_20": "TaiwanStockLoanCollateralBalance", "block_premium_20": "TaiwanStockBlockTrade",
+                "block_volume_20": "TaiwanStockBlockTrade", "broker_concentration_5": "TaiwanStockBrokerDailyConcentration"}
+
 STOCK_DIVIDENDS = "StockDividends"
 DIVIDEND_LISTING_SESSIONS = 70
 SAME_PERIOD_DAYS = (305, 425)          # the payout "a year earlier": announced 305–425 days before
@@ -485,6 +516,112 @@ class ChipStore:
                 for row in column.get(code, ()):
                     output[row, start:end] = value
         return output
+
+    def holder_path(self) -> Path:
+        return self._folder.parent / "tdcc" / "holding.parquet"
+
+    def holder_available(self) -> bool:
+        return self.holder_path().is_file()
+
+    def holder_matrix(self, factor: str) -> np.ndarray:
+        """symbols × sessions, HOLDER_FACTORS: each week's value from the first session HOLDER_DELAY_DAYS after its
+        date until the next week's (at most HOLDER_HOLD sessions); a 4-week change against the table four weeks
+        earlier. NaN before the data and for a code without the brackets."""
+        table = pq.read_table(self.holder_path(), columns=["date", "code", "level", "holders", "percent"]).to_pandas()
+        sessions = pd.to_datetime(pd.Index(self.sessions))
+        output = np.full((len(self._codes), len(sessions)), np.nan, dtype=np.float32)
+        table = table.assign(day=pd.to_datetime(table["date"].astype(str), format="%Y%m%d"), code=table["code"].astype(str))
+        delay = pd.Timedelta(days=HOLDER_DELAY_DAYS)
+        if self.until is not None:
+            table = table[table["day"] + delay <= pd.Timestamp(self.until)]
+        if not len(table):
+            return output
+        if factor in ("big_holder_pct", "big_holder_up_4w"):
+            weekly = table[table["level"] == 15].pivot_table(index="day", columns="code", values="percent", aggfunc="last")
+        elif factor == "retail_down_4w":
+            weekly = table[table["level"].isin((1, 2, 3))].pivot_table(index="day", columns="code", values="percent",
+                                                                        aggfunc="sum")
+        else:
+            weekly = table[table["level"] == 17].pivot_table(index="day", columns="code", values="holders", aggfunc="last")
+        weekly = weekly.reindex(sorted(table["day"].unique())).astype(float)     # every week a row: shift(4) = 4 weeks
+        if factor == "big_holder_pct":
+            weekly = weekly / 100
+        elif factor == "big_holder_up_4w":
+            weekly = (weekly - weekly.shift(4)) / 100
+        elif factor == "retail_down_4w":
+            weekly = -(weekly - weekly.shift(4)) / 100
+        else:
+            earlier = weekly.shift(4)
+            weekly = -(weekly / earlier.where(earlier > 0) - 1)
+        at = sessions.searchsorted((weekly.index + delay).to_numpy(), side="left")
+        weekly = weekly[at < len(sessions)]
+        weekly.index = at[at < len(sessions)]
+        frame = weekly.groupby(level=0).last().reindex(range(len(sessions))).ffill(limit=HOLDER_HOLD)
+        frame = frame.reindex(columns=list(dict.fromkeys(self._codes)))   # a code may be two symbols
+        where = {code: number for number, code in enumerate(frame.columns)}
+        values = frame.to_numpy(dtype=np.float32)
+        return np.ascontiguousarray(values[:, [where[code] for code in self._codes]].T)
+
+    def paid_available(self, factor: str) -> bool:
+        return (self._folder.parent / "paid" / f"{PAID_SOURCES[factor]}.parquet").is_file()
+
+    def _paid(self, dataset: str, field: str, fill: int = 10, zero: bool = False) -> pd.DataFrame:
+        """sessions × codes from history/paid: the value known on each session (the day before's table), carried
+        up to ``fill`` sessions over gaps; ``zero``: a session without a row is 0 once the data starts."""
+        key = f"paid:{dataset}:{field}:{zero}"
+        if key not in self._frames:
+            table = pq.read_table(self._folder.parent / "paid" / f"{dataset}.parquet",
+                                  columns=["date", "code", field]).to_pandas()
+            if self.until is not None:
+                table = table[pd.to_datetime(table["date"]) < pd.Timestamp(self.until)]
+            frame = table.pivot_table(index="date", columns="code", values=field, aggfunc="last")
+            frame.index = pd.to_datetime(frame.index)
+            sessions = pd.to_datetime(pd.Index(self.sessions))
+            if zero:
+                first = frame.index.min() if len(frame) else None
+                frame = frame.reindex(sessions).fillna(0.0)
+                if first is not None:
+                    frame.loc[frame.index < first] = np.nan
+            elif fill:
+                frame = frame.reindex(sessions.union(frame.index)).ffill(limit=fill).reindex(sessions)
+            else:
+                frame = frame.reindex(sessions)
+            self._frames[key] = frame.reindex(columns=self._codes).shift(1)       # after the close: next session
+        return self._frames[key]
+
+    def paid_matrix(self, factor: str) -> np.ndarray:
+        """symbols × sessions, PAID_FACTORS."""
+        dataset = PAID_SOURCES[factor]
+        if factor == "margin_safe":
+            ratio = self._paid(dataset, "margin_maintenance")
+            frame = ratio.where(ratio > 0)
+        elif factor == "margin_in_profit":
+            cost = self._paid(dataset, "margin_cost")
+            close = pd.DataFrame(self._close.T, index=cost.index, columns=cost.columns).shift(1)
+            frame = close / cost.where(cost > 0) - 1
+        elif factor == "low_pledge_loan_20":
+            balance = self._paid(dataset, "UnrestrictedLoanCurrentDayBalance")
+            shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued")
+            frame = -(balance - balance.shift(20)) * 1000 / shares.where(shares > 0)
+        elif factor in ("block_premium_20", "block_volume_20"):
+            volume = self._paid(dataset, "volume", zero=True)
+            if factor == "block_volume_20":
+                shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued")
+                frame = volume.rolling(20, min_periods=20).sum() / shares.where(shares > 0)
+            else:
+                money = self._paid(dataset, "trading_money", zero=True)
+                close = pd.DataFrame(self._close.T, index=volume.index, columns=volume.columns).shift(1)
+                # each day's block shares at their average price against that day's close, summed over 20 sessions
+                gap = (money - volume * close).rolling(20, min_periods=20).sum()
+                worth = (volume * close).rolling(20, min_periods=20).sum()
+                frame = gap / worth.where(worth > 0)
+        elif factor == "broker_concentration_5":
+            bought = self._paid(dataset, "top_buy_volume", fill=0).rolling(5, min_periods=5).sum()
+            sold = self._paid(dataset, "top_sell_volume", fill=0).rolling(5, min_periods=5).sum()
+            frame = (bought - sold) / (bought + sold).where(bought + sold > 0)
+        else:
+            raise ValueError(factor)
+        return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
 
     def disclosure_path(self, factor: str) -> Path:
         history = self._folder.parent

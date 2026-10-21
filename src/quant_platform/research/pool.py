@@ -109,6 +109,7 @@ def _build_sources(research_dir: Path) -> dict[str, str]:
     else:
         origin = _every_batch()
         partial = snapshot.with_suffix(".partial")
+        partial.parent.mkdir(parents=True, exist_ok=True)       # 2026-10-21: a research folder not made yet
         partial.write_text(json.dumps(origin, ensure_ascii=False), encoding="utf-8")
         partial.replace(snapshot)
     log = research_dir / SOURCES_LOG

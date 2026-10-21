@@ -147,6 +147,8 @@ from quant_platform.research.chips import (
     CORPORATE_FACTORS,
     DEALER_FACTORS,
     DISCLOSURE_FACTORS,
+    HOLDER_FACTORS,
+    PAID_FACTORS,
     PLEDGE_FACTORS,
     ISSUANCE_FACTORS,
     EVENT_FACTORS,
@@ -224,7 +226,8 @@ def quarter_weights(sessions) -> np.ndarray:
     return weights
 FACTOR_LABELS = {**PRICE_FACTORS, **TECHNICAL, **CHIP_FACTORS, **STATEMENT_FACTORS, **EVENT_FACTORS, **TREND_QUALITY,
                  **RAW_V2, **TIME_FACTORS, **SHORT_FACTORS, **ALERT_FACTORS, **LENDING_FACTORS, **CORPORATE_FACTORS,
-                 **ISSUANCE_FACTORS, **DEALER_FACTORS, **DISCLOSURE_FACTORS, **PLEDGE_FACTORS, **INDUSTRY_FACTORS}
+                 **ISSUANCE_FACTORS, **DEALER_FACTORS, **DISCLOSURE_FACTORS, **PLEDGE_FACTORS, **INDUSTRY_FACTORS,
+                 **HOLDER_FACTORS, **PAID_FACTORS}
 # R15 stage B (2026-10-06): scores from a model trained on the factors above (research/model.py).
 MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標籤、逐年滾動訓練）",
                  "ml_gbm_excess": "機器學習綜合分數（30 個因子、超額報酬標籤、逐年滾動訓練）",
@@ -295,7 +298,9 @@ class DailyRule(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: str = Field(min_length=1, max_length=80)
-    factors: dict[str, float] = Field(min_length=1, max_length=4)   # factor -> weight; negative reverses
+    # factor -> weight; negative reverses. 2026-10-21: up to 5 — the second large scan searched sets of five and its
+    # stage 2 stopped turning them into rules (19 hours of stage 1 kept, stage 2 run again)
+    factors: dict[str, float] = Field(min_length=1, max_length=5)
     top: int = Field(default=20, ge=3, le=50)
     check: Literal["daily", "weekly", "monthly", "revenue"] = "daily"    # revenue: after the 10th (2026-10-10)
     keep: int = Field(default=3, ge=1, le=5)
@@ -664,6 +669,14 @@ class FactorPanel:
             if self.chips is None or not self.chips.available() or not self.chips.issuance_available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
             return self.chips.issuance_matrix().T                                  # back to sessions × symbols
+        if factor in PAID_FACTORS:                                                  # 2026-10-21 (FinMind 付費)
+            if self.chips is None or not self.chips.paid_available(factor):
+                return np.full((len(self.sessions), len(self.symbols)), np.nan)
+            return self.chips.paid_matrix(factor).T                                # back to sessions × symbols
+        if factor in HOLDER_FACTORS:                                                # 2026-10-21
+            if self.chips is None or not self.chips.holder_available():
+                return np.full((len(self.sessions), len(self.symbols)), np.nan)
+            return self.chips.holder_matrix(factor).T                              # back to sessions × symbols
         if factor in PLEDGE_FACTORS:                                                # 2026-10-20
             if self.chips is None or not self.chips.pledge_available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
@@ -1010,6 +1023,22 @@ class FactorPanel:
             return self._cache[key]
         close = self.panel.close
         traded = np.isfinite(close)
+        up, down = self.price_limits()
+        with np.errstate(invalid="ignore"):
+            beyond = (close > up + 1e-6) | (close < down - 1e-6)   # 1.4.0: traded beyond them: no limit that day
+            fill = close if at == "close" else np.where(np.isfinite(self.panel.open), self.panel.open, np.nan)
+            traded = traded & np.isfinite(fill)
+            locked_up = traded & np.isfinite(up) & (fill >= up - 1e-6) & ~beyond
+            locked_down = traded & np.isfinite(down) & (fill <= down + 1e-6) & ~beyond
+        self._cache[key] = (traded, locked_up, locked_down)
+        return self._cache[key]
+
+    def price_limits(self) -> tuple[np.ndarray, np.ndarray]:
+        """symbols × sessions: the limit-up and limit-down prices market_locks judges by (2026-10-21: split out to be
+        checked against the exchange's own, FinMind TaiwanStockPriceLimit — research/limits_check.py)."""
+        if "__limits__" in self._cache:
+            return self._cache["__limits__"]
+        close = self.panel.close
         with np.errstate(divide="ignore", invalid="ignore"):
             growth = self.panel.adjusted / close
         previous_close = pd.DataFrame(close.T).ffill().shift(1).to_numpy().T
@@ -1037,13 +1066,8 @@ class FactorPanel:
                     position = self.index.get(day)
                     if position is not None:
                         down[row, position], up[row, position] = low, high
-            beyond = (close > up + 1e-6) | (close < down - 1e-6)   # 1.4.0: traded beyond them: no limit that day
-            fill = close if at == "close" else np.where(np.isfinite(self.panel.open), self.panel.open, np.nan)
-            traded = traded & np.isfinite(fill)
-            locked_up = traded & np.isfinite(up) & (fill >= up - 1e-6) & ~beyond
-            locked_down = traded & np.isfinite(down) & (fill <= down + 1e-6) & ~beyond
-        self._cache[key] = (traded, locked_up, locked_down)
-        return self._cache[key]
+        self._cache["__limits__"] = (up, down)
+        return up, down
 
     def smoothed(self, factor: str, sessions: int) -> np.ndarray:
         """The factor averaged over the last ``sessions`` sessions (symbols × sessions; days with no value
@@ -2004,20 +2028,42 @@ def account_windows(data: LegacyData, account, costs: CostModel, months: int, st
             "best_excess": round(max(excesses), 6)}
 
 
+# 2026-10-21 (使用者：繼續做你本來就應該要做的短歷史賽道；2015 到現在其實也很久了，評估長資料跟短歷史的權重): a rule
+# whose account starts after 2020-10-26 — a factor known only from 2021 (the brokers' concentration, the government
+# banks): every factor of a rule must have a value for it to rank — is graded on the history it has. The study
+# (research/window_weight.py, research_method §7): the last 60 months rank the rules' next year 98% as well as all of
+# them (0.387 against 0.394), so a short history is usable; its excess is discounted by that ratio, there is no
+# separate 2020-10 check (it all is after 2020-10) and it must win 60% of its 1-year windows instead of 50%.
+SHORT_TRACK_FROM = REGIME_START
+SHORT_RELIABILITY = 0.981
+SHORT_ONE_YEAR = 0.6
+
+
+def short_track(metrics: dict) -> bool:
+    return str(metrics.get("start") or "") >= SHORT_TRACK_FROM.isoformat()
+
+
 def gate(metrics: dict) -> list[str]:
     """Pass: beats 0050 from 2015-06 and again from 2020-10, wins >= 60% of 3-year windows with a
-    positive median and >= 50% of 1-year windows, and the drawdown is no more than 5 points deeper."""
+    positive median and >= 50% of 1-year windows, and the drawdown is no more than 5 points deeper. The short track
+    (``short_track``): beats 0050 from its start after the discount, wins >= 60% of 1-year windows."""
     reasons = []
-    for key, label in (("full_period_excess", "2015-06 起"), ("since_2020_excess", "2020-10 起")):
+    short = short_track(metrics)
+    checks = ((("full_period_excess", f"{str(metrics['start'])[:7]} 起"),) if short
+              else (("full_period_excess", "2015-06 起"), ("since_2020_excess", "2020-10 起")))
+    for key, label in checks:
         value = metrics.get(key)
+        if short and value is not None:
+            value *= SHORT_RELIABILITY
         if value is None or value <= 0:
             reasons.append(f"{label}輸 0050（{(value or 0):+.0%}）")
     windows = metrics.get("windows") or {}
     three, one = windows.get("3y") or {}, windows.get("1y") or {}
     if three.get("count") and ((three.get("win_ratio") or 0) < 0.6 or (three.get("median_excess") or 0) <= 0):
         reasons.append(f"3 年視窗勝率 {(three.get('win_ratio') or 0):.0%}、中位 {(three.get('median_excess') or 0):+.1%}")
-    if one.get("count") and (one.get("win_ratio") or 0) < 0.5:
-        reasons.append(f"1 年視窗勝率 {(one.get('win_ratio') or 0):.0%} < 50%")
+    least = SHORT_ONE_YEAR if short else 0.5
+    if one.get("count") and (one.get("win_ratio") or 0) < least:
+        reasons.append(f"1 年視窗勝率 {(one.get('win_ratio') or 0):.0%} < {least:.0%}")
     strategy, benchmark = metrics.get("max_drawdown"), metrics.get("benchmark_max_drawdown")
     if strategy is not None and benchmark is not None and strategy < benchmark - 0.05:
         reasons.append(f"最大回撤 {strategy:.0%} 比 0050 {benchmark:.0%} 深超過 5 個百分點")
@@ -2048,6 +2094,11 @@ def tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
     T0 候選 that, after at least 60 sessions of forward observation, is not behind 0050 and reconciles. 2026-10-18 (使用者):
     a rule whose only failed gate is the drawdown, within RISKY_DRAWDOWN of 0050's, is T0 候選（高風險） (T0（高風險）
     once forward observation confirms it); deeper than that, T1."""
+    grade, why = _tier(metrics, forward)
+    return grade, (f"短歷史賽道（{str(metrics.get('start'))[:7]} 起）：{why}" if short_track(metrics) else why)
+
+
+def _tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
     reasons = gate(metrics)
     if (metrics.get("full_period_excess") or 0) <= 0:
         return "T3", reasons[0] if reasons else "2015-06 起輸 0050"
@@ -2276,6 +2327,16 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         from quant_platform.research.fundamentals import digest as statements_digest
 
         payload["statements"] = statements_digest(history, RECENT_END)
+    if any(name in PAID_FACTORS for name in factor_names):     # 2026-10-21: the paid tables it read
+        from quant_platform.research.chips import PAID_SOURCES
+        from quant_platform.research.history.paid import digest as paid_digest
+
+        payload["paid"] = paid_digest(history, RECENT_END, sorted({PAID_SOURCES[name] for name in factor_names
+                                                                    if name in PAID_FACTORS}))
+    if any(name in HOLDER_FACTORS for name in factor_names):   # 2026-10-21: the holder brackets it read
+        from quant_platform.research.history.tdcc import digest as holders_digest
+
+        payload["holders"] = holders_digest(history, RECENT_END)
     if uses_exit:                                              # C1b: the exit models are part of the input
         from quant_platform.research.exits import digest as exits_digest
         from quant_platform.research.exits import exits_dir
@@ -3099,6 +3160,74 @@ HOLDING_STYLES = (("固定持有 20 天", {"hold": "days", "min_hold": 20}),
                   ("不設最短持有", {"hold": "days", "min_hold": 0}))
 HOLDING_TOP = 30
 
+# 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」, written before the
+# strength results): the new data's factors that the strength analysis calls strong (or reversed: bet the other way),
+# each alone, with each of the NEW_DATA_PARTNERS strongest earlier factors, with the deep model and with the two
+# strongest partners together — and the partners alone in the same frame to compare with — every one weekly, the top 20,
+# a 30% industry cap, in the three holding styles. A factor known only from 2021 is strong on the 2020-10 and 2024 columns
+# alone (its rules go on the short track, short_track).
+NEW_DATA_FACTORS = ("big_holder_pct", "big_holder_up_4w", "holders_down_4w", "retail_down_4w", "margin_safe",
+                    "margin_in_profit", "low_pledge_loan_20", "block_premium_20", "block_volume_20", "broker_concentration_5")
+NEW_DATA_SHORT = ("broker_concentration_5",)
+NEW_DATA_PARTNERS = 6
+
+
+def new_data_signs(report: dict) -> tuple[dict[str, float], list[str]]:
+    """From a strength report: the new factors to use with their sign (+1 strong, -1 reversed) and the strongest earlier
+    factors (verdict 強, by the 2015-06～2020-10 t)."""
+    from quant_platform.research.factors import EDGE
+
+    factors = report.get("factors") or {}
+    signs: dict[str, float] = {}
+    for name in NEW_DATA_FACTORS:
+        item = factors.get(name) or {}
+        if name in NEW_DATA_SHORT:
+            tops = [((item.get("periods") or {}).get(key) or {}).get("top_excess_year") for key in ("regime", "since_2024")]
+            if all(value is not None and value >= EDGE for value in tops):
+                signs[name] = 1.0
+            elif all(value is not None and value <= -EDGE for value in tops):
+                signs[name] = -1.0
+        elif item.get("verdict") == "強":
+            signs[name] = 1.0
+        elif item.get("verdict") == "反向":
+            signs[name] = -1.0
+    earlier = [(name, ((item.get("periods") or {}).get("before_regime") or {}).get("t") or 0)
+               for name, item in factors.items() if name not in NEW_DATA_FACTORS and item.get("verdict") == "強"]
+    partners = [name for name, _t in sorted(earlier, key=lambda pair: -pair[1])[:NEW_DATA_PARTNERS]]
+    return signs, partners
+
+
+def new_data_batch() -> list[DailyRule]:
+    from quant_platform.research.scan import SHORT
+
+    folder = Path("instance") / "research" / "factors"
+    reports = sorted(folder.glob("strength-*-recent.json"))
+    if not reports:
+        return []
+    signs, partners = new_data_signs(_json_load(reports[-1]))
+    print(f"強的新因子：{signs}；搭配的舊因子：{partners}", flush=True)
+    sets: list[dict[str, float]] = [{partner: 1.0} for partner in partners] if signs else []
+    for name, sign in signs.items():
+        sets.append({name: sign})
+        sets += [{name: sign, partner: 1.0} for partner in partners]
+        sets.append({name: sign, "ml_deep2_top": 1.0})
+        if len(partners) >= 2:
+            sets.append({name: sign, partners[0]: 1.0, partners[1]: 1.0})
+    output = []
+    for factors in sets:
+        words = "＋".join(("反向" if weight < 0 else "") + SHORT.get(name, name) for name, weight in factors.items())
+        for label, style in HOLDING_STYLES:
+            name = f"新資料：{words}：前 20 名、同產業最多 3 成、每週決策"
+            output.append(DailyRule(name=f"{name[: 79 - len(label) - 4]}｜持有：{label}", factors=factors, check="weekly",
+                                    industry_cap=0.3, **style))
+    return output
+
+
+def _json_load(path: Path) -> dict:
+    import json as _json
+
+    return _json.loads(path.read_text(encoding="utf-8"))
+
 
 def _stem(name: str) -> str:
     """A rule's name without the holding style it states (research/holding.HOLD_WORDS)."""
@@ -3844,4 +3973,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch}
+           "robot41": robot41_batch, "newdata": new_data_batch}

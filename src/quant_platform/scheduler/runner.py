@@ -540,6 +540,48 @@ def start_llm_trader(container: "Container", now: datetime | None = None, launch
     return "llmtrader"
 
 
+def start_finmind_paid(container: "Container", now: datetime | None = None, launch=None, limit=None) -> str | None:
+    """2026-10-21 (使用者：FinMind Sponsor 你要做什麼分析; 為什麼 API 次數使用是 0): every hour at :20, the plan of the
+    FinMind token the project's .env has now (written to research/history/raw/finmind/plan.json for the system page);
+    once it shows a paid plan (more than the free 600 an hour), the paid tables' download and the first analysis start
+    once (scripts/start-research.ps1 -Name finmind-paid; the marker paid.started). The owner pays on FinMind's site and
+    puts the token in .env; nothing here buys anything or handles the token beyond reading it."""
+    import json
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research.history.finmind import env_token
+    from quant_platform.research.history.finmind import plan as finmind_plan
+
+    root = FilePath(_instance_dir(container.settings.database_url)).parent
+    research = _instance_dir(container.settings.database_url) / "research"
+    folder = research / "history" / "raw" / "finmind"
+    marker = folder / "paid.started"
+    token = env_token(root) or container.settings.finmind_token
+    if marker.is_file() or not token:
+        return None
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    moment = (now or datetime.now(zone)).isoformat(timespec="seconds")
+    found = {"title": None, "limit": limit(token), "used": None, "expires": None} if limit is not None else finmind_plan(token)
+    if not found:
+        return None
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "plan.json").write_text(json.dumps({**found, "checked_at": moment}, ensure_ascii=False), encoding="utf-8")
+    if not found["limit"] or found["limit"] <= 600:
+        return None
+    found = found["limit"]
+    marker.write_text(f"{moment} 每小時上限 {found}", encoding="utf-8")
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch("finmind-paid")
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Name",
+                        "finmind-paid"], check=False, timeout=120)
+    logger.info("FinMind paid plan found (%s an hour): finmind-paid started", found)
+    return "finmind-paid"
+
+
 def start_trade_audit(container: "Container", now: datetime | None = None, launch=None) -> str | None:
     """2026-10-21 (使用者 2026-10-14：確實檢查每個時期都照當時的台股規則；稽核：10/17 之後沒再稽核、排程裡沒有): every
     Sunday 06:00, every rule the forward accounts and the month's list track, order by order (scripts/start-research.ps1
@@ -1044,6 +1086,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=35, timezone=timezone),
         id="llm_trader",
         name="LLM 交易員（交易日 15:35 收盤資料進來後決定，隔天收盤成交；前向實驗）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=2 * 3600,
+    )
+    scheduler.add_job(
+        start_finmind_paid,
+        args=[container],
+        trigger=CronTrigger(minute=20, timezone=timezone),
+        id="finmind_paid",
+        name="FinMind 付費方案偵測（每小時 20 分讀 .env 的金鑰；付款後自動下載付費資料並做第一輪分析，只一次）",
         replace_existing=True,
         coalesce=True,
         max_instances=1,

@@ -52,11 +52,12 @@ def _summary(manifest: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
-                                            "chips", "tpex", "fundamentals", "alerts", "reductions", "insider", "buyback", "pledge", "tdcc"))
-    parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報")
+                                            "chips", "tpex", "fundamentals", "alerts", "reductions", "insider", "buyback", "pledge", "tdcc",
+                                            "holders", "paid"))
+    parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報；paid＝付費方案的資料集")
     parser.add_argument("--refresh-quarter", help="finmind：季更新，due＝法定期限已過的最新一季；只重抓近期有交易、"
                                                   "還沒有這一季的檔（2026-10-07）")
-    parser.add_argument("--codes", default="twse", choices=("twse", "tpex", "all", "lists"),
+    parser.add_argument("--codes", default="twse", choices=("twse", "tpex", "all", "lists", "paid-lists"),
                         help="finmind：上市、上櫃、全部，或 lists（下市清單、股票基本資料、期貨法人部位）")
     parser.add_argument("--exchange", default="twse,tpex", help="stocks：twse、tpex 或兩者")
     parser.add_argument("--from-year", type=int, default=2004, help="stocks：起始年")
@@ -141,14 +142,38 @@ def main() -> int:
     if args.command == "finmind":
         from quant_platform.config import Settings
         from quant_platform.research.history.finmind import (
-            DATASETS, STATEMENTS, fetch_all, fetch_lists, stock_codes, tpex_codes,
+            DATASETS, PAID, PAID_SHARE, PER_HOUR, STATEMENTS, env_token, fetch_all, fetch_lists, request_limit,
+            stock_codes, tpex_codes,
         )
         from quant_platform.research.jobs import JobLog
 
-        token = Settings.from_env().finmind_token
+        token = env_token(Path.cwd()) or Settings.from_env().finmind_token      # 2026-10-21: the .env as it is now
         if not token:
             print("沒有 FINMIND_TOKEN（.env）", file=sys.stderr)
             return 2
+        if args.codes == "paid-lists":           # 2026-10-21: the paid whole-market tables, one request each
+            from quant_platform.research.history.finmind import PAID_LISTS, path_for
+
+            import gzip
+            import urllib.parse
+            import urllib.request
+
+            from quant_platform.research.history.finmind import URL
+
+            counts = {}
+            for dataset in PAID_LISTS:
+                query = urllib.parse.urlencode({"dataset": dataset, "start_date": "2000-01-01"})
+                request = urllib.request.Request(f"{URL}?{query}", headers={"Authorization": f"Bearer {token}",
+                                                                             "User-Agent": "StockResearch/1.0"})
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    rows = json.loads(response.read().decode("utf-8")).get("data") or []
+                path = path_for(base, dataset, "all")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(gzip.compress(json.dumps({"dataset": dataset, "code": "", "data": rows},
+                                                          ensure_ascii=False).encode("utf-8")))
+                counts[dataset] = len(rows)
+            print(json.dumps(counts, ensure_ascii=False), flush=True)
+            return 0
         if args.codes == "lists":
             with JobLog(base.parent).start("下載清單資料（FinMind：下市、股票基本資料、期貨法人部位）",
                                            "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
@@ -157,7 +182,7 @@ def main() -> int:
             print(json.dumps(counts, ensure_ascii=False), flush=True)
             return 0
         text = args.datasets or ",".join(DATASETS)
-        text = text.replace("statements", ",".join(STATEMENTS))
+        text = text.replace("statements", ",".join(STATEMENTS)).replace("paid", ",".join(PAID))
         datasets = [item.strip() for item in text.split(",") if item.strip()]
         codes = {"twse": stock_codes(base), "tpex": tpex_codes(base),
                  "all": sorted(set(stock_codes(base)) | set(tpex_codes(base)))}[args.codes]
@@ -175,7 +200,15 @@ def main() -> int:
             market += f"，更新到 {refresh}"
         with JobLog(base.parent).start(f"下載 FinMind（{market}，{len(datasets)} 種 × {len(codes)} 檔：{'、'.join(datasets)}）"[:120],
                                        "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
-            result = fetch_all(base, token, codes, datasets, job=job, refresh_before=refresh)
+            per_hour = PER_HOUR
+            if any(name in PAID for name in datasets):           # 2026-10-21: a paid plan's own hourly limit
+                limit = request_limit(token)
+                if not limit or limit <= 600:
+                    job.payload["summary"] = f"帳號每小時上限 {limit}：不是付費方案，沒有下載"
+                    print(job.payload["summary"], file=sys.stderr)
+                    return 3
+                per_hour = int(limit * PAID_SHARE)
+            result = fetch_all(base, token, codes, datasets, job=job, refresh_before=refresh, per_hour=per_hour)
         print(json.dumps(result, ensure_ascii=False)[:2000], flush=True)
         return 0
 
@@ -238,6 +271,18 @@ def main() -> int:
             job.payload["summary"] = (f"新下載 {fetched['stored']:,} 天、共 {written['days']:,} 天；申報 {written['filings']:,} 筆，"
                                       f"在市場賣出的 {written['on_market']:,} 筆")
         print(json.dumps({**fetched, **written}, ensure_ascii=False), flush=True)
+        return 0
+
+    if args.command == "paid":               # 2026-10-21: the paid FinMind tables, one Parquet file each
+        from quant_platform.research.history import paid
+
+        print(json.dumps(paid.build(base), ensure_ascii=False), flush=True)
+        return 0
+
+    if args.command == "holders":            # 2026-10-21: FinMind's holder history and the weekly files, one table
+        from quant_platform.research.history import tdcc
+
+        print(json.dumps(tdcc.build(base), ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "tdcc":               # 2026-10-20: the depository's weekly holder distribution (latest week)

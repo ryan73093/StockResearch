@@ -21,7 +21,7 @@ def test_a_new_week_is_stored_once_and_built(tmp_path):
     assert tdcc.fetch(tmp_path, get=lambda: SAMPLE)["stored"] is False            # the same week again
     built = tdcc.build(tmp_path)
     frame = pd.read_parquet(tmp_path / "tdcc" / "holding.parquet")
-    assert built == {"weeks": 1, "rows": 3} and sorted(frame["level"]) == [1, 15, 17]   # the adjustment row left out
+    assert built == {"weeks": 1, "rows": 3, "first": "20261016"} and sorted(frame["level"]) == [1, 15, 17]   # the adjustment row left out
     big = frame[(frame["code"] == "2330") & (frame["level"] == tdcc.BIG)].iloc[0]
     assert big["percent"] == 88.70 and big["holders"] == 1500
     assert tdcc.fetch(tmp_path, get=lambda: b"")["stored"] is False

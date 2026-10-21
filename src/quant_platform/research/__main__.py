@@ -322,7 +322,8 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling"),
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
+                            "window-weight", "intraday", "limits-check"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
@@ -352,6 +353,7 @@ def main() -> int:
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
     parser.add_argument("--recent", action="store_true", help="factors：新設計（2015-06 起、每週排名、看 20 個交易日）")
+    parser.add_argument("--only", help="factors --recent：只分析這些因子（逗號分隔），其他沿用最新一份完整報告")
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--lump-sum", type=float, default=0, help="stocks：一次投入的金額（0＝每月投入）")
     parser.add_argument("--initial", type=float, default=0,
@@ -537,8 +539,12 @@ def main() -> int:
 
         title = "因子強弱分析（2015-06 起、每週、19 個因子）" if args.recent else "因子強弱分析（全市場、2005 起每月）"
         with JobLog(RESEARCH).start(title, "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
-            run = factor_strength.run_recent if args.recent else factor_strength.run
-            path = run(Path(args.base), RESEARCH / "factors", job=job)
+            if args.recent and args.only:          # 2026-10-21: a new family only, over the latest full report
+                path = factor_strength.run_recent(Path(args.base), RESEARCH / "factors", job=job,
+                                                  names=[name.strip() for name in args.only.split(",") if name.strip()])
+            else:
+                run = factor_strength.run_recent if args.recent else factor_strength.run
+                path = run(Path(args.base), RESEARCH / "factors", job=job)
         report = json.loads(path.read_text(encoding="utf-8"))
         for key, item in report["factors"].items():
             first = next(iter(item["periods"].values()), {})
@@ -971,6 +977,51 @@ def main() -> int:
                                       f"（重算 {refreshed.get('holdout_run', 0)} 個，其餘讀前向帳戶紀錄）"
                                       if refreshed else "這個月還沒挑策略")
         print(job.payload["summary"])
+        return 0
+
+    if args.command == "limits-check":
+        # 2026-10-21 (使用者 2026-10-14：確實照當時的台股規則): research/limits_check.py
+        from quant_platform.research import limits_check
+
+        path = limits_check.run(Path(args.base), RESEARCH)
+        report = json.loads(path.read_text(encoding="utf-8"))
+        print(f"比對 {report['compared']:,} 個（股票×交易日）：漲跌停價不同 {report['limits_differ']:,} 個、"
+              f"漲跌停鎖死判斷不同 {report['locks_differ']:,} 個；各年 {report['limits_differ_by_year']}；鎖死組合 {report['locks']}")
+        print(f"已寫入 {path}")
+        return 0
+
+    if args.command == "intraday":
+        # 2026-10-21 (使用者 2026-10-16：盤中買會不會比較有效; FinMind 分 K): research/intraday.py
+        from quant_platform.research import intraday
+        from quant_platform.research.history.finmind import env_token
+        from quant_platform.research.jobs import JobLog
+
+        with JobLog(RESEARCH).start("盤中成交時機（前 10 名策略 2021 起的買賣決定抽 4,000 筆，隔天的分 K）",
+                                    "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+            path = intraday.run(Path(args.base), RESEARCH, env_token(Path.cwd()), job)
+            report = json.loads(path.read_text(encoding="utf-8"))
+            job.payload["summary"] = f"{report['sampled']} 筆、有分 K 的 {report['with_bars']} 筆"
+        for point, label in report["points"].items():
+            item = report["gains"][point]
+            parts = "；".join(f"{side} {(item.get(side) or {}).get('mean', 0):+.3%}（t={(item.get(side) or {}).get('t')}）"
+                             for side in ("buy", "sell", "both"))
+            print(f"{label}：{parts}；{'值得做' if item['worth'] else '不值得'}")
+        print(f"已寫入 {path}")
+        return 0
+
+    if args.command == "window-weight":
+        # 2026-10-21 (使用者：2015 到現在其實也很久了，評估長資料跟短歷史的權重): research/window_weight.py
+        from quant_platform.research import window_weight
+
+        path = window_weight.run(RESEARCH, RESEARCH / "diagnostics")
+        report = json.loads(path.read_text(encoding="utf-8"))
+        print(f"{report['rules']} 個規則、{report['months']}；每種方法的平均排序相關（之後 {report['horizon']} 個月）：")
+        for method, item in report["summary"].items():
+            print(f"  {method:12s} IC {item['ic']:+.4f}（t={item['t']}）長歷史時點 {item['ic_long_history']}  勝過全部 "
+                  f"{item['better_than_all']:.0%}  前 10% 之後 12 個月 {item['top_outcome']:+.2%}、贏 0050 {item['top_beat']:.0%}")
+        print(report["verdict_main"])
+        print(report["verdict_short"])
+        print(f"已寫入 {path}")
         return 0
 
     if args.command == "worst-rl":

@@ -94,14 +94,15 @@ def features() -> tuple[str, ...]:
     version would add on purpose (a saved version keeps its own list, ``trained_features``)."""
     from quant_platform.research.daily import (
         ALERT_FACTORS, CORPORATE_FACTORS, DEALER_FACTORS, DISCLOSURE_FACTORS, FACTOR_LABELS, INDUSTRY_FACTORS,
-        ISSUANCE_FACTORS, LENDING_FACTORS, PLEDGE_FACTORS, RAW_V2, SHORT_FACTORS, TIME_FACTORS, TREND_QUALITY,
+        HOLDER_FACTORS, ISSUANCE_FACTORS, LENDING_FACTORS, PAID_FACTORS, PLEDGE_FACTORS, RAW_V2, SHORT_FACTORS,
+        TIME_FACTORS, TREND_QUALITY,
     )
 
     # 2026-10-20: the later families (the insiders' notices, the buybacks, the pledges, the industries) stay out of the
     # shared list too
     later = {**TREND_QUALITY, **RAW_V2, **TIME_FACTORS, **SHORT_FACTORS, **ALERT_FACTORS, **LENDING_FACTORS,
              **CORPORATE_FACTORS, **ISSUANCE_FACTORS, **DEALER_FACTORS, **DISCLOSURE_FACTORS, **PLEDGE_FACTORS,
-             **INDUSTRY_FACTORS}
+             **INDUSTRY_FACTORS, **HOLDER_FACTORS, **PAID_FACTORS}
     return tuple(name for name in FACTOR_LABELS if name not in later)
 
 
@@ -137,7 +138,9 @@ def version_features(version: str | None) -> tuple[str, ...]:
         DEALER_FACTORS,
         DISCLOSURE_FACTORS,
         FACTOR_LABELS,
+        HOLDER_FACTORS,
         INDUSTRY_FACTORS,
+        PAID_FACTORS,
         ISSUANCE_FACTORS,
         LENDING_FACTORS,
         PLEDGE_FACTORS,
@@ -151,9 +154,11 @@ def version_features(version: str | None) -> tuple[str, ...]:
     kind = VERSIONS.get(version, {}).get("features") if version else None
     if kind == "extended":
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in DISCLOSURE_FACTORS
-                     and name not in PLEDGE_FACTORS and name not in INDUSTRY_FACTORS)
+                     and name not in PLEDGE_FACTORS and name not in INDUSTRY_FACTORS and name not in HOLDER_FACTORS
+                     and name not in PAID_FACTORS)
     if kind == "extended_h":
-        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS)
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
+                     and name not in HOLDER_FACTORS and name not in PAID_FACTORS)
     if version and VERSIONS.get(version, {}).get("features") == "technical":
         from quant_platform.research.tech_rl import TECH_FEATURES
 
@@ -164,7 +169,7 @@ def version_features(version: str | None) -> tuple[str, ...]:
                      and name not in LENDING_FACTORS and name not in CORPORATE_FACTORS
                      and name not in ISSUANCE_FACTORS and name not in DEALER_FACTORS
                      and name not in DISCLOSURE_FACTORS and name not in PLEDGE_FACTORS
-                     and name not in INDUSTRY_FACTORS)
+                     and name not in INDUSTRY_FACTORS and name not in HOLDER_FACTORS and name not in PAID_FACTORS)
     return features()
 
 

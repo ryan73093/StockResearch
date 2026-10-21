@@ -86,7 +86,8 @@ def _grade(item: dict, cutoff: str) -> dict:
                      end=date.fromisoformat(cutoff))
     except Exception as error:  # noqa: BLE001 - one rule's failure is recorded, the month goes on
         return {"trial": item["trial"], "name": rule.name, "error": str(error)[:200]}
-    metrics = {"full_period_excess": report["full_period_excess"], "since_2020_excess": report["since_2020"]["excess"],
+    metrics = {"start": report.get("start"),     # 2026-10-21: an account from after 2020-10 is graded on the short track
+               "full_period_excess": report["full_period_excess"], "since_2020_excess": report["since_2020"]["excess"],
                "windows": report["windows"], "max_drawdown": report["strategy"]["max_drawdown"],
                "benchmark_max_drawdown": report["benchmark"]["max_drawdown"],
                "final_value": report["strategy"]["final_value"], "benchmark_final_value": report["benchmark"]["final_value"],

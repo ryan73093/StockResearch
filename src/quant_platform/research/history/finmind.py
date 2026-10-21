@@ -50,6 +50,22 @@ LISTS = {                            # one request each: dataset -> data ids (""
     "TaiwanFuturesInstitutionalInvestors": ("TX", "MTX", "TE", "TF"),
 }
 PER_HOUR = 560                     # under the free tier's 600 an hour, with room for other users of the token
+# 2026-10-21 (使用者：FinMind Sponsor 你要做什麼分析; 路線圖 S9-W22): the paid tables with the whole history per stock,
+# one request each (FinMind's documentation: tiers and first dates). Fetched once the token's hourly limit shows a
+# paid plan (``request_limit``), at 93% of it.
+PAID = {
+    "TaiwanStockHoldingSharesPer": "股東持股分級（每週，2010 起；Backer 以上）",
+    "TaiwanStockMarginMaintenance": "個股融資維持率（2001 起；Sponsor）",
+    "TaiwanStockLoanCollateralBalance": "借貸款項擔保品餘額（2006 起；Sponsor）",
+    "TaiwanStockBlockTrade": "鉅額交易日成交（2005 起；Sponsor）",
+    "TaiwanStockPriceLimit": "每日漲跌停價（2000 起；Backer 以上，核對引擎）",
+    "TaiwanStockPriceAdj": "還原股價（Backer 以上，核對除權息）",
+    "TaiwanStockBrokerDailyConcentration": "每日主力集中度（前 15 大分點買賣量，2021-06-28 起；Sponsor）",
+}
+# one request each for the whole market (2026-10-21, tried on the day it was paid)
+PAID_LISTS = {"TaiwanTotalExchangeMarginMaintenance": "大盤融資維持率（2001 起）", "TaiwanStockSuspended": "暫停交易公告（2011 起）"}
+USER_INFO = "https://api.web.finmindtrade.com/v2/user_info"
+PAID_SHARE = 0.93
 QUIET = (clock_time(13, 30), clock_time(15, 30))
 
 
@@ -83,6 +99,45 @@ def http_get(dataset: str, code: str, token: str, end: date) -> dict[str, object
     if payload.get("status") in (402, 429):
         raise QuotaReached(str(payload.get("msg")))
     return payload
+
+
+def plan(token: str, get: Callable[[], dict] | None = None) -> dict[str, object] | None:
+    """The token's plan from FinMind's user_info: its name (Free, Backer, Sponsor), requests an hour (600, 1,600,
+    6,000), used this hour, the paid plan's last day; None if FinMind does not answer. No secret in it."""
+    def default() -> dict:
+        request = urllib.request.Request(USER_INFO, headers={"Authorization": f"Bearer {token}",
+                                                             "User-Agent": "StockResearch/1.0"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    try:
+        payload = (get or default)()
+        limit = int(payload.get("api_request_limit"))
+    except (urllib.error.URLError, TimeoutError, ValueError, TypeError):
+        return None
+    expires = max((str((payload.get(key) or {}).get("subscription_expired_date") or "")
+                   for key in ("BackerInfo", "SponsorInfo", "SponsorProInfo")), default="")
+    return {"title": payload.get("level_title"), "limit": limit, "used": payload.get("user_count"),
+            "expires": expires or None}
+
+
+def request_limit(token: str, get: Callable[[], dict] | None = None) -> int | None:
+    """The token's requests an hour (FinMind's user_info: 600 free, 1,600 Backer, 6,000 Sponsor); None if unknown."""
+    found = plan(token, get)
+    return int(found["limit"]) if found else None
+
+
+def env_token(root: str | Path) -> str:
+    """FINMIND_TOKEN as the project's .env has it now (2026-10-21: a running worker keeps the value it started with;
+    the owner may put a paid account's token in without restarting anything)."""
+    path = Path(root) / ".env"
+    if not path.is_file():
+        return ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, _, value = line.strip().partition("=")
+        if key.strip() == "FINMIND_TOKEN":
+            return value.strip().strip('"').strip("'")
+    return ""
 
 
 def tpex_codes(base: Path) -> list[str]:

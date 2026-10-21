@@ -1,4 +1,4 @@
-﻿param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "robustfront", "exec_a", "exec_b", "llmreplay", "monthmodels", "next10blend", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind")][string]$Name = "daily")
+﻿param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "robustfront", "exec_a", "exec_b", "llmreplay", "monthmodels", "next10blend", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind", "finmind-paid", "finmind-paid-b", "finmind-paid-c", "paid-factors", "newdata", "intraday", "limitscheck")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -1275,5 +1275,68 @@ switch ($Name) {
     }
     "factors" { Invoke-Step "factors" @("-m", "quant_platform.research", "factors") }
     "finmind" { Invoke-Step "finmind" @("-m", "quant_platform.research.history", "finmind") }
+    "finmind-paid" {
+        # 2026-10-21 (使用者：FinMind Sponsor 你要做什麼分析; 路線圖 S9-W22): once the token shows a paid plan (the
+        # worker checks every evening), the paid tables with each stock's whole history (listed, TPEx and delisted);
+        # the holder brackets into one table with the depository's weekly files; the holder factors' strength from
+        # 2015-06 (only them, over the latest full report). The rules come after, from what is strong.
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-holders" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanStockHoldingSharesPer")
+        Invoke-Step "2-build" @("-m", "quant_platform.research.history", "holders")
+        Invoke-Step "3-strength" @("-m", "quant_platform.research", "factors", "--recent", "--only", "big_holder_pct,big_holder_up_4w,holders_down_4w,retail_down_4w")
+        Invoke-Step "4-download" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "paid")
+        Invoke-Step "5-lists" @("-m", "quant_platform.research.history", "finmind", "--codes", "paid-lists")
+        Invoke-Step "6-tables" @("-m", "quant_platform.research.history", "paid")
+        Invoke-Step "7-strength" @("-m", "quant_platform.research", "factors", "--recent", "--only", "margin_safe,margin_in_profit,low_pledge_loan_20,block_premium_20,block_volume_20,broker_concentration_5")
+    }
+    "finmind-paid-b" {
+        # 2026-10-21: a request takes about 2 seconds (a stock's whole history), so one downloader makes about 1,400
+        # an hour of the plan's 6,000: the factors' tables fetched alongside the holder brackets (finmind-paid)
+        Invoke-Step "1-download" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanStockMarginMaintenance,TaiwanStockBlockTrade,TaiwanStockBrokerDailyConcentration")
+    }
+    "finmind-paid-c" {
+        # 2026-10-21: the unrestricted loans, and the exchange's limits and adjusted prices to check the engine against
+        Invoke-Step "1-download" @("-m", "quant_platform.research.history", "finmind", "--codes", "all", "--datasets", "TaiwanStockLoanCollateralBalance,TaiwanStockPriceLimit,TaiwanStockPriceAdj")
+    }
+    "paid-factors" {
+        # 2026-10-21: once no FinMind download runs, the paid tables into history/paid and the six factors' strength
+        Wait-While "等 FinMind 付費資料下載完" { [bool](Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "quant_platform\.research\.history finmind" }) } 120
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-lists" @("-m", "quant_platform.research.history", "finmind", "--codes", "paid-lists")
+        Invoke-Step "2-tables" @("-m", "quant_platform.research.history", "paid")
+        Invoke-Step "3-strength" @("-m", "quant_platform.research", "factors", "--recent", "--only", "margin_safe,margin_in_profit,low_pledge_loan_20,block_premium_20,block_volume_20,broker_concentration_5")
+    }
+    "limitscheck" {
+        # 2026-10-21 (使用者 2026-10-14：確實照當時的台股規則): once the paid downloads are done, the engine's limit-up and
+        # limit-down prices and locks against the exchange's (FinMind TaiwanStockPriceLimit) from 2015-06
+        $paidRecord = Join-Path $records "paid-factors.json"
+        Wait-While "等 FinMind 付費資料下載與分析（paid-factors）" { $state = if (Test-Path $paidRecord) { Get-Content $paidRecord -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }; -not $state -or $state.status -eq "running" } 120
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-check" @("-m", "quant_platform.research", "limits-check")
+    }
+    "intraday" {
+        # 2026-10-21 (使用者 2026-10-16：盤中買會不會比較有效; research_method §7「盤中成交時機」): once the paid downloads
+        # are done (the plan's hourly requests are theirs until then), the strongest rules' decisions and the next
+        # session's minute bars (about 4,000 requests).
+        $paidRecord = Join-Path $records "paid-factors.json"
+        Wait-While "等 FinMind 付費資料下載與分析（paid-factors）" { $state = if (Test-Path $paidRecord) { Get-Content $paidRecord -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }; -not $state -or $state.status -eq "running" } 120
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-study" @("-m", "quant_platform.research", "intraday")
+    }
+    "newdata" {
+        # 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」): once the
+        # paid factors' strength is in (the paid-factors pipeline done), the strong new factors' rules
+        # (daily.new_data_batch), the statistics, the month's list (only the new rules), its forward test, the forward
+        # accounts and the board.
+        $paidRecord = Join-Path $records "paid-factors.json"
+        Wait-While "等付費資料的因子強弱分析（paid-factors）" { $state = if (Test-Path $paidRecord) { Get-Content $paidRecord -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }; -not $state -or $state.status -eq "running" } 120
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "newdata", "--broker", "cathay")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
+        Invoke-Step "4-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "5-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
 }
 Write-PipelineRecord "done"
