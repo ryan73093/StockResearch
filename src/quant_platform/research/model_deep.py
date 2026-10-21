@@ -222,24 +222,60 @@ def scores(fp, folder: str | Path) -> np.ndarray:
         later = [position for position, day in enumerate(fp.sessions) if day > last and position >= LENGTH]
         if later:
             _score_later(fp, Path(folder), later, output)
+    return _monthly(fp, Path(folder), output)
+
+
+def _monthly(fp, folder: Path, output: np.ndarray) -> np.ndarray:
+    """2026-10-21: every session after a monthly cutoff takes that cutoff's scores (model_risk.train_until); a
+    session after the scored ones is scored with that cutoff's networks."""
+    from datetime import date
+
+    target = folder / "monthly"
+    files = sorted(target.glob("*.npz")) if target.is_dir() else []
+    if not files:
+        return output
+    for path in files:
+        cutoff = date.fromisoformat(path.stem)
+        stored = np.load(path, allow_pickle=False)
+        columns = {symbol: fp.row[symbol] for symbol in stored["symbols"].tolist() if symbol in fp.row}
+        keep = [index for index, symbol in enumerate(stored["symbols"].tolist()) if symbol in columns]
+        rows = [columns[symbol] for symbol in np.array(stored["symbols"].tolist())[keep]]
+        for day, values in zip(stored["days"].tolist(), stored["scores"]):
+            position = fp.index.get(date.fromisoformat(day))
+            if position is not None and fp.sessions[position] > cutoff:
+                output[position, rows] = values[keep].astype(np.float32)
+    latest = files[-1]
+    cutoff = date.fromisoformat(latest.stem)
+    scored = set(np.load(latest, allow_pickle=False)["days"].tolist())
+    missing = [position for position, day in enumerate(fp.sessions)
+               if day > cutoff and day.isoformat() not in scored and position >= LENGTH]
+    if missing and sorted(target.glob(f"{cutoff.isoformat()}-*.pt")):
+        _score_later(fp, folder, missing, output, prefix=f"monthly/{cutoff.isoformat()}")
     return output
 
 
-def _score_later(fp, folder: Path, positions: list[int], output: np.ndarray) -> None:
+def _score_later(fp, folder: Path, positions: list[int], output: np.ndarray, prefix: str | None = None) -> None:
+    """``prefix``: the networks to use (monthly/<cutoff>, 2026-10-21); else the latest year's."""
     import torch
 
     from quant_platform.research.model import eligibility
 
-    saved = sorted(folder.glob("*-*.pt"))
-    if not saved:
+    if prefix:
+        chosen = sorted(folder.glob(f"{prefix}-*.pt"))
+    else:
+        saved = sorted(folder.glob("*-*.pt"))
+        if not saved:
+            return
+        year = max(int(path.stem.split("-")[0]) for path in saved)
+        chosen = [path for path in saved if path.stem.startswith(f"{year}-")]
+    if not chosen:
         return
-    year = max(int(path.stem.split("-")[0]) for path in saved)
     networks = []
     eligible = eligibility(fp)
     data = sequences(fp, eligible)
     from quant_platform.research.gpu import device
 
-    for path in [path for path in saved if path.stem.startswith(f"{year}-")]:
+    for path in chosen:
         network = _network(data.shape[2]).to(device())
         network.load_state_dict(torch.load(path, weights_only=True, map_location=device()))
         network.eval()

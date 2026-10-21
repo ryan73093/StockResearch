@@ -451,6 +451,8 @@ class StockForwardTracker:
             found |= set((one.get("factors") or {}).keys())
             if one.get("risk_veto") and one.get("risk_veto") != "none":
                 found.add(str(one["risk_veto"]))
+            if one.get("weighting") == "inverse_risk":           # the weights read the risk model too
+                found.add("dl_risk")
         return found
 
     def refit(self, factors: set[str], reason: str, now: datetime | None = None) -> list[str]:

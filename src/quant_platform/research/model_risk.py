@@ -58,6 +58,92 @@ def auc(score: np.ndarray, label: np.ndarray) -> float | None:
     return float((ranks[label == 1].sum() - positive * (positive + 1) / 2) / (positive * negative))
 
 
+def _fit_seeds(data, pairs, held, targets, held_targets, on, path_of) -> tuple[list, list]:
+    """Each seed's network fitted on ``pairs`` and kept at its best held-out AUC, saved to ``path_of(seed)``."""
+    import torch
+
+    from quant_platform.research.model_deep import BATCH, EPOCHS, LEARNING_RATE, SEEDS, _network, _score, _windows
+
+    weight = torch.tensor((len(targets) - targets.sum()) / max(targets.sum(), 1.0), device=on)   # drops are rare
+    networks, curves = [], []
+    for seed in SEEDS:
+        torch.manual_seed(seed)
+        rng = np.random.default_rng(seed)
+        network = _network(data.shape[2]).to(on)
+        optimiser = torch.optim.Adam(network.parameters(), lr=LEARNING_RATE)
+        best, curve = (-np.inf, None), []
+        for _epoch in range(EPOCHS):
+            order = rng.permutation(len(pairs))
+            for start in range(0, len(order), BATCH):
+                chosen = order[start:start + BATCH]
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                    network(_windows(data, pairs[chosen])), torch.from_numpy(targets[chosen]).to(on), pos_weight=weight)
+                optimiser.zero_grad()
+                loss.backward()
+                optimiser.step()
+            held_auc = auc(_score(network, data, held), held_targets) or 0.0
+            curve.append(round(held_auc, 4))
+            if held_auc > best[0]:
+                best = (held_auc, {key: value.clone() for key, value in network.state_dict().items()})
+        network.load_state_dict(best[1])
+        networks.append(network)
+        curves.append(curve)
+        torch.save(best[1], path_of(seed))
+    return networks, curves
+
+
+def train_until(fp, out_dir: str | Path, cutoff, job=None, label_function=None) -> dict[str, object]:
+    """2026-10-21 (使用者 2026-10-16：每月滾動，模型也要更新): the risk networks refitted on every weekly sample whose
+    20-session label ended by ``cutoff``, held out and kept as the yearly fit; saved as monthly/<cutoff>-<seed>.pt and
+    the sessions after the cutoff scored with them (monthly/<cutoff>.npz, the drop probability). model_deep.scores
+    takes them for every session after the cutoff; the yearly networks and deep.npz stay."""
+    import torch
+
+    from quant_platform.research.gpu import device
+    from quant_platform.research.model import HORIZON, eligibility, sample_columns
+    from quant_platform.research.model_deep import HELD_OUT, LENGTH, _score, sequences
+
+    torch.set_num_threads(4)
+    on = device()
+    target = Path(out_dir) / "monthly"
+    target.mkdir(parents=True, exist_ok=True)
+    eligible = eligibility(fp)
+    data = torch.from_numpy(sequences(fp, eligible)).to(on)
+    samples = [column for column in sample_columns(len(fp.sessions)) if column >= LENGTH]
+    drops = (label_function or labels)(fp, samples, eligible, HORIZON)
+    slot_of = {column: index for index, column in enumerate(samples)}
+    last = max(index for index, day in enumerate(fp.sessions) if day <= cutoff)
+    train_cols = [column for column in samples if column + HORIZON <= last]
+    cut = train_cols[int(len(train_cols) * (1 - HELD_OUT))]
+    pairs, held = [], []
+    for column in train_cols:
+        rows = np.flatnonzero(np.isfinite(drops[slot_of[column]]))
+        (pairs if column < cut else held).extend((column, row) for row in rows)
+    pairs, held = np.array(pairs), np.array(held)
+    targets = np.array([drops[slot_of[column], row] for column, row in pairs], dtype=np.float32)
+    held_targets = np.array([drops[slot_of[column], row] for column, row in held], dtype=np.float32)
+    if job:
+        job.update(current=f"風險模型：重訓到 {cutoff}", force=True)
+    networks, curves = _fit_seeds(data, pairs, held, targets, held_targets, on,
+                                  lambda seed: target / f"{cutoff.isoformat()}-{seed}.pt")
+    kept = {}
+    for column in range(last + 1, len(fp.sessions)):
+        rows = np.flatnonzero(eligible[:, column])
+        values = np.full(len(fp.symbols), np.nan, dtype=np.float32)
+        if rows.size:
+            now = np.stack([np.full(rows.size, column), rows], axis=1)
+            values[rows] = 1 / (1 + np.exp(-np.mean([_score(network, data, now) for network in networks], axis=0)))
+        kept[fp.sessions[column].isoformat()] = values
+    days = sorted(kept)
+    with open(target / f"{cutoff.isoformat()}.npz", "wb") as handle:
+        np.savez_compressed(handle, days=np.array(days), symbols=np.array(fp.symbols),
+                            scores=np.stack([kept[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0)))
+    return {"version": VERSION, "cutoff": cutoff.isoformat(), "train_samples": int(len(pairs)),
+            "held_samples": int(len(held)), "label_until": fp.sessions[train_cols[-1] + HORIZON].isoformat(),
+            "held_best": [max(curve) for curve in curves], "scored_days": len(days),
+            "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
+
+
 def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None, version: str = VERSION,
           label_function=None, target: str = "drop") -> dict[str, object]:
     """2026-10-17: ``label_function`` and ``target`` let dl-risk-2.0.0 (research/model_risk2.py) train the same
@@ -96,32 +182,7 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None, ver
         pairs, held = np.array(pairs), np.array(held)
         targets = np.array([drops[slot_of[column], row] for column, row in pairs], dtype=np.float32)
         held_targets = np.array([drops[slot_of[column], row] for column, row in held], dtype=np.float32)
-        weight = torch.tensor((len(targets) - targets.sum()) / max(targets.sum(), 1.0), device=on)   # drops are rare
-        networks = []
-        curves = []
-        for seed in SEEDS:
-            torch.manual_seed(seed)
-            rng = np.random.default_rng(seed)
-            network = _network(data.shape[2]).to(on)
-            optimiser = torch.optim.Adam(network.parameters(), lr=LEARNING_RATE)
-            best, curve = (-np.inf, None), []
-            for _epoch in range(EPOCHS):
-                order = rng.permutation(len(pairs))
-                for start in range(0, len(order), BATCH):
-                    chosen = order[start:start + BATCH]
-                    loss = torch.nn.functional.binary_cross_entropy_with_logits(
-                        network(_windows(data, pairs[chosen])), torch.from_numpy(targets[chosen]).to(on), pos_weight=weight)
-                    optimiser.zero_grad()
-                    loss.backward()
-                    optimiser.step()
-                held_auc = auc(_score(network, data, held), held_targets) or 0.0
-                curve.append(round(held_auc, 4))
-                if held_auc > best[0]:
-                    best = (held_auc, {key: value.clone() for key, value in network.state_dict().items()})
-            network.load_state_dict(best[1])
-            networks.append(network)
-            curves.append(curve)
-            torch.save(best[1], out / f"{year}-{seed}.pt")
+        networks, curves = _fit_seeds(data, pairs, held, targets, held_targets, on, lambda seed: out / f"{year}-{seed}.pt")
         columns = [column for column, day in enumerate(fp.sessions) if day.year == year and column >= LENGTH]
         for column in columns:
             rows = np.flatnonzero(eligible[:, column])

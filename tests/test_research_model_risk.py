@@ -56,3 +56,13 @@ def test_the_risk_model_trains_on_the_device_and_scores_probabilities(monkeypatc
     first = fp.index[next(day for day in fp.sessions if day.year == 2018)]
     finite = scores[first][np.isfinite(scores[first])]
     assert finite.size > 10 and ((finite >= 0) & (finite <= 1)).all()
+    # 2026-10-21 (每月滾動，模型也要更新): refitted to a cutoff, the sessions after it take the refit's probabilities
+    cutoff = [day for day in fp.sessions if day.year == 2018][100]
+    found = model_risk.train_until(fp, tmp_path, cutoff)
+    assert found["scored_days"] > 0 and date.fromisoformat(found["label_until"]) <= cutoff
+    after = model.scores(fp, tmp_path)
+    past = fp.index[cutoff]
+    assert np.array_equal(np.nan_to_num(after[:past + 1]), np.nan_to_num(scores[:past + 1]))
+    later = after[past + 1][np.isfinite(after[past + 1])]
+    assert later.size > 10 and ((later >= 0) & (later <= 1)).all()
+    assert not np.array_equal(np.nan_to_num(after[past + 1:]), np.nan_to_num(scores[past + 1:]))
