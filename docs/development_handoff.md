@@ -26,8 +26,7 @@
 - `modeli`：模型 I（gbm-2.5.0＝模型 H＋4 個集保因子）逐年訓練 → 門檻（對 gbm-2.3.0）→ 3 個規則 → 名單與前向。
 - `finmind-paid-rest`（擔保品、漲跌停價、還原股價、大盤融資維持率、暫停交易）、`finmind-paid-b`（融資維持率、鉅額交易、主力集中度）、`finmind-paid-c2`（等 b 完再抓還原股價），各限每小時 2,900 次；預計 02:30～02:40 抓完。
 - 等下載完自動跑：`paid-factors`（建 `history/paid/`＋六個付費因子強弱）→ `newdata`（強的新因子組策略、名單、前向）、`intraday`（分 K 成交時機，4,000 筆）、`limitscheck`（官方漲跌停價核對引擎）。
-- 研究流程一律用 `start-research.ps1` 啟動（`conhost --headless`，不開視窗）；每個流程的步驟紀錄在 `instance
-esearch\logs\<流程>-<時間>-pipeline.log`。
+- 研究流程一律用 `start-research.ps1` 啟動（`conhost --headless`，不開視窗）；每個流程的步驟紀錄在 `instance\research\logs\<流程>-<時間>-pipeline.log`。
 - worker：交易日 07:40 公告類補抓、08:20 集保、08:57 盤中資金流、15:30 前向紀錄、15:35 LLM 交易員、16:00 需求檢查、22:30 每月滾動前向測試（讀前向帳戶紀錄）、22:45 模型檢查；每小時 20 分 FinMind 方案檢查；每天新聞 4 次；03:00 資料庫備份、03:30 D 槽；週日 04:30 全部測試、06:00 交易稽核。
 
 ## 下一步（依優先）
