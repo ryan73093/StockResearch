@@ -212,6 +212,14 @@ NEXT10_SPLITS = (
 )
 
 
+SPLIT_BLENDS = (
+    # 2026-10-22 (research_method §7「開盤賣、收盤買」): the frontier's blends #6365 and #6366 with every sleeve's
+    # split version — the deep top 10 #6490 (6,750 萬), the calm rule #6503 (3,130 萬), the consensus #6505 (3,137 萬)
+    ("組合：深度學習前 10 名＋跌市穩（開盤賣、收盤買）", (("深度學習前 10 名", 6490), ("跌市穩", 6503))),
+    ("組合：共識＋深度學習前 10 名＋跌市穩（開盤賣、收盤買）", (("共識", 6505), ("深度學習前 10 名", 6490), ("跌市穩", 6503))),
+)
+
+
 def role_blends(research: str | Path = Path("instance") / "research", splits=ROLE_SPLITS) -> list:
     """The ``splits`` (ROLE_SPLITS, TOP10_SPLITS) as blends: each member's share by risk parity on its development
     months (volatility of its month returns to DEV_END); the development measures printed."""

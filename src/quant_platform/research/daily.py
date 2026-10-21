@@ -3667,6 +3667,15 @@ def next10_blend_batch() -> list:
     return role_blends(splits=NEXT10_SPLITS)
 
 
+def split_blend_batch() -> list:
+    """2026-10-22 (research_method §7「開盤賣、收盤買」): #6365 and #6366 with their sleeves' split versions
+    (blend_scan.SPLIT_BLENDS). Each passes if it is a T0 候選 (high-risk or not) on the money-against-falls frontier, or
+    ends above its own blend with a drawdown at most 2 points deeper."""
+    from quant_platform.research.blend_scan import SPLIT_BLENDS, role_blends
+
+    return role_blends(splits=SPLIT_BLENDS)
+
+
 def role_split_batch() -> list:
     """2026-10-20 (使用者：研究這些策略能否互相輔助——因子、策略、DL、RL、ML 各負責什麼): two accounts with one sleeve a
     role (research/blend_scan.ROLE_SPLITS). Registered (research_method §7): each passes if it is a T0 候選 (high-risk
@@ -4231,4 +4240,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
-           "split_b": lambda: split_all_batch()[1::2]}
+           "split_b": lambda: split_all_batch()[1::2], "splitblend": split_blend_batch}
