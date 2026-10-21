@@ -58,6 +58,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # 2026-10-22 (集保因子第四版; research_method §7): model H's ensemble with the four holder-bracket factors too
           # (chips.HOLDER_FACTORS, FinMind's history from 2010) — let the model weigh them; judged against gbm-2.3.0
           "ml_gbm_i": {"version": "gbm-2.5.0", "label": "ensemble", "features": "extended_i"},
+          # 2026-10-22 (FinMind 付費資料; research_method §7): model I's ensemble with the paid tables' long-history
+          # factors too (margin maintenance, unrestricted loans, block trades); not the brokers' concentration (from
+          # 2021 only) nor margin_in_profit (it ranks as margin_safe does); judged against gbm-2.5.0
+          "ml_gbm_j": {"version": "gbm-2.6.0", "label": "ensemble", "features": "extended_j"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -161,6 +165,9 @@ def version_features(version: str | None) -> tuple[str, ...]:
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in DISCLOSURE_FACTORS
                      and name not in PLEDGE_FACTORS and name not in INDUSTRY_FACTORS and name not in HOLDER_FACTORS
                      and name not in PAID_FACTORS)
+    if kind == "extended_j":           # 2026-10-22: I's list and the paid tables' long-history factors
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
+                     and name not in ("margin_in_profit", "broker_concentration_5"))
     if kind == "extended_i":           # 2026-10-22: H's list and the holder brackets (not the paid tables yet)
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
                      and name not in PAID_FACTORS)

@@ -240,6 +240,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_h": "機器學習集成 H（模型 G 的集成，特徵再加上內部人申報賣股與庫藏股買回）",
                  "ml_gbm_i": "機器學習集成 I（模型 H 再加上集保股權分散的 4 個因子）",
                  "ml_deep2_holders": "深度學習第二版・前一成（特徵用模型 I 的，含集保股權分散）",
+                 "ml_gbm_j": "機器學習集成 J（模型 I 再加上融資維持率、不限用途借貸、鉅額交易）",
                  "ml_gbm_ext_monthly": "機器學習集成 G・每月重訓（同模型 G，每個月只用之前結束的標籤重新訓練）",
                  "ml_deep2_riskadj": "深度學習第二版・學以波動調整的前一成（不靠挑高波動股）",
                  "ml_deep2_monthly": "深度學習第二版・前一成，每月重新訓練（每個月只用之前結束的標籤，10 個種子）",
@@ -3653,6 +3654,24 @@ def deep26_batch() -> list[DailyRule]:
                       factors={"ml_deep2_monthly": 1.0}, **common)]
 
 
+def model_j_batch() -> list[DailyRule]:
+    """2026-10-22 (FinMind 付費資料; research_method §7): gbm-2.6.0 (model J: model I with the paid tables' factors) —
+    only if its development years' top-20 gain is at least gbm-2.5.0's — in model I's three frames."""
+    from quant_platform.research.model_ensemble import gate
+
+    check = gate(Path("instance") / "research" / "models", "gbm-2.6.0", "gbm-2.5.0")
+    print(f"gbm-2.6.0 門檻（2016-2020 前 20 名多賺，對 gbm-2.5.0）：{check}", flush=True)
+    if not check["passed"]:
+        return []
+    return [DailyRule(name="機器學習集成（模型 J）：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股",
+                      factors={"ml_gbm_j": 1.0}, check="weekly", keep=3, min_hold=0, industry_cap=0.3, switching="cost1"),
+            DailyRule(name="機器學習集成（模型 J）：前 20 名、同產業最多 3 成、每週決策、月線上續抱", factors={"ml_gbm_j": 1.0},
+                      check="weekly", industry_cap=0.3, hold="trend", min_hold=0),
+            DailyRule(name="模型 J＋深度學習前一成：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股",
+                      factors={"ml_gbm_j": 1.0, "ml_deep2_top": 1.0}, check="weekly", keep=3, min_hold=0, industry_cap=0.3,
+                      switching="cost1")]
+
+
 def deep27_batch() -> list[DailyRule]:
     """2026-10-22 (集保因子第五版; research_method §7): dl-2.7.0 (dl-2.1.0 with model I's features) — only past its
     registered gate against dl-2.1.0 — in the four strongest deep rules' own frames (HOLDER_FRAME_RULES)."""
@@ -4107,4 +4126,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch}
+           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch}
