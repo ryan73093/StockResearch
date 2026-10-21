@@ -3191,9 +3191,23 @@ def new_data_signs(report: dict) -> tuple[dict[str, float], list[str]]:
             signs[name] = 1.0
         elif item.get("verdict") == "反向":
             signs[name] = -1.0
+    from quant_platform.research.categories import FAMILY_FACTORS
+    from quant_platform.research.model import MONTHLY_REVENUE
+
+    # 2026-10-21, before the run: the six were three monthly-revenue factors — the owner's rule (月營收是落後指標，不以它
+    # 為中心) and genuinely different partners: no monthly revenue, at most one a family
+    family = {name: key for key, names in FAMILY_FACTORS.items() for name in names}
     earlier = [(name, ((item.get("periods") or {}).get("before_regime") or {}).get("t") or 0)
-               for name, item in factors.items() if name not in NEW_DATA_FACTORS and item.get("verdict") == "強"]
-    partners = [name for name, _t in sorted(earlier, key=lambda pair: -pair[1])[:NEW_DATA_PARTNERS]]
+               for name, item in factors.items() if name not in NEW_DATA_FACTORS and name not in MONTHLY_REVENUE
+               and item.get("verdict") == "強"]
+    partners, families = [], set()
+    for name, _t in sorted(earlier, key=lambda pair: -pair[1]):
+        if family.get(name, name) in families:
+            continue
+        families.add(family.get(name, name))
+        partners.append(name)
+        if len(partners) >= NEW_DATA_PARTNERS:
+            break
     return signs, partners
 
 
@@ -3215,7 +3229,8 @@ def new_data_batch() -> list[DailyRule]:
             sets.append({name: sign, partners[0]: 1.0, partners[1]: 1.0})
     output = []
     for factors in sets:
-        words = "＋".join(("反向" if weight < 0 else "") + SHORT.get(name, name) for name, weight in factors.items())
+        words = "＋".join(("反向" if weight < 0 else "") + SHORT.get(name, FACTOR_LABELS.get(name, name).split("（")[0])
+                         for name, weight in factors.items())
         for label, style in HOLDING_STYLES:
             name = f"新資料：{words}：前 20 名、同產業最多 3 成、每週決策"
             output.append(DailyRule(name=f"{name[: 79 - len(label) - 4]}｜持有：{label}", factors=factors, check="weekly",

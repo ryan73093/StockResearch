@@ -90,7 +90,9 @@ def test_the_new_data_rules_pair_the_strong_new_factors_with_the_strong_old_ones
 
     report = {"factors": {"big_holder_up_4w": item("強"), "margin_safe": item("反向"), "retail_down_4w": item("弱"),
                           "broker_concentration_5": item("弱", regime=0.05, since=0.03),        # short: 2020-10, 2024
-                          "foreign_buy_20": item("強", 3.0), "trust_buy_20": item("強", 5.0), "rsi_14": item("弱", 9.0)}}
+                          "foreign_buy_20": item("強", 3.0), "trust_buy_20": item("強", 5.0), "rsi_14": item("弱", 9.0),
+                          "revenue_accel": item("強", 9.0), "high_52w": item("強", 1.0)}}
     signs, partners = daily.new_data_signs(report)
     assert signs == {"big_holder_up_4w": 1.0, "margin_safe": -1.0, "broker_concentration_5": 1.0}
-    assert partners == ["trust_buy_20", "foreign_buy_20"]
+    # no monthly revenue (lagging, the owner's rule) and one a family: foreign buying is the same family as the trusts'
+    assert partners == ["trust_buy_20", "high_52w"]
