@@ -15,7 +15,10 @@ Both lists are stored (forward/llm_trader/decisions.jsonl, one line a day, never
 two rule factors, ``llm_trader`` and ``llm_control`` (``scores``): a day's choice ranks its stocks on the next session,
 so the forward accounts (stock_forward.forward_only) trade them at the next close — decided after the close, filled
 the next day. An answer that breaks a hard rule, or no answer, keeps the previous day's choice (recorded as such).
-The accounts start at the first session after the first decision and are not restarted monthly (there is no history).
+2026-10-21 (使用者：不要跟我說前向觀察只能做一天，我之前要求什麼): the accounts start like every forward account, the
+day after the month's cutoff (9/1 in October), restarted monthly. The days before the trader existed (from the cutoff
+day, 8/31) were decided afterwards with only what was known that day (``replay``; marked ``replayed``) — the model
+may have read news of those weeks in its training, which the record states.
 """
 
 from __future__ import annotations
@@ -147,9 +150,9 @@ def news_of(history: Path, codes: set[str], day: date) -> dict[str, list[str]]:
 
     output: dict[str, list[str]] = {}
     events = Path(history) / "news_events"
-    for path in sorted(events.glob("*.parquet"))[-NEWS_DAYS:] if events.is_dir() else []:
-        if path.stem > day.strftime("%Y%m%d"):
-            continue
+    known = [path for path in sorted(events.glob("*.parquet")) if path.stem <= day.strftime("%Y%m%d")] \
+        if events.is_dir() else []                                   # 2026-10-21: that day's last week, not today's
+    for path in known[-NEWS_DAYS:]:
         frame = pd.read_parquet(path)
         for row in frame[frame["stock_id"].astype(str).isin(codes) & frame["about"].fillna(False)].to_dict("records"):
             mark = {1: "利多", -1: "利空", 0: "中性"}.get(int(row.get("direction") or 0), "")
@@ -161,12 +164,38 @@ def news_of(history: Path, codes: set[str], day: date) -> dict[str, list[str]]:
 def run_day(base: Path, research: Path, day: date, client=None, now: datetime | None = None) -> dict[str, object] | None:
     """Decide ``day`` once (None when already decided or not a session); the record appended to decisions.jsonl."""
     from quant_platform.research import daily
-    from quant_platform.research.agent.llm import call_cost
-    from quant_platform.research.stock_forward import _names
 
     if any(item["date"] == day.isoformat() for item in decisions(research)):
         return None
-    data, fp = daily.load(base)
+    _data, fp = daily.load(base)
+    return decide(fp, base, research, day, client, now)
+
+
+def replay(base: Path, research: Path, first: date, last: date, client=None, job=None) -> list[dict[str, object]]:
+    """2026-10-21: every session from ``first`` to ``last`` not decided yet, in order, each with only what was known
+    that day (the candidates' ranks and factors that day, the week's news before it); marked ``replayed``."""
+    from quant_platform.research import daily
+
+    _data, fp = daily.load(base)
+    days = [day for day in fp.sessions if first <= day <= last]
+    made = []
+    for number, day in enumerate(days):
+        if any(item["date"] == day.isoformat() for item in decisions(research)):
+            continue
+        if job:
+            job.update(done=number, total=len(days), current=f"補做 {day.isoformat()} 的決定", force=True)
+        record = decide(fp, base, research, day, client, replayed=True)
+        if record is not None:
+            made.append(record)
+    return made
+
+
+def decide(fp, base: Path, research: Path, day: date, client=None, now: datetime | None = None,
+           replayed: bool = False) -> dict[str, object] | None:
+    """One day's decision on loaded factors (run_day, replay); appended to decisions.jsonl."""
+    from quant_platform.research.agent.llm import call_cost
+    from quant_platform.research.stock_forward import _names
+
     position = fp.index.get(day)
     if position is None:
         return None
@@ -200,6 +229,8 @@ def run_day(base: Path, research: Path, day: date, client=None, now: datetime | 
               "decided_at": (now or datetime.now(TAIPEI)).isoformat(timespec="seconds"),
               "candidates": [item["code"] for item in cands],
               "control": {"hold": control_choice(cands, held_control)}}
+    if replayed:                  # decided afterwards with that day's information (the model's training may know more)
+        record["replayed"] = True
     llm = {"hold": held_llm, "fallback": "沒有呼叫模型"}
     if client is not None:
         try:

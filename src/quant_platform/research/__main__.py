@@ -367,6 +367,7 @@ def main() -> int:
     parser.add_argument("--monthly", type=float, default=10_000)
     parser.add_argument("--day", type=int, default=5)
     parser.add_argument("--decision-day", help="llm-trader：決定哪一天收盤後（YYYY-MM-DD，預設今天）")
+    parser.add_argument("--replay-from", help="llm-trader：從這一天起補做每個交易日的決定到 --decision-day（只用當天以前的資料）")
     parser.add_argument("--windows", default="36,60")
     parser.add_argument("--cost-scale", type=float, default=1.0)
     parser.add_argument("--broker", default="conservative", choices=tuple(BROKERS), help="券商手續費設定")
@@ -933,6 +934,16 @@ def main() -> int:
 
         day = date.fromisoformat(args.decision_day) if args.decision_day else datetime.now(TAIPEI).date()
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        if args.replay_from:          # 2026-10-21 (使用者：不要跟我說前向觀察只能做一天): the days before it existed
+            first = date.fromisoformat(args.replay_from)
+            with JobLog(RESEARCH).start(f"LLM 交易員：補做 {first}～{day} 每天收盤後的決定（只用當天以前的資料）",
+                                        command) as job:
+                client = llm_trader.build_client(Settings.from_env(), RESEARCH)
+                made = llm_trader.replay(Path(args.base), RESEARCH, first, day, client, job)
+                fallback = sum(1 for record in made if record["llm"].get("fallback"))
+                job.payload["summary"] = f"補做 {len(made)} 天" + (f"（{fallback} 天沿用前一天）" if fallback else "")
+            print(job.payload["summary"], flush=True)
+            return 0
         with JobLog(RESEARCH).start(f"LLM 交易員：{day} 收盤後的決定", command) as job:
             client = llm_trader.build_client(Settings.from_env(), RESEARCH)
             for attempt in range(7):                # the day's prices may still be on their way (15:15 refresh)

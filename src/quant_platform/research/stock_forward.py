@@ -151,12 +151,12 @@ def forward_only() -> list[tuple[object, str]]:
         (base.model_copy(update={"name": base.name + "、新聞否決對照組", "news_veto": "v1-off"}),
          "R15 D 對照組：同一規則、同一天開始、不看新聞（和上一列比）"),
     ]
-    # 2026-10-20 (使用者：LLM 有沒有辦法做成交易 agent): the LLM trader and its twin (research/llm_trader.py), each from
-    # its first decision (llm_trader_start; not restarted monthly: there is no history)
+    # 2026-10-20 (使用者：LLM 有沒有辦法做成交易 agent): the LLM trader and its twin (research/llm_trader.py); 2026-10-21
+    # (使用者：不要跟我說前向觀察只能做一天): from the month's common start like every account
     for factor, label in (("llm_trader", "LLM 交易員"), ("llm_control", "LLM 交易員對照組")):
         output.append((DailyRule(name=f"{label}：#5163 三個子帳戶前 20 名中挑最多 20 檔、隔天收盤成交", factors={factor: 1.0},
                                  top=20, keep=1, min_hold=0, industry_cap=0.3),
-                       "LLM 交易員前向實驗（只能前向；和對照組同一天開始比）" if factor == "llm_trader"
+                       "LLM 交易員前向實驗（和對照組同一天開始比）" if factor == "llm_trader"
                        else "LLM 交易員的對照組：同樣候選、固定規則（和上一列比）"))
     # 2026-10-20 (使用者：ML、DL、RL、技術分析、LLM 都要加入評估；持有方式都是策略): the same pair in the other two
     # holding styles, forward only (no news before 2026-10-05)
@@ -168,7 +168,7 @@ def forward_only() -> list[tuple[object, str]]:
 
 
 def llm_trader_start(research_dir: str | Path) -> str | None:
-    """The LLM trader's accounts start on its first decision's day (research/llm_trader.py); None before one."""
+    """The LLM trader's first decision day (research/llm_trader.py); None before one."""
     from quant_platform.research.llm_trader import decisions
 
     made = sorted(item["date"] for item in decisions(research_dir))
@@ -272,12 +272,14 @@ class StockForwardTracker:
                 changed = True
         moment = datetime.now(TAIPEI).isoformat(timespec="seconds")
         experiments = {rule.rule_hash: (rule, reason) for rule, reason in (forward_only() if self._experiments else [])}
-        # 2026-10-20: the LLM trader's pair start at its first decision (none before it: not added yet)
-        llm_start = llm_trader_start(self._base)
-        fixed = {rule.rule_hash: llm_start for rule, _reason in (forward_only() if self._experiments else [])
-                 if any(name in rule.factors for name in ("llm_trader", "llm_control"))}
-        for rule_hash in [key for key, value in fixed.items() if value is None]:
-            experiments.pop(rule_hash, None)
+        # 2026-10-21 (使用者：不要跟我說前向觀察只能做一天): the LLM trader's pair start on the common start like every
+        # account; added once its decisions reach back to the cutoff day (llm_trader.replay), so it never sits in cash
+        fixed: dict[str, str] = {}
+        llm_first = llm_trader_start(self._base)
+        if llm_first is None or llm_first > cutoff.isoformat():
+            for rule, _reason in (forward_only() if self._experiments else []):
+                if any(name in rule.factors for name in ("llm_trader", "llm_control")):
+                    experiments.pop(rule.rule_hash, None)
         month_path = rolling_folder(self._base) / f"{cutoff.isoformat()}.json"
         month = None
         if month_path.is_file():

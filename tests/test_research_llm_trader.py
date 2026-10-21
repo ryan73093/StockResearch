@@ -41,3 +41,19 @@ def test_a_choice_ranks_its_stocks_from_the_next_session_until_the_next_choice(t
     assert scores[3, 1] > 0                                              # carried to 10-22
     assert np.isfinite(scores[4, 2]) and np.isnan(scores[4, :2]).all()    # 10-22's choice from 10-23
     assert np.isfinite(llm_trader.scores(fp, tmp_path, "control")[2, 2])
+
+
+def test_a_replayed_day_reads_the_week_of_news_before_it_not_the_latest(tmp_path):
+    from datetime import date
+
+    import pandas as pd
+
+    from quant_platform.research import llm_trader
+
+    folder = tmp_path / "news_events"
+    folder.mkdir()
+    for day in ("20261005", "20261006", "20261020", "20261021"):
+        pd.DataFrame([{"stock_id": "2330", "about": True, "direction": 1, "risk": False, "numbers": False,
+                       "news_day": day, "title": f"news {day}"}]).to_parquet(folder / f"{day}.parquet")
+    lines = llm_trader.news_of(tmp_path, {"2330"}, date(2026, 10, 6))["2330"]
+    assert [line.split()[0] for line in lines] == ["20261005", "20261006"]        # not 10-20 or 10-21
