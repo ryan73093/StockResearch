@@ -3612,6 +3612,52 @@ def execution_all_batch() -> list:
     return output
 
 
+# 2026-10-22 (research_method §7「開盤賣、收盤買」: 7 of the 8 strongest single rules made more money with it): every
+# passing single rule registered before SPLIT_BEFORE without a "split" version, with one — the list fixed by time
+SPLIT_BEFORE = "2026-10-22T06:00:00"
+SPLIT_LABEL = "開盤賣、收盤買"
+
+
+def split_all_batch() -> list:
+    import json as _json
+
+    from quant_platform.research.blend import BlendRule, parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = Path("instance") / "research"
+    latest = newest([record for record in TrialRegistry(research / "trials.jsonl").records()
+                     if record.kind == "candidate" and record.period == "recent"
+                     and record.created_at < SPLIT_BEFORE
+                     and str(record.metrics.get("engine", "")).startswith(ENGINE_VERSION.split("+")[0])])
+    timings: dict[str, set[str]] = {}
+    bases: dict[str, DailyRule] = {}
+    for record in sorted(latest.values(), key=lambda record: -(record.metrics.get("final_value") or 0)):
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            rule = parse_spec(spec)
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if isinstance(rule, BlendRule) or uses_0050(spec) or rule.free or rule.exit_model != "none":
+            continue
+        key = execution_key(rule.canonical())
+        timings.setdefault(key, set()).add(rule.execution)
+        if tier(record.metrics)[0] in PASSING_TIERS:
+            bases.setdefault(key, rule)                     # the passing timing with the highest end value
+    output = []
+    for key, rule in bases.items():
+        if "split" in timings[key]:
+            continue
+        stem, _, held = rule.name.partition("｜持有：")
+        for word in EXECUTION_WORDS + ("、當天盤後成交", "、隔天收盤成交", "、隔天開盤成交"):
+            stem = stem.replace(word, "")
+        held = f"｜持有：{held}" if held else ""
+        name = f"{stem[: 80 - len(held) - len(SPLIT_LABEL) - 1]}＋{SPLIT_LABEL}{held}"
+        output.append(DailyRule.model_validate({**rule.model_dump(), "execution": "split", "name": name}))
+    print(f"過門檻的策略 {len(bases)} 個；還沒有開盤賣、收盤買的 {len(output)} 個", flush=True)
+    return output
+
+
 def next10_blend_batch() -> list:
     """2026-10-21: #6086 and #6087 with #6090 (the same deep top 10 filled at the next close) in place of #5983
     (blend_scan.NEXT10_SPLITS). Registered (research_method §7): each passes if it is a T0 候選 (high-risk or not) on
@@ -4184,4 +4230,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch}
+           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
+           "split_b": lambda: split_all_batch()[1::2]}
