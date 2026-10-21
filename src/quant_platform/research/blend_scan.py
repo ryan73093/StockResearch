@@ -204,6 +204,14 @@ TOP10_SPLITS = (
 )
 
 
+NEXT10_SPLITS = (
+    # 2026-10-21 (#6090 = #5983 filled at the next session's close: 6,697 萬, 7.7 points further than 0050 in its worst
+    # fall, the frontier's top): #6086 and #6087 with #6090 in place of #5983
+    ("組合：深度學習前 10 名隔天收盤＋跌市穩", (("深度學習前 10 名隔天收盤", 6090), ("跌市穩", 5106))),
+    ("組合：共識＋深度學習前 10 名隔天收盤＋跌市穩", (("共識", 4317), ("深度學習前 10 名隔天收盤", 6090), ("跌市穩", 5106))),
+)
+
+
 def role_blends(research: str | Path = Path("instance") / "research", splits=ROLE_SPLITS) -> list:
     """The ``splits`` (ROLE_SPLITS, TOP10_SPLITS) as blends: each member's share by risk parity on its development
     months (volatility of its month returns to DEV_END); the development measures printed."""
