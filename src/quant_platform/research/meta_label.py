@@ -150,6 +150,32 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
     return meta
 
 
+def train_until(fp, out_dir: str | Path, cutoff) -> dict[str, object]:
+    """2026-10-21 (使用者 2026-10-16：每月滾動，模型也要更新): the classifier refitted on every weekly event whose
+    40-session label ended by ``cutoff``; saved as monthly/<cutoff>.pkl, ``scores`` uses it for every session after
+    the cutoff. The yearly models and meta.npz stay."""
+    from sklearn.ensemble import HistGradientBoostingClassifier
+
+    from quant_platform.research.model import eligibility, trained_features
+
+    out = Path(out_dir)
+    target = out / "monthly"
+    target.mkdir(parents=True, exist_ok=True)
+    eligible = eligibility(fp)
+    names = trained_features(models_root_of(out) / SNAPSHOT, SNAPSHOT)
+    pairs = np.argwhere(picks(fp, eligible).T)
+    x = features(fp, eligible, pairs, names)
+    won, _excess = labels(fp, pairs)
+    last = max(index for index, day in enumerate(fp.sessions) if day <= cutoff)
+    learn = (pairs[:, 0] % STEP == 0) & (pairs[:, 0] + HORIZON <= last) & np.isfinite(won)
+    model = HistGradientBoostingClassifier(**PARAMS, random_state=0).fit(x[learn], won[learn])
+    base = float(won[learn].mean())
+    (target / f"{cutoff.isoformat()}.pkl").write_bytes(pickle.dumps({"model": model, "base": base}))
+    return {"version": VERSION, "cutoff": cutoff.isoformat(), "train_events": int(learn.sum()), "base_rate": round(base, 4),
+            "label_until": fp.sessions[int(pairs[learn][:, 0].max()) + HORIZON].isoformat(),
+            "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
+
+
 def models_root_of(folder: Path) -> Path:
     return Path(folder).parent
 
@@ -213,6 +239,22 @@ def scores(fp, folder: str | Path) -> np.ndarray:
             fitted = pickle.loads(saved[-1].read_bytes())
             values = fitted["model"].predict_proba(features(fp, eligible, pairs, names))[:, 1] - fitted["base"]
             output[pairs[:, 0], pairs[:, 1]] = values
+    # 2026-10-21: every session after a monthly cutoff from that cutoff's classifier (train_until), the latest winning
+    monthly = sorted((folder / "monthly").glob("*.pkl")) if (folder / "monthly").is_dir() else []
+    if monthly:
+        eligible = eligibility(fp)
+        chosen = picks(fp, eligible)
+        names = trained_features(folder.parent / SNAPSHOT, SNAPSHOT)
+        for path in monthly:
+            cutoff = date.fromisoformat(path.stem)
+            after = [position for position, day in enumerate(fp.sessions) if day > cutoff]
+            pairs = np.array([(position, row) for position in after for row in np.flatnonzero(chosen[:, position])],
+                             dtype=int).reshape(-1, 2)
+            if len(pairs):
+                fitted = pickle.loads(path.read_bytes())
+                output[after] = np.nan
+                values = fitted["model"].predict_proba(features(fp, eligible, pairs, names))[:, 1] - fitted["base"]
+                output[pairs[:, 0], pairs[:, 1]] = values
     return output
 
 

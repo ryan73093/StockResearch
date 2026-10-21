@@ -111,8 +111,11 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
         elif factor in ("dl2", "dl2x"):
             stale.add("風險模型 " + factor)
         elif factor == "meta1":
-            stale.add("後設標籤 meta-1.0.0")
-        elif factor.startswith(("rl_", "rolling", "block_", "tech_")):
+            if not (models / "meta-1.0.0" / "monthly" / f"{cutoff.isoformat()}.pkl").is_file():
+                stale.add("後設標籤 meta-1.0.0")
+        elif factor in ("block_equal", "tech_equal"):
+            continue                          # fixed factors weighted alike: nothing learned, nothing to refit
+        elif factor.startswith(("rl_", "rolling")):
             stale.add("RL 機器人 " + factor)
     checks.append(_check("前向帳戶用到的模型都重訓到當月截止日", "AGENTS.md：只用截止日以前的資料挑策略、重訓模型（使用者 2026-10-16）",
                          not stale, f"截止日 {cutoff}；還沒重訓的 {len(stale)} 個" + (f"：{sorted(stale)[:6]}" if stale else "")))

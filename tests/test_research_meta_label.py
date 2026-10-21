@@ -105,6 +105,14 @@ def test_each_year_learns_only_from_events_ended_before_it_and_the_veto_reads_th
     assert fp.meta_vetoed(position) == vetoed
     assert np.isfinite(margins[position]).sum() == 20 and np.isnan(margins[: position - 300]).all()
     assert meta_label.gate(tmp_path)["kept"] == check["kept"]
+    # 2026-10-21 (每月滾動，模型也要更新): refitted to a cutoff, the sessions after it are judged by the refit
+    cutoff = [day for day in fp.sessions if day.year == 2018][120]
+    found = meta_label.train_until(fp, tmp_path / meta_label.VERSION, cutoff)
+    assert date.fromisoformat(found["label_until"]) <= cutoff and found["train_events"] > 0
+    after = meta_label.scores(fp, tmp_path / meta_label.VERSION)
+    past = fp.index[cutoff]
+    assert np.array_equal(np.nan_to_num(after[:past + 1]), np.nan_to_num(margins[:past + 1]))
+    assert np.isfinite(after[past + 1]).sum() == 20
 
 
 def test_the_gate_by_hand():

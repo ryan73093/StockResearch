@@ -923,8 +923,14 @@ def main() -> int:
                         job))
                 payload["models"] = trained
                 rolling.save(RESEARCH, cutoff, payload)
-                retrained = {factor for factor, spec in research_model.MODELS.items()
-                             if spec["version"] in set(versions) | set(deep)} | ({"dl1", "dl1x", "dl_risk"} if risky else set())
+                if "meta1" in read:                                    # the meta-label veto (it reads the deep model)
+                    from quant_platform.research import meta_label
+
+                    trained.append(meta_label.train_until(fp, research_model.model_dir(Path(args.base), meta_label.VERSION),
+                                                          cutoff))
+                retrained = ({factor for factor, spec in research_model.MODELS.items()
+                              if spec["version"] in set(versions) | set(deep)}
+                             | ({"dl1", "dl1x", "dl_risk"} if risky else set()) | ({"meta1"} & read))
                 again = tracker.refit(retrained, f"模型重訓到 {cutoff}（每月滾動），從起算日重新記錄") if args.refit_accounts else []
                 job.payload["summary"] = (f"{len(trained)} 個模型重訓到 {cutoff}（深度學習 {len(deep)} 個）"
                                           + (f"；{len(again)} 個前向帳戶重新記錄" if again else ""))
