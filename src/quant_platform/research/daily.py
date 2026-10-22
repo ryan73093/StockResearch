@@ -367,7 +367,7 @@ class DailyRule(BaseModel):
     # sessions; holdings are kept by the usual rules. Left out of the hash when "none".
     # 2026-10-22 (集保因子第三版): "h1" = no new buys of the fifth whose small holders' share rose the most in 4 weeks
     # (retail_down_4w lowest), "h2" = of the fifth whose holders grew the most (holders_down_4w lowest)
-    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm"] = "none"
+    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm", "t1", "e1"] = "none"
     # 2026-10-12 (全面研究「之後再試」第 1 項): "cost1" = a holding that leaves the keep zone is replaced only when
     # the replacement's expected next-20-session excess beats the holding's by more than a round trip (about
     # 0.99%: fee both ways, the sell tax, slippage both ways). The expectation is the rule's own score
@@ -3206,7 +3206,9 @@ HOLDING_STYLES = (("固定持有 20 天", {"hold": "days", "min_hold": 20}),
 HOLDING_TOP = 30
 HOLDER_EXCLUDES = {"h1": "retail_down_4w", "h2": "holders_down_4w", "m1": "margin_safe"}
 # 2026-10-22 (否決第三版): "hm" = the holders' and the margin veto together (a stock in either fifth is not bought)
-VETO_FACTORS = {**{key: (value,) for key, value in HOLDER_EXCLUDES.items()}, "hm": ("holders_down_4w", "margin_safe")}
+VETO_FACTORS = {**{key: (value,) for key, value in HOLDER_EXCLUDES.items()}, "hm": ("holders_down_4w", "margin_safe"),
+                # 否決第五版: the fifth furthest below the 200-session average; the fifth whose earnings fell the most
+                "t1": ("trend_200",), "e1": ("eps_growth",)}
 HOLDER_VETO_SHARE = 0.2
 
 # 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」, written before the
@@ -3331,7 +3333,8 @@ def holders2_batch() -> list[DailyRule]:
 VETO2_RULES = (6490, 6090, 5983, 6491, 6492, 6091, 6509, 6501, 6093, 4941)
 VETO2_H2 = (6492, 6509, 6501)
 VETO_WORDS = {"h1": "不買散戶大增的五分之一", "h2": "不買股東大增的五分之一", "m1": "不買融資快斷頭的五分之一",
-              "hm": "不買股東大增或融資快斷頭的五分之一"}
+              "hm": "不買股東大增或融資快斷頭的五分之一", "t1": "不買離年線最遠的五分之一",
+              "e1": "不買獲利衰退最多的五分之一"}
 # 2026-10-22 (research_method §7「否決第三版」, written before the run; the lists frozen at 14:4x from the passing single
 # rules ranking the top 20 without a veto, by end value): the holders' veto on the 120 richest, both vetoes together on
 # the 20 richest and on the three top-10 rules the margin veto moved onto the frontier
@@ -3347,6 +3350,17 @@ VETO3_HM = VETO3_H2[:20] + (6490, 6090, 5983)
 # passing deep-learning rules ranking the top 20 without a veto (registered before veto3) — the family it helped
 VETO4_H2 = (5107, 6125, 6111, 5123, 6197, 5042, 6554, 6440, 6530, 6177, 6219, 4990, 4919, 6176, 6152, 6396, 5038, 6541,
             6218, 6155, 4933, 5124, 6165, 5137, 6395, 6138, 6137, 6631, 6426)
+
+
+# 2026-10-22 16:0x (research_method §7「否決第五版」, written before the run): two other families' worst fifths — the
+# price furthest below its 200-session average, the earnings falling most — as vetoes on the 20 richest deep-learning
+# top-20 rules (where the holders' veto worked)
+VETO5_RULES = (6491, 6492, 6509, 6501, 6093, 4941, 5050, 6493, 5085, 6485, 6600, 6506, 6514, 6133, 6523, 6519, 6120,
+               5254, 6132, 6117)
+
+
+def veto5_batch() -> list[DailyRule]:
+    return _veto_rules([(trial, "t1") for trial in VETO5_RULES] + [(trial, "e1") for trial in VETO5_RULES])
 
 
 def veto4_batch() -> list[DailyRule]:
@@ -4446,7 +4460,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "veto2": veto2_batch, "veto3_a": lambda: veto3_batch()[0::2],
-           "veto3_b": lambda: veto3_batch()[1::2], "veto4": veto4_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
+           "veto3_b": lambda: veto3_batch()[1::2], "veto4": veto4_batch, "veto5": veto5_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
            "split_b": lambda: split_all_batch()[1::2], "splitblend": split_blend_batch,
            "splitblends": split_blends_all_batch, "splitblends_a": lambda: split_blends_all_batch()[0::2],
            "splitblends_b": lambda: split_blends_all_batch()[1::2],
