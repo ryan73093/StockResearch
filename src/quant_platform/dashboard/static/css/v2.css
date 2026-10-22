@@ -752,3 +752,5 @@ td.wrap { white-space: normal; min-width: 180px; }
 .kb-answer p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .kb-answer__lead { font-size: 15px; }
 .kb-text { white-space: pre-wrap; font: 13.5px/1.65 var(--font); margin: 0; overflow-wrap: anywhere; }
+.kb-table td { overflow-wrap: anywhere; word-break: break-word; }
+.kb-answer a, .kb-form + p a { overflow-wrap: anywhere; }

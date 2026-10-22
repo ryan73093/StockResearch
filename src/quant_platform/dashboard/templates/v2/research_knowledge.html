@@ -15,7 +15,7 @@
 {% macro badge(verdict) %}<span class="badge {{ 'badge--bad' if verdict in ('失敗', '淘汰') else ('badge--ok' if verdict == '通過' else ('badge--warn' if verdict in ('部分', '事先登錄', '進行中') else '')) }}">{{ verdict }}</span>{% endmacro %}
 {% macro entry_table(rows, show_score=false) %}
   <div class="table-wrap table-wrap--stack">
-    <table class="table--stack">
+    <table class="table--stack kb-table">
       <thead><tr><th>紀錄</th><th>類別</th><th>判定</th><th>日期</th><th>重點</th></tr></thead>
       <tbody>
       {% for entry in rows %}
@@ -74,7 +74,7 @@
 <section class="card" id="all" data-tab="全部紀錄">
   <div class="card__head"><h2>全部紀錄</h2><span class="muted small">點數字列出那一類</span></div>
   <div class="table-wrap table-wrap--stack">
-    <table class="table--stack">
+    <table class="table--stack kb-table">
       <thead><tr><th>類別</th><th class="num">紀錄</th><th class="num">失敗</th><th class="num">通過</th><th class="num">部分</th><th class="num">其他</th></tr></thead>
       <tbody>
       {% for row in counts %}
@@ -102,7 +102,7 @@
   <div class="card__head"><h2>最近問過的問題</h2><span class="muted small">AI 回答過的（每一題都留紀錄）</span></div>
   {% if recent %}
   <div class="table-wrap table-wrap--stack">
-    <table class="table--stack">
+    <table class="table--stack kb-table">
       <thead><tr><th>問題</th><th>結論</th><th>時間</th></tr></thead>
       <tbody>
       {% for item in recent %}
