@@ -248,6 +248,23 @@ def role_blends(research: str | Path = Path("instance") / "research", splits=ROL
     return output
 
 
+def rolling_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+    """2026-10-22 (research_method §7 組合搜尋第六輪; written before the run): the same search with the development months
+    up to the month's cutoff (the end of the month two months back) instead of 2020-09 — how the monthly list grades
+    single rules; the forward test from the day after the cutoff is the out-of-sample check."""
+    from datetime import date
+
+    from quant_platform.research.rolling import cutoff_for
+
+    global DEV_END
+    kept = DEV_END
+    DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
+    try:
+        return batch(research)
+    finally:
+        DEV_END = kept
+
+
 def batch(research: str | Path = Path("instance") / "research") -> list:
     """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json."""
     from quant_platform.research.registry import TrialRegistry
