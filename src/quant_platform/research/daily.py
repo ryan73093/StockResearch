@@ -3343,6 +3343,14 @@ VETO3_H2 = (6491, 6492, 6509, 6501, 6093, 4941, 5050, 6493, 6504, 6510, 5085, 64
             5127, 5113, 6528, 6106, 4915, 6124, 5105, 6533, 6543, 6098, 6531, 5097, 5098, 6575, 6535, 5039, 6164, 6123,
             4943, 4924, 6494, 5108, 6135, 6196, 6551, 5023, 6136, 6578, 5078, 6143)
 VETO3_HM = VETO3_H2[:20] + (6490, 6090, 5983)
+# 2026-10-22 15:2x (research_method §7「否決第三版」的下一版, written before the run): the holders' veto on the other
+# passing deep-learning rules ranking the top 20 without a veto (registered before veto3) — the family it helped
+VETO4_H2 = (5107, 6125, 6111, 5123, 6197, 5042, 6554, 6440, 6530, 6177, 6219, 4990, 4919, 6176, 6152, 6396, 5038, 6541,
+            6218, 6155, 4933, 5124, 6165, 5137, 6395, 6138, 6137, 6631, 6426)
+
+
+def veto4_batch() -> list[DailyRule]:
+    return _veto_rules([(trial, "h2") for trial in VETO4_H2])
 
 
 def veto3_batch() -> list[DailyRule]:
@@ -3776,6 +3784,83 @@ def split_blends_all_batch() -> list:
         suffix = f"（#{trial} 開盤賣、收盤買）"
         output.append(BlendRule(name=blend.name[: 80 - len(suffix)] + suffix, sleeves=tuple(sleeves)))
     print(f"過門檻的組合 {len(blends)} 個；有子策略可換成開盤賣、收盤買的 {len(output)} 個", flush=True)
+    return output
+
+
+VETO_BLENDS_BEFORE = "2026-10-22T16:00:00"
+
+
+def veto_key(spec: dict) -> str:
+    """A rule's spec without its veto or name: the strategy a veto is compared on."""
+    import hashlib
+    import json as _json
+
+    data = {key: value for key, value in spec.items() if key not in ("name", "exclude")}
+    return hashlib.sha256(_json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def veto_blends_batch() -> list:
+    """2026-10-22 (research_method §7「否決第三版」的組合; written before the run): every passing blend (newest engine, no
+    0050) registered before VETO_BLENDS_BEFORE with each sleeve that has a passing holders'-veto version (the same
+    settings with exclude "h2") replaced by it, the shares as they were — the veto's effect alone, like the split
+    blends. A blend none of whose sleeves has one is left out; a version already registered is skipped."""
+    import json as _json
+
+    from quant_platform.research.blend import BlendRule, Sleeve, parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = Path("instance") / "research"
+    records = TrialRegistry(research / "trials.jsonl").records()
+    latest = newest([record for record in records if record.kind == "candidate" and record.period == "recent"
+                     and record.created_at < VETO_BLENDS_BEFORE
+                     and str(record.metrics.get("engine", "")).startswith(ENGINE_VERSION.split("+")[0])])
+    from quant_platform.research import downside
+
+    # 2026-10-22 15:0x, before it ran (veto3's first 82: the holders' veto helped 21, median −12%): only a twin that
+    # passed the veto's own judgement against its plain rule — more money with a drawdown at most 2 points deeper, at
+    # least 95% with one 2 points shallower, or on the frontier. Chosen on the same years: the blends read optimistic.
+    frontier = {row["rule_hash"] for row in downside.table(research) if row.get("frontier")}
+    twins: dict[str, DailyRule] = {}
+    plain: dict[str, object] = {}
+    vetoed: list[tuple[DailyRule, object]] = []
+    blends = []
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            rule = parse_spec(spec)
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if isinstance(rule, BlendRule):
+            if not uses_0050(spec) and not rule.core and tier(record.metrics)[0] in PASSING_TIERS:
+                blends.append((record.trial_id, rule))
+        elif rule.exclude == "h2" and tier(record.metrics)[0] in PASSING_TIERS:
+            vetoed.append((rule, record))
+        elif rule.exclude == "none":
+            plain[veto_key(rule.canonical())] = record
+    for rule, record in vetoed:
+        origin = plain.get(veto_key(rule.canonical()))
+        if origin is None:
+            continue
+        money = record.metrics["final_value"] / origin.metrics["final_value"] - 1
+        deeper = (origin.metrics["max_drawdown"] - record.metrics["max_drawdown"]) * 100
+        if (money > 0 and deeper <= 2) or (money >= -0.05 and deeper <= -2) or record.spec_hash in frontier:
+            twins[veto_key(rule.canonical())] = rule
+    output = []
+    for trial, blend in blends:
+        sleeves, changed = [], 0
+        for sleeve in blend.sleeves:
+            twin = twins.get(veto_key(sleeve.rule.canonical()))
+            if twin is not None and sleeve.rule.exclude == "none":
+                sleeves.append(Sleeve(rule=twin, share=sleeve.share))
+                changed += 1
+            else:
+                sleeves.append(sleeve)
+        if not changed:
+            continue
+        suffix = f"（#{trial} 不買股東大增）"
+        output.append(BlendRule(name=blend.name[: 80 - len(suffix)] + suffix, sleeves=tuple(sleeves)))
+    print(f"過門檻的組合 {len(blends)} 個；有子策略可換成股東否決版的 {len(output)} 個", flush=True)
     return output
 
 
@@ -4361,7 +4446,8 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "veto2": veto2_batch, "veto3_a": lambda: veto3_batch()[0::2],
-           "veto3_b": lambda: veto3_batch()[1::2], "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
+           "veto3_b": lambda: veto3_batch()[1::2], "veto4": veto4_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
            "split_b": lambda: split_all_batch()[1::2], "splitblend": split_blend_batch,
            "splitblends": split_blends_all_batch, "splitblends_a": lambda: split_blends_all_batch()[0::2],
-           "splitblends_b": lambda: split_blends_all_batch()[1::2]}
+           "splitblends_b": lambda: split_blends_all_batch()[1::2],
+           "vetoblends_a": lambda: veto_blends_batch()[0::2], "vetoblends_b": lambda: veto_blends_batch()[1::2]}

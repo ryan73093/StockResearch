@@ -9,7 +9,7 @@ when one fails, a notification.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 
@@ -187,6 +187,30 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
         checks.append(_check("資料庫每日備份", "AGENTS.md 資料庫安全：每日 03:00、保留 7 份",
                              newest is not None and (datetime.now() - newest).days < 2,
                              f"{len(files)} 份，最新 {newest:%m-%d %H:%M}" if newest else "沒有備份"))
+    # 2026-10-22 (交接：需求檢查再加): the month's list, the news, the second copy on the other disk
+    from quant_platform.research import rolling as rolling_lists
+
+    try:
+        month = rolling_lists.summary(rolling_lists.latest(research)) or {}
+    except (KeyError, TypeError, ValueError):            # a list file without its cutoff is no list
+        month = {}
+    wanted = cutoff_for(today).isoformat()
+    checks.append(_check("本月的每月名單存在", "AGENTS.md：前向觀察與挑策略一律每月滾動（使用者 2026-10-16／10-17）",
+                         month.get("cutoff") == wanted, f"應為截止 {wanted}；最新名單截止 {month.get('cutoff') or '沒有'}"))
+    news = research / "history" / "raw" / "finmind" / "TaiwanStockNews"
+    days = sorted(path.name for path in news.iterdir() if path.is_dir() and path.name.isdigit()) if news.is_dir() else []
+    sessions = _sessions(research)
+    before = [day for day in sessions if day < today]
+    due = before[-1].strftime("%Y%m%d") if before else None
+    checks.append(_check("新聞收到前一個交易日", "需求 §8：每個交易日 14:40 收前一個交易日的新聞（新聞否決、LLM 交易員用）",
+                         bool(due) and bool(days) and days[-1] >= due, f"應有 {due or '—'}；最新 {days[-1] if days else '沒有'}"))
+    copies = [row for row in _jobs(research) if str(row.get("name", "")).startswith("研究資料第二份備份")]
+    newest = max(copies, key=lambda row: str(row.get("started_at") or ""), default=None)
+    fresh = bool(newest) and newest.get("status") == "done" and str(newest.get("started_at") or "") >= (
+        today - timedelta(days=2)).isoformat()
+    checks.append(_check("研究資料第二份備份（另一顆硬碟，2 天內）", "使用者 2026-10-19：評估專案可能失敗的原因並排除（每日 03:30）",
+                         fresh, f"最近一次 {str(newest.get('started_at'))[:16] if newest else '沒有'}，{newest.get('status') if newest else '—'}"
+                         + (f"：{newest.get('summary')}" if newest and newest.get("summary") else "")))
     # 2026-10-22 (使用者：我所有的失敗紀錄都要記起來，作為知識庫，讓後面的人可以用 AI 問): every finished experiment
     # has its result written (research method or development history), and the knowledge base holds every trial
     from quant_platform.research import knowledge
@@ -206,6 +230,26 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
         checks.append(_check("研究知識庫收了每一個試驗", "使用者 2026-10-22：失敗紀錄都要記起來，作為知識庫", False,
                              f"建立失敗：{str(exc)[:120]}"))
     return checks
+
+
+def _sessions(research: Path) -> list[date]:
+    """The market's sessions from the stored index (history/daily/TAIEX.parquet); [] without it."""
+    path = research / "history" / "daily" / "TAIEX.parquet"
+    if not path.is_file():
+        return []
+    import pyarrow.parquet as pq
+
+    return sorted(set(pq.read_table(path, columns=["date"])["date"].to_pylist()))
+
+
+def _jobs(research: Path) -> list[dict[str, object]]:
+    rows = []
+    for path in (research / "jobs").glob("*.json") if (research / "jobs").is_dir() else []:
+        try:
+            rows.append(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+    return rows
 
 
 def save(research: str | Path, checks: list[dict[str, object]], now: datetime) -> Path:

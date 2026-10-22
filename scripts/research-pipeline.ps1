@@ -1,4 +1,4 @@
-﻿param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "robustfront", "exec_a", "exec_b", "llmreplay", "monthmodels", "next10blend", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind", "finmind-paid", "finmind-paid-b", "finmind-paid-c", "paid-factors", "newdata", "intraday", "limitscheck", "finmind-paid-c2", "newdata-now", "finmind-paid-rest", "holders2", "holders3", "liveflow", "modeli", "monthfill", "deep27", "modelj", "jdeep", "split", "split_a", "split_b", "splitblend", "splitblends", "splitblends_a", "splitblends_b", "bigscan3", "fmdaily_a", "fmdaily_b", "openfeas", "opentight", "govbank", "engine160", "veto2", "knowledge", "veto3_a", "veto3_b")][string]$Name = "daily")
+﻿param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "robustfront", "exec_a", "exec_b", "llmreplay", "monthmodels", "next10blend", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind", "finmind-paid", "finmind-paid-b", "finmind-paid-c", "paid-factors", "newdata", "intraday", "limitscheck", "finmind-paid-c2", "newdata-now", "finmind-paid-rest", "holders2", "holders3", "liveflow", "modeli", "monthfill", "deep27", "modelj", "jdeep", "split", "split_a", "split_b", "splitblend", "splitblends", "splitblends_a", "splitblends_b", "bigscan3", "fmdaily_a", "fmdaily_b", "openfeas", "opentight", "govbank", "engine160", "veto2", "knowledge", "veto3_a", "veto3_b", "vetoblends_a", "vetoblends_b", "veto4")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -1340,6 +1340,38 @@ switch ($Name) {
         # and its new or changed entries encoded as BGE-M3 vectors into the embedded Qdrant, on the CPU (the scheduler
         # starts it hourly at :45 when a record changed)
         Invoke-Step "1-index" @("-m", "quant_platform.research", "knowledge", "--index", "--device", "cpu")
+    }
+    "veto4" {
+        # 2026-10-22 (research_method §7「否決第三版」的下一版): the holders' veto on the other 29 passing deep-learning
+        # top-20 rules; the statistics, the month's list (only the new rules), its forward test, accounts and board
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "veto4", "--broker", "cathay")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
+        Invoke-Step "4-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "5-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "vetoblends_a" {
+        # 2026-10-22 (research_method §7「否決第三版」的組合): half of the passing blends with their sleeves' holders'-veto
+        # versions (same shares); waits for veto3 (its versions are the twins)
+        Wait-While "等否決第三版（veto3_b）跑完" {
+            Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*-Name veto3_b*" } } 120
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "vetoblends_a", "--broker", "cathay")
+    }
+    "vetoblends_b" {
+        Wait-While "等否決第三版（veto3_b）跑完" {
+            Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*-Name veto3_b*" } } 120
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "vetoblends_b", "--broker", "cathay")
+        Wait-While "等另一半（vetoblends_a）跑完" {
+            Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*--name vetoblends_a*" } }
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
+        Invoke-Step "4-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "5-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "veto3_a" {
         # 2026-10-22 (research_method §7「否決第三版」): half of the holders' veto on the 120 richest passing top-20 single

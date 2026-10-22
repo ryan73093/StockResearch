@@ -41,6 +41,7 @@
         </tbody>
       </table>
     </div>
+  <p class="col-help"><b>欄位說明</b>　<b>工作</b>：排程工作（行情、備份、前向紀錄等）。<b>開始</b>：開始時間。<b>市場</b>：台股或美股。<b>結果</b>：成功、失敗或中斷，以及處理的筆數。</p>
   </section>
 
   <section class="card order-2">
@@ -93,6 +94,7 @@
     <p class="muted small" style="margin:10px 0 0">最新一天沒有超過漲跌幅限制的股票。</p>
   {% endif %}
   {% if quality.gone %}<p class="muted small" style="margin:6px 0 0">前一天有行情、最新一天沒有的股票 {{ quality.gone }} 檔（暫停交易或下市；大量出現代表當天行情沒抓完整）。</p>{% endif %}
+  <p class="col-help"><b>欄位說明</b>　<b>資料</b>：上市、上櫃、ETF 與指數、籌碼、新聞、個股快照等。<b>最新一天</b>：資料更新到哪一天。<b>狀態</b>：正常＝到應有的交易日；落後或異常＝少了交易日或數字可疑。<b>說明</b>：缺幾天、哪裡異常。</p>
 </section>
 {% endif %}
 
@@ -115,6 +117,7 @@
   {% else %}
     <p class="muted" style="margin:0">尚無紀錄；交易日 13:30 起每分鐘記錄證交所、櫃買、Yahoo 與盤後零股的公布時間，連續 5 個交易日後決定決策快照最早可開始的時間。</p>
   {% endif %}
+  <p class="col-help"><b>欄位說明</b>　<b>交易日</b>：哪一天。其他欄：各來源（證交所、櫃買、Yahoo、盤後零股）13:30 後第一次看到當天資料的時間——決定盤後單最早幾點能算。</p>
 </section>
 
 <details class="card card--quiet" id="legacy-tools">

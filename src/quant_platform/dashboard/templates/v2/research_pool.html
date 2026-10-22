@@ -154,6 +154,7 @@
   <div class="card__head"><h2>開發期高勝率榜 <span class="badge">前 {{ pool.high_win|length }}</span></h2></div>
   {{ rule_table(pool.high_win) }}
   <p class="note">開發期勝率高不等於有效：大掃描裡開發期最好的規則多半在驗證期輸。看「驗證期比 0050」那一欄。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>狀態</b>：選手池等級或淘汰原因。<b>開發期期末（0050）</b>：挑規則用的期間結束時的帳戶價值，括號同樣的錢買 0050。<b>開發期比 0050</b>：多或少幾成。<b>3 年勝率／中位</b>：滾動 3 年視窗贏 0050 的比例與中位數差距。<b>最大回撤</b>、<b>費稅佔投入</b>。<b>驗證期比 0050／3 年勝率</b>：挑完規則之後才看的期間（— 是還沒驗證）。<b>說明</b>：等級的原因。</p>
 </section>
 
 {% if pool.ai_rounds %}
@@ -180,6 +181,7 @@
     <span class="muted small" id="rule-count"></span>
   </div>
   {{ rule_table(pool.rules) }}
+  <p class="col-help"><b>欄位說明</b>　欄位同上面的榜：<b>狀態</b>（等級或淘汰原因）、<b>開發期期末與比 0050</b>、<b>3 年勝率／中位</b>、<b>最大回撤</b>、<b>費稅佔投入</b>、<b>驗證期比 0050 與 3 年勝率</b>（挑完規則才看的期間）、<b>說明</b>。上面可以搜尋名稱、依狀態篩選。</p>
 </section>
 </div>
 <script>

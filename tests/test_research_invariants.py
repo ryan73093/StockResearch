@@ -89,3 +89,30 @@ def test_the_latest_trade_audit_must_be_clean(tmp_path):
     (folder / "trade-audit-2.json").write_text(json.dumps({"rules": [{}], "orders": 10, "violation_counts": {}}),
                                                encoding="utf-8")
     assert checked()["ok"]
+
+
+def test_the_news_and_the_second_copy_are_checked(tmp_path):
+    """2026-10-22: the previous session's news on disk; the copy on the other disk done within two days."""
+    import pandas as pd
+
+    (tmp_path / "forward" / "stocks").mkdir(parents=True)
+    (tmp_path / "forward" / "stocks" / "tracked.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "history" / "daily").mkdir(parents=True)
+    pd.DataFrame({"date": [date(2026, 10, 20), date(2026, 10, 21), date(2026, 10, 22)], "close": [1.0, 1.0, 1.0]}).to_parquet(
+        tmp_path / "history" / "daily" / "TAIEX.parquet", index=False)
+    news = tmp_path / "history" / "raw" / "finmind" / "TaiwanStockNews"
+    (news / "20261020").mkdir(parents=True)
+
+    def checked(name):
+        return {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 22))}[name]
+
+    assert not checked("新聞收到前一個交易日")["ok"]
+    (news / "20261021").mkdir()
+    assert checked("新聞收到前一個交易日")["ok"]
+    copy = "研究資料第二份備份（另一顆硬碟，2 天內）"
+    assert not checked(copy)["ok"]
+    (tmp_path / "jobs").mkdir()
+    (tmp_path / "jobs" / "1.json").write_text(json.dumps({"name": "研究資料第二份備份（另一顆硬碟）", "status": "done",
+                                                         "started_at": "2026-10-22T03:30:00+08:00"}), encoding="utf-8")
+    assert checked(copy)["ok"]
+    assert not checked("本月的每月名單存在")["ok"]
