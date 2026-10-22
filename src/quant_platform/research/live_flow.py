@@ -53,17 +53,23 @@ class Flow:
     def __init__(self, state: dict | None = None) -> None:
         self.stocks: dict[str, dict] = (state or {}).get("stocks") or {}
 
-    def update(self, rows: list[dict]) -> int:
+    def update(self, rows: list[dict], day: date | None = None) -> int:
+        """2026-10-22: only the rows of ``day`` (before the open the snapshot still holds the last session's totals —
+        the first morning took them as its start and counted nothing after); a total that fell is a new session."""
         changed = 0
         for row in rows:
             code = str(row.get("stock_id") or "")
             if not common(code):
+                continue
+            if day is not None and not str(row.get("date") or "").startswith(day.isoformat()):
                 continue
             try:
                 total = float(row.get("total_amount") or 0)
             except (TypeError, ValueError):
                 continue
             item = self.stocks.get(code)
+            if item is not None and total < item["amount"]:
+                item = None                   # the totals started again: a new session
             if item is None:                  # the first snapshot: what traded before it is of unknown side
                 item = self.stocks[code] = {"amount": total, "outer": 0.0, "inner": 0.0, "unknown": total}
                 added = 0.0
@@ -177,7 +183,7 @@ def run(history: str | Path, research: str | Path, token: str, now=lambda: datet
             continue
         try:
             rows = (get or fetch)(token)
-            flow.update(rows)
+            flow.update(rows, day)
             due = last_row is None or (moment - last_row).total_seconds() >= EVERY
             save(research, day, flow, groups, moment, minute_row=due)
             if due:

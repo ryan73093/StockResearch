@@ -80,3 +80,17 @@ def test_one_industry_named_two_ways_is_one_row():
     flow = live_flow.Flow()
     flow.update([snap("2882", 100.0, 1), snap("5864", 50.0, 1)])
     assert [entry["industry"] for entry in flow.industries({"2882": "金融保險", "5864": "金融業"})] == ["金融保險"]
+
+
+def test_the_last_sessions_rows_before_the_open_are_not_todays_start():
+    # 2026-10-22: before the open the snapshot holds the last session's totals (dated that day)
+    flow = live_flow.Flow()
+    yesterday = {**snap("2330", 9e9, 1), "date": "2026-10-21 14:30:00.000000"}
+    flow.update([yesterday], date(2026, 10, 22))
+    assert flow.stocks == {}
+    flow.update([{**snap("2330", 1e8, 1), "date": "2026-10-22 09:00:15.000000"}], date(2026, 10, 22))
+    flow.update([{**snap("2330", 3e8, 1), "date": "2026-10-22 09:00:30.000000"}], date(2026, 10, 22))
+    assert flow.stocks["2330"]["outer"] == 2e8
+    restarted = live_flow.Flow({"stocks": {"2330": {"amount": 9e9, "outer": 0.0, "inner": 0.0, "unknown": 9e9}}})
+    restarted.update([{**snap("2330", 1e8, 1), "date": "2026-10-22 09:00:15.000000"}])
+    assert restarted.stocks["2330"]["amount"] == 1e8 and restarted.stocks["2330"]["unknown"] == 1e8   # a new session
