@@ -64,12 +64,14 @@ def test_a_rule_graded_t0_before_the_first_possible_day_is_caught(tmp_path, monk
     (tmp_path / "forward" / "stocks" / "tracked.json").write_text("[]", encoding="utf-8")
     TrialRegistry(tmp_path / "trials.jsonl").register(kind="candidate", period="recent", spec_hash="h", spec_name="早到的",
                                                        input_hash="h", data_fingerprint="x", metrics={})
-    name = "12/28 以前沒有規則被標成 T0"
+    name = "12/29 以前沒有規則被標成 T0"          # 10/23's typhoon closure moved the 60th session from 12/28
     monkeypatch.setattr(daily, "tier", lambda metrics, forward=None: ("T0 候選", ""))
     assert {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 21))}[name]["ok"]
     monkeypatch.setattr(daily, "tier", lambda metrics, forward=None: ("T0", ""))
     found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 21))}[name]
     assert not found["ok"] and "1 個" in found["detail"]
+    assert not {item["name"]: item for item in invariants.run(tmp_path, date(2026, 12, 28))}[name]["ok"]
+    assert {item["name"]: item for item in invariants.run(tmp_path, date(2026, 12, 29))}[name]["ok"]
 
 
 def test_the_latest_trade_audit_must_be_clean(tmp_path):
@@ -116,3 +118,22 @@ def test_the_news_and_the_second_copy_are_checked(tmp_path):
                                                          "started_at": "2026-10-22T03:30:00+08:00"}), encoding="utf-8")
     assert checked(copy)["ok"]
     assert not checked("本月的每月名單存在")["ok"]
+
+
+def test_the_worker_skips_the_checks_on_a_closed_day(tmp_path, monkeypatch):
+    """2026-10-23 (颱風休市): no news or forward records are due on a closed day, so nothing to check or notify."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.scheduler.runner import check_invariants
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'r.db'}"))
+    container.market_calendar.add_manual_closure(date(2026, 10, 23), "颱風休市")
+    ran = []
+    monkeypatch.setattr(invariants, "run", lambda *args, **kwargs: ran.append(args) or [])
+    monkeypatch.setattr(invariants, "save", lambda *args, **kwargs: None)
+    zone = ZoneInfo("Asia/Taipei")
+    assert check_invariants(container, datetime(2026, 10, 23, 16, 0, tzinfo=zone)) is None and not ran
+    assert check_invariants(container, datetime(2026, 10, 22, 16, 0, tzinfo=zone)) == [] and len(ran) == 1

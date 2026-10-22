@@ -104,6 +104,8 @@ def test_the_worker_starts_the_month_once_then_refreshes_the_holdout_each_tradin
     assert start_rolling(container, monday, launch=started.append) == "rolling-holdout"
     assert start_rolling(container, monday, launch=started.append) is None          # once a day
     assert start_rolling(container, datetime(2026, 10, 24, 22, 30, tzinfo=zone), launch=started.append) is None  # Saturday
+    container.market_calendar.add_manual_closure(datetime(2026, 10, 23).date(), "颱風休市")
+    assert start_rolling(container, datetime(2026, 10, 23, 22, 30, tzinfo=zone), launch=started.append) is None  # typhoon
     november = datetime(2026, 11, 2, 22, 30, tzinfo=zone)
     assert start_rolling(container, november, launch=started.append) == "rolling"   # a new cutoff: 2026-09-30
     assert started == ["rolling", "rolling-holdout", "rolling"]

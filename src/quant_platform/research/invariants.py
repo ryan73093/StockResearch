@@ -12,6 +12,10 @@ import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+# The roadmap's date table: the 60th session from 2026-10-01 (the exchange's 2026 closures 10/9, 10/26, 12/25 and the
+# typhoon closure on 10/23 — 19 sessions in October, 21 in November, the 20th in December)
+FIRST_T0 = date(2026, 12, 29)
+
 
 def _check(name: str, source: str, ok: bool, detail: str) -> dict[str, object]:
     return {"name": name, "source": source, "ok": bool(ok), "detail": detail}
@@ -167,8 +171,8 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
             grade = tier(record.metrics, judged.get(key))[0]
             if grade.startswith("T0") and not grade.startswith("T0 候選"):
                 early.append(record.spec_name)
-    checks.append(_check("12/28 以前沒有規則被標成 T0", f"路線圖判定準則：串接前向滿 {FORWARD_SESSIONS} 個交易日",
-                         today >= date(2026, 12, 28) or not early, f"被標成 T0 的 {len(early)} 個"))
+    checks.append(_check(f"{FIRST_T0:%m/%d} 以前沒有規則被標成 T0", f"路線圖判定準則：串接前向滿 {FORWARD_SESSIONS} 個交易日",
+                         today >= FIRST_T0 or not early, f"被標成 T0 的 {len(early)} 個"))
 
     # 2026-10-21 (使用者 2026-10-14：確實檢查每個時期都照當時的台股規則): the latest trade audit, at most 8 days old
     audits = sorted((research / "audit").glob("trade-audit-*.json"), key=lambda path: path.stat().st_mtime) \

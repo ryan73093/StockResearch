@@ -505,7 +505,9 @@ def start_rolling(container: "Container", now: datetime | None = None, launch=No
     else:
         done = folder / f"{cutoff.isoformat()}.json"
         daily = folder / f"holdout-{local_now.date().isoformat()}.started"
-        if local_now.weekday() >= 5 or daily.is_file() or not done.is_file():
+        # 2026-10-23 (颱風休市): a closed day has no new session to run the accounts through
+        if local_now.weekday() >= 5 or daily.is_file() or not done.is_file() \
+                or _exchange_closure(container, "TW", local_now) is not None:
             return None
         name = "rolling-holdout"
         daily.write_text(local_now.isoformat(timespec="seconds"), encoding="utf-8")
@@ -838,6 +840,10 @@ def check_invariants(container: "Container", now: datetime | None = None) -> obj
 
     instance = _instance_dir(container.settings.database_url)
     local = (now or datetime.now(ZoneInfo(container.settings.scheduler_timezone)))
+    closure = _exchange_closure(container, "TW", local)
+    if closure is not None:     # 2026-10-23 (颱風休市): no news or records are due on a closed day
+        logger.info("Skipping invariant checks: TW market closed (%s)", closure)
+        return None
     checks = invariants.run(instance / "research", local.date(), instance / "backups" / "daily")
     invariants.save(instance / "research", checks, local)
     failed = [item for item in checks if not item["ok"]]
