@@ -3658,6 +3658,53 @@ def split_all_batch() -> list:
     return output
 
 
+def split_blends_all_batch() -> list:
+    """2026-10-22 (research_method §7「開盤賣、收盤買」; written before the run): every passing blend (newest engine, no
+    0050) registered before SPLIT_BEFORE with each sleeve that has a split version (a passing rule of the same settings
+    filled "split") replaced by it, the shares as they were — the fill's effect alone. A blend none of whose sleeves
+    has one is left out; a version already registered is skipped by the registry."""
+    import json as _json
+
+    from quant_platform.research.blend import BlendRule, Sleeve, parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = Path("instance") / "research"
+    records = TrialRegistry(research / "trials.jsonl").records()
+    latest = newest([record for record in records if record.kind == "candidate" and record.period == "recent"
+                     and str(record.metrics.get("engine", "")).startswith(ENGINE_VERSION.split("+")[0])])
+    splits: dict[str, DailyRule] = {}
+    blends = []
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            rule = parse_spec(spec)
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if isinstance(rule, BlendRule):
+            if (record.created_at < SPLIT_BEFORE and not uses_0050(spec) and not rule.core
+                    and tier(record.metrics)[0] in PASSING_TIERS):
+                blends.append((record.trial_id, rule))
+        elif rule.execution == "split" and tier(record.metrics)[0] in PASSING_TIERS:
+            splits[execution_key(rule.canonical())] = rule
+    output = []
+    for trial, blend in blends:
+        sleeves, changed = [], 0
+        for sleeve in blend.sleeves:
+            twin = splits.get(execution_key(sleeve.rule.canonical()))
+            if twin is not None and sleeve.rule.execution != "split":
+                sleeves.append(Sleeve(rule=twin, share=sleeve.share))
+                changed += 1
+            else:
+                sleeves.append(sleeve)
+        if not changed:
+            continue
+        suffix = f"（#{trial} 開盤賣、收盤買）"
+        output.append(BlendRule(name=blend.name[: 80 - len(suffix)] + suffix, sleeves=tuple(sleeves)))
+    print(f"過門檻的組合 {len(blends)} 個；有子策略可換成開盤賣、收盤買的 {len(output)} 個", flush=True)
+    return output
+
+
 def next10_blend_batch() -> list:
     """2026-10-21: #6086 and #6087 with #6090 (the same deep top 10 filled at the next close) in place of #5983
     (blend_scan.NEXT10_SPLITS). Registered (research_method §7): each passes if it is a T0 候選 (high-risk or not) on
@@ -4240,4 +4287,6 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
-           "split_b": lambda: split_all_batch()[1::2], "splitblend": split_blend_batch}
+           "split_b": lambda: split_all_batch()[1::2], "splitblend": split_blend_batch,
+           "splitblends": split_blends_all_batch, "splitblends_a": lambda: split_blends_all_batch()[0::2],
+           "splitblends_b": lambda: split_blends_all_batch()[1::2]}
