@@ -324,7 +324,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge"),
+                            "limits-overrides", "knowledge", "govbank-events"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--ask", help="knowledge：問研究知識庫（AI 只根據紀錄回答；沒有金鑰時列出最相關的紀錄）")
@@ -1062,6 +1062,17 @@ def main() -> int:
         report = json.loads(path.read_text(encoding="utf-8"))
         print(f"比對 {report['compared']:,} 個（股票×交易日）：漲跌停價不同 {report['limits_differ']:,} 個、"
               f"漲跌停鎖死判斷不同 {report['locks_differ']:,} 個；各年 {report['limits_differ_by_year']}；鎖死組合 {report['locks']}")
+        print(f"已寫入 {path}")
+        return 0
+
+    if args.command == "govbank-events":
+        # 2026-10-23 (research_method §7「八大行庫」的下一版): the banks' unusually large buying as an event
+        from quant_platform.research import govbank_events
+
+        path = govbank_events.run(Path(args.base), RESEARCH)
+        report = json.loads(path.read_text(encoding="utf-8"))
+        for kind, periods in report["results"].items():
+            print(kind, report["verdicts"][kind], json.dumps(periods, ensure_ascii=False), flush=True)
         print(f"已寫入 {path}")
         return 0
 
