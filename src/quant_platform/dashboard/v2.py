@@ -1126,6 +1126,74 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                                growth=summary(research_dir), rolling=rolling, jobs=JobLog(research_dir).jobs(),
                                division=division, holding=holding)
 
+    @blueprint.get("/research/knowledge")
+    def research_knowledge():
+        """2026-10-22 (使用者：我所有的失敗紀錄都要記起來，作為知識庫，讓後面的人可以用 AI 問他的決策、確認可不可行、
+        回測狀況): research/knowledge.py — ask (the model answers from the records only), the failures, every record."""
+        from quant_platform.research import knowledge
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        try:
+            built = knowledge.ensure(_project_root(), research_dir)
+        except Exception:
+            logger.exception("Knowledge base build failed")
+            built = knowledge.meta(research_dir)
+        question = (request.args.get("q") or "").strip()[:500]
+        kind, verdict = request.args.get("kind") or "", request.args.get("verdict") or ""
+        client, ai = knowledge.ai_status(dependencies.settings, research_dir)
+        # 2026-10-22 (使用者：向量資料庫可用 BGE-M3、Qdrant): the meaning's ranking fused with the keywords'
+        meaning = knowledge.semantic(research_dir, question, _project_root()) if question else None
+        answer = (knowledge.ask(research_dir, question, client, semantic_ids=meaning)
+                  if question and request.args.get("ai") == "1" else None)
+        results = (knowledge.search(research_dir, question, limit=40, kinds=(kind,) if kind else None,
+                                    verdicts=(verdict,) if verdict else None, semantic_ids=meaning) if question else [])
+        everything = knowledge.entries(research_dir)
+        from quant_platform.research import knowledge_vectors
+
+        vectors = knowledge_vectors.status(research_dir)
+        return render_template(
+            "v2/research_knowledge.html", active_nav="research", research_tab="knowledge", built=built,
+            question=question, answer=answer, results=results, kind=kind, verdict=verdict, ai=ai,
+            mode=("語意（BGE-M3，Qdrant）＋關鍵字" if meaning is not None else "關鍵字") if question else "",
+            vectors=vectors,
+            examples=knowledge.EXAMPLES, gist=knowledge.gist, failures=knowledge.failures(research_dir),
+            failed_total=sum(1 for entry in everything if entry["verdict"] in knowledge.FAILED),
+            failed_trials=sum(1 for entry in everything if entry["kind"] == "試驗" and entry["verdict"] == "失敗"),
+            scan_candidates=knowledge.scan_total(research_dir), counts=knowledge.counts(research_dir),
+            listing=knowledge.listed(research_dir, kind, verdict) if (kind or verdict) and not question else [],
+            recent=knowledge.recent_questions(research_dir))
+
+    @blueprint.get("/research/knowledge.json")
+    def research_knowledge_json():
+        """The same for other tools and agents: ?q= (and ai=1 for the model's answer)."""
+        from quant_platform.research import knowledge
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        built = knowledge.ensure(_project_root(), research_dir)
+        question = (request.args.get("q") or "").strip()[:500]
+        limit = max(1, min(100, int(request.args.get("limit") or 20)))
+        meaning = knowledge.semantic(research_dir, question, _project_root()) if question else None
+        payload = {"built": built, "question": question, "semantic": meaning is not None,
+                   "results": knowledge.search(research_dir, question, limit=limit, semantic_ids=meaning) if question else []}
+        if question and request.args.get("ai") == "1":
+            client, _ai = knowledge.ai_status(dependencies.settings, research_dir)
+            payload["answer"] = knowledge.ask(research_dir, question, client, semantic_ids=meaning)
+        return jsonify(payload)
+
+    @blueprint.get("/research/knowledge/<entry_id>")
+    def research_knowledge_entry(entry_id: str):
+        from quant_platform.research import knowledge
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        knowledge.ensure(_project_root(), research_dir)
+        entry = knowledge.find(research_dir, entry_id)
+        if entry is None:
+            abort(404)
+        trials = [found for number in entry.get("trials") or [] if entry["kind"] != "試驗"
+                  for found in [knowledge.find(research_dir, f"T-{number}")] if found]
+        return render_template("v2/research_knowledge_entry.html", active_nav="research", research_tab="knowledge",
+                               entry=entry, trials=trials, gist=knowledge.gist)
+
     @blueprint.get("/research/rl")
     def research_rl():
         """2026-10-16 (使用者：我要怎麼看到學習的狀況？): every RL robot's yearly learning record."""

@@ -1,0 +1,38 @@
+{% extends "v2/base.html" %}
+{# 2026-10-22: one record of the research knowledge base, whole, with where it came from. #}
+{% block title %}{{ entry.title[:40] }} · 研究知識庫{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>{{ entry.title }}</h1>
+    <p class="page-head__sub">{{ entry.kind }}・{{ entry.date or '日期不明' }}・判定 {{ entry.verdict }}{% if entry.judged %}（自動判讀，以全文為準）{% endif %}</p>
+  </div>
+  <div class="page-head__meta"><a href="/research/knowledge">回知識庫</a>{% if entry.link %}・<a href="{{ entry.link }}">原始頁面</a>{% endif %}</div>
+</header>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card__head"><h2>全文</h2><span class="muted small">出處：{{ entry.source or '—' }}</span></div>
+  <p class="kb-text">{{ entry.text }}</p>
+</section>
+{% if trials %}
+<section class="card">
+  <div class="card__head"><h2>提到的試驗</h2><span class="muted small">{{ trials|length }} 個</span></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>試驗</th><th>判定</th><th>回測重點</th></tr></thead>
+      <tbody>
+      {% for item in trials %}
+        <tr>
+          <td data-primary><a href="/research/knowledge/{{ item.id }}">{{ item.title }}</a></td>
+          <td data-label="判定">{{ item.verdict }}</td>
+          <td data-label="回測重點" class="small">{{ gist(item) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　這段紀錄裡出現的試驗編號（#）在知識庫的回測紀錄；點進去看等級、期末金額、回撤與沒過的原因。</p>
+</section>
+{% endif %}
+{% endblock %}

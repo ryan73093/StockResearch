@@ -139,10 +139,16 @@ PAID_FACTORS = {
     "block_premium_20": "鉅額交易溢價（20 日內鉅額成交均價相對當天收盤，依股數加權）",
     "block_volume_20": "鉅額交易量（20 日內鉅額成交股數佔發行股數）",
     "broker_concentration_5": "主力買超（5 日前 15 大分點買減賣 ÷ 買加賣；2021-06-28 起，短歷史賽道）",
+    # 2026-10-22 (使用者：還有什麼要加入分析的): the eight government banks (八大行庫) buy for the state's funds and
+    # support the market in falls — their net buying over 20 sessions, and only on the sessions the stock fell
+    "govbank_net_20": "八大行庫買超（20 日官股買減賣金額 ÷ 市值；2021-06-30 起，短歷史賽道）",
+    "govbank_dip_buy_20": "八大行庫逢跌買（20 日內股價下跌那幾天的官股買減賣 ÷ 市值；2021-06-30 起，短歷史賽道）",
 }
+GOVBANK_FACTORS = ("govbank_net_20", "govbank_dip_buy_20")
 PAID_SOURCES = {"margin_safe": "TaiwanStockMarginMaintenance", "margin_in_profit": "TaiwanStockMarginMaintenance",
                 "low_pledge_loan_20": "TaiwanStockLoanCollateralBalance", "block_premium_20": "TaiwanStockBlockTrade",
-                "block_volume_20": "TaiwanStockBlockTrade", "broker_concentration_5": "TaiwanStockBrokerDailyConcentration"}
+                "block_volume_20": "TaiwanStockBlockTrade", "broker_concentration_5": "TaiwanStockBrokerDailyConcentration",
+                "govbank_net_20": "TaiwanStockGovernmentBankBuySell", "govbank_dip_buy_20": "TaiwanStockGovernmentBankBuySell"}
 
 STOCK_DIVIDENDS = "StockDividends"
 DIVIDEND_LISTING_SESSIONS = 70
@@ -619,6 +625,14 @@ class ChipStore:
             bought = self._paid(dataset, "top_buy_volume", fill=0).rolling(5, min_periods=5).sum()
             sold = self._paid(dataset, "top_sell_volume", fill=0).rolling(5, min_periods=5).sum()
             frame = (bought - sold) / (bought + sold).where(bought + sold > 0)
+        elif factor in GOVBANK_FACTORS:
+            net = self._paid(dataset, "buy_amount", zero=True) - self._paid(dataset, "sell_amount", zero=True)
+            shares = self._daily("TaiwanStockShareholding", "NumberOfSharesIssued")
+            close = pd.DataFrame(self._close.T, index=net.index, columns=net.columns).shift(1)   # the table's day
+            if factor == "govbank_dip_buy_20":                 # only the sessions the stock closed lower
+                net = net.where(close < close.shift(1), 0.0).where(net.notna())
+            worth = shares * close
+            frame = net.rolling(20, min_periods=20).sum() / worth.where(worth > 0)
         else:
             raise ValueError(factor)
         return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)

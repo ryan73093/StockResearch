@@ -20,6 +20,10 @@ dependencies = [
   "pyarrow>=17",
   "PyJWT[crypto]>=2.8,<3",
   "gunicorn>=23,<24; platform_system != 'Windows'",
+  # 2026-10-22 (使用者：向量資料庫可用 BGE-M3、Qdrant): the research knowledge base's vectors (research/knowledge_vectors.py;
+  # torch is already in the environment for the deep models)
+  "transformers>=5.16,<6",
+  "qdrant-client>=1.19,<2",
 ]
 
 [project.optional-dependencies]

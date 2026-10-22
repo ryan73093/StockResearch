@@ -316,3 +316,30 @@ def test_the_split_fill_sells_at_the_open_and_buys_at_the_close():
     assert trades[(days[3], "A.TW", "SELL")] == 9.8                     # sold at the open
     assert trades[(days[3], "B.TW", "BUY")] == 10.0
     assert rule.canonical()["execution"] == "split"
+
+
+def test_the_opening_auction_cap_tightens_only_the_open_side(monkeypatch):
+    """2026-10-22 (開盤賣做不做得到): OPEN_PARTICIPATION caps a fill in the opening auction — a "split" rule's sells —
+    and leaves its buys at the close alone; the engine keeps it at NEXT_DAY_PARTICIPATION."""
+    assert daily.OPEN_PARTICIPATION == daily.NEXT_DAY_PARTICIPATION
+    days = DAYS[:8]
+    closes = {"A.TW": {day: 10.0 for day in days}, "B.TW": {day: 10.0 for day in days}}
+    data = replace(market(days, closes), opens={"A.TW": {day: 9.8 for day in days}, "B.TW": {day: 10.0 for day in days}},
+                   traded_value={"A.TW": {day: 20_000_000.0 for day in days}, "B.TW": {day: 20_000_000.0 for day in days},
+                                 "0050.TW": {day: 5_000_000_000.0 for day in days}})
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, top=3, execution="split")
+
+    def sells(cap):
+        monkeypatch.setattr(daily, "OPEN_PARTICIPATION", cap)
+        ledger = []
+        simulate_daily(data, rule, FREE, days[0], days[-1], {days[1]: ["A.TW"], days[3]: ["B.TW"]},
+                       SeedPlan(100_000, 0), ledger=ledger)
+        return ledger
+
+    plain, tight = sells(daily.NEXT_DAY_PARTICIPATION), sells(0.002)
+    sold = lambda ledger, day: sum(row["shares"] for row in ledger if row["side"] == "SELL" and row["day"] == day)
+    bought = lambda ledger: sum(row["shares"] for row in ledger if row["side"] == "BUY" and row["symbol"] == "A.TW")
+    assert bought(plain) == bought(tight) == 10_000                          # the close side keeps 0.5%: 100,000
+    assert sold(plain, days[3]) == 10_000                                    # 0.5% of 20,000,000 at 9.8: all of it
+    assert sold(tight, days[3]) == 4_081 and sold(tight, days[4]) == 4_081   # 0.2%: 40,000 at 9.8, the rest later
+    assert any(row["side"] == "BLOCKED" and row["order"] == "SELL" and "0.2%" in row["reason"] for row in tight)

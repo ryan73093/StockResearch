@@ -1,0 +1,121 @@
+{% extends "v2/base.html" %}
+{# 2026-10-22 (使用者：我所有的失敗紀錄都要記起來，作為知識庫，讓後面的人可以用 AI 問他的決策、確認可不可行、回測狀況):
+   research/knowledge.py. Tabs: ask, the failures, every record, the recent questions. #}
+{% block title %}研究知識庫 · 交易研究分析平台{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>研究知識庫</h1>
+    <p class="page-head__sub">{{ '{:,}'.format(built.entries or 0) }} 筆紀錄・失敗 {{ '{:,}'.format(failed_total) }} 筆・{{ (built.built_at or '')[:16].replace('T', ' ') }} 更新（紀錄有變自動重建）</p>
+  </div>
+  <div class="page-head__meta"><a href="/research">研究總覽</a>・<a href="/research/knowledge.json?q={{ question|urlencode }}">JSON</a></div>
+</header>
+{% endblock %}
+{% block content %}
+{% macro badge(verdict) %}<span class="badge {{ 'badge--bad' if verdict in ('失敗', '淘汰') else ('badge--ok' if verdict == '通過' else ('badge--warn' if verdict in ('部分', '事先登錄', '進行中') else '')) }}">{{ verdict }}</span>{% endmacro %}
+{% macro entry_table(rows, show_score=false) %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>紀錄</th><th>類別</th><th>判定</th><th>日期</th><th>重點</th></tr></thead>
+      <tbody>
+      {% for entry in rows %}
+        <tr>
+          <td data-primary><a href="/research/knowledge/{{ entry.id }}">{{ entry.title }}</a>{% if entry.cite %} <span class="muted small">[{{ entry.cite }}]</span>{% endif %}</td>
+          <td data-label="類別">{{ entry.kind }}{% if entry.family and entry.kind == '最佳化紀錄' %}<br><span class="muted small">{{ entry.family }}</span>{% endif %}</td>
+          <td data-label="判定">{{ badge(entry.verdict) }}{% if entry.judged %}<br><span class="muted small">自動判讀</span>{% endif %}</td>
+          <td data-label="日期">{{ entry.date or '—' }}</td>
+          <td data-label="重點" class="small">{{ gist(entry) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endmacro %}
+
+<section class="card" id="ask" data-tab="問 AI" data-tab-default>
+  <div class="card__head"><h2>問研究知識庫</h2><span class="muted small">AI 只根據下面的紀錄回答，每句附出處</span></div>
+  <form class="kb-form" action="/research/knowledge" method="get" role="search">
+    <label class="visually-hidden" for="kb-q">問題</label>
+    <input id="kb-q" name="q" type="search" value="{{ question }}" placeholder="例如：停損有沒有效？月營收的策略可不可行？#6490 的回測？" autocomplete="off" maxlength="500">
+    <div class="kb-form__buttons">
+      <button type="submit" class="btn">搜尋紀錄</button>
+      <button type="submit" class="btn btn--primary" name="ai" value="1"{% if not ai.ready %} disabled title="{{ ai.note }}"{% endif %}>問 AI</button>
+    </div>
+  </form>
+  <p class="muted small" style="margin:6px 0 0">{{ ai.note }}　試試：{% for example in examples %}<a href="/research/knowledge?q={{ example|urlencode }}">{{ example }}</a>{% if not loop.last %}、{% endif %}{% endfor %}</p>
+
+  {% if answer and (answer.conclusion or answer.note) %}
+  <div class="kb-answer">
+    {% if answer.conclusion %}<p class="kb-answer__lead"><strong>{{ answer.conclusion }}</strong></p>{% endif %}
+    {% for paragraph in (answer.answer or '').split('\n') if paragraph.strip() %}<p>{{ paragraph }}</p>{% endfor %}
+    {% if answer.citations %}<p class="muted small">出處：{% for cite in answer.citations %}{% set hit = (answer.evidence|selectattr('cite', 'equalto', cite)|list) %}{% if hit %}<a href="/research/knowledge/{{ hit[0].id }}">[{{ cite }}] {{ hit[0].title[:30] }}</a>{% else %}[{{ cite }}]{% endif %}{% if not loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
+    {% if answer.note %}<p class="muted small">{{ answer.note }}</p>{% endif %}
+    {% if answer.model %}<p class="muted small">模型 {{ answer.model }}；同一個問題在知識庫沒變之前不會重複計費。</p>{% endif %}
+  </div>
+  {% if answer.evidence %}<h3 class="small" style="margin:12px 0 6px">AI 讀的紀錄</h3>{{ entry_table(answer.evidence) }}{% endif %}
+  {% endif %}
+
+  {% if question and results %}
+  <h3 class="small" style="margin:12px 0 6px">搜尋結果（{{ results|length }} 筆，最相關的在上；搜尋方式：{{ mode }}）</h3>
+  {{ entry_table(results) }}
+  {% elif question %}
+  <p class="muted">知識庫沒有找到相關紀錄。換個說法，或用策略名稱、因子名稱、#試驗編號查。</p>
+  {% endif %}
+  <p class="col-help"><b>欄位說明</b>　<b>紀錄</b>：點進去看全文與出處。<b>類別</b>：研究紀錄（研究方法每一段）、最佳化紀錄、淘汰方向、試驗（每個規則最新一次回測）、大規模搜尋、組合搜尋、開發紀錄、使用者決定、需求。<b>判定</b>：失敗＝照事先寫的判定沒過、或回測沒過門檻（T2／T3）；通過＝過門檻（T0 候選含高風險）；部分＝有過有沒過或只到 T1；自動判讀＝從文字判斷，以全文為準。<b>重點</b>：結果或原因那一段的開頭。</p>
+</section>
+
+<section class="card" id="failures" data-tab="失敗紀錄">
+  <div class="card__head"><h2>失敗紀錄</h2><span class="muted small">寫下來的失敗 {{ failures|length }} 筆，最新在上</span></div>
+  <p class="small" style="margin:0 0 8px">另外 <a href="/research/knowledge?kind=試驗&verdict=失敗">{{ '{:,}'.format(failed_trials) }} 個試驗沒過門檻</a>（每個規則最新一次回測），以及 {{ '{:,}'.format(scan_candidates) }} 個大規模搜尋的設定（只有最後名單逐一登錄）。每一筆失敗都寫原因與下一版怎麼改（研究方法第 7 節）。</p>
+  {{ entry_table(failures) }}
+  <p class="col-help"><b>欄位說明</b>　這裡列研究方法、最佳化紀錄、淘汰方向與大規模搜尋裡的失敗；沒過門檻的單一試驗太多，用上面的連結或搜尋查。判定是「自動判讀」的，以全文為準（同一段可能有過也有沒過的版本）。</p>
+</section>
+
+<section class="card" id="all" data-tab="全部紀錄">
+  <div class="card__head"><h2>全部紀錄</h2><span class="muted small">點數字列出那一類</span></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>類別</th><th class="num">紀錄</th><th class="num">失敗</th><th class="num">通過</th><th class="num">部分</th><th class="num">其他</th></tr></thead>
+      <tbody>
+      {% for row in counts %}
+        <tr>
+          <td data-primary><a href="/research/knowledge?kind={{ row.kind|urlencode }}#all">{{ row.kind }}</a></td>
+          <td class="num" data-label="紀錄">{{ '{:,}'.format(row.total) }}</td>
+          <td class="num" data-label="失敗">{% if row.failed %}<a href="/research/knowledge?kind={{ row.kind|urlencode }}&verdict={{ '淘汰' if row.kind == '淘汰方向' else '失敗' }}#all">{{ '{:,}'.format(row.failed) }}</a>{% else %}0{% endif %}</td>
+          <td class="num" data-label="通過">{{ '{:,}'.format(row.passed) }}</td>
+          <td class="num" data-label="部分">{{ '{:,}'.format(row.partial) }}</td>
+          <td class="num" data-label="其他">{{ '{:,}'.format(row.other) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if listing %}
+  <h3 class="small" style="margin:12px 0 6px">{{ kind or '全部' }}{% if verdict %}・{{ verdict }}{% endif %}（最新 {{ listing|length }} 筆）</h3>
+  {{ entry_table(listing) }}
+  {% endif %}
+  <p class="small muted" style="margin:8px 0 0">向量索引：{% if vectors %}BGE-M3（語意向量＋學習式稀疏權重）存在內嵌 Qdrant「{{ vectors.collection }}」，{{ '{:,}'.format(vectors.points or 0) }} 筆，{{ (vectors.at or '')[:16].replace('T', ' ') }} 更新（每小時補新紀錄）{% else %}還沒建立（只用關鍵字搜尋）{% endif %}。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>紀錄</b>：知識庫裡這一類的筆數（試驗是每個規則最新一次回測）。<b>失敗／通過／部分</b>：判定（研究紀錄是自動判讀）。<b>其他</b>：說明、事先登錄、進行中、診斷、使用者決定等。來源：研究方法、開發歷程、AGENTS.md、需求、試驗登錄、大規模與組合搜尋的結果檔。</p>
+</section>
+
+<section class="card" id="recent" data-tab="最近的問題">
+  <div class="card__head"><h2>最近問過的問題</h2><span class="muted small">AI 回答過的（每一題都留紀錄）</span></div>
+  {% if recent %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>問題</th><th>結論</th><th>時間</th></tr></thead>
+      <tbody>
+      {% for item in recent %}
+        <tr>
+          <td data-primary><a href="/research/knowledge?q={{ item.question|urlencode }}&ai=1">{{ item.question }}</a></td>
+          <td data-label="結論" class="small">{{ item.conclusion }}</td>
+          <td data-label="時間">{{ (item.at or '')[:16].replace('T', ' ') }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted">還沒有人問過。</p>{% endif %}
+  <p class="col-help"><b>欄位說明</b>　點問題重看答案（知識庫沒變就讀已存的答案，不重複計費）。</p>
+</section>
+{% endblock %}

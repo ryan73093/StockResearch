@@ -45,7 +45,7 @@
           <tr>
             <td data-primary>{{ row.label }}<br><span class="muted small">{{ row.name }}</span></td>
             <td data-label="類別">{{ row.family }}</td>
-            <td data-label="判定"><span class="badge {{ 'badge--ok' if row.verdict == '強' else ('badge--warn' if row.verdict in ('不穩', '反向') else '') }}">{{ row.verdict }}</span></td>
+            <td data-label="判定"><span class="badge {{ 'badge--ok' if (row.verdict or '').startswith('強') else ('badge--warn' if (row.verdict or '').startswith(('不穩', '反向')) else '') }}">{{ row.verdict }}</span></td>
             <td class="num" data-label="2015～2020">{{ pct(row.before) }}</td>
             <td class="num" data-label="2020-10 起">{{ pct(row.regime) }}</td>
             <td class="num" data-label="2024 起">{{ pct(row.recent) }}</td>
@@ -55,7 +55,7 @@
         </tbody>
       </table>
     </div>
-    <p class="col-help"><b>欄位說明</b>　<b>判定</b>：強＝前五分之一在 2015～2020 與 2020-10 起都比平均多 2 個百分點以上；反向＝都少 2 點以上（反著用）；不穩＝一段好一段壞；弱＝其他。<b>2015～2020／2020-10 起／2024 起</b>：每週選這個因子排名前五分之一的股票，之後 20 個交易日比全部合格股票平均每年多賺多少。<b>過門檻策略用到</b>：目前過門檻的策略裡有幾個用到它（組合帳戶算子策略的）。</p>
+    <p class="col-help"><b>欄位說明</b>　<b>判定</b>：強＝前五分之一在 2015～2020 與 2020-10 起都比平均多 2 個百分點以上；反向＝都少 2 點以上（反著用）；不穩＝一段好一段壞；弱＝其他。（短歷史）＝資料 2021 起才有，改看 2020-10～2023 與 2024 起兩段不重疊的期間，只用在短歷史賽道。<b>2015～2020／2020-10 起／2024 起</b>：每週選這個因子排名前五分之一的股票，之後 20 個交易日比全部合格股票平均每年多賺多少。<b>過門檻策略用到</b>：目前過門檻的策略裡有幾個用到它（組合帳戶算子策略的）。</p>
   </div>
 
   <div data-tab="分析項目" id="status-analyses">

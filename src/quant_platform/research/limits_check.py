@@ -19,6 +19,12 @@ import numpy as np
 TAIPEI = ZoneInfo("Asia/Taipei")
 DATASET = "TaiwanStockPriceLimit"
 TOLERANCE = 1e-6
+# 2026-10-22 (engine 1.6.0, roadmap S9-W23; switched on 2026-10-31 with ENGINE_VERSION, before the November roll): the
+# exchange's published limits on every stock-day they differ from the engine's own reckoning (16,091 of 2.64 million
+# from 2015-06) or the engine has none, kept as overrides (history/limits/official_overrides.parquet, built with the
+# switch off by ``build_overrides``) so the load stays small; days after the download keep the engine's reckoning.
+OFFICIAL_LIMITS = False
+OVERRIDES = Path("limits") / "official_overrides.parquet"
 
 
 def official(base: str | Path, codes: list[str]) -> dict[str, dict[str, tuple[float, float]]]:
@@ -86,6 +92,84 @@ def compare(sessions: list[date], symbols: list[str], close: np.ndarray, up: np.
             "examples": examples}
 
 
+def overrides(sessions: list[date], symbols: list[str], close: np.ndarray, up: np.ndarray, down: np.ndarray,
+              exchange: dict[str, dict[str, tuple[float, float]]], start: date) -> list[dict[str, object]]:
+    """The (stock, session)s from ``start`` that traded and whose exchange limits differ from the engine's, or that
+    the engine has none for: symbol, date, low, high."""
+    rows = []
+    for row, symbol in enumerate(symbols):
+        days = exchange.get(symbol.split(".")[0])
+        if not days:
+            continue
+        for column, day in enumerate(sessions):
+            if day < start or not np.isfinite(close[row, column]):
+                continue
+            found = days.get(day.isoformat())
+            if not found:
+                continue
+            low, high = found
+            mine_up, mine_down = up[row, column], down[row, column]
+            if (not np.isfinite(mine_up) or not np.isfinite(mine_down) or abs(mine_up - high) > TOLERANCE
+                    or abs(mine_down - low) > TOLERANCE):
+                rows.append({"symbol": symbol, "date": day, "low": float(low), "high": float(high)})
+    return rows
+
+
+def build_overrides(base: str | Path) -> dict[str, object]:
+    """The overrides against the engine's own limits (the switch off while loading)."""
+    import pandas as pd
+
+    from quant_platform.research import daily
+
+    global OFFICIAL_LIMITS
+    kept, OFFICIAL_LIMITS = OFFICIAL_LIMITS, False
+    try:
+        _data, fp = daily.load(Path(base))
+    finally:
+        OFFICIAL_LIMITS = kept
+    up, down = fp.price_limits()
+    exchange = official(base, sorted({symbol.split(".")[0] for symbol in fp.symbols}))
+    # FinMind's limits before 2015-06-01 are ±10% (computed back), the exchange's were ±7% then: from the widening only
+    start = max(fp.sessions[0], daily.PRICE_LIMIT_WIDENED)
+    rows = overrides(list(fp.sessions), list(fp.symbols), fp.panel.close, up, down, exchange, start)
+    path = Path(base) / OVERRIDES
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows, columns=["symbol", "date", "low", "high"]).to_parquet(path, index=False)
+    return {"path": str(path), "rows": len(rows), "stocks": len({row["symbol"] for row in rows}),
+            "from": start.isoformat(), "through": fp.sessions[-1].isoformat()}
+
+
+def read_overrides(base: str | Path, first_year: int = 0) -> dict[str, dict[date, tuple[float, float]]]:
+    """symbol → day → (low, high) from the overrides file ({} without it)."""
+    import pandas as pd
+
+    path = Path(base) / OVERRIDES
+    if not path.is_file():
+        return {}
+    frame = pd.read_parquet(path)
+    days = pd.to_datetime(frame["date"]).dt.date
+    output: dict[str, dict[date, tuple[float, float]]] = {}
+    for symbol, day, low, high in zip(frame["symbol"], days, frame["low"], frame["high"]):
+        if day.year >= first_year:
+            output.setdefault(str(symbol), {})[day] = (float(low), float(high))
+    return output
+
+
+def digest(base: str | Path, until: date | None = None) -> str:
+    """The overrides a run reads (dated by ``until``), part of its data fingerprint while the switch is on."""
+    import hashlib
+
+    import pandas as pd
+
+    path = Path(base) / OVERRIDES
+    if not path.is_file():
+        return "none"
+    frame = pd.read_parquet(path)
+    if until is not None:
+        frame = frame[pd.to_datetime(frame["date"]) <= pd.Timestamp(until)]
+    return hashlib.sha256(pd.util.hash_pandas_object(frame, index=False).to_numpy().tobytes()).hexdigest()
+
+
 def run(base: str | Path, research: str | Path) -> Path:
     from quant_platform.research import daily
 
@@ -96,7 +180,7 @@ def run(base: str | Path, research: str | Path) -> Path:
     found = compare(list(fp.sessions), list(fp.symbols), fp.panel.close, up, down, exchange, daily.RECENT_START,
                     (locked_up, locked_down))
     report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "start": daily.RECENT_START.isoformat(),
-              "stocks_with_limits": len(exchange), **found}
+              "official_limits": OFFICIAL_LIMITS, "stocks_with_limits": len(exchange), **found}
     folder = Path(research) / "diagnostics"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"limits-check-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"

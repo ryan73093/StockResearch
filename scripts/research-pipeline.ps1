@@ -1,4 +1,4 @@
-﻿param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "robustfront", "exec_a", "exec_b", "llmreplay", "monthmodels", "next10blend", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind", "finmind-paid", "finmind-paid-b", "finmind-paid-c", "paid-factors", "newdata", "intraday", "limitscheck", "finmind-paid-c2", "newdata-now", "finmind-paid-rest", "holders2", "holders3", "liveflow", "modeli", "monthfill", "deep27", "modelj", "jdeep", "split", "split_a", "split_b", "splitblend", "splitblends", "splitblends_a", "splitblends_b", "bigscan3", "fmdaily_a", "fmdaily_b", "openfeas")][string]$Name = "daily")
+﻿param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "robustfront", "exec_a", "exec_b", "llmreplay", "monthmodels", "next10blend", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind", "finmind-paid", "finmind-paid-b", "finmind-paid-c", "paid-factors", "newdata", "intraday", "limitscheck", "finmind-paid-c2", "newdata-now", "finmind-paid-rest", "holders2", "holders3", "liveflow", "modeli", "monthfill", "deep27", "modelj", "jdeep", "split", "split_a", "split_b", "splitblend", "splitblends", "splitblends_a", "splitblends_b", "bigscan3", "fmdaily_a", "fmdaily_b", "openfeas", "opentight", "govbank", "engine160", "veto2", "knowledge")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -1334,6 +1334,45 @@ switch ($Name) {
         Wait-While "等 FinMind 付費資料下載與分析（paid-factors）" { $state = if (Test-Path $paidRecord) { Get-Content $paidRecord -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }; -not $state -or $state.status -eq "running" } 120
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-study" @("-m", "quant_platform.research", "intraday")
+    }
+    "knowledge" {
+        # 2026-10-22 (使用者：失敗紀錄都要記起來，作為知識庫; 向量資料庫可用 BGE-M3、Qdrant): the knowledge base rebuilt
+        # and its new or changed entries encoded as BGE-M3 vectors into the embedded Qdrant, on the CPU (the scheduler
+        # starts it hourly at :45 when a record changed)
+        Invoke-Step "1-index" @("-m", "quant_platform.research", "knowledge", "--index", "--device", "cpu")
+    }
+    "veto2" {
+        # 2026-10-22 (research_method §7「否決第二版」, written before the run): the margin veto (m1) on the ten richest
+        # passing single rules without a veto and the holders' veto (h2) on three; the statistics, the month's list
+        # (only the new rules), its forward test, the forward accounts and the board
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "veto2", "--broker", "cathay")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
+        Invoke-Step "4-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "5-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "engine160" {
+        # 2026-10-22 (engine 1.6.0, roadmap S9-W23): the overrides (the exchange's limits where the engine's reckoning
+        # differs), then the limits check with them for this process only — the switch itself goes on 10-31
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-overrides" @("-m", "quant_platform.research", "limits-overrides")
+        Invoke-Step "2-check" @("-m", "quant_platform.research", "limits-check", "--official")
+    }
+    "govbank" {
+        # 2026-10-22 (research_method §7「八大行庫」, written before the run): the government banks' table from the day
+        # files, the two stock factors' strength (short history) and the market-wide net buying as a market signal
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-table" @("-m", "quant_platform.research.history", "paid", "--datasets", "TaiwanStockGovernmentBankBuySell")
+        Invoke-Step "2-strength" @("-m", "quant_platform.research", "factors", "--recent", "--only", "govbank_net_20,govbank_dip_buy_20")
+        Invoke-Step "3-market" @("-m", "quant_platform.research", "market-signals")
+    }
+    "opentight" {
+        # 2026-10-22 (開盤賣做不做得到): the frontier's rules that sell at the open (#6490, #6759, #6695) with costs doubled
+        # and the opening-auction fill capped at 0.2% of the day instead of 0.5% (a diagnostic, not a trial)
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-check" @("-m", "quant_platform.research", "robustness", "--broker", "cathay", "--trials", "6490,6759,6695")
     }
     "openfeas" {
         # 2026-10-22 (開盤賣做不做得到): the sampled sells' opening auction against the first odd-lot match and the

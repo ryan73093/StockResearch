@@ -323,9 +323,15 @@ def main() -> int:
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
-                            "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility"),
+                            "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
+                            "limits-overrides", "knowledge"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
+    parser.add_argument("--ask", help="knowledge：問研究知識庫（AI 只根據紀錄回答；沒有金鑰時列出最相關的紀錄）")
+    parser.add_argument("--index", action="store_true", help="knowledge：把新的或改過的紀錄編成 BGE-M3 向量存進 Qdrant")
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), help="knowledge --index：用哪個裝置編碼（預設 auto）")
+    parser.add_argument("--official", action="store_true",
+                        help="limits-check：這次用引擎 1.6.0 的交易所漲跌停價（開關 10/31 才正式打開；驗證用）")
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
     parser.add_argument("--events", help="factors：事件因子分析，逗號分隔（例如 low_insider_sell_60,buyback_60）")
     parser.add_argument("--explain", action="store_true",
@@ -751,7 +757,7 @@ def main() -> int:
         top = args.top or 10
         trials = [int(item) for item in args.trials.split(",")] if args.trials else None
         title = (f"穩健性檢查：#{'、#'.join(str(item) for item in trials)}" if trials
-                 else f"穩健性檢查：最好的 {top} 個 T0 候選") + "，成本加倍、晚一個交易日成交"
+                 else f"穩健性檢查：最好的 {top} 個 T0 候選") + "，成本加倍、晚一個交易日成交、開盤成交上限收緊（有開盤成交的）"
         with JobLog(RESEARCH).start(title, command, total=len(trials) if trials else top) as job:
             result = robustness.run(Path(args.base), RESEARCH, broker_costs(args.broker), top, job, trials)
             kept = sum(1 for row in result["rows"] if str(row["costs_doubled"]["tier"]).startswith("T0"))
@@ -1047,11 +1053,58 @@ def main() -> int:
         # 2026-10-21 (使用者 2026-10-14：確實照當時的台股規則): research/limits_check.py
         from quant_platform.research import limits_check
 
+        if args.official:                        # 2026-10-22: engine 1.6.0's limits, this process only (a check)
+            limits_check.OFFICIAL_LIMITS = True
         path = limits_check.run(Path(args.base), RESEARCH)
         report = json.loads(path.read_text(encoding="utf-8"))
         print(f"比對 {report['compared']:,} 個（股票×交易日）：漲跌停價不同 {report['limits_differ']:,} 個、"
               f"漲跌停鎖死判斷不同 {report['locks_differ']:,} 個；各年 {report['limits_differ_by_year']}；鎖死組合 {report['locks']}")
         print(f"已寫入 {path}")
+        return 0
+
+    if args.command == "knowledge":
+        # 2026-10-22 (使用者：我所有的失敗紀錄都要記起來，作為知識庫，讓後面的人可以用 AI 問): research/knowledge.py
+        from quant_platform.config.settings import Settings
+        from quant_platform.research import knowledge
+
+        root = Path(__file__).resolve().parents[3] if (Path(__file__).resolve().parents[3] / "AGENTS.md").is_file() else Path.cwd()
+        found = knowledge.build(root, RESEARCH)
+        print(json.dumps({key: found[key] for key in ("built_at", "entries", "kinds", "verdicts")}, ensure_ascii=False), flush=True)
+        if args.index:                          # 2026-10-22 (使用者：向量資料庫可用 BGE-M3、Qdrant)
+            from quant_platform.research import knowledge_vectors
+            from quant_platform.research.jobs import JobLog
+
+            model_dir = knowledge_vectors.model_path(root)
+            if model_dir is None or not knowledge_vectors.available():
+                print("沒有 BGE-M3 模型或套件（transformers、qdrant-client）：知識庫只用關鍵字搜尋")
+                return 1
+            command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+            with JobLog(RESEARCH).start("研究知識庫：BGE-M3 向量進 Qdrant（只編碼新的或改過的紀錄）", command) as job:
+                model = knowledge_vectors.encoder(root, args.device or "auto")
+                report = knowledge_vectors.index(RESEARCH, knowledge.entries(RESEARCH), model, job=job)
+                job.payload["summary"] = (f"{report['points']:,} 筆；這次編碼 {report['encoded']:,}、刪除 {report['deleted']}"
+                                          f"（{report['device']}，{report['seconds']} 秒）")
+            print(json.dumps(report, ensure_ascii=False), flush=True)
+        if args.ask:
+            client, ai = knowledge.ai_status(Settings.from_env(), RESEARCH)
+            answer = knowledge.ask(RESEARCH, args.ask, client, semantic_ids=knowledge.semantic(RESEARCH, args.ask, root))
+            print(ai["note"])
+            print(answer["conclusion"] or answer["note"])
+            print(answer["answer"])
+            for entry in answer["evidence"]:
+                print(f"[{entry['cite']}] {entry['id']} {entry['kind']}｜{entry['verdict']}｜{entry['date']} {entry['title'][:70]}")
+        return 0
+
+    if args.command == "limits-overrides":
+        # 2026-10-22 (engine 1.6.0): the exchange's limits where the engine's reckoning differs, for the switch
+        from quant_platform.research import limits_check
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("引擎 1.6.0：交易所漲跌停價和引擎推算不同的日子（覆寫表）", command) as job:
+            found = limits_check.build_overrides(Path(args.base))
+            job.payload["summary"] = f"{found['rows']:,} 個股票×交易日、{found['stocks']} 檔（{found['from']}～{found['through']}）"
+        print(json.dumps(found, ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "intraday":

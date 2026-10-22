@@ -12,6 +12,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 COST_FACTOR = 2.0
+# 2026-10-22 (開盤賣做不做得到): a rule filling in the opening auction runs again with that fill capped at 0.2% of the
+# day's value instead of 0.5% — about the share of the opening auction the closing one gets (the opening auction is
+# ~2.8% of the day, the closing 4–9%)
+OPEN_TIGHT = 0.002
 
 
 def candidates(research: Path, top: int) -> list[tuple[object, dict]]:
@@ -54,6 +58,13 @@ def chosen_trials(research: Path, trials: list[int]) -> list[tuple[object, dict]
     return output
 
 
+def opens_auction(rule) -> bool:
+    """Whether a rule (or a blend's sleeve) fills anything in the opening auction."""
+    sleeves = getattr(rule, "sleeves", None)
+    rules = [sleeve.rule for sleeve in sleeves] if sleeves is not None else [rule]
+    return any(getattr(item, "execution", "same") in ("open", "split") for item in rules)
+
+
 def run(base: Path, research: Path, costs, top: int = 10, job=None, trials: list[int] | None = None) -> dict[str, object]:
     from quant_platform.research.blend import BlendRule, Sleeve, evaluate_blend, parse_spec
     from quant_platform.research.daily import (
@@ -92,8 +103,17 @@ def run(base: Path, research: Path, costs, top: int = 10, job=None, trials: list
             changed = rule.execution == "same"
         if changed:
             row["next_session"] = _summary(measured(late, costs, plain), tier)
+        if opens_auction(rule):
+            from quant_platform.research import daily
+
+            kept = daily.OPEN_PARTICIPATION
+            daily.OPEN_PARTICIPATION = OPEN_TIGHT
+            try:
+                row["open_tight"] = _summary(measured(rule, costs, plain), tier)
+            finally:
+                daily.OPEN_PARTICIPATION = kept
         rows.append(row)
-    result = {"engine": ENGINE_VERSION, "cost_factor": COST_FACTOR, "rows": rows,
+    result = {"engine": ENGINE_VERSION, "cost_factor": COST_FACTOR, "open_tight": OPEN_TIGHT, "rows": rows,
               "built_at": datetime.now(UTC).isoformat(timespec="seconds")}
     folder = research / "robustness"
     folder.mkdir(parents=True, exist_ok=True)
@@ -103,15 +123,31 @@ def run(base: Path, research: Path, costs, top: int = 10, job=None, trials: list
 
 
 def latest(research: Path) -> dict | None:
-    """The newest check (research/robustness/<stamp>.json), for the research page."""
+    """The checks for the research page (research/robustness/<stamp>.json): the newest file's, with the rows of the
+    earlier files on the same engine that it did not run again (2026-10-22: a check of three rules no longer hides
+    the eight checked before), by the original end value."""
     folder = Path(research) / "robustness"
     files = sorted(folder.glob("*.json")) if folder.is_dir() else []
+    found = []
     for path in reversed(files):
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            found.append(json.loads(path.read_text(encoding="utf-8")))
         except ValueError:
             continue
-    return None
+    if not found:
+        return None
+    newest = dict(found[0])
+    rows, seen = [], set()
+    for result in found:
+        if result.get("engine") != newest.get("engine"):
+            continue
+        for row in result.get("rows") or []:
+            if row.get("trial") not in seen:
+                seen.add(row.get("trial"))
+                rows.append(row)
+    rows.sort(key=lambda row: -((row.get("base") or {}).get("final_value") or 0))
+    newest["rows"] = rows
+    return newest
 
 
 def _summary(metrics: dict, tier) -> dict[str, object]:

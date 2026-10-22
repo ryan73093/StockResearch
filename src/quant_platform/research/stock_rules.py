@@ -231,6 +231,12 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
             for day, pair in days.items():
                 limits.setdefault(symbol, {}).setdefault(day, pair)
     reductions = {symbol: days for symbol, days in reduction_terms(base / "raw", first_year).items() if symbol in closes}
+    from quant_platform.research import limits_check
+
+    if limits_check.OFFICIAL_LIMITS:          # engine 1.6.0: the exchange's published limits where the reckoning differs
+        for symbol, days in limits_check.read_overrides(base, first_year).items():
+            if symbol in closes:
+                limits.setdefault(symbol, {}).update(days)
     return LegacyData(sessions=sessions, closes=closes, traded_value=traded, factors=factors, predictions={},
                       notes={"symbols": len(closes) - 1, "years": [first_year, last_year], "universe": universe,
                              "limits": limits, "moved_events": moved_actions,
@@ -287,6 +293,10 @@ def stock_fingerprint(base: str | Path, first_year: int, last_year: int, until: 
     else:                      # a research period: only what it covers (0050 and the events up to ``until``)
         digest.update(f"0050:{_year_digest(base / 'daily' / '0050.parquet', until)}".encode())
         digest.update(f"events:{_events_digest(base / 'raw', first_year, last_year, until, universe)}".encode())
+    from quant_platform.research import limits_check
+
+    if limits_check.OFFICIAL_LIMITS:                  # engine 1.6.0: the overrides it reads
+        digest.update(f"limits:{limits_check.digest(base, until)}".encode())
     if "tpex" in UNIVERSES[universe]:                 # the TWSE-only fingerprint leaves TPEx out
         for year in range(first_year, last_year + 1):
             path = base / "stocks" / "tpex" / f"{year}.parquet"

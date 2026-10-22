@@ -9,7 +9,12 @@ fifths. Outcomes from 0050's total return index: the next 20 and 60 sessions, an
 that day's level within 60 sessions.
 
 Useful (the criterion written first) when in both 2015-06..2020-09 and 2020-10..2026-08 the worst fifth's next-60
-return is at least ``GAP`` below the period's average and its 10%-fall rate at least ``RATE`` times the average."""
+return is at least ``GAP`` below the period's average and its 10%-fall rate at least ``RATE`` times the average.
+
+2026-10-22 (八大行庫): the eight government banks' net buying over the whole listed market, as a share of the market's
+turnover over 5 and 20 sessions (FinMind TaiwanStockGovernmentBankBuySell from 2021-06-30, history/paid). Known from
+2021-07, its percentiles from 2022-07: judged on SHORT_PERIODS (2022-07..2023-12 and 2024-01..2026-08) by the same
+criterion — written before the run (research_method §7「八大行庫」)."""
 
 from __future__ import annotations
 
@@ -24,6 +29,8 @@ import numpy as np
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 PERIODS = {"2015-06～2020-09": (date(2015, 6, 1), date(2020, 9, 30)), "2020-10～2026-08": (date(2020, 10, 1), date(2026, 8, 31))}
+SHORT_PERIODS = {"2022-07～2023-12": (date(2022, 7, 1), date(2023, 12, 31)), "2024-01～2026-08": (date(2024, 1, 1), date(2026, 8, 31))}
+GOVBANK = "八大行庫淨買超"
 HORIZONS = (20, 60)
 FALL = 0.10
 GAP, RATE = 0.03, 1.5
@@ -47,6 +54,33 @@ def series(history: str | Path) -> dict[str, dict[date, float]]:
     return {"融資維持率": margin, "外資台指期淨部位": futures}
 
 
+def govbank(history: str | Path, sessions: int) -> dict[date, float]:
+    """date → the eight banks' net buying over the last ``sessions`` sessions as a share of the listed market's
+    turnover over them (none before the table)."""
+    import pandas as pd
+
+    history = Path(history)
+    path = history / "paid" / "TaiwanStockGovernmentBankBuySell.parquet"
+    if not path.is_file():
+        return {}
+    table = pd.read_parquet(path, columns=["date", "buy_amount", "sell_amount"])
+    net = (table["buy_amount"] - table["sell_amount"]).groupby(pd.to_datetime(table["date"])).sum()
+    if not len(net):
+        return {}
+    turnover = []
+    for file in sorted((history / "stocks" / "twse").glob("*.parquet")):
+        if int(file.stem) >= net.index.min().year:
+            frame = pd.read_parquet(file, columns=["date", "turnover"])
+            turnover.append(frame.groupby(pd.to_datetime(frame["date"]))["turnover"].sum())
+    if not turnover:
+        return {}
+    market = pd.concat(turnover).groupby(level=0).sum()
+    market = market[market.index >= net.index.min()]
+    net = net.reindex(market.index).fillna(0.0)
+    share = net.rolling(sessions, min_periods=sessions).sum() / market.rolling(sessions, min_periods=sessions).sum()
+    return {day.date(): float(value) for day, value in share.dropna().items()}
+
+
 def _changes(values: dict[date, float], sessions: int = 20) -> dict[date, float]:
     days = sorted(values)
     return {day: values[day] - values[days[index - sessions]] for index, day in enumerate(days) if index >= sessions}
@@ -64,6 +98,7 @@ def percentiles(values: dict[date, float]) -> dict[date, float]:
 
 
 def study(index: dict[date, float], signals: dict[str, dict[date, float]]) -> dict[str, object]:
+    """Each signal on PERIODS, the government banks' on SHORT_PERIODS."""
     days = sorted(index)
     level = np.array([index[day] for day in days])
     position = {day: number for number, day in enumerate(days)}
@@ -72,7 +107,8 @@ def study(index: dict[date, float], signals: dict[str, dict[date, float]]) -> di
         known = sorted(values)
         ranks = percentiles(values)
         report = {}
-        for period, (start, end) in PERIODS.items():
+        periods = SHORT_PERIODS if name.startswith(GOVBANK) else PERIODS
+        for period, (start, end) in periods.items():
             buckets: dict[int, list[tuple[float, float, bool]]] = {fifth: [] for fifth in range(5)}
             for day in days:
                 if not (start <= day <= end):
@@ -106,7 +142,7 @@ def study(index: dict[date, float], signals: dict[str, dict[date, float]]) -> di
             verdicts.append(worst["mean_60"] <= item["mean_60"] - GAP and item["fall_rate"] > 0
                             and (worst["fall_rate"] or 0) >= RATE * item["fall_rate"])
             item["worst"] = worst["fifth"]
-        found[name] = {"periods": report, "useful": bool(verdicts) and len(verdicts) == len(PERIODS) and all(verdicts)}
+        found[name] = {"periods": report, "useful": bool(verdicts) and len(verdicts) == len(periods) and all(verdicts)}
     return found
 
 
@@ -121,6 +157,11 @@ def run(history: str | Path, research: str | Path) -> Path:
     for name, values in raw.items():
         signals[f"{name}（水準）"] = values
         signals[f"{name}（20 日變化）"] = _changes(values)
+    for sessions in (5, 20):                    # 2026-10-22
+        values = govbank(history, sessions)
+        if values:
+            signals[f"{GOVBANK}（{sessions} 日，佔全市場成交值）"] = values
+            raw[f"{GOVBANK}（{sessions} 日）"] = values
     found = study(index, signals)
     report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "fall": FALL, "gap": GAP, "rate": RATE,
               "signals": found, "ranges": {name: [str(min(values)), str(max(values))] for name, values in raw.items() if values}}

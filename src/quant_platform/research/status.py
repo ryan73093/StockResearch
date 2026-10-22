@@ -94,7 +94,7 @@ def factors(research: Path) -> dict[str, object]:
         for name in names:
             used[name] = used.get(name, 0) + 1
     rows = []
-    order = {"強": 0, "反向": 1, "不穩": 2, "弱": 3}
+    order = {"強": 0, "強（短歷史）": 1, "反向": 2, "反向（短歷史）": 3, "不穩": 4, "不穩（短歷史）": 5, "弱": 6}
     for name, item in (report.get("factors") or {}).items():
         periods = item.get("periods") or {}
         rows.append({"name": name, "label": item.get("label"), "family": _family(name, 1.0), "verdict": item.get("verdict"),
@@ -147,17 +147,47 @@ def analyses(research: Path) -> list[dict[str, object]]:
         result = "還沒跑"
     items.append({"name": "盤中成交時機（分 K）", "when": _stamp(intraday_path), "result": result,
                   "link": "/project/research_method"})
-    limits_path = _newest(research / "diagnostics", "limits-check-*.json")
-    limits = _read(limits_path)
-    items.append({"name": "官方漲跌停價核對引擎", "when": _stamp(limits_path),
-                  "result": (f"{limits.get('compared', 0):,} 個股票×交易日：鎖死判斷不同 {limits.get('locks_differ')} 個"
-                             "（引擎 1.6.0 修正，10/31 部署）" if limits else "還沒跑"), "link": "/project/research_method"})
+    feasible_path = _newest(research / "diagnostics", "open-feasibility-*.json")
+    feasible = _read(feasible_path)
+    if feasible.get("sells"):
+        at_open = (feasible.get("gain_open") or {}).get("mean") or 0.0
+        at_odd = (feasible.get("gain_first_odd_lot") or {}).get("mean") or 0.0
+        cap = (feasible.get("engine_cap_share_of_auction") or {}).get("median") or 0.0
+        result = (f"{feasible['sells']} 筆賣出：開盤賣比收盤多 {at_open:+.2%}、零股 09:10 賣多 {at_odd:+.2%}"
+                  + ("（零股 09:10 也站得住）" if at_odd >= at_open / 2 else "（零股 09:10 不到一半：要另算）")
+                  + f"；引擎上限是開盤量的 {cap:.0%}（中位數）" + ("，沒超過 25% 不改引擎" if cap <= 0.25 else "，超過 25% 要改引擎"))
+    else:
+        result = "還沒跑"
+    items.append({"name": "開盤賣做不做得到（零股 09:10、開盤量）", "when": _stamp(feasible_path), "result": result,
+                  "link": "/project/research_method"})
+    checks = sorted((research / "diagnostics").glob("limits-check-*.json"), key=lambda path: path.stat().st_mtime) if (
+        research / "diagnostics").is_dir() else []
+    engine_path = next((path for path in reversed(checks) if not _read(path).get("official_limits")), None)
+    official_path = next((path for path in reversed(checks) if _read(path).get("official_limits")), None)
+    limits, verified = _read(engine_path), _read(official_path)
+    result = (f"{limits.get('compared', 0):,} 個股票×交易日：鎖死判斷不同 {limits.get('locks_differ')} 個" if limits else "還沒跑")
+    if verified:                                 # 2026-10-22: engine 1.6.0's limits checked before the switch
+        result += f"；引擎 1.6.0（交易所漲跌停價，10/31 打開）驗證：不同 {verified.get('locks_differ')} 個"
+    elif limits:
+        result += "（引擎 1.6.0 修正，10/31 部署）"
+    items.append({"name": "官方漲跌停價核對引擎", "when": _stamp(official_path or engine_path), "result": result,
+                  "link": "/project/research_method"})
     signals_path = _newest(research / "diagnostics", "market-signals-*.json")
     signals = _read(signals_path).get("signals") or {}
     useful = [name for name, item in signals.items() if item.get("useful")]
-    items.append({"name": "大盤訊號（融資維持率、外資台指期）", "when": _stamp(signals_path),
-                  "result": (f"{len(signals)} 個訊號、有用 {len(useful)} 個" + (f"：{'、'.join(useful)}" if useful else "（兩段期間最差的組別不同，不做成濾網）"))
-                  if signals else "還沒跑", "link": "/project/research_method"})
+    # 2026-10-22: a pass whose worst fifth is a middle one (not the most bought or sold) has no story — watched forward,
+    # not made a filter (research_method §7「八大行庫」)
+    middle = [name for name in useful if any((period.get("worst") or 0) not in (1, 5)
+                                             for period in (signals[name].get("periods") or {}).values())]
+    if not signals:
+        result = "還沒跑"
+    elif not useful:
+        result = f"{len(signals)} 個訊號、過條件 0 個（兩段期間最差的組別不同，不做成濾網）"
+    else:
+        result = (f"{len(signals)} 個訊號、過條件 {len(useful)} 個：{'、'.join(useful)}"
+                  + ("（最差的是中間一組、沒有機制，不做成濾網，前向觀察）" if middle else ""))
+    items.append({"name": "大盤訊號（融資維持率、外資台指期、八大行庫）", "when": _stamp(signals_path), "result": result,
+                  "link": "/project/research_method"})
     robust_path = _newest(research / "robustness", "*.json")
     robust = _read(robust_path)
     items.append({"name": "穩健性（成本加倍、晚一天成交）", "when": _stamp(robust_path),
@@ -170,13 +200,22 @@ def analyses(research: Path) -> list[dict[str, object]]:
     latest_scan = max(scans, key=lambda pair: pair[0].stat().st_mtime) if scans else None
     blends = [(path, _read(path)) for path in (research / "blend_scan").glob("finalists-*.json")] if (
         research / "blend_scan").is_dir() else []
-    blend_total = sum(int(summary.get("candidates") or 0) for _path, summary in blends)
+    # every blend round searches all pairs and threes of the pool at that time, so a later round holds the earlier
+    # rounds' blends: the biggest round is the count, not the sum; a rerun of the same pool is not a round
+    rounds = {(summary.get("pool"), summary.get("candidates")): summary for _path, summary in blends}
+    biggest = max(rounds.values(), key=lambda summary: int(summary.get("candidates") or 0)) if rounds else {}
+    tiers = latest_scan[1].get("tiers") or {} if latest_scan else {}
     items.append({"name": "大規模搜尋（單一策略）", "when": _stamp(latest_scan[0]) if latest_scan else None,
-                  "result": f"累計 {total:,} 個策略" + (f"；最近一輪最後名單 {latest_scan[1].get('tiers')}" if latest_scan else ""),
+                  "result": f"{len(scans)} 輪、各輪合計 {total:,} 個策略設定" + (
+                      f"；最近一輪 {int(latest_scan[1].get('candidates') or 0):,} 個，最後名單"
+                      + ("、".join(f"{tier} {count} 個" for tier, count in sorted(tiers.items())) or "沒有過門檻的")
+                      if latest_scan else ""),
                   "link": "/project/research_method"})
     items.append({"name": "組合搜尋（兩檔／三檔組合）",
                   "when": _stamp(max((path for path, _summary in blends), key=lambda path: path.stat().st_mtime)) if blends else None,
-                  "result": f"{len(blends)} 輪、累計 {blend_total:,} 個組合", "link": "/project/research_method"})
+                  "result": (f"{len(rounds)} 輪；最大一輪 {int(biggest.get('candidates') or 0):,} 個組合"
+                             f"（{biggest.get('pool')} 個策略的兩檔、三檔組合，每輪都含前幾輪的組合，所以不加總）")
+                  if rounds else "還沒跑", "link": "/project/research_method"})
     from quant_platform.research import rolling
 
     month = rolling.summary(rolling.latest(research)) or {}

@@ -24,7 +24,8 @@ FAMILY_FACTORS = {
              "lending_fee_not_rising", "low_attention_20", "low_disposition_60",
              # 2026-10-21: the depository's holder brackets and the paid FinMind tables
              "big_holder_pct", "big_holder_up_4w", "holders_down_4w", "retail_down_4w", "margin_safe", "margin_in_profit",
-             "low_pledge_loan_20", "block_premium_20", "block_volume_20", "broker_concentration_5"),
+             "low_pledge_loan_20", "block_premium_20", "block_volume_20", "broker_concentration_5",
+             "govbank_net_20", "govbank_dip_buy_20"),
     "公司事件": ("dividend_raise", "no_cash_issue", "low_issuance_250", "dividend_ahead",
                  "low_insider_sell_60", "buyback_60", "low_pledge", "pledge_heavy"),
     "營收財報": ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "roe_ttm", "gross_margin", "operating_margin_change", "eps_growth",
@@ -136,8 +137,9 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
             traits.append("看成本才換股")
         if spec.get("winner_hold"):
             traits.append("贏家續抱")
-        if spec.get("exclude") not in (None, "none"):
-            traits.append("不買樂透型股票")
+        if spec.get("exclude") not in (None, "none"):           # 2026-10-22: h1/h2/m1 are not lottery stocks
+            traits.append({"v1": "不買樂透型股票", "h1": "不新買散戶大增的股票", "h2": "不新買股東大增的股票",
+                           "m1": "不新買融資快斷頭的股票"}.get(spec["exclude"], "有排除條件"))
         if spec.get("large_caps"):               # equal amounts unless weighted by calmness (its own trait)
             equal = spec.get("weighting", "equal") == "equal"
             traits.append(f"只挑市值前 {spec['large_caps']} 大" + ("、每檔等額" if equal else ""))

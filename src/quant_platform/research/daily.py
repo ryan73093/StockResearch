@@ -123,6 +123,10 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 ENGINE_VERSION = "daily-1.5.0"
 SAME_DAY_PARTICIPATION = 0.001              # an order's share of the stock's turnover that session, at most
 NEXT_DAY_PARTICIPATION = 0.005
+# 2026-10-22 (開盤賣做不做得到): a fill in the opening auction ("open", the sells of "split"), at most this share of the
+# day's value. The opening auction is about 3% of the day (median 2.8%), the closing one 4–9%, so the same cap is a
+# bigger share of the opening auction (median 17.6%); the robustness check tightens it (OPEN_TIGHT), the engine keeps it.
+OPEN_PARTICIPATION = NEXT_DAY_PARTICIPATION
 PRICE_LIMIT_WIDENED = date(2015, 6, 1)
 IDLE_LIMIT = 20             # sessions after the last trade: a stock that never trades again and is not listed
 VOL_FLOOR = 1e-4            # a daily standard deviation below this is a price that did not move: unknown
@@ -363,7 +367,7 @@ class DailyRule(BaseModel):
     # sessions; holdings are kept by the usual rules. Left out of the hash when "none".
     # 2026-10-22 (集保因子第三版): "h1" = no new buys of the fifth whose small holders' share rose the most in 4 weeks
     # (retail_down_4w lowest), "h2" = of the fifth whose holders grew the most (holders_down_4w lowest)
-    exclude: Literal["none", "v1", "h1", "h2"] = "none"
+    exclude: Literal["none", "v1", "h1", "h2", "m1"] = "none"
     # 2026-10-12 (全面研究「之後再試」第 1 項): "cost1" = a holding that leaves the keep zone is replaced only when
     # the replacement's expected next-20-session excess beats the holding's by more than a round trip (about
     # 0.99%: fee both ways, the sell tax, slippage both ways). The expectation is the rule's own score
@@ -896,8 +900,9 @@ class FactorPanel:
         return (total / spread.where(spread > 0)).shift(skip).to_numpy()
 
     def holder_vetoed(self, position: int, factor: str) -> set[str]:
-        """exclude "h1"/"h2" (2026-10-22): the stocks in the lowest HOLDER_VETO_SHARE of ``factor`` at ``position`` —
-        the small holders' share or the holders' count rising most (chips dispersing); none without the data."""
+        """exclude "h1"/"h2"/"m1" (2026-10-22): the stocks in the lowest HOLDER_VETO_SHARE of ``factor`` at ``position`` —
+        the small holders' share or the holders' count rising most (chips dispersing), the margin buyers nearest a
+        margin call; none without the data (a stock without margin buyers is never vetoed by "m1")."""
         values = self.matrix(factor)[:, position]
         known = np.flatnonzero(np.isfinite(values))
         if known.size < 50:
@@ -1598,17 +1603,21 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         topups = {sessions[number + lag] for number, session in enumerate(sessions)
                   if session in decided and number + lag < len(sessions)}
 
-    def capacity(symbol: str, day: date, fill: float) -> float:
+    def share_of(side: str) -> float:
+        """``most``, or OPEN_PARTICIPATION for a fill in the opening auction."""
+        return OPEN_PARTICIPATION if execution == "open" or (execution == "split" and side == "SELL") else most
+
+    def capacity(symbol: str, day: date, fill: float, side: str = "BUY") -> float:
         """Whole shares the session can take: ``most`` of the stock's turnover that day."""
         turnover = data.traded_value.get(symbol, {}).get(day)
-        return float("inf") if not turnover or symbol == BENCHMARK else math.floor(most * turnover / fill)
+        return float("inf") if not turnover or symbol == BENCHMARK else math.floor(share_of(side) * turnover / fill)
 
     def cut(symbol: str, day: date, side: str) -> None:
         nonlocal blocked
         blocked = True
         if ledger is not None:
             ledger.append({"day": day, "symbol": symbol, "side": "BLOCKED", "order": side,
-                           "reason": f"超過當天成交值 {most:.1%}，其餘下個交易日再{'買' if side == 'BUY' else '賣'}"})
+                           "reason": f"超過當天成交值 {share_of(side):.1%}，其餘下個交易日再{'買' if side == 'BUY' else '賣'}"})
 
     def buy(symbol: str, budget: float, day: date) -> None:
         nonlocal cash
@@ -1622,7 +1631,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         shares = affordable_shares(min(budget, cash), fill, costs)
         while shares > 0 and shares * fill + order_fee(shares, fill, day) > min(budget, cash) + 1e-9:
             shares -= 1
-        room = capacity(symbol, day, fill)
+        room = capacity(symbol, day, fill, "BUY")
         if shares > room:
             shares = int(room)
             short.add(symbol)
@@ -1652,7 +1661,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
             shares = min(shares, float(math.floor(amount / fill)))
             if shares <= 0:
                 return
-        room = capacity(symbol, day, fill)
+        room = capacity(symbol, day, fill, "SELL")
         if shares > room:
             shares = float(room)
             cut(symbol, day, "SELL")
@@ -2315,7 +2324,7 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
               stamp: str | None = None) -> tuple[object, dict]:
     payload = {"rule": rule.canonical(), "period": PERIOD, "costs": costs.as_dict(), "data": data_fingerprint,
                "engine": ENGINE_VERSION, "plan": SEED_PLAN}
-    payload.update(input_digests(history, list(rule.factors), rule.exit_model != "none"))
+    payload.update(input_digests(history, rule_inputs(rule), rule.exit_model != "none"))
     veto, weighting = getattr(rule, "risk_veto", "none"), getattr(rule, "weighting", "equal")
     if veto != "none" or weighting == "inverse_risk":           # 2026-10-16: the deep risk model it reads
         from quant_platform.research.model import MODELS, digest, model_dir
@@ -2342,6 +2351,14 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
 
 SEED_PLAN = {"kind": "SeedPlan", "initial": SeedPlan().initial, "monthly_amount": SeedPlan().monthly_amount,
              "day_of_month": 5}
+
+
+def rule_inputs(rule) -> list[str]:
+    """The factors a rule reads: its own and (2026-10-22) the one its exclusion vetoes by — the holder brackets or
+    the paid margin table are then part of its input."""
+    names = list(rule.factors)
+    veto = HOLDER_EXCLUDES.get(getattr(rule, "exclude", "none"))
+    return names + [veto] if veto and veto not in names else names
 
 
 def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool) -> dict[str, object]:
@@ -3184,7 +3201,7 @@ HOLDING_STYLES = (("固定持有 20 天", {"hold": "days", "min_hold": 20}),
                   ("月線上續抱", {"hold": "trend", "min_hold": 0}),
                   ("不設最短持有", {"hold": "days", "min_hold": 0}))
 HOLDING_TOP = 30
-HOLDER_EXCLUDES = {"h1": "retail_down_4w", "h2": "holders_down_4w"}
+HOLDER_EXCLUDES = {"h1": "retail_down_4w", "h2": "holders_down_4w", "m1": "margin_safe"}
 HOLDER_VETO_SHARE = 0.2
 
 # 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」, written before the
@@ -3302,6 +3319,33 @@ def holders2_batch() -> list[DailyRule]:
 # factors to the deep rules' ranking and cost them 60-80% of the money (a weak signal pushed the deep model's best
 # picks out). Literature uses a weak signal as a filter: the deep ranking as it is, no new buys of the fifth whose
 # small holders' share (h1) or holders' count (h2) rose the most in 4 weeks.
+# 2026-10-22 (research_method §7「否決第二版」, written before the run): the third big scan found the new signals
+# diluted inside equal-weight sets, while as a veto (holders3) they came close — so the new margin information as a
+# veto ("m1": no new buys of the fifth nearest a margin call) on the ten single passing rules with the most money that
+# have no veto, and the holders' veto ("h2") on the three of them without an h2 version yet
+VETO2_RULES = (6490, 6090, 5983, 6491, 6492, 6091, 6509, 6501, 6093, 4941)
+VETO2_H2 = (6492, 6509, 6501)
+VETO_WORDS = {"h1": "不買散戶大增的五分之一", "h2": "不買股東大增的五分之一", "m1": "不買融資快斷頭的五分之一"}
+
+
+def veto2_batch() -> list[DailyRule]:
+    from quant_platform.research.holding import style_of
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    timing = {"same": "當天盤後成交", "next": "隔天收盤成交", "open": "隔天開盤成交", "split": "開盤賣、收盤買"}
+    output = []
+    for trial, exclude in [(trial, "m1") for trial in VETO2_RULES] + [(trial, "h2") for trial in VETO2_H2]:
+        base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
+        spec = base.canonical()
+        stem = _stem(records[trial].spec_name).split("：")[0]
+        name = (f"{stem}・{VETO_WORDS[exclude]}（#{trial} 的設定、前 {base.top} 名、{timing.get(spec.get('execution', 'same'))}）"
+                f"｜持有：{style_of(spec) or '固定持有 20 天'}")
+        output.append(DailyRule.model_validate({**base.model_dump(), "name": name, "exclude": exclude}))
+    return output
+
+
 def holders3_batch() -> list[DailyRule]:
     from quant_platform.research.holding import style_of
     from quant_platform.research.registry import TrialRegistry
@@ -4286,7 +4330,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
+           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "veto2": veto2_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
            "split_b": lambda: split_all_batch()[1::2], "splitblend": split_blend_batch,
            "splitblends": split_blends_all_batch, "splitblends_a": lambda: split_blends_all_batch()[0::2],
            "splitblends_b": lambda: split_blends_all_batch()[1::2]}

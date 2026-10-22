@@ -45,6 +45,7 @@ GROUPS = (
     ("集保大戶", ("big_holder_pct", "big_holder_up_4w", "holders_down_4w", "retail_down_4w")),   # 2026-10-21
     ("融資、借貸與鉅額交易", ("margin_safe", "margin_in_profit", "low_pledge_loan_20", "block_premium_20",
                        "block_volume_20", "broker_concentration_5")),                       # 2026-10-21 (FinMind 付費)
+    ("八大行庫（官股）", ("govbank_net_20", "govbank_dip_buy_20")),                                  # 2026-10-22
 )
 
 

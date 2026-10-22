@@ -187,6 +187,24 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
         checks.append(_check("資料庫每日備份", "AGENTS.md 資料庫安全：每日 03:00、保留 7 份",
                              newest is not None and (datetime.now() - newest).days < 2,
                              f"{len(files)} 份，最新 {newest:%m-%d %H:%M}" if newest else "沒有備份"))
+    # 2026-10-22 (使用者：我所有的失敗紀錄都要記起來，作為知識庫，讓後面的人可以用 AI 問): every finished experiment
+    # has its result written (research method or development history), and the knowledge base holds every trial
+    from quant_platform.research import knowledge
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    root = research.parent.parent
+    missing = knowledge.unrecorded(root, research)
+    checks.append(_check("每個做完的研究都寫了結果（含失敗）", "使用者 2026-10-22：失敗紀錄都要記起來，作為知識庫", not missing,
+                         f"{knowledge.RECORDED_FROM} 起做完的研究流程沒寫結果的 {len(missing)} 個" + (f"：{missing[:5]}" if missing else "")))
+    try:
+        built = knowledge.ensure(root, research)
+        registered = len(newest(TrialRegistry(research / "trials.jsonl").records())) if (research / "trials.jsonl").is_file() else 0
+        held = int((built.get("kinds") or {}).get("試驗", 0))
+        checks.append(_check("研究知識庫收了每一個試驗", "使用者 2026-10-22：失敗紀錄都要記起來，作為知識庫", held == registered,
+                             f"{built.get('entries', 0):,} 筆紀錄；試驗 {held:,}／{registered:,}（每個規則最新一次）"))
+    except Exception as exc:                            # noqa: BLE001 - a broken build is itself the finding
+        checks.append(_check("研究知識庫收了每一個試驗", "使用者 2026-10-22：失敗紀錄都要記起來，作為知識庫", False,
+                             f"建立失敗：{str(exc)[:120]}"))
     return checks
 
 

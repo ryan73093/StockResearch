@@ -235,6 +235,25 @@ HORIZON = 20     # sessions ahead
 STEP = 5         # a ranking every week
 
 
+# 2026-10-22 (八大行庫, written before the run): a factor known only after 2020-10 (no 2015～2020 column) is judged on
+# two periods that do not overlap — 2020-10～2023 and 2024 on — the same edge; its verdict says 短歷史, and only its
+# own batches use it (a 強 for the whole history stays the 2015～2020 and 2020-10 test)
+SHORT_FIRST = ("short_first", "2020-10～2023", date(2020, 10, 26), date(2023, 12, 31))
+
+
+def short_verdict(periods: dict[str, dict[str, object]]) -> str:
+    tops = [periods.get(key, {}).get("top_excess_year") for key in ("short_first", "since_2024")]
+    if any(value is None for value in tops):
+        return "弱（短歷史）"
+    if all(value >= EDGE for value in tops):
+        return "強（短歷史）"
+    if all(value <= -EDGE for value in tops):
+        return "反向（短歷史）"
+    if any(value >= EDGE for value in tops) and any(value <= -EDGE for value in tops):
+        return "不穩（短歷史）"
+    return "弱（短歷史）"
+
+
 def recent_verdict(periods: dict[str, dict[str, object]]) -> str:
     """The top fifth against the average stock before and after the 2020-10 rule changes."""
     tops = [periods.get(key, {}).get("top_excess_year") for key in ("before_regime", "regime")]
@@ -300,7 +319,8 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None, names: list[s
     for factor in factors:
         mine = [row for row in rows if row["factor"] == factor]
         periods = {}
-        for key, label, start, end in RECENT_COLUMNS:
+        short = not any(row["date"] <= RECENT_COLUMNS[1][3].isoformat() for row in mine)   # nothing before 2020-10
+        for key, label, start, end in (*RECENT_COLUMNS, SHORT_FIRST) if short else RECENT_COLUMNS:
             chosen = [row for row in mine if start.isoformat() <= row["date"] <= end.isoformat()]
             if len(chosen) < 10:
                 continue
@@ -320,7 +340,8 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None, names: list[s
         for row in mine:
             if row["top_excess"] is not None:
                 by_year.setdefault(row["date"][:4], []).append(row["top_excess"])
-        summary[factor] = {"label": daily.FACTOR_LABELS[factor], "periods": periods, "verdict": recent_verdict(periods),
+        summary[factor] = {"label": daily.FACTOR_LABELS[factor], "periods": periods,
+                           "verdict": short_verdict(periods) if short and mine else recent_verdict(periods),
                            "spread_by_year": {year: round(statistics.fmean(values) * scale, 4)
                                               for year, values in sorted(by_year.items())}}
     if names:                                   # the other factors as the latest full report has them

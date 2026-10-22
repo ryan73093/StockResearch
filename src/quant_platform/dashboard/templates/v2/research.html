@@ -144,20 +144,21 @@
   <p class="small" style="margin:0 0 10px">成本加倍後仍是 T0 候選：<strong>{{ kept }}／{{ robustness.rows|length }}</strong>；全部 {{ robustness.rows|selectattr('costs_doubled.final_value', 'gt', robustness.rows[0].base.benchmark_final_value)|list|length }} 個仍贏 0050。</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th class="num">原本</th><th class="num">成本加倍</th><th class="num">晚一個交易日成交</th></tr></thead>
+      {% set tight = robustness.rows|selectattr('open_tight')|list|length > 0 %}
+      <thead><tr><th>規則</th><th class="num">原本</th><th class="num">成本加倍</th><th class="num">晚一個交易日成交</th>{% if tight %}<th class="num">開盤成交上限收緊</th>{% endif %}</tr></thead>
       <tbody>
       {% for row in robustness.rows %}
         <tr>
           <td data-primary>{% if row.rule_hash %}<a href="/research/rules/{{ row.rule_hash }}">#{{ row.trial }} {{ row.name }}</a>{% else %}#{{ row.trial }} {{ row.name }}{% endif %}</td>
-          {% for key in ('base', 'costs_doubled', 'next_session') %}{% set item = row[key] %}
-          <td class="num" data-label="{{ {'base': '原本', 'costs_doubled': '成本加倍', 'next_session': '晚一天成交'}[key] }}">{% if item %}{{ '{:,.0f}'.format(item.final_value / 10000) }} 萬<span class="muted small">（{{ '{:.0%}'.format(item.max_drawdown) }}）</span><br><span class="badge {{ 'badge--ok' if item.tier == 'T0 候選' else 'badge--warn' }}">{{ item.tier }}</span>{% else %}<span class="muted small">本來就晚一天成交</span>{% endif %}</td>
+          {% for key in (('base', 'costs_doubled', 'next_session', 'open_tight') if tight else ('base', 'costs_doubled', 'next_session')) %}{% set item = row[key] %}
+          <td class="num" data-label="{{ {'base': '原本', 'costs_doubled': '成本加倍', 'next_session': '晚一天成交', 'open_tight': '開盤上限收緊'}[key] }}">{% if item %}{{ '{:,.0f}'.format(item.final_value / 10000) }} 萬<span class="muted small">（{{ '{:.0%}'.format(item.max_drawdown) }}）</span><br><span class="badge {{ 'badge--ok' if item.tier == 'T0 候選' else 'badge--warn' }}">{{ item.tier }}</span>{% elif key == 'open_tight' %}<span class="muted small">沒有開盤成交</span>{% else %}<span class="muted small">本來就晚一天成交</span>{% endif %}</td>
           {% endfor %}
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="col-help"><b>欄位說明</b>　依原本期末排序的 T0 候選（單一上市股規則）。<b>原本</b>：登錄的回測（2015-06 起，30 萬＋每月 1 萬）。<b>成本加倍</b>：手續費、最低手續費、滑價都乘 2（證交稅照法定）。<b>晚一個交易日成交</b>：原本當天盤後成交的，改成隔天收盤成交。括號是最大回撤；等級照選手池（T0 候選要回撤不比 0050 深超過 5 個百分點）。同樣的錢買 0050 是 {{ '{:,.0f}'.format(robustness.rows[0].base.benchmark_final_value / 10000) }} 萬。</p>
+  <p class="col-help"><b>欄位說明</b>　依原本期末排序：最好的 T0 候選（單一上市股規則）與指定檢查的前緣規則（含組合帳戶）。<b>原本</b>：登錄的回測（2015-06 起，30 萬＋每月 1 萬）。<b>成本加倍</b>：手續費、最低手續費、滑價都乘 2（證交稅照法定）。<b>晚一個交易日成交</b>：原本當天盤後成交的，改成隔天收盤成交。<b>開盤成交上限收緊</b>：在開盤集合競價成交的委託（開盤賣），上限從當天成交值的 0.5% 收緊到 0.2%——開盤競價只佔全天約 3%，0.2% 約等於收盤競價拿到的比例；大帳戶賣不完的隔天再賣。括號是最大回撤；等級照選手池（T0 候選要回撤不比 0050 深超過 5 個百分點）。同樣的錢買 0050 是 {{ '{:,.0f}'.format(robustness.rows[0].base.benchmark_final_value / 10000) }} 萬。</p>
 </section>
 {% endif %}
 
@@ -184,7 +185,7 @@
       {% for row in factor_rows %}
         <tr>
           <td data-primary><strong>{{ row.label }}</strong></td>
-          <td data-label="判定"><span class="badge {{ 'badge--ok' if row.verdict == '強' else ('badge--bad' if row.verdict == '反向' else ('badge--warn' if row.verdict == '不穩' else '')) }}">{{ row.verdict }}</span></td>
+          <td data-label="判定"><span class="badge {{ 'badge--ok' if row.verdict.startswith('強') else ('badge--bad' if row.verdict.startswith('反向') else ('badge--warn' if row.verdict.startswith('不穩') else '')) }}">{{ row.verdict }}</span></td>
           {% for item in row.cells %}
           <td class="num" data-label="{{ factor_columns[loop.index0][1] }}">
             {% if item and item.top_excess_year is defined and item.top_excess_year is not none %}<span class="{{ 'up' if item.top_excess_year > 0 else 'down' }}">{{ '{:+.1%}'.format(item.top_excess_year) }}</span>{% else %}—{% endif %}<br>

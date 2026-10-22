@@ -562,6 +562,40 @@ def start_live_flow(container: "Container", now: datetime | None = None, launch=
     return "liveflow"
 
 
+def start_knowledge_index(container: "Container", launch=None) -> str | None:
+    """2026-10-22 (使用者：失敗紀錄都要記起來，作為知識庫; 向量資料庫可用 BGE-M3、Qdrant): every hour at :45, when a record
+    changed since the vectors were made — the knowledge base rebuilt and only its new or changed entries encoded, on the
+    CPU, in a background pipeline (scripts/start-research.ps1 -Name knowledge); nothing when nothing changed or one runs."""
+    import json
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import knowledge, knowledge_vectors
+
+    research = _instance_dir(container.settings.database_url) / "research"
+    root = FilePath(_instance_dir(container.settings.database_url)).parent
+    if knowledge_vectors.model_path(root) is None or not knowledge_vectors.available():
+        return None
+    built = knowledge.ensure(root, research)
+    vectors = knowledge_vectors.status(research)
+    if vectors and str(vectors.get("at") or "") >= str(built.get("built_at") or ""):
+        return None
+    record = research / "pipelines" / "knowledge.json"
+    try:
+        if json.loads(record.read_text(encoding="utf-8")).get("status") == "running":
+            return None
+    except (OSError, ValueError):
+        pass
+    script = root / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch("knowledge")
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Name", "knowledge"],
+                       check=False, timeout=120)
+    return "knowledge"
+
+
 def start_finmind_paid(container: "Container", now: datetime | None = None, launch=None, limit=None) -> str | None:
     """2026-10-21 (使用者：FinMind Sponsor 你要做什麼分析; 為什麼 API 次數使用是 0): every hour at :20, the plan of the
     FinMind token the project's .env has now (written to research/history/raw/finmind/plan.json for the system page);
@@ -1135,6 +1169,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=2 * 3600,
+    )
+    scheduler.add_job(
+        start_knowledge_index,
+        args=[container],
+        trigger=CronTrigger(minute=45, timezone=timezone),
+        id="knowledge_index",
+        name="研究知識庫（每小時 45 分：紀錄有變就重建，新的紀錄編成 BGE-M3 向量進 Qdrant）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
     )
     scheduler.add_job(
         check_invariants,

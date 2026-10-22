@@ -51,3 +51,26 @@ def test_named_trials_are_checked_whatever_their_tier_blends_too(tmp_path):
     chosen = robustness.chosen_trials(tmp_path, [2, 1, 99])
     assert [record.trial_id for record, _spec in chosen] == [2, 1]
     assert chosen[0][1]["kind"] == "blend"
+
+
+def test_open_fills_are_found_and_earlier_checks_stay_on_the_page(tmp_path):
+    """2026-10-22 (開盤賣做不做得到): a rule or a blend's sleeve filling in the opening auction gets the tightened
+    run; the page keeps the rows of earlier checks on the same engine that the newest did not run again."""
+    import json
+
+    from quant_platform.research import robustness
+    from quant_platform.research.blend import BlendRule, Sleeve
+    from quant_platform.research.daily import DailyRule
+
+    split = DailyRule(name="a", factors={"trend_200": 1.0}, top=3, execution="split")
+    plain = DailyRule(name="b", factors={"trend_200": 1.0}, top=3)
+    assert robustness.opens_auction(split) and not robustness.opens_auction(plain)
+    assert robustness.opens_auction(BlendRule(name="c", sleeves=(Sleeve(rule=plain, share=0.5), Sleeve(rule=split, share=0.5))))
+    folder = tmp_path / "robustness"
+    folder.mkdir()
+    row = lambda trial, money: {"trial": trial, "base": {"final_value": money}}
+    (folder / "20261021-000000.json").write_text(json.dumps({"engine": "e1", "rows": [row(1, 10), row(2, 30)]}), encoding="utf-8")
+    (folder / "20261020-000000.json").write_text(json.dumps({"engine": "e0", "rows": [row(9, 99)]}), encoding="utf-8")
+    (folder / "20261022-000000.json").write_text(json.dumps({"engine": "e1", "rows": [row(2, 31), row(3, 20)]}), encoding="utf-8")
+    found = robustness.latest(tmp_path)
+    assert [(item["trial"], item["base"]["final_value"]) for item in found["rows"]] == [(2, 31), (3, 20), (1, 10)]

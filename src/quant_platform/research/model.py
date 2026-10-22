@@ -167,7 +167,7 @@ def version_features(version: str | None) -> tuple[str, ...]:
                      and name not in PAID_FACTORS)
     if kind == "extended_j":           # 2026-10-22: I's list and the paid tables' long-history factors
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
-                     and name not in ("margin_in_profit", "broker_concentration_5"))
+                     and name not in ("margin_in_profit", "broker_concentration_5", "govbank_net_20", "govbank_dip_buy_20"))
     if kind == "extended_i":           # 2026-10-22: H's list and the holder brackets (not the paid tables yet)
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
                      and name not in PAID_FACTORS)

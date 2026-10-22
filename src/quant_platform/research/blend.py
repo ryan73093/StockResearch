@@ -186,11 +186,12 @@ def evaluate_blend(data, fp, blend: BlendRule, costs, benchmark_cache: dict | No
 
 def run_blend_trial(blend: BlendRule, history: str | Path, registry, reports_dir: Path, costs, data, fp,
                     data_fingerprint: str, benchmark_cache: dict | None = None) -> tuple[object, dict]:
-    from quant_platform.research.daily import ENGINE_VERSION, PERIOD, SEED_PLAN, input_digests, record_trial
+    from quant_platform.research.daily import ENGINE_VERSION, PERIOD, SEED_PLAN, input_digests, record_trial, rule_inputs
 
     payload = {"blend": blend.canonical(), "period": PERIOD, "costs": costs.as_dict(), "data": data_fingerprint,
                "engine": f"{ENGINE_VERSION}+{BLEND_VERSION}", "plan": SEED_PLAN}
-    payload.update(input_digests(history, list(blend.factors),
+    names = list(dict.fromkeys(name for sleeve in blend.sleeves for name in rule_inputs(sleeve.rule)))
+    payload.update(input_digests(history, names,
                                  any(sleeve.rule.exit_model != "none" for sleeve in blend.sleeves)))
     return record_trial(registry, reports_dir, blend.rule_hash, blend.name, payload,
                         lambda: evaluate_blend(data, fp, blend, costs, benchmark_cache), data_fingerprint, "blend",

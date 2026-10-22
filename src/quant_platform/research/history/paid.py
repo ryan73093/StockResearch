@@ -9,6 +9,7 @@ these only through the factors that use them, and its trial input then holds the
 | TaiwanStockLoanCollateralBalance | the unrestricted-purpose loans' balance (lots) | 2006-10 |
 | TaiwanStockBlockTrade | each day's block trades: shares, money | 2005 (2007 for most) |
 | TaiwanStockBrokerDailyConcentration | the top 15 branches' buying and selling (shares) | 2021-06-28 |
+| TaiwanStockGovernmentBankBuySell | the eight government banks' shares and money bought and sold, summed (from the per-day files of history/finmind_daily.py) | 2021-06-30 |
 
 Each table is the day's, published after the close: used from the next session (research/chips.py)."""
 
@@ -26,11 +27,40 @@ TABLES = {
 }
 
 
+GOVBANK = "TaiwanStockGovernmentBankBuySell"
+
+
 def folder(base: str | Path) -> Path:
     return Path(base) / "paid"
 
 
-def build(base: str | Path, datasets: tuple[str, ...] = tuple(TABLES)) -> dict[str, int]:
+def build_govbank(base: str | Path) -> int:
+    """2026-10-22: the government banks' per-day files (raw/finmind/govbank/<date>.json.gz) into one table."""
+    import gzip
+    import json
+
+    import pandas as pd
+
+    base = Path(base)
+    rows = []
+    for path in sorted((base / "raw" / "finmind" / "govbank").glob("*.json.gz")):
+        try:
+            payload = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
+            day = date.fromisoformat(str(payload["date"])[:10])
+        except (OSError, ValueError, KeyError):
+            continue
+        for code, bought, sold, buy_money, sell_money in payload.get("rows") or []:
+            rows.append({"date": day, "code": str(code), "buy": float(bought), "sell": float(sold),
+                         "buy_amount": float(buy_money), "sell_amount": float(sell_money)})
+    frame = pd.DataFrame(rows, columns=["date", "code", "buy", "sell", "buy_amount", "sell_amount"])
+    frame = frame.drop_duplicates(["date", "code"], keep="last").sort_values(["date", "code"])
+    target = folder(base) / f"{GOVBANK}.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(target, index=False)
+    return len(frame)
+
+
+def build(base: str | Path, datasets: tuple[str, ...] = (*TABLES, GOVBANK)) -> dict[str, int]:
     """Every stored stock file of each dataset into ``paid/<dataset>.parquet`` (date, code, the kept fields; block
     trades summed by day). Rows without a date or code, or with fields that are not numbers, are left out."""
     import pandas as pd
@@ -40,6 +70,9 @@ def build(base: str | Path, datasets: tuple[str, ...] = tuple(TABLES)) -> dict[s
     base = Path(base)
     counts = {}
     for dataset in datasets:
+        if dataset == GOVBANK:
+            counts[dataset] = build_govbank(base)
+            continue
         fields = TABLES[dataset]
         source = base / "raw" / "finmind" / dataset
         rows = []

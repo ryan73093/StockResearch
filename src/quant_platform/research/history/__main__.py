@@ -306,7 +306,8 @@ def main() -> int:
     if args.command == "paid":               # 2026-10-21: the paid FinMind tables, one Parquet file each
         from quant_platform.research.history import paid
 
-        print(json.dumps(paid.build(base), ensure_ascii=False), flush=True)
+        chosen = tuple(item.strip() for item in args.datasets.split(",") if item.strip()) if args.datasets else None
+        print(json.dumps(paid.build(base, chosen) if chosen else paid.build(base), ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "holders":            # 2026-10-21: FinMind's holder history and the weekly files, one table
