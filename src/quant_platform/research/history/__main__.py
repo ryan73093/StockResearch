@@ -53,7 +53,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
                                             "chips", "tpex", "fundamentals", "alerts", "reductions", "insider", "buyback", "pledge", "tdcc",
-                                            "holders", "paid"))
+                                            "holders", "paid", "finmind-daily"))
+    parser.add_argument("--kind", choices=("govbank", "branches"), default="govbank", help="finmind-daily：八大行庫或分點")
+    parser.add_argument("--part", help="finmind-daily --kind branches：第幾份／共幾份（例如 0/2），兩個下載分工")
     parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報；paid＝付費方案的資料集")
     parser.add_argument("--per-hour", type=int, help="finmind：這個程序每小時最多幾次（幾個下載同時跑時分配上限）")
     parser.add_argument("--refresh-quarter", help="finmind：季更新，due＝法定期限已過的最新一季；只重抓近期有交易、"
@@ -272,6 +274,33 @@ def main() -> int:
             job.payload["summary"] = (f"新下載 {fetched['stored']:,} 天、共 {written['days']:,} 天；申報 {written['filings']:,} 筆，"
                                       f"在市場賣出的 {written['on_market']:,} 筆")
         print(json.dumps({**fetched, **written}, ensure_ascii=False), flush=True)
+        return 0
+
+    if args.command == "finmind-daily":      # 2026-10-22: the government banks and the branches, a day a request
+        from quant_platform.research.history import finmind_daily
+        from quant_platform.research.history.finmind import PAID_SHARE, env_token, request_limit
+        from quant_platform.research.jobs import JobLog
+
+        token = env_token(Path.cwd())
+        limit = request_limit(token) if token else None
+        if not limit or limit <= 600:
+            print("FinMind 不是付費方案，沒有下載", file=sys.stderr)
+            return 3
+        days = finmind_daily.sessions(base)
+        if args.kind == "govbank":
+            tasks = [("", day) for day in days]
+            title = f"下載八大行庫買賣（2021-06-30 起 {len(days)} 個交易日，一天一次全市場）"
+        else:
+            codes = finmind_daily.branch_codes(base)
+            part, parts = (int(value) for value in (args.part or "0/1").split("/"))
+            codes = codes[part::parts]
+            tasks = [(code, day) for code in codes for day in days]
+            title = f"下載分點買賣（{len(codes)} 檔 × {len(days)} 個交易日，第 {part + 1}／{parts} 份）"
+        per_hour = min(int(limit * PAID_SHARE), args.per_hour or limit)
+        with JobLog(base.parent).start(title, "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
+            found = finmind_daily.download(base, token, tasks, args.kind, per_hour, job)
+            job.payload["summary"] = f"請求 {found['asked']:,} 次、已有 {found['skipped']:,}、錯誤 {found['errors']}"
+        print(json.dumps(found, ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "paid":               # 2026-10-21: the paid FinMind tables, one Parquet file each
