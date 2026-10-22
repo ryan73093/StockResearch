@@ -226,6 +226,14 @@ def analyses(research: Path) -> list[dict[str, object]]:
     live_path = _newest(research / "live", "????-??-??/latest.json")
     items.append({"name": "盤中資金流（每 15 秒全市場快照）", "when": _stamp(live_path),
                   "result": "交易日 09:00～13:30" if live_path else "還沒有資料", "link": "/market/live"})
+    from quant_platform.research import knowledge, knowledge_vectors   # 2026-10-22: every record, failures first
+
+    built, vectors = knowledge.meta(research), knowledge_vectors.status(research)
+    verdicts = built.get("verdicts") or {}
+    items.append({"name": "研究知識庫（失敗紀錄與 AI 問答）", "when": str(built.get("built_at") or "")[:16].replace("T", " ") or None,
+                  "result": (f"{int(built.get('entries') or 0):,} 筆紀錄、失敗 {sum(int(verdicts.get(word) or 0) for word in knowledge.FAILED):,} 筆；"
+                             + (f"BGE-M3 向量 {int(vectors.get('points') or 0):,} 筆（Qdrant）" if vectors else "只有關鍵字搜尋"))
+                  if built else "還沒建立", "link": "/research/knowledge"})
     return items
 
 

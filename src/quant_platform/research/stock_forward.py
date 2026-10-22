@@ -890,6 +890,11 @@ class StockForwardTracker:
                      else [decision_key(rule_hash, start)]):
             for day, notes in store.why(name).items():
                 why.setdefault(day, {}).update({code: reworded(text) for code, text in notes.items()})
+        if "llm_trader" in ((item.get("rule") or {}).get("factors") or {}):   # 2026-10-22: the model's own words
+            from quant_platform.research.llm_trader import trade_reasons
+
+            for day, notes in trade_reasons(self._base, days).items():
+                why.setdefault(day, {}).update(notes)
         trades, results = explain_trades(days, why, float((item.get("rule") or {}).get("trim_above") or 0.0))
         adjustments = [{**entry, "date": record["date"]} for record in reversed(days)
                        for entry in record.get("adjustments_today") or []]

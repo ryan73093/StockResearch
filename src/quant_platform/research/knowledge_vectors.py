@@ -39,7 +39,7 @@ def model_path(root: str | Path | None = None) -> Path | None:
     """KNOWLEDGE_BGE_MODEL, this project's models/bge-m3, or the VectorDB project's next to it — a folder with the
     weights and sparse_linear.pt; None when none has them."""
     candidates = [os.getenv("KNOWLEDGE_BGE_MODEL", "")]
-    base = Path(root) if root else Path.cwd()
+    base = (Path(root) if root else Path.cwd()).resolve()      # the worker passes "." (its parent is itself)
     candidates += [str(base / "models" / "bge-m3"), str(base.parent / "VectorDB" / "models" / "bge-m3")]
     for item in candidates:
         if item and (Path(item) / "sparse_linear.pt").is_file() and (Path(item) / "config.json").is_file():

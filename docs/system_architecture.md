@@ -155,6 +155,8 @@ flowchart TD
     T0 -->|"S10（提案）：R4 成交可行性、你核准"| PLAN["計畫可選、今日頁產生委託"]
     T3 --> LOG["研究方法第 7～8 節：結論與淘汰原因"]
     T2 --> LOG
+    LOG --> KB["研究知識庫（2026-10-22）：研究方法、最佳化紀錄、淘汰方向、試驗登錄、搜尋、開發歷程、決定、需求<br/>BGE-M3 向量進內嵌 Qdrant＋關鍵字（RRF）；AI 只根據紀錄回答、附出處"]
+    REC --> KB
 ```
 
 防護：挑規則的期間固定（2015-06～2026-09）；每月滾動時只用截止日以前的資料挑規則與重訓模型，截止日之後的資料只拿來前向觀察；每個試驗（含失敗）都計入多重檢定；規則只在研究頁出現，不會自動變成交易建議。AI 研究員（舊流程，夜間提案）暫停中（S9-W07）；舊設計的晉級流程（開發 → 驗證 → 最終驗證 → 前向 → 核准）只適用 ETF 規則，紀錄在研究頁「舊設計紀錄」。
@@ -176,6 +178,7 @@ flowchart TB
       FWDF["forward/：前向觀察紀錄（只追加）"]
       SNAP["snapshots/：個股與市場快照；factors/：因子強弱；execution/：成交可行性"]
       JOBS["jobs/、logs/：長時間程式的進度與日誌"]
+      KBF["knowledge/：研究知識庫 entries.jsonl、meta.json、qdrant/（BGE-M3 向量）、answers.jsonl（問過的問題）"]
     end
     subgraph ARCH["封存與備份"]
       BK["instance/backups/daily/：每日 03:00，保留 7 份"]
@@ -287,6 +290,8 @@ flowchart LR
 | `research/history/reductions.py` | 減資（2026-10-16）：證交所 TWTAUU（每年一檔 `raw/twse_reductions/<年>.json`）與每筆明細 TWTAVUDetail（`raw/twse_reduction_details/<代號>_<日期>.json`，每千股換發股數、每股退還股款）、櫃買 bulletin/revivt（`raw/tpex_reductions/<年>.json`，明細在表內）；`events`（停止買賣前收盤、恢復買賣參考價：還原價的接續）、`exchanges`（換發比例、退還股款：引擎 1.5.0 換股與入帳）、`limits`（恢復買賣日的漲跌停）；`load_stock_data` 放進 `notes["reductions"]`；每晚 21:30 `update_chips` 更新今年與去年，`python -m quant_platform.research.history reductions` 全部重抓 |
 | `research/decisions.py` | 已做過的決定固定（2026-10-15）：每個前向帳戶每天要持有的名單與還沒成交的被擋單（引擎 1.5.0：被擋的賣單、要補的位置數；之前是「隔天重新決定」標記）寫在 `forward/stocks/decisions.json`（鍵：規則雜湊@起始日，組合的子策略加 `#n`）；`rankings` 把記錄過的日子交給 `daily.daily_rankings(fixed=...)` 照原樣沿用，只排新的一天。前向紀錄、共同起跑排行榜、13:50 盤後單共用；`StockForwardTracker.freeze`、`rebase`（`forward/stocks/rebases.json`：已知原因的重算基準） |
 | `research/stock_rules.py` | 個股因子規則（單一或混合因子、資格門檻、前 N 名等權、每月／每季、緩衝、一次投入）、兩階段大掃描、登錄為候選試驗（資料指紋 `stocks:…`）；CLI `python -m quant_platform.research stocks --period … --name first|second|sweep|high52 [--screen|--top N] [--lump-sum 300000]` |
+| `research/knowledge.py` | 研究知識庫（2026-10-22，使用者：失敗紀錄都要記起來，讓後面的人用 AI 問）：`build`／`ensure`（研究方法每一段、最佳化紀錄、淘汰方向、試驗登錄每個規則最新一次回測、大規模與組合搜尋、開發歷程、AGENTS.md 已核定方向、需求 → `research/knowledge/entries.jsonl`，來源有變重建）、`search`（BM25 中文雙字＋英數，試驗編號精確命中；有向量時和語意排名 RRF 合併）、`ask`（取 12 筆給模型，只根據紀錄回答、附出處；`OPERATION="knowledge"` 自己的每月預算，同題快取）、`unrecorded`（做完的研究流程沒寫結果的，需求檢查用）；網頁 `/research/knowledge`、`/research/knowledge/<編號>`、`/research/knowledge.json`；CLI `research knowledge [--index] [--ask]` |
+| `research/knowledge_vectors.py` | 知識庫向量（2026-10-22，使用者：可用 BGE-M3、Qdrant）：`BgeM3`（transformers 載入 BGE-M3，語意向量＝正規化 [CLS]、稀疏＝`sparse_linear.pt`；模型資料夾 `KNOWLEDGE_BGE_MODEL`、本專案 `models/bge-m3` 或 VectorDB 專案的 `models/bge-m3`，不下載）、內嵌 Qdrant `research/knowledge/qdrant`（每次用完就關，網站與更新程序輪流用）、`index`（只編碼內容雜湊變了的紀錄、刪掉不存在的）、`query`（Qdrant 的 dense＋sparse RRF）；worker `knowledge_index` 每小時 45 分有新紀錄就背景跑流程 `knowledge`（CPU） |
 | `research/pool.py` | 研究選手池：從試驗登錄、晉級帳本、AI 日誌與統計檔組出每個規則的狀態與原因；`/research/pool` 與 `/research/pool.json` |
 | `docs/research_method.md` | 研究方法、架構圖、關卡流程圖、結論、淘汰方向、研究路線圖 R1–R12（系統頁專案資訊「研究方法」） |
 | `research/legacy_challenger.py` | 舊版機器學習模型的挑戰者評估（S5-W06 依據）：唯讀載入樣本外預測與 Yahoo 日線、官方除權息表換算持有單位、三種用法對 0050 定期定額與隨機（周轉相同）／最差對照、排序相關、依預測開始前規模縮小股票池的倖存者偏差檢查；CLI `python -m quant_platform.research legacy [--experiment N]`，報告存 `instance/research/legacy/challenger-*.json`，研究頁顯示最新一份 |

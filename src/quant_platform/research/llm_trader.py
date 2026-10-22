@@ -278,3 +278,33 @@ def first_session(fp_sessions: list[date], research: str | Path) -> date | None:
     if not made:
         return None
     return next((day for day in fp_sessions if day.isoformat() > made[0]), None)
+
+
+def trade_reasons(research: str | Path, days: list[dict]) -> dict[str, dict[str, str]]:
+    """2026-10-22 (交接：LLM 交易員帳戶頁顯示 LLM 自己寫的理由): day → code → why, for the trades of the LLM trader's
+    account — a buy with the reason the model wrote in the latest decision before the trade's day, a sale with the
+    decision that no longer held it; a day the model was not used says so."""
+    made = sorted(decisions(research), key=lambda item: item["date"])
+    output: dict[str, dict[str, str]] = {}
+    for record in days:
+        day = str(record["date"])
+        before = [item for item in made if item["date"] < day]
+        if not before:
+            continue
+        recent = before[::-1][:3]       # a choice ranks the next session and fills the one after: look a few back
+        for trade in record.get("trades_today") or []:
+            code = str(trade["code"])
+            text = None
+            for item in recent:
+                llm = item.get("llm") or {}
+                tag = "（補做）" if item.get("replayed") else ""
+                if trade["side"] == "BUY" and code in (llm.get("reasons") or {}):
+                    text = f"LLM {item['date']}{tag}：{llm['reasons'][code]}"
+                elif trade["side"] == "SELL" and code not in set(llm.get("hold") or []):
+                    text = (f"LLM {item['date']}{tag}的選擇裡沒有它了"
+                            + (f"（{llm['fallback']}）" if llm.get("fallback") else ""))
+                if text:
+                    break
+            if text:
+                output.setdefault(day, {})[code] = text
+    return output

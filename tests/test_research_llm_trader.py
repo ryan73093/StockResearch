@@ -57,3 +57,19 @@ def test_a_replayed_day_reads_the_week_of_news_before_it_not_the_latest(tmp_path
                        "news_day": day, "title": f"news {day}"}]).to_parquet(folder / f"{day}.parquet")
     lines = llm_trader.news_of(tmp_path, {"2330"}, date(2026, 10, 6))["2330"]
     assert [line.split()[0] for line in lines] == ["20261005", "20261006"]        # not 10-20 or 10-21
+
+
+def test_the_account_shows_the_reasons_the_model_wrote(tmp_path):
+    """2026-10-22: a buy shows the reason in the latest decision before it that holds the stock; a sale the decision
+    that dropped it; a trade the model gave no reason for keeps the engine's own words."""
+    folder = llm_trader.folder(tmp_path)
+    folder.mkdir(parents=True)
+    lines = [{"date": "2026-10-19", "llm": {"hold": ["2330", "2317"], "reasons": {"2330": "AI 需求強", "2317": "伺服器"}}},
+             {"date": "2026-10-20", "replayed": True, "llm": {"hold": ["2330", "2454"], "reasons": {"2330": "續強", "2454": "新訂單"}}}]
+    (folder / "decisions.jsonl").write_text("\n".join(json.dumps(line, ensure_ascii=False) for line in lines), encoding="utf-8")
+    days = [{"date": "2026-10-21", "trades_today": [{"code": "2454", "side": "BUY"}, {"code": "2317", "side": "SELL"},
+                                                    {"code": "1101", "side": "BUY"}]}]
+    found = llm_trader.trade_reasons(tmp_path, days)["2026-10-21"]
+    assert found["2454"] == "LLM 2026-10-20（補做）：新訂單"
+    assert found["2317"] == "LLM 2026-10-20（補做）的選擇裡沒有它了"
+    assert "1101" not in found

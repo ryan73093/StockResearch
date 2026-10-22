@@ -77,3 +77,15 @@ def test_the_model_folder_is_found_without_downloading(tmp_path, monkeypatch):
     assert knowledge_vectors.model_path(tmp_path / "project") == folder       # the sibling project's copy
     monkeypatch.setenv("KNOWLEDGE_BGE_MODEL", str(folder))
     assert knowledge_vectors.model_path(tmp_path / "elsewhere") == folder
+
+
+def test_a_relative_project_folder_still_finds_the_sibling_model(tmp_path, monkeypatch):
+    """The worker passes the instance folder's parent as "." — resolved first, its parent is the projects folder."""
+    monkeypatch.delenv("KNOWLEDGE_BGE_MODEL", raising=False)
+    folder = tmp_path / "VectorDB" / "models" / "bge-m3"
+    folder.mkdir(parents=True)
+    (folder / "config.json").write_text("{}", encoding="utf-8")
+    (folder / "sparse_linear.pt").write_bytes(b"x")
+    (tmp_path / "StockResearch").mkdir()
+    monkeypatch.chdir(tmp_path / "StockResearch")
+    assert knowledge_vectors.model_path(".") == folder
