@@ -323,7 +323,7 @@ def main() -> int:
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
-                            "window-weight", "intraday", "limits-check", "live-flow"),
+                            "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
@@ -996,6 +996,33 @@ def main() -> int:
                                       f"（重算 {refreshed.get('holdout_run', 0)} 個，其餘讀前向帳戶紀錄）"
                                       if refreshed else "這個月還沒挑策略")
         print(job.payload["summary"])
+        return 0
+
+    if args.command == "open-feasibility":
+        # 2026-10-22 (開盤賣做不做得到): research/intraday.py feasibility
+        from quant_platform.research import intraday
+        from quant_platform.research.jobs import JobLog
+
+        with JobLog(RESEARCH).start("開盤賣做不做得到（零股 09:10 才撮合、開盤集合競價的量）",
+                                    "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+            path = intraday.feasibility(Path(args.base), RESEARCH, job)
+        report = json.loads(path.read_text(encoding="utf-8"))
+        print(json.dumps({key: value for key, value in report.items() if key != "generated_at"}, ensure_ascii=False, indent=1))
+        return 0
+
+    if args.command == "market-signals":
+        # 2026-10-22 (使用者：還有什麼要加入分析的): research/market_signals.py
+        from quant_platform.research import market_signals
+
+        path = market_signals.run(Path(args.base), RESEARCH)
+        report = json.loads(path.read_text(encoding="utf-8"))
+        for name, item in report["signals"].items():
+            for period, row in item["periods"].items():
+                worst = row["fifths"][row["worst"] - 1]
+                print(f"{name} {period}：平均 60 日 {row['mean_60']:+.1%}、大跌率 {row['fall_rate']:.0%}；最差第 {row['worst']} 組 "
+                      f"60 日 {worst['mean_60']:+.1%}、大跌率 {worst['fall_rate']:.0%}")
+            print(f"  → {'有用' if item['useful'] else '沒用'}")
+        print(f"已寫入 {path}")
         return 0
 
     if args.command == "live-flow":

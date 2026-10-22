@@ -1,6 +1,7 @@
 {% extends "v2/base.html" %}
 {% from "v2/_risk.html" import risk_badge %}
 {% from "v2/_icons.html" import icon %}
+{% from "v2/_research_status.html" import research_status %}
 {% block title %}研究 · 交易研究分析平台{% endblock %}
 {% block heading %}
 <header class="page-head">
@@ -16,6 +17,7 @@
 {% set running_count = (jobs or [])|selectattr('status', 'equalto', 'running')|list|length %}
 
 {% if research_tab == 'overview' %}
+{{ research_status(status) }}
 <section class="card">
   <div class="card__head"><h2>研究現況 <span class="badge">2015-06 起、每天決策</span></h2><span class="muted small">啟動資金 30 萬＋每月 5 日 1 萬，對同樣的錢全部買 0050</span></div>
   {% if overview %}

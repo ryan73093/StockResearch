@@ -1002,6 +1002,14 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         jobs = JobLog(research_dir).jobs()
         overview = pool_view(research_dir, basis=_default_basis(research_dir)) if tab == "overview" else None
         best = [row for row in overview["daily"] if row["tier"] in BEST_TIERS and not row["uses_0050"]] if overview else []
+        status = None
+        if tab == "overview":     # 2026-10-22 (使用者：研究首頁建一個表讓我快速知道現在狀況): never breaks the page
+            try:
+                from quant_platform.research.status import overview as research_status
+
+                status = research_status(research_dir)
+            except Exception:  # noqa: BLE001
+                logger.exception("Research status table failed")
         return render_template(
             "v2/research.html",
             active_nav="research",
@@ -1020,7 +1028,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             forward_board=forward_board_load(research_dir) if tab == "forward" else None,
             after_close=after_close_load(research_dir, datetime.now(TAIPEI).date()) if tab == "orders" else None,
             hypotheses=hypothesis_items(research_dir) if tab == "hypothesis" else None,
-            research_tab=tab, jobs=jobs, factor_report=latest_factor_strength(research_dir / "factors"),
+            research_tab=tab, jobs=jobs, factor_report=latest_factor_strength(research_dir / "factors"), status=status,
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
             ml=ml_view(research_dir) if tab == "ml" else None,
             robustness=robustness_latest(research_dir) if tab == "overview" else None,

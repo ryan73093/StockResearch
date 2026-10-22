@@ -581,16 +581,17 @@ def start_finmind_paid(container: "Container", now: datetime | None = None, laun
     folder = research / "history" / "raw" / "finmind"
     marker = folder / "paid.started"
     token = env_token(root) or container.settings.finmind_token
-    if marker.is_file() or not token:
+    if not token:
         return None
     zone = ZoneInfo(container.settings.scheduler_timezone)
     moment = (now or datetime.now(zone)).isoformat(timespec="seconds")
     found = {"title": None, "limit": limit(token), "used": None, "expires": None} if limit is not None else finmind_plan(token)
     if not found:
         return None
+    # 2026-10-22: the plan kept every hour (the research status table shows it), the download started once
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "plan.json").write_text(json.dumps({**found, "checked_at": moment}, ensure_ascii=False), encoding="utf-8")
-    if not found["limit"] or found["limit"] <= 600:
+    if marker.is_file() or not found["limit"] or found["limit"] <= 600:
         return None
     found = found["limit"]
     marker.write_text(f"{moment} 每小時上限 {found}", encoding="utf-8")

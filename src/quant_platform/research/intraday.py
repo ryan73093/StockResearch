@@ -205,3 +205,66 @@ def run(base: str | Path, research: str | Path, token: str, job=None) -> Path:
     path = folder / f"intraday-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
     path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     return path
+
+
+ACCOUNTS = (300_000, 3_000_000, 30_000_000, 67_500_000)
+HOLDINGS = (10, 20)
+
+
+def opening(rows: list[dict]) -> dict[str, float] | None:
+    """2026-10-22 (開盤賣做不做得到): the opening auction's price and money (the 09:00 bar; volume in lots), the first
+    odd-lot match's price (intraday odd lots match from 09:10: the 09:10 bar's close, else the last bar before it), the
+    day's money (bars' volume × typical price) and the close."""
+    bars = sorted((row for row in rows if str(row.get("minute", "")) < "14:00:00"), key=lambda row: row["minute"])
+    if not bars or bars[0]["minute"] != "09:00:00":
+        return None
+    first = bars[0]
+    upto = [row for row in bars if row["minute"] <= "09:10:00"]
+    day = sum(float(row["volume"]) * 1000 * (float(row["high"]) + float(row["low"]) + float(row["close"])) / 3 for row in bars)
+    return {"open": float(first["open"]), "auction": float(first["volume"]) * 1000 * float(first["open"]),
+            "odd_first": float(upto[-1]["close"]), "day": day, "close": float(bars[-1]["close"])}
+
+
+def feasibility(base: str | Path, research: str | Path, job=None) -> Path:
+    """For the sampled sells (the same seed as ``run``): the open against the first odd-lot match; the opening
+    auction's share of the day's money; the engine's cap (NEXT_DAY_PARTICIPATION of the day) as a share of the
+    auction; and how often a whole position of an account (ACCOUNTS over HOLDINGS stocks) is more than a tenth, a
+    quarter or half of the auction."""
+    from quant_platform.research.daily import NEXT_DAY_PARTICIPATION
+
+    base, research = Path(base), Path(research)
+    chosen = [row for row in sample(decisions(base, research, job)) if row["side"] == "sell"]
+    found = []
+    for row in chosen:
+        target = path_for(base, row["code"], date.fromisoformat(row["filled"]))
+        if target.is_file():
+            point = opening(json.loads(gzip.decompress(target.read_bytes()).decode("utf-8")))
+            if point and point["close"] > 0 and point["auction"] > 0 and point["day"] > 0:
+                found.append(point)
+
+    def stats(values: list[float]) -> dict[str, float]:
+        values = sorted(values)
+        return {"count": len(values), "mean": round(statistics.fmean(values), 6),
+                "median": round(values[len(values) // 2], 6), "p25": round(values[len(values) // 4], 6),
+                "p75": round(values[3 * len(values) // 4], 6)} if values else {"count": 0}
+
+    gain_open = [point["open"] / point["close"] - 1 for point in found]
+    gain_odd = [point["odd_first"] / point["close"] - 1 for point in found]
+    sizes = {}
+    for account in ACCOUNTS:
+        for holdings in HOLDINGS:
+            shares = [account / holdings / point["auction"] for point in found]
+            sizes[f"{account // 10_000} 萬／{holdings} 檔"] = {
+                "over_10pct": round(sum(value > 0.10 for value in shares) / len(shares), 3) if shares else None,
+                "over_25pct": round(sum(value > 0.25 for value in shares) / len(shares), 3) if shares else None,
+                "over_50pct": round(sum(value > 0.50 for value in shares) / len(shares), 3) if shares else None}
+    report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "sells": len(found),
+              "gain_open": stats(gain_open), "gain_first_odd_lot": stats(gain_odd),
+              "auction_share_of_day": stats([point["auction"] / point["day"] for point in found]),
+              "engine_cap_share_of_auction": stats([NEXT_DAY_PARTICIPATION * point["day"] / point["auction"] for point in found]),
+              "position_vs_auction": sizes}
+    folder = research / "diagnostics"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"open-feasibility-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path

@@ -1,0 +1,130 @@
+{# 2026-10-22 (使用者：在研究首頁建一個表——因子有哪些、策略類別、分析項目有哪些、每個成長的幅度、版本、策略角色成長，
+   讓我可以快速知道現在狀況): research/status.py. A card of its own tabs. #}
+{% macro pct(value) %}{% if value is none %}—{% else %}<span class="{{ 'up' if value > 0.0005 else ('down' if value < -0.0005 else '') }}">{{ '{:+.1%}'.format(value) }}</span>{% endif %}{% endmacro %}
+{% macro money(value) %}{% if value is none %}—{% else %}{{ '{:,.0f}'.format(value / 1e4) }} 萬{% endif %}{% endmacro %}
+{% macro research_status(status) %}
+{% if status %}
+<section class="card" id="status" data-tab="現況總表" data-tab-default>
+  <div class="card__head"><h2>研究現況總表</h2><span class="muted small">{{ status.built }} 更新・檔案有變才重算</span></div>
+  <div class="tabset" data-tabset>
+
+  {% set c = status.categories %}
+  <div data-tab="策略類別與成長" id="status-categories">
+    <p class="muted small" style="margin:0 0 8px">總共 {{ '{:,}'.format(c.rules) }} 個策略（每一種設定算一個）、過門檻 {{ '{:,}'.format(c.passing) }} 個；每個帳戶都是 2015-06 起啟動資金 30 萬＋每月 5 日 1 萬，同樣的錢全部買 0050 是 {{ money(c.benchmark) }}。</p>
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>類別</th><th class="num">策略數</th><th class="num">過門檻（一般／高風險／T1）</th><th>最好的策略</th><th class="num">期末</th><th class="num">比 1 天前</th><th class="num">比 7 天前</th><th class="num">最近一次最佳化</th><th class="num">從第一個起</th></tr></thead>
+        <tbody>
+        {% for row in c.rows %}
+          <tr>
+            <td data-primary><strong>{{ row.role }}</strong></td>
+            <td class="num" data-label="策略數">{{ row.rules }}</td>
+            <td class="num" data-label="過門檻">{{ row.passing }}（{{ row.t0 }}／{{ row.risky }}／{{ row.t1 }}）</td>
+            <td data-label="最好的策略">{% if row.best.spec %}<a href="/research/rules/{{ row.best.spec }}">{{ row.best.name }}</a> <span class="badge {{ 'badge--ok' if row.best.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in (row.best.tier or '') else 'badge--warn') }}">{{ row.best.tier }}</span>{% endif %}</td>
+            <td class="num" data-label="期末">{{ money(row.best.final) }}</td>
+            <td class="num" data-label="比 1 天前">{{ pct(row.change_1d) }}</td>
+            <td class="num" data-label="比 7 天前">{{ pct(row.change_7d) }}</td>
+            <td class="num" data-label="最近一次最佳化">{{ pct(row.change_last) }}<br><span class="muted small">{{ (row.last_run or '')[5:16].replace('T', ' ') }}</span></td>
+            <td class="num" data-label="從第一個起">{{ pct(row.growth_total) }}<br><span class="muted small">{{ (row.first or {}).get('day', '')[5:] }}</span></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="col-help"><b>欄位說明</b>　<b>類別</b>：策略押的是什麼（策略角色）。<b>策略數</b>：這一類登錄過的不同策略（最新引擎）。<b>過門檻</b>：T0 候選＋高風險 T0 候選＋T1（T1 只進前向觀察）。<b>最好的策略</b>：這一類期末錢最多的一個。<b>比 1 天前／7 天前</b>：這一類最好的期末金額和 1 天前、7 天前比（— 是那時這一類還沒有策略或沒有變）。<b>最近一次最佳化</b>：這一類最近一次加入新策略之前和現在比，下面是那次的時間。<b>從第一個起</b>：和這一類第一個策略的期末比。引擎改版重算時數字也會往下修。</p>
+  </div>
+
+  {% set f = status.factors %}
+  <div data-tab="因子" id="status-factors">
+    <p class="muted small" style="margin:0 0 8px">{{ f.rows|length }} 個因子、{{ f.strong }} 個「強」（因子強弱 {{ f.built }}，2015-06 起每週排名、看之後 20 個交易日）。模型分數被過門檻策略用到最多的：{% for name, count in f.models_used[:6] %}{{ name }} {{ count }} 個{% if not loop.last %}、{% endif %}{% endfor %}。</p>
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>因子</th><th>類別</th><th>判定</th><th class="num">2015～2020</th><th class="num">2020-10 起</th><th class="num">2024 起</th><th class="num">過門檻策略用到</th></tr></thead>
+        <tbody>
+        {% for row in f.rows %}
+          <tr>
+            <td data-primary>{{ row.label }}<br><span class="muted small">{{ row.name }}</span></td>
+            <td data-label="類別">{{ row.family }}</td>
+            <td data-label="判定"><span class="badge {{ 'badge--ok' if row.verdict == '強' else ('badge--warn' if row.verdict in ('不穩', '反向') else '') }}">{{ row.verdict }}</span></td>
+            <td class="num" data-label="2015～2020">{{ pct(row.before) }}</td>
+            <td class="num" data-label="2020-10 起">{{ pct(row.regime) }}</td>
+            <td class="num" data-label="2024 起">{{ pct(row.recent) }}</td>
+            <td class="num" data-label="過門檻策略用到">{{ row.used }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="col-help"><b>欄位說明</b>　<b>判定</b>：強＝前五分之一在 2015～2020 與 2020-10 起都比平均多 2 個百分點以上；反向＝都少 2 點以上（反著用）；不穩＝一段好一段壞；弱＝其他。<b>2015～2020／2020-10 起／2024 起</b>：每週選這個因子排名前五分之一的股票，之後 20 個交易日比全部合格股票平均每年多賺多少。<b>過門檻策略用到</b>：目前過門檻的策略裡有幾個用到它（組合帳戶算子策略的）。</p>
+  </div>
+
+  <div data-tab="分析項目" id="status-analyses">
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>分析項目</th><th>最近一次</th><th>結果</th></tr></thead>
+        <tbody>
+        {% for item in status.analyses %}
+          <tr>
+            <td data-primary><a href="{{ item.link }}">{{ item.name }}</a></td>
+            <td data-label="最近一次">{{ item.when or '—' }}</td>
+            <td data-label="結果">{{ item.result }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="col-help"><b>欄位說明</b>　<b>分析項目</b>：平台固定在做的檢查與研究，點名稱看細節。<b>最近一次</b>：結果檔的時間。<b>結果</b>：最近一次的重點；完整數字在研究方法第 7 節與「最佳化紀錄」分頁。</p>
+  </div>
+
+  {% set v = status.versions %}
+  <div data-tab="版本" id="status-versions">
+    <p class="muted small" style="margin:0 0 8px">回測引擎 <strong>{{ v.engine }}</strong>・本月截止日 {{ v.cutoff }}・前向帳戶 {{ v.accounts }} 個{% if v.finmind %}・FinMind {{ v.finmind.title or '' }}（每小時 {{ '{:,}'.format(v.finmind.limit or 0) }} 次{% if v.finmind.expires %}，到 {{ v.finmind.expires }}{% endif %}）{% endif %}</p>
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>資料</th><th>更新到</th></tr></thead>
+        <tbody>
+        {% for item in v.data %}<tr><td data-primary>{{ item.name }}</td><td data-label="更新到">{{ item.through or '—' }}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-wrap table-wrap--stack" style="margin-top:10px">
+      <table class="table--stack">
+        <thead><tr><th>模型</th><th>版本</th><th>開發期門檻</th><th>最近訓練</th><th>重訓到截止日</th><th class="num">前向帳戶用到</th></tr></thead>
+        <tbody>
+        {% for row in v.models %}
+          <tr>
+            <td data-primary>{{ row.label }}<br><span class="muted small">{{ row.name }}</span></td>
+            <td data-label="版本">{{ row.version }}</td>
+            <td data-label="開發期門檻"><span class="badge {{ 'badge--ok' if row.gate == '過' else 'badge--bad' }}">{{ row.gate }}</span></td>
+            <td data-label="最近訓練">{{ row.trained or '—' }}</td>
+            <td data-label="重訓到截止日">{{ '是' if row.refitted else '—' }}</td>
+            <td class="num" data-label="前向帳戶用到">{{ row.accounts }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="col-help"><b>欄位說明</b>　<b>回測引擎</b>：交易規則的版本，改版時全部策略重算。<b>開發期門檻</b>：模型只有在 2016～2020 的成績不輸比較對象才拿來做策略。<b>重訓到截止日</b>：前向帳戶用的模型每個月重訓到本月截止日（兩個月前的月底）。<b>前向帳戶用到</b>：目前有幾個前向帳戶讀這個模型。</p>
+  </div>
+
+  <div data-tab="角色成長歷程" id="status-roles">
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>類別</th><th>最好的期末（加入新策略的日子）</th></tr></thead>
+        <tbody>
+        {% for row in c.rows %}
+          <tr>
+            <td data-primary><strong>{{ row.role }}</strong></td>
+            <td data-label="歷程">{% for point in row.history[-8:] %}{{ point.day[5:] }} {{ money(point.final) }}{% if not loop.last %} → {% endif %}{% endfor %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="col-help"><b>欄位說明</b>　每個日期是這一類加入新策略的那天，金額是當時這一類最好的期末（2015-06 起 30 萬＋每月 1 萬）；最後一個是今天。只列最近 8 個點。</p>
+  </div>
+
+  </div>
+</section>
+{% endif %}
+{% endmacro %}

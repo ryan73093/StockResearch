@@ -33,3 +33,13 @@ def test_the_sample_is_half_buys_half_sells_and_fixed():
     rows = [{"trial": 1, "code": str(1000 + n), "filled": "2024-01-02", "side": "buy" if n % 3 else "sell"} for n in range(300)]
     first, again = intraday.sample(rows, 100), intraday.sample(rows, 100)
     assert first == again and sum(row["side"] == "buy" for row in first) == 50 and len(first) == 100
+
+
+def test_the_opening_auction_and_the_first_odd_lot_match_by_hand():
+    rows = [bar("09:00:00", 100, 100, 100, 100, 50), bar("09:05:00", 100, 101, 99, 99, 10),
+            bar("09:10:00", 99, 99, 98, 98.5, 10), bar("09:30:00", 98, 98, 98, 98, 20), bar("13:30:00", 97, 97, 97, 97, 60)]
+    found = intraday.opening(rows)
+    assert found["open"] == 100 and found["auction"] == 50 * 1000 * 100 and found["odd_first"] == 98.5
+    assert found["close"] == 97 and found["day"] == pytest.approx(1000 * (50 * 100 + 10 * (101 + 99 + 99) / 3
+                                                                          + 10 * (99 + 98 + 98.5) / 3 + 20 * 98 + 60 * 97))
+    assert intraday.opening([bar("09:01:00", 1, 1, 1, 1, 1)]) is None          # no opening auction bar
