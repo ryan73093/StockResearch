@@ -341,6 +341,8 @@ def main() -> int:
                         help="forward：把每個帳戶最新紀錄背後的決定寫下來（之後重算不再改變已做的決定）")
     parser.add_argument("--rebase", help="forward：把接不上前一天的紀錄標成重算基準，附上原因")
     parser.add_argument("--restart-from", help="forward：所有在跑的帳戶從這天重新起算（舊紀錄封存，YYYY-MM-DD）")
+    parser.add_argument("--restart-broken", action="store_true",
+                        help="forward：對帳不一致的帳戶封存後從起算日重新記錄（--reason 寫原因；2026-10-22 修復用）")
     parser.add_argument("--reason", help="forward --restart-from：原因")
     parser.add_argument("--stop-ai-account", action="store_true",
                         help="forward：停止追蹤「AI 研究員（整體）」帳戶（沒有合格規則時整個放 0050；紀錄保留）")
@@ -1517,6 +1519,10 @@ def main() -> int:
         if args.restart_from:                   # 2026-10-17: every live account from the common start again
             found = tracker.restart(date.fromisoformat(args.restart_from), args.reason or "使用者：前向從每月滾動起點起算")
             print(f"重新起算：{found}", flush=True)
+        if args.restart_broken:                 # 2026-10-22: accounts out of step, recorded again from their start
+            broken = {key for key, found in reconcile(tracker.records(), tracker.rebases()).items() if found}
+            names = tracker.restart_accounts(broken, args.reason or "對帳不一致，從起算日重新記錄")
+            print(f"對帳不一致、從起算日重新記錄的帳戶 {len(names)} 個", flush=True)
         if args.rebase:                         # 2026-10-15: known causes, not reconciliation errors
             print(f"標成重算基準：{tracker.rebase(args.rebase)} 筆紀錄", flush=True)
         if args.explain:                        # 2026-10-19: the reasons for the decisions kept before reasons were

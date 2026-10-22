@@ -228,6 +228,47 @@ def qualifying_rules(research_dir: str | Path, plan_kind: str = "SeedPlan") -> l
     return output
 
 
+class ForwardLock:
+    """2026-10-22 (前向帳戶 194 個對帳不一致): one writer of the forward records and decisions at a time, across processes.
+    On 10-21 23:31 a model refit restarted accounts (records and decisions archived, recorded again with the refit
+    model) while another pipeline's forward step, holding the decisions it had read before, saved them back over the
+    new ones — the records were the new model's, the decisions the old one's, and the next day did not follow on.
+    ``record`` and ``refit`` hold this for their whole run; a lock older than ``stale`` seconds (a dead process) goes."""
+
+    def __init__(self, folder: Path, stale: float = 3 * 3600) -> None:
+        self._lock = Path(folder) / "forward.lock"
+        self._stale = stale
+        self._held = False
+
+    def __enter__(self):
+        import time
+
+        self._lock.parent.mkdir(parents=True, exist_ok=True)
+        while True:
+            try:
+                handle = os.open(self._lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(handle, f"{os.getpid()} {datetime.now(TAIPEI).isoformat(timespec='seconds')}".encode())
+                os.close(handle)
+                self._held = True
+                return self
+            except (FileExistsError, PermissionError):
+                try:
+                    if time.time() - self._lock.stat().st_mtime > self._stale:
+                        self._lock.unlink()
+                        continue
+                except OSError:
+                    pass
+                time.sleep(1.0)
+
+    def __exit__(self, *_exc) -> None:
+        if self._held:
+            try:
+                self._lock.unlink()
+            except OSError:
+                pass
+            self._held = False
+
+
 class StockForwardTracker:
     def __init__(self, research_dir: str | Path, costs: CostModel | None = None, min_quotes: int = 100,
                  experiments: bool = True) -> None:
@@ -459,12 +500,24 @@ class StockForwardTracker:
         """2026-10-21 (使用者 2026-10-16：每月滾動，模型也要更新): the live accounts reading a model just retrained to the
         month's cutoff are recorded again from their start with it — their records moved to log-archive.jsonl and their
         decisions to decisions-archive.json (kept, not deleted). Returns their names."""
+        items = self.tracked()
+        hashes = {item["rule_hash"] for item in items if not item.get("stopped") and item.get("kind") in ("daily", "blend")
+                  and self.uses(item) & factors}
+        return self.restart_accounts(hashes, reason, now, field="refit")
+
+    def restart_accounts(self, hashes: set[str], reason: str, now: datetime | None = None, field: str = "restarted"
+                         ) -> list[str]:
+        """These live accounts recorded again from their start: records to log-archive.jsonl, decisions to
+        decisions-archive.json (kept), the reason on the account (``field``). Under the forward lock."""
+        with ForwardLock(self._folder):
+            return self._restart_accounts(hashes, reason, now, field)
+
+    def _restart_accounts(self, hashes: set[str], reason: str, now: datetime | None, field: str) -> list[str]:
         from quant_platform.research.decisions import DecisionStore
 
         moment = (now or datetime.now(TAIPEI)).isoformat(timespec="seconds")
         items = self.tracked()
-        hit = [item for item in items if not item.get("stopped") and item.get("kind") in ("daily", "blend")
-               and self.uses(item) & factors]
+        hit = [item for item in items if item["rule_hash"] in hashes and not item.get("stopped")]
         if not hit:
             return []
         hashes = {item["rule_hash"] for item in hit}
@@ -477,7 +530,7 @@ class StockForwardTracker:
             kept.update({f"{name}~{moment}": value for name, value in moved.items()})
             archive.write_text(json.dumps(kept, ensure_ascii=False), encoding="utf-8")
         for item in hit:
-            item["refit"] = {"at": moment, "reason": reason}
+            item[field] = {"at": moment, "reason": reason}
         self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
         return [item["name"] for item in hit]
 
@@ -497,6 +550,11 @@ class StockForwardTracker:
         return self.record(today, freeze=True)
 
     def record(self, today: date, now: datetime | None = None, freeze: bool = False) -> list[dict[str, object]]:
+        """Under the forward lock (2026-10-22): ``_record``."""
+        with ForwardLock(self._folder):
+            return self._record(today, now, freeze)
+
+    def _record(self, today: date, now: datetime | None = None, freeze: bool = False) -> list[dict[str, object]]:
         """Append the state of every tracked rule for today and for any earlier session since its
         start that has no record yet (the computer was off at 15:30, or the quotes came late): those
         are marked ``late``. A day whose quotes (stocks and 0050) are not on disk is left for later.

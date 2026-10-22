@@ -18,6 +18,7 @@ being the account (rule hash and start day, a blend's sleeve numbered after ``#`
 from __future__ import annotations
 
 import json
+import time
 import os
 from datetime import date
 from pathlib import Path
@@ -31,6 +32,7 @@ class DecisionStore:
     def __init__(self, research: str | Path) -> None:
         self.path = Path(research) / "forward" / "stocks" / "decisions.json"
         self._kept: dict[str, dict] = {}
+        self._loaded_at = time.time()            # 2026-10-22: what was dropped after this is not written back
         try:
             self._data = json.loads(self.path.read_text(encoding="utf-8")) if self.path.is_file() else {}
         except (OSError, ValueError):
@@ -89,8 +91,20 @@ class DecisionStore:
             partial = self.path.with_suffix(".partial")
             partial.write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
             os.replace(partial, self.path)
+            marks = self._dropped()
+            marks.update({name: time.time() for name in names})
+            tomb = self.path.with_name("decisions-dropped.json")
+            tomb.write_text(json.dumps(marks, ensure_ascii=False), encoding="utf-8")
         self._data = current
+        self._kept = {name: entry for name, entry in self._kept.items() if name not in names}
         return taken
+
+    def _dropped(self) -> dict[str, float]:
+        """name -> when it was dropped (an account recorded again from its start)."""
+        try:
+            return json.loads(self.path.with_name("decisions-dropped.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
 
     def save(self) -> None:
         """Merge what this run kept into the file as it is now (another process may have written meanwhile)."""
@@ -100,7 +114,12 @@ class DecisionStore:
             current = json.loads(self.path.read_text(encoding="utf-8")) if self.path.is_file() else {}
         except (OSError, ValueError):
             current = {}
+        dropped = self._dropped()
         for name, entry in self._kept.items():
+            # 2026-10-22 (194 accounts out of step): decisions read before the account was dropped and started again
+            # are the old ones — a process that read them earlier must not write them back over the new
+            if dropped.get(name, 0.0) > self._loaded_at:
+                continue
             old = current.get(name)
             if old and old["through"] > entry["through"]:
                 continue
