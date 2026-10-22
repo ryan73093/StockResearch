@@ -117,3 +117,15 @@ def test_the_margin_veto_reads_the_margin_table_and_names_its_trait():
     assert daily.rule_inputs(daily.DailyRule(name="y", factors={"trend_200": 1.0})) == ["trend_200"]
     assert set(daily.VETO2_H2) <= set(daily.VETO2_RULES)
     assert "不新買融資快斷頭的股票" in classify(rule.canonical())["traits"]
+
+
+def test_both_vetoes_together_read_both_tables():
+    """2026-10-22 (否決第三版): exclude "hm" — a stock in either the holders' or the margin fifth is not newly bought."""
+    from quant_platform.research import daily
+    from quant_platform.research.categories import classify
+
+    rule = daily.DailyRule(name="x", factors={"ml_deep2_top": 1.0}, top=20, exclude="hm")
+    assert daily.VETO_FACTORS["hm"] == ("holders_down_4w", "margin_safe")
+    assert daily.rule_inputs(rule) == ["ml_deep2_top", "holders_down_4w", "margin_safe"]
+    assert "不新買股東大增或融資快斷頭的股票" in classify(rule.canonical())["traits"]
+    assert len(daily.VETO3_H2) == 120 and len(set(daily.VETO3_H2)) == 120 and len(daily.VETO3_HM) == 23

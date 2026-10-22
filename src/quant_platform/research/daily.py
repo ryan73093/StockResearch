@@ -367,7 +367,7 @@ class DailyRule(BaseModel):
     # sessions; holdings are kept by the usual rules. Left out of the hash when "none".
     # 2026-10-22 (集保因子第三版): "h1" = no new buys of the fifth whose small holders' share rose the most in 4 weeks
     # (retail_down_4w lowest), "h2" = of the fifth whose holders grew the most (holders_down_4w lowest)
-    exclude: Literal["none", "v1", "h1", "h2", "m1"] = "none"
+    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm"] = "none"
     # 2026-10-12 (全面研究「之後再試」第 1 項): "cost1" = a holding that leaves the keep zone is replaced only when
     # the replacement's expected next-20-session excess beats the holding's by more than a round trip (about
     # 0.99%: fee both ways, the sell tax, slippage both ways). The expectation is the rule's own score
@@ -1308,8 +1308,9 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
         vetoed = fp.news_vetoed(position) if getattr(rule, "news_veto", "none") == "v1" else set()
         if getattr(rule, "exclude", "none") == "v1":
             vetoed = vetoed | fp.excluded(position)       # no new buys; holdings keep their usual rules
-        elif getattr(rule, "exclude", "none") in HOLDER_EXCLUDES:   # 2026-10-22: chips dispersing, no new buys
-            vetoed = vetoed | fp.holder_vetoed(position, HOLDER_EXCLUDES[rule.exclude])
+        elif getattr(rule, "exclude", "none") in VETO_FACTORS:      # 2026-10-22: chips dispersing, no new buys
+            for factor in VETO_FACTORS[rule.exclude]:
+                vetoed = vetoed | fp.holder_vetoed(position, factor)
         if exit_agent is not None and hasattr(exit_agent, "refuses"):
             vetoed = vetoed | exit_agent.refuses(position)  # tech1: the robot buys only what it wants
         if risk_veto == "meta1":              # 2026-10-20: the meta-label model expects it to lose to 0050
@@ -2357,8 +2358,10 @@ def rule_inputs(rule) -> list[str]:
     """The factors a rule reads: its own and (2026-10-22) the one its exclusion vetoes by — the holder brackets or
     the paid margin table are then part of its input."""
     names = list(rule.factors)
-    veto = HOLDER_EXCLUDES.get(getattr(rule, "exclude", "none"))
-    return names + [veto] if veto and veto not in names else names
+    for veto in VETO_FACTORS.get(getattr(rule, "exclude", "none"), ()):
+        if veto not in names:
+            names.append(veto)
+    return names
 
 
 def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool) -> dict[str, object]:
@@ -3202,6 +3205,8 @@ HOLDING_STYLES = (("固定持有 20 天", {"hold": "days", "min_hold": 20}),
                   ("不設最短持有", {"hold": "days", "min_hold": 0}))
 HOLDING_TOP = 30
 HOLDER_EXCLUDES = {"h1": "retail_down_4w", "h2": "holders_down_4w", "m1": "margin_safe"}
+# 2026-10-22 (否決第三版): "hm" = the holders' and the margin veto together (a stock in either fifth is not bought)
+VETO_FACTORS = {**{key: (value,) for key, value in HOLDER_EXCLUDES.items()}, "hm": ("holders_down_4w", "margin_safe")}
 HOLDER_VETO_SHARE = 0.2
 
 # 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」, written before the
@@ -3325,10 +3330,33 @@ def holders2_batch() -> list[DailyRule]:
 # have no veto, and the holders' veto ("h2") on the three of them without an h2 version yet
 VETO2_RULES = (6490, 6090, 5983, 6491, 6492, 6091, 6509, 6501, 6093, 4941)
 VETO2_H2 = (6492, 6509, 6501)
-VETO_WORDS = {"h1": "不買散戶大增的五分之一", "h2": "不買股東大增的五分之一", "m1": "不買融資快斷頭的五分之一"}
+VETO_WORDS = {"h1": "不買散戶大增的五分之一", "h2": "不買股東大增的五分之一", "m1": "不買融資快斷頭的五分之一",
+              "hm": "不買股東大增或融資快斷頭的五分之一"}
+# 2026-10-22 (research_method §7「否決第三版」, written before the run; the lists frozen at 14:4x from the passing single
+# rules ranking the top 20 without a veto, by end value): the holders' veto on the 120 richest, both vetoes together on
+# the 20 richest and on the three top-10 rules the margin veto moved onto the frontier
+VETO3_H2 = (6491, 6492, 6509, 6501, 6093, 4941, 5050, 6493, 6504, 6510, 5085, 6485, 6600, 5122, 6516, 6505, 6503, 6512,
+            6506, 6514, 4589, 6133, 5106, 6540, 5100, 6523, 6519, 6507, 6107, 6120, 5102, 6104, 5254, 6132, 6524, 6542,
+            5128, 6117, 4587, 6513, 6532, 6105, 4944, 6100, 6115, 5117, 6145, 6110, 5110, 6142, 6099, 6521, 6488, 5230,
+            6518, 6527, 6515, 6489, 5112, 5231, 6108, 6534, 6118, 4317, 6538, 6109, 4918, 6511, 5253, 6544, 5151, 6103,
+            5121, 5152, 6522, 6562, 6508, 6520, 6130, 6114, 6529, 6526, 6119, 6131, 5051, 5095, 6116, 6112, 5148, 6550,
+            5127, 5113, 6528, 6106, 4915, 6124, 5105, 6533, 6543, 6098, 6531, 5097, 5098, 6575, 6535, 5039, 6164, 6123,
+            4943, 4924, 6494, 5108, 6135, 6196, 6551, 5023, 6136, 6578, 5078, 6143)
+VETO3_HM = VETO3_H2[:20] + (6490, 6090, 5983)
+
+
+def veto3_batch() -> list[DailyRule]:
+    return _veto_rules([(trial, "h2") for trial in VETO3_H2] + [(trial, "hm") for trial in VETO3_HM])
 
 
 def veto2_batch() -> list[DailyRule]:
+    from quant_platform.research.holding import style_of
+    from quant_platform.research.registry import TrialRegistry
+
+    return _veto_rules([(trial, "m1") for trial in VETO2_RULES] + [(trial, "h2") for trial in VETO2_H2])
+
+
+def _veto_rules(pairs: list[tuple[int, str]]) -> list[DailyRule]:
     from quant_platform.research.holding import style_of
     from quant_platform.research.registry import TrialRegistry
 
@@ -3336,13 +3364,15 @@ def veto2_batch() -> list[DailyRule]:
     records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
     timing = {"same": "當天盤後成交", "next": "隔天收盤成交", "open": "隔天開盤成交", "split": "開盤賣、收盤買"}
     output = []
-    for trial, exclude in [(trial, "m1") for trial in VETO2_RULES] + [(trial, "h2") for trial in VETO2_H2]:
+    for trial, exclude in pairs:
         base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
         spec = base.canonical()
         stem = _stem(records[trial].spec_name).split("：")[0]
-        name = (f"{stem}・{VETO_WORDS[exclude]}（#{trial} 的設定、前 {base.top} 名、{timing.get(spec.get('execution', 'same'))}）"
+        tail = (f"・{VETO_WORDS[exclude]}（#{trial} 的設定、前 {base.top} 名、{timing.get(spec.get('execution', 'same'))}）"
                 f"｜持有：{style_of(spec) or '固定持有 20 天'}")
-        output.append(DailyRule.model_validate({**base.model_dump(), "name": name, "exclude": exclude}))
+        if len(stem) + len(tail) > 80:                 # the setting's number says the rest
+            stem = stem[:max(4, 79 - len(tail))] + "…"
+        output.append(DailyRule.model_validate({**base.model_dump(), "name": stem + tail, "exclude": exclude}))
     return output
 
 
@@ -4330,7 +4360,8 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
-           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "veto2": veto2_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
+           "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "veto2": veto2_batch, "veto3_a": lambda: veto3_batch()[0::2],
+           "veto3_b": lambda: veto3_batch()[1::2], "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
            "split_b": lambda: split_all_batch()[1::2], "splitblend": split_blend_batch,
            "splitblends": split_blends_all_batch, "splitblends_a": lambda: split_blends_all_batch()[0::2],
            "splitblends_b": lambda: split_blends_all_batch()[1::2]}
