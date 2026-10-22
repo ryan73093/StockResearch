@@ -166,10 +166,12 @@ def _document_entries(root: Path, name: str, kind: str, link: str, skip: tuple[s
     if not path.is_file():
         return []
     output = []
-    for part in sections(path.read_text(encoding="utf-8")):
+    seen: Counter = Counter()        # an entry's id from its title (and which one of that title), not its line:
+    for part in sections(path.read_text(encoding="utf-8")):   # an edit above it leaves it the same entry
         title = str(part["title"])
         if any(word in title for word in skip):
             continue
+        seen[title] += 1
         body = "\n".join(part["lines"]).strip()
         if len(body) < 15:
             continue
@@ -179,7 +181,7 @@ def _document_entries(root: Path, name: str, kind: str, link: str, skip: tuple[s
             label = title if len(pieces) == 1 else f"{title}（第 {number}／{len(pieces)} 部分）"
             date = _date(title) or _date(piece) or _date(context)
             verdict = judge(title, piece) if kind == "研究紀錄" else ("決定" if kind == "使用者決定" else "說明")
-            output.append(_entry(kind, f"{name}:{part['line']}:{number}", label,
+            output.append(_entry(kind, f"{name}:{title}#{seen[title]}:{number}", label,
                                  (f"（{context}）\n" if context else "") + piece, date, verdict,
                                  f"{DOCS[name].as_posix()}:{part['line']}", link, judged=kind == "研究紀錄"))
     return output

@@ -161,3 +161,15 @@ def test_the_knowledge_page_answers_and_lists_the_failures(tmp_path):
     assert client.get("/research/knowledge?q=停損").status_code == 200
     assert client.get("/research/knowledge.json?q=停損").get_json()["question"] == "停損"
     assert client.get("/research/knowledge/X-0000000000").status_code == 404
+
+
+def test_an_edit_above_a_record_keeps_its_id(tmp_path):
+    root, research = _root(tmp_path)
+    knowledge.build(root, research)
+    before = {row["title"]: row["id"] for row in knowledge.entries(research) if row["kind"] == "研究紀錄"}
+    path = root / "docs" / "research_method.md"
+    path.write_text(path.read_text(encoding="utf-8").replace("## 7. 結論\n", "## 7. 結論\n\n新增的一行。\n\n另一行。\n"),
+                    encoding="utf-8")
+    knowledge.build(root, research)
+    after = {row["title"]: row["id"] for row in knowledge.entries(research) if row["kind"] == "研究紀錄"}
+    assert after["停損（2026-10-05，跑之前寫）"] == before["停損（2026-10-05，跑之前寫）"]
