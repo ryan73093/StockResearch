@@ -57,9 +57,11 @@ CORRELATION_LIMIT = 0.9
 # features for the models (model H), not signals for the search
 LEFT_OUT = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "dl_risk", "dl_risk2", "low_insider_sell_60",
             "buyback_60", "pledge_heavy", "low_pledge",     # 2026-10-20: the pledges wait for their event study
-            # 2026-10-21: the holder brackets and the paid FinMind tables wait for their strength analysis
-            "big_holder_pct", "big_holder_up_4w", "holders_down_4w", "retail_down_4w", "margin_safe", "margin_in_profit",
-            "low_pledge_loan_20", "block_premium_20", "block_volume_20", "broker_concentration_5")
+            # 2026-10-21: the holder brackets and the paid FinMind tables waited for their strength analysis; 10-22 the
+            # strong ones (fewer holders, small holders leaving, margin maintenance) are in, the weak, the duplicate
+            # (margin_in_profit ranks as margin_safe does) and the short-history one stay out
+            "big_holder_pct", "big_holder_up_4w", "margin_in_profit", "low_pledge_loan_20", "block_premium_20",
+            "block_volume_20", "broker_concentration_5")
 SHORT = {
     "momentum_12_1": "12 月動能", "momentum_6": "6 月動能", "momentum_3": "3 月動能", "reversal_1": "1 月反轉",
     "reversal_5d": "5 日反轉", "low_volatility_60": "60 日低波", "low_volatility_250": "250 日低波",

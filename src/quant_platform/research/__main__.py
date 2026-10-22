@@ -354,6 +354,7 @@ def main() -> int:
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
     parser.add_argument("--recent", action="store_true", help="factors：新設計（2015-06 起、每週排名、看 20 個交易日）")
     parser.add_argument("--only", help="factors --recent：只分析這些因子（逗號分隔），其他沿用最新一份完整報告")
+    parser.add_argument("--require-any", help="scan-large：每組至少含其中一個訊號（逗號分隔；不在訊號清單的會加進去）")
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--lump-sum", type=float, default=0, help="stocks：一次投入的金額（0＝每月投入）")
     parser.add_argument("--initial", type=float, default=0,
@@ -1137,8 +1138,10 @@ def main() -> int:
         with JobLog(RESEARCH).start(f"大規模搜尋（串流）：{args.signals_min}～{args.signals_max} 個訊號一組"
                                     + (f"（最常過篩的 {len(only)} 個訊號）" if only else "")
                                     + f" × {len(holds)} 種持有方式 × {settings} 種設定", command) as job:
+            required = [name.strip() for name in (args.require_any or "").split(",") if name.strip()] or None
             summary = scan_large.run(Path(args.base), RESEARCH, broker_costs(args.broker), sizes, holds,
-                                     count=args.finalists, job=job, folder=folder, universes=universes, only=only)
+                                     count=args.finalists, job=job, folder=folder, universes=universes, only=only,
+                                     required=required)
             job.payload["summary"] = (f"{summary['candidates']:,} 個策略、{summary['passed_screen']:,} 個過第一階段、"
                                       f"{summary['finalists']} 個進引擎：{summary['tiers']}")
         print(json.dumps({key: value for key, value in summary.items() if key != "results"}, ensure_ascii=False), flush=True)

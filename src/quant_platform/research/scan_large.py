@@ -36,8 +36,11 @@ def keys(holds=HOLDS, universes=UNIVERSES) -> list[tuple[str, str, str, str]]:
             for check in CHECKS for hold in holds]
 
 
-def total(names: list[str], sizes: list[int], holds=HOLDS, universes=UNIVERSES) -> int:
-    return sum(comb(len(names), size) for size in sizes) * len(keys(holds, universes))
+def total(names: list[str], sizes: list[int], holds=HOLDS, universes=UNIVERSES, required=None) -> int:
+    """Every set of ``sizes`` signals (2026-10-22: with ``required``, only the sets holding at least one of them)."""
+    others = len(set(names) - set(required or ())) if required else 0
+    return sum(comb(len(names), size) - (comb(others, size) if required else 0) for size in sizes) * len(
+        keys(holds, universes))
 
 
 def frequent(folder: Path, top: int) -> list[str]:
@@ -53,13 +56,17 @@ def frequent(folder: Path, top: int) -> list[str]:
     return [name for name, _count in counts.most_common(top)]
 
 
-def blocks(names: list[str], sizes: list[int], holds=HOLDS, block: int = 2048, universes=UNIVERSES):
-    """(block number, candidates sharing one key) in a fixed order — the same numbers on every run."""
+def blocks(names: list[str], sizes: list[int], holds=HOLDS, block: int = 2048, universes=UNIVERSES, required=None):
+    """(block number, candidates sharing one key) in a fixed order — the same numbers on every run; 2026-10-22: with
+    ``required``, only the sets holding at least one of those signals (a round about new information)."""
     number = 0
+    wanted = set(required or ())
     for size in sizes:
         for universe, weighting, check, hold in keys(holds, universes):
             batch = []
             for group in combinations(names, size):
+                if wanted and not wanted.intersection(group):
+                    continue
                 batch.append({"factors": list(group), "universe": universe, "weighting": weighting, "check": check,
                               "hold": hold, "named_hold": True})
                 if len(batch) == block:
@@ -99,7 +106,7 @@ def _with_room(accounts, chunk, job=None):
 
 
 def screen_stream(arrays_folder: Path, names: list[str], sizes: list[int], costs, out: Path, holds=HOLDS, job=None,
-                  accounts=None, universes=UNIVERSES) -> dict[str, object]:
+                  accounts=None, universes=UNIVERSES, required=None) -> dict[str, object]:
     """Stage 1 over every candidate, block by block (see the module text); returns the progress record."""
     from quant_platform.research.scan import load_arrays, metrics, passes
 
@@ -118,12 +125,13 @@ def screen_stream(arrays_folder: Path, names: list[str], sizes: list[int], costs
     path = out / "progress.json"
     progress = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {
         "version": VERSION, "names": names, "sizes": sizes, "holds": list(holds), "universes": list(universes),
-        "total": total(names, sizes, holds, universes),
+        "required": list(required or ()), "total": total(names, sizes, holds, universes, required),
         "screened": 0, "passed": 0, "next_block": 0, "started_at": datetime.now().isoformat(timespec="seconds")}
     universes = tuple(progress.get("universes") or UNIVERSES)      # a resumed run keeps its own
+    required = progress.get("required") or None
     began, counted = time.time(), progress["screened"]
     index = 0
-    for number, chunk in blocks(names, sizes, holds, universes=universes):
+    for number, chunk in blocks(names, sizes, holds, universes=universes, required=required):
         if number < progress["next_block"]:
             index += len(chunk)
             continue
@@ -161,7 +169,8 @@ def screen_stream(arrays_folder: Path, names: list[str], sizes: list[int], costs
 
 
 def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count: int = 80, job=None,
-        folder: Path | None = None, universes=UNIVERSES, only: list[str] | None = None) -> dict[str, object]:
+        folder: Path | None = None, universes=UNIVERSES, only: list[str] | None = None,
+        required: list[str] | None = None) -> dict[str, object]:
     """Stage 1 streamed (``folder``: an unfinished run to go on with), then stage 2 as the scan's; the summary.
     ``only``: the signals to combine (default every scan signal); a resumed run keeps the ones it started with."""
     from collections import Counter
@@ -190,7 +199,9 @@ def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count:
         names = json.loads(started_with.read_text(encoding="utf-8"))["names"]
     else:
         names = [name for name in (only or signals()) if name in arrays.names]
-    progress = screen_stream(folder / "arrays", names, sizes, costs, folder, holds, job, universes=universes)
+        names += [name for name in required or () if name in arrays.names and name not in names]
+    progress = screen_stream(folder / "arrays", names, sizes, costs, folder, holds, job, universes=universes,
+                             required=[name for name in required or () if name in names] or None)
     rows = [json.loads(line) for path in sorted(folder.glob("screen-s*.jsonl"))
             for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     seeds = earlier_finalists(research)
