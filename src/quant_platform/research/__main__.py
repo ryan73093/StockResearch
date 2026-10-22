@@ -363,6 +363,7 @@ def main() -> int:
     parser.add_argument("--recent", action="store_true", help="factors：新設計（2015-06 起、每週排名、看 20 個交易日）")
     parser.add_argument("--only", help="factors --recent：只分析這些因子（逗號分隔），其他沿用最新一份完整報告")
     parser.add_argument("--require-any", help="scan-large：每組至少含其中一個訊號（逗號分隔；不在訊號清單的會加進去）")
+    parser.add_argument("--dev-end", help="scan-large：第一階段的開發期終點（cutoff＝本月截止日，和每月名單一致；或 YYYY-MM-DD；預設 2020-09-30）")
     parser.add_argument("--experiment", type=int, default=241, help="legacy：舊版模型實驗編號")
     parser.add_argument("--lump-sum", type=float, default=0, help="stocks：一次投入的金額（0＝每月投入）")
     parser.add_argument("--initial", type=float, default=0,
@@ -1209,6 +1210,13 @@ def main() -> int:
         from quant_platform.research import scan_large
         from quant_platform.research.jobs import JobLog
 
+        if args.dev_end:                        # 2026-10-22: the development months up to the month's cutoff
+            from quant_platform.research import scan as scan_module
+            from quant_platform.research.rolling import cutoff_for
+
+            scan_module.DEV_END = (cutoff_for(datetime.now(TAIPEI).date()) if args.dev_end == "cutoff"
+                                   else date.fromisoformat(args.dev_end))
+            print(f"第一階段開發期到 {scan_module.DEV_END}", flush=True)
         sizes = list(range(args.signals_min, args.signals_max + 1))
         holds = tuple((args.holds or ",".join(scan_large.HOLDS)).split(","))
         universes = tuple((args.universes or ",".join(scan_large.UNIVERSES)).split(","))
