@@ -8,6 +8,9 @@
   (each round holds the earlier rounds' blends) — and the rules run through the full engine, over time.
 - ``forward``: the accounts of the month's list day by day since its start, as cash if everything were sold that day.
 - ``families``: the best rule of each family now.
+- 2026-10-23 (使用者：短賽道績效呢): the same rules from 2020-10-26 on (a fresh 30 萬＋每月 1 萬 account, the second
+  check every rule passes), and the short-history track (rules on data known only from 2021, graded from their start)
+  kept apart from the 2015 lines — their end values start years later and are not comparable.
 
 Kept until the files they read change (the forward records are 190 MB)."""
 
@@ -116,7 +119,7 @@ def searches(research: Path) -> list[dict[str, object]]:
 def timeline(research: str | Path, rows: dict[str, dict] | None = None) -> dict[str, object]:
     """The best backtest known at the end of each hour with a new run (2015-06～2026-09, 30 萬＋每月 1 萬, 100% stocks);
     ``rows``: spec hash → the pool's row (which rules hold 0050), the pool's by default."""
-    from quant_platform.research.daily import tier
+    from quant_platform.research.daily import short_track, tier
     from quant_platform.research.registry import TrialRegistry, engine_order
 
     research = Path(research)
@@ -133,20 +136,32 @@ def timeline(research: str | Path, rows: dict[str, dict] | None = None) -> dict[
     changes: list[dict[str, object]] = []
     engines: dict[str, datetime] = {}
     holders: dict[str, object] = {key: None for key, _label in GROUPS}
-    benchmark = None
+    benchmark = recent_benchmark = short_benchmark = None
 
     def flush(at: datetime, runs: int) -> None:
         best: dict[str, tuple | None] = {key: None for key, _label in GROUPS}
-        passing = 0
+        passing = short_passing = 0
+        recent: dict[str, float | None] = {"any": None, "t0": None}
+        short_best = None
         for _order, record, grade in current.values():
             value = float(record.metrics["final_value"])
+            if short_track(record.metrics):              # from 2021: its own line, not the 2015 ones
+                short_best = value if short_best is None else max(short_best, value)
+                short_passing += grade in PASSING
+                continue
+            since = record.metrics.get("since_2020_final_value")
+            if since and grade in ANY_TIERS:
+                recent["any"] = since if recent["any"] is None else max(recent["any"], since)
+            if since and grade in ("T0", "T0 候選"):
+                recent["t0"] = since if recent["t0"] is None else max(recent["t0"], since)
             keys = (["any"] if grade in ANY_TIERS else []) + (["risky"] if "高風險" in grade and grade in PASSING else []) \
                 + (["t0"] if grade in ("T0", "T0 候選") else [])
             passing += grade in PASSING
             for key in keys:
                 if best[key] is None or value > best[key][0]:
                     best[key] = (value, record, grade)
-        point = {"at": at, "passing": passing, "rules": len(current), "runs": runs}
+        point = {"at": at, "passing": passing, "rules": len(current), "runs": runs, "recent_any": recent["any"],
+                 "recent_t0": recent["t0"], "short": short_best, "short_passing": short_passing}
         for key, _label in GROUPS:
             point[key] = best[key][0] if best[key] else None
             before = holders[key]
@@ -174,10 +189,15 @@ def timeline(research: str | Path, rows: dict[str, dict] | None = None) -> dict[
         order = engine_order(record)
         if old is None or order >= old[0]:
             current[record.spec_hash] = (order, record, tier(record.metrics)[0])
-        benchmark = float(record.metrics.get("benchmark_final_value") or 0) or benchmark
+        if short_track(record.metrics):
+            short_benchmark = float(record.metrics.get("benchmark_final_value") or 0) or short_benchmark
+        else:
+            benchmark = float(record.metrics.get("benchmark_final_value") or 0) or benchmark
+            recent_benchmark = float(record.metrics.get("since_2020_benchmark_final_value") or 0) or recent_benchmark
     if hour is not None:
         flush(hour, runs)
-    return {"points": points, "changes": changes, "benchmark": benchmark,
+    return {"points": points, "changes": changes, "benchmark": benchmark, "recent_benchmark": recent_benchmark,
+            "short_benchmark": short_benchmark,
             "engines": sorted(({"engine": name, "at": at} for name, at in engines.items()), key=lambda item: item["at"])}
 
 
@@ -207,6 +227,35 @@ def forward(research: str | Path, start: str, named: dict[str, str] | None = Non
             row[rule_hash] = cashed[rule_hash]["gain"] if rule_hash in cashed else None
         series.append(row)
     return {"series": series, "start": start, "accounts": len(live), "named": named or {}}
+
+
+def short_rules(research: Path, summary: dict[str, dict]) -> list[dict[str, object]]:
+    """The short-history track's rules (each newest run), richest first, with the grade's reason and the forward."""
+    from quant_platform.research.daily import short_track, tier
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    latest = newest(TrialRegistry(research / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent"
+                    and short_track(record.metrics or {}))
+    out = []
+    for record in latest.values():
+        metrics = record.metrics
+        grade, why = tier(metrics)
+        cashed = (summary.get(record.spec_hash) or {}).get("sell_all") or {}
+        out.append({"trial": record.trial_id, "spec_hash": record.spec_hash, "name": record.spec_name, "tier": grade,
+                    "why": why, "start": str(metrics.get("start"))[:10], "final_value": metrics.get("final_value"),
+                    "benchmark": metrics.get("benchmark_final_value"), "max_drawdown": metrics.get("max_drawdown"),
+                    "benchmark_drawdown": metrics.get("benchmark_max_drawdown"),
+                    "win_1y": ((metrics.get("windows") or {}).get("1y") or {}).get("win_ratio"),
+                    "forward_gain": cashed.get("gain"), "forward_ahead": cashed.get("ahead")})
+    return sorted(out, key=lambda row: -(row["final_value"] or 0))
+
+
+def recent_best(pool_rows: list[dict], count: int = 15) -> list[dict[str, object]]:
+    """The richest passing rules from 2020-10-26 (each rule's second check: a fresh account then), 100% stocks."""
+    rows = [row for row in pool_rows if not row.get("uses_0050") and row.get("tier") in ANY_TIERS
+            and row.get("since_2020_final_value")]
+    return sorted(rows, key=lambda row: -row["since_2020_final_value"])[:count]
 
 
 def families(pool_rows: list[dict], summary: dict[str, dict]) -> list[dict[str, object]]:
@@ -282,6 +331,7 @@ def view(research: str | Path, start: str) -> dict[str, object]:
                                   "realized": (summary.get(row["rule_hash"]) or {}).get("realized"),
                                   "sessions": (summary.get(row["rule_hash"]) or {}).get("sessions")})
         return {"timeline": line, "searches": search_rows, "scale": search_scale(research), "forward": fwd,
+                "short": short_rules(research, summary), "recent": recent_best(pool["daily"]),
                 "latest_forward": latest, "frontier": frontier_rows,
                 "families": families(pool["daily"], summary),
                 "days": daily_table(line["points"], search_rows, fwd["series"])}

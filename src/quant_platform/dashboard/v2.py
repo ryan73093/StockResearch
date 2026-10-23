@@ -1128,6 +1128,13 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                                        {"key": "t0", "label": "一般 T0 候選最好", "css": "s3"}],
                 money, guides=[(line["benchmark"], f"0050 同樣的錢 {money(line['benchmark'])}")] if line["benchmark"] else [],
                 marks=marks, step=True, label="回測最好的規則隨研究時間的變化")),
+            # 2026-10-23 (使用者：短賽道績效呢): the same rules from 2020-10-26, a fresh account then
+            "recent": Markup(progress_chart(
+                line["points"], "at", [{"key": "recent_any", "label": "全部過門檻的最好（2020-10 起）", "css": "s1", "wide": True},
+                                       {"key": "recent_t0", "label": "一般 T0 候選最好（2020-10 起）", "css": "s3"}],
+                money, guides=[(line["recent_benchmark"], f"0050 同樣的錢 {money(line['recent_benchmark'])}")]
+                if line.get("recent_benchmark") else [], marks=marks, step=True,
+                label="2020-10 起最好的規則隨研究時間的變化")),
             "passing": Markup(progress_chart(
                 line["points"], "at", [{"key": "passing", "label": "過門檻的規則", "css": "s1"},
                                        {"key": "rules", "label": "完整回測過的規則", "css": "s4", "dashed": True}],

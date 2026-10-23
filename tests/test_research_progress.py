@@ -26,21 +26,25 @@ def test_the_best_is_each_rules_newest_run_so_an_engine_correction_shows(tmp_pat
     registry = TrialRegistry(tmp_path / "trials.jsonl")
     count = iter(range(100))
 
-    def run(spec, value, grade, engine):
+    def run(spec, value, grade, engine, start="2015-06-01", since=None):
         registry.register(kind="candidate", period="recent", spec_hash=spec, spec_name=spec,
                           input_hash=f"{spec}{next(count)}", data_fingerprint="x",
-                          metrics={"final_value": value, "benchmark_final_value": 100.0, "engine": engine, "grade": grade})
-    run("a", 300.0, "T0 候選", "daily-1.4.0")
-    run("b", 500.0, "T1", "daily-1.4.0")
+                          metrics={"final_value": value, "benchmark_final_value": 100.0, "engine": engine, "grade": grade,
+                                   "start": start, "since_2020_final_value": since, "since_2020_benchmark_final_value": 40.0})
+    run("a", 300.0, "T0 候選", "daily-1.4.0", since=90.0)
+    run("b", 500.0, "T1", "daily-1.4.0", since=120.0)
+    run("e", 2000.0, "T0 候選", "daily-1.5.0", start="2021-07-05")   # the short track: its own line (2026-10-23)
     run("c", 900.0, "T3", "daily-1.4.0")                  # loses to 0050: never the best
     run("d", 800.0, "T0 候選", "daily-1.4.0")             # holds 0050: left out
-    run("a", 250.0, "T0 候選", "daily-1.5.0")             # the newer engine corrects a
+    run("a", 250.0, "T0 候選", "daily-1.5.0", since=80.0)  # the newer engine corrects a
     run("a", 999.0, "T0 候選", "daily-1.4.0")             # an older engine's rerun registered later does not count
-    rows = {key: {"uses_0050": key == "d"} for key in "abcd"}
+    rows = {key: {"uses_0050": key == "d"} for key in "abcde"}
     found = progress.timeline(tmp_path, rows=rows)
     last = found["points"][-1]
     assert last["t0"] == 250.0 and last["any"] == 500.0 and last["risky"] is None
-    assert last["passing"] == 1 and last["rules"] == 3 and found["benchmark"] == 100.0
+    assert last["passing"] == 1 and last["rules"] == 4 and found["benchmark"] == 100.0
+    assert last["recent_any"] == 120.0 and last["recent_t0"] == 80.0 and found["recent_benchmark"] == 40.0
+    assert last["short"] == 2000.0 and last["short_passing"] == 1 and found["short_benchmark"] == 100.0
     assert [item["engine"] for item in found["engines"]] == ["daily-1.4.0", "daily-1.5.0"]
 
 

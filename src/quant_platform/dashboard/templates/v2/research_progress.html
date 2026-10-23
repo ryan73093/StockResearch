@@ -35,6 +35,58 @@
   <p class="col-help"><b>說明</b>　<b>全部過門檻的最好</b>：T1、T0 候選、T0 候選（高風險）裡期末最多的。<b>一般 T0 候選</b>：回撤不比 0050 深超過 5 個百分點、兩段期間都贏、視窗勝率都夠。<b>倍</b>：現在除以起點。<b>過門檻的規則</b>：每個規則看它最新一次的回測。<b>搜尋過的策略</b>：大規模搜尋每輪篩過的設定加總，加上組合搜尋最大一輪的組合數（每輪組合都含前幾輪的，所以組合不加總）。</p>
 </section>
 
+<section class="card" id="short" data-tab="短賽道">
+  {% set recent_now = last.recent_any if last else None %}{% set recent_first = points|selectattr('recent_any')|first if points else None %}
+  <div class="card__head"><h2>短賽道：只看最近幾年</h2><span class="muted small">2020-10-26 起（盤中零股之後）重新開 30 萬＋每月 1 萬的帳戶；短歷史賽道是 2021 年後才有資料的規則</span></div>
+  <div class="kpis kpis--four">
+    <div class="kpi"><div class="kpi__label">2020-10 起，全部過門檻的最好</div><div class="kpi__value">{{ wan(recent_now) if recent_now else '—' }}{% if recent_now and line.recent_benchmark %}<small>（0050 同樣的錢 {{ wan(line.recent_benchmark) }}，{{ '{:.1f}'.format(recent_now / line.recent_benchmark) }} 倍{% if recent_first %}；{{ recent_first.at.strftime('%m/%d') }} 時 {{ wan(recent_first.recent_any) }}{% endif %}）</small>{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">2020-10 起，一般 T0 候選最好</div><div class="kpi__value">{{ wan(last.recent_t0) if last and last.recent_t0 else '—' }}{% if last and last.recent_t0 and line.recent_benchmark %}<small>（{{ '{:.1f}'.format(last.recent_t0 / line.recent_benchmark) }} 倍）</small>{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">短歷史賽道的規則</div><div class="kpi__value">{{ data.short|length }}<small>（過門檻 {{ data.short|selectattr('tier', 'in', ['T0', 'T0（高風險）', 'T0 候選', 'T0 候選（高風險）'])|list|length }} 個）</small></div></div>
+    <div class="kpi"><div class="kpi__label">短歷史賽道最好</div><div class="kpi__value">{% if data.short %}{{ wan(data.short[0].final_value) }}<small>（{{ data.short[0].start[:7] }} 起；0050 同樣的錢 {{ wan(data.short[0].benchmark) }}）</small>{% else %}—{% endif %}</div></div>
+  </div>
+  {{ charts.recent }}
+  <div class="legend"><span><i class="sw-s1"></i>全部過門檻的最好（2020-10 起）</span><span><i class="sw-s3"></i>一般 T0 候選最好（2020-10 起）</span><span><i class="sw-s0"></i>0050 同樣的錢（2020-10 起）</span></div>
+  <p class="note">每個規則除了 2015-06 起的帳戶，也要在 2020-10-26 起重新開的帳戶贏 0050 才過門檻；這張圖是後面那段的最好成績。這段期間也被拿來篩過規則，不算乾淨的驗證；乾淨的是「前向」分頁。</p>
+  {% if data.recent %}
+  <h3 style="margin:16px 0 6px;font-size:15px">2020-10 起期末最多的規則</h3>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th class="num">2020-10 起期末（0050）</th><th class="num">2015-06 起期末</th><th class="num">最大回撤（0050）</th></tr></thead>
+      <tbody>
+      {% for row in data.recent %}
+        <tr>
+          <td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
+          <td class="num" data-label="2020-10 起期末">{{ wan(row.since_2020_final_value) }}<span class="muted small">（{{ wan(row.since_2020_benchmark_final_value) }}）</span></td>
+          <td class="num" data-label="2015-06 起期末">{{ wan(row.final_value) }}</td>
+          <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <h3 style="margin:16px 0 6px;font-size:15px">短歷史賽道的規則（{{ data.short|length }} 個）</h3>
+  {% if data.short %}
+  <div class="table-wrap table-wrap--stack table-wrap--tall">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th>等級與原因</th><th class="num">期末（0050）</th><th class="num">最大回撤（0050）</th><th class="num">1 年視窗勝率</th></tr></thead>
+      <tbody>
+      {% for row in data.short %}
+        <tr>
+          <td data-primary><a href="/research/rules/{{ row.spec_hash }}">#{{ row.trial }} {{ row.name }}</a><span class="muted small"> {{ row.start }} 起</span></td>
+          <td data-label="等級與原因" data-wide><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if row.tier == 'T3' else 'badge--warn') }}">{{ row.tier }}</span> <span class="small">{{ row.why }}</span></td>
+          <td class="num" data-label="期末">{{ wan(row.final_value) }}<span class="muted small">（{{ wan(row.benchmark) }}）</span></td>
+          <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_drawdown) if row.benchmark_drawdown is not none else '—' }}）</span></td>
+          <td class="num" data-label="1 年勝率">{{ '{:.0%}'.format(row.win_1y) if row.win_1y is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted">還沒有短歷史賽道的規則。</p>{% endif %}
+  <p class="col-help"><b>欄位說明</b>　<b>2020-10 起期末</b>：2020-10-26 起重新開的 30 萬＋每月 1 萬帳戶到 2026-09 的期末，括號是同樣的錢買 0050。<b>短歷史賽道</b>：用到 2021 年後才有的資料（例如分點、主力買超、八大行庫）的規則，從資料開始那天起算，期末打 98.1 折後要贏 0050、1 年視窗勝率至少 60%、回撤不比 0050 深超過 5 個百分點。<b>等級與原因</b>：照選手池的分級，後面寫沒過的原因。</p>
+</section>
+
 <section class="card" id="records" data-tab="刷新紀錄">
   <div class="card__head"><h2>每一次最好成績的變化 <span class="badge">{{ line.changes|length }} 次</span></h2><span class="muted small">最新在上</span></div>
   <div class="table-wrap table-wrap--stack table-wrap--tall">
