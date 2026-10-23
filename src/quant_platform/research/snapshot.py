@@ -46,6 +46,7 @@ GROUPS = (
     ("融資、借貸與鉅額交易", ("margin_safe", "margin_in_profit", "low_pledge_loan_20", "block_premium_20",
                        "block_volume_20", "broker_concentration_5")),                       # 2026-10-21 (FinMind 付費)
     ("八大行庫（官股）", ("govbank_net_20", "govbank_dip_buy_20")),                                  # 2026-10-22
+    ("分點", ("branch_informed_20", "low_daytrade_5")),                                          # 2026-10-23
 )
 
 

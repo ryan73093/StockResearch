@@ -62,7 +62,8 @@ LEFT_OUT = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "dl_
             # (margin_in_profit ranks as margin_safe does) and the short-history one stay out
             "big_holder_pct", "big_holder_up_4w", "margin_in_profit", "low_pledge_loan_20", "block_premium_20",
             "block_volume_20", "broker_concentration_5",
-            "govbank_net_20", "govbank_dip_buy_20")      # 2026-10-22: wait for their strength analysis (short history)
+            "govbank_net_20", "govbank_dip_buy_20",      # 2026-10-22: wait for their strength analysis (short history)
+            "branch_informed_20", "low_daytrade_5")      # 2026-10-23: the branches, the same
 SHORT = {
     "momentum_12_1": "12 月動能", "momentum_6": "6 月動能", "momentum_3": "3 月動能", "reversal_1": "1 月反轉",
     "reversal_5d": "5 日反轉", "low_volatility_60": "60 日低波", "low_volatility_250": "250 日低波",
@@ -79,7 +80,7 @@ SHORT = {
          "big_holder_pct": "千張大戶比例", "big_holder_up_4w": "大戶增加", "holders_down_4w": "股東人數減少",
          "retail_down_4w": "散戶減少", "margin_safe": "融資維持率高", "margin_in_profit": "融資沒套牢",
          "low_pledge_loan_20": "借貸沒增加", "block_premium_20": "鉅額溢價", "block_volume_20": "鉅額量",
-         "broker_concentration_5": "主力買超", "govbank_net_20": "官股買超", "govbank_dip_buy_20": "官股逢跌買", "ml_deep": "深度模型", "ml_deep2": "深度模型2", "ml_deep2_top": "深度模型2前一成", "ml_deep3": "深度模型3", "ml_deep2_wide": "深度模型2加上櫃", "rl_tech": "技術機器人",
+         "broker_concentration_5": "主力買超", "govbank_net_20": "官股買超", "govbank_dip_buy_20": "官股逢跌買", "branch_informed_20": "分點跟著買", "low_daytrade_5": "隔日沖少", "ml_deep": "深度模型", "ml_deep2": "深度模型2", "ml_deep2_top": "深度模型2前一成", "ml_deep3": "深度模型3", "ml_deep2_wide": "深度模型2加上櫃", "rl_tech": "技術機器人",
     "high_52w_count_60": "新高次數", "range_position_60": "區間位置", "low_ivol_60": "特質低波",
     "low_pv_corr_20": "量價背離", "overnight_reversal_12": "隔夜反轉", "rl_tech_weekly": "技術機器人週",
     "season_month": "同月季節性", "dividend_ahead": "即將除息", "trust_quarter_end": "投信季底作帳",

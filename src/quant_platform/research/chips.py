@@ -143,12 +143,18 @@ PAID_FACTORS = {
     # support the market in falls — their net buying over 20 sessions, and only on the sessions the stock fell
     "govbank_net_20": "八大行庫買超（20 日官股買減賣金額 ÷ 市值；2021-06-30 起，短歷史賽道）",
     "govbank_dip_buy_20": "八大行庫逢跌買（20 日內股價下跌那幾天的官股買減賣 ÷ 市值；2021-06-30 起，短歷史賽道）",
+    # 2026-10-23 (research_method §7「分點」): who is buying — the branches whose large trades were followed by gains,
+    # and the next-day flippers (隔日沖), each chosen month by month from before (research/branches.py)
+    "branch_informed_20": "分點跟著買（20 日內「之前大買之後會漲」的分點買減賣 ÷ 成交金額；每月只用之前的資料挑分點；2022-07 起、約 555 檔，短歷史賽道）",
+    "low_daytrade_5": "隔日沖少（5 日內隔日沖分點的買超 ÷ 成交金額，反向；2022-07 起、約 555 檔，短歷史賽道）",
 }
 GOVBANK_FACTORS = ("govbank_net_20", "govbank_dip_buy_20")
+BRANCH_FACTORS = ("branch_informed_20", "low_daytrade_5")
 PAID_SOURCES = {"margin_safe": "TaiwanStockMarginMaintenance", "margin_in_profit": "TaiwanStockMarginMaintenance",
                 "low_pledge_loan_20": "TaiwanStockLoanCollateralBalance", "block_premium_20": "TaiwanStockBlockTrade",
                 "block_volume_20": "TaiwanStockBlockTrade", "broker_concentration_5": "TaiwanStockBrokerDailyConcentration",
-                "govbank_net_20": "TaiwanStockGovernmentBankBuySell", "govbank_dip_buy_20": "TaiwanStockGovernmentBankBuySell"}
+                "govbank_net_20": "TaiwanStockGovernmentBankBuySell", "govbank_dip_buy_20": "TaiwanStockGovernmentBankBuySell",
+                "branch_informed_20": "BranchSignals", "low_daytrade_5": "BranchSignals"}
 
 STOCK_DIVIDENDS = "StockDividends"
 DIVIDEND_LISTING_SESSIONS = 70
@@ -633,6 +639,14 @@ class ChipStore:
                 net = net.where(close < close.shift(1), 0.0).where(net.notna())
             worth = shares * close
             frame = net.rolling(20, min_periods=20).sum() / worth.where(worth > 0)
+        elif factor in BRANCH_FACTORS:                         # 2026-10-23: research/branches.py
+            days = 20 if factor == "branch_informed_20" else 5
+            money = self._paid(dataset, "total", zero=True).rolling(days, min_periods=days).sum()
+            field = "informed_net" if factor == "branch_informed_20" else "flip_net"
+            flows = self._paid(dataset, field, zero=True).rolling(days, min_periods=days).sum()
+            frame = flows / money.where(money > 0)
+            if factor == "low_daytrade_5":
+                frame = -frame
         else:
             raise ValueError(factor)
         return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)

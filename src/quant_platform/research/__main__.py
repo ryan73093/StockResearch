@@ -324,7 +324,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--ask", help="knowledge：問研究知識庫（AI 只根據紀錄回答；沒有金鑰時列出最相關的紀錄）")
@@ -1062,6 +1062,21 @@ def main() -> int:
         report = json.loads(path.read_text(encoding="utf-8"))
         print(f"比對 {report['compared']:,} 個（股票×交易日）：漲跌停價不同 {report['limits_differ']:,} 個、"
               f"漲跌停鎖死判斷不同 {report['locks_differ']:,} 個；各年 {report['limits_differ_by_year']}；鎖死組合 {report['locks']}")
+        print(f"已寫入 {path}")
+        return 0
+
+    if args.command == "branches":
+        # 2026-10-23 (research_method §7「分點」): the informed and the next-day-flipping branches, month by month
+        from quant_platform.research import branches
+        from quant_platform.research.jobs import JobLog
+
+        with JobLog(RESEARCH).start("分點：挑出跟著買與隔日沖的分點、做成個股訊號",
+                                    "python -m quant_platform.research branches") as job:
+            path = branches.run(Path(args.base), RESEARCH, job=job)
+            report = json.loads(path.read_text(encoding="utf-8"))
+            job.payload["summary"] = f"{report['stocks']} 檔、{report['branches']} 個分點、訊號 {report['signal_rows']:,} 列"
+        print(json.dumps({key: report[key] for key in ("stocks", "branches", "signal_rows", "persistence",
+                                                       "after_flipper_buying")}, ensure_ascii=False), flush=True)
         print(f"已寫入 {path}")
         return 0
 
