@@ -336,12 +336,16 @@ def test_the_chained_record_counts_each_month_on_that_months_list():
     lists = {"2026-08-31": {"A", "B"}, "2026-09-30": {"A"}, "2026-10-31": {"A", "B"}}
     found = chain(records, lists, date(2026, 12, 3))
     a = found["A"]
-    assert a["months"] == ["2026-10", "2026-11", "2026-12"] and a["sessions"] == 4
+    # 2026-10-23 (使用者：叫你要浮動的): the first month counts its account from the day after the cutoff — 9/30 too
+    assert a["months"] == ["2026-10", "2026-11", "2026-12"] and a["sessions"] == 5
     assert a["return"] == pytest.approx(1.1 * 1.1 * ((120 - 10) / 100) * 0.9 - 1, abs=1e-6)       # money netted out
     assert a["benchmark_return"] == pytest.approx(1.01 * 1.01 * ((111 - 10) / 100) - 1, abs=1e-6)
     assert a["excess"] == pytest.approx(a["return"] - a["benchmark_return"], abs=1e-6)
-    b = found["B"]                                                            # off the November list: December only
-    assert b["months"] == ["2026-12"] and b["sessions"] == 1 and b["return"] == pytest.approx(0.02)
+    b = found["B"]                     # off the November list: December's list account from 11/1, November's day too
+    assert b["months"] == ["2026-12"] and b["sessions"] == 2 and b["return"] == pytest.approx(0.02)
+    first = chain([rec("C", "2026-09-01", "2026-09-01", 99, 100, 100.5), rec("C", "2026-09-01", "2026-09-02", 110, 100, 100.5)],
+                  {"2026-08-31": {"C"}}, date(2026, 10, 5))["C"]        # the first session against the money put in
+    assert first["sessions"] == 2 and first["return"] == pytest.approx(0.10) and first["benchmark_return"] == pytest.approx(0.005)
 
 
 def test_every_trade_shows_what_it_made_and_why():

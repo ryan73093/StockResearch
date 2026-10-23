@@ -60,6 +60,7 @@ META_STOPPED = ("2026-10-15：AI 研究員還沒有合格的規則，這個帳�
 
 
 _SUMMARY: dict[str, object] = {}
+_CHAINED: dict[str, object] = {}
 _HELD_OLD = re.compile(r"，已持有滿 (\d+) 個交易日")
 
 
@@ -407,11 +408,20 @@ class StockForwardTracker:
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def chained(self, today: date) -> dict[str, dict[str, object]]:
-        """2026-10-19 (使用者選「串接滾動前向紀錄」): each rule's chained rolling forward record — see ``chain``."""
+        """2026-10-19 (使用者選「串接滾動前向紀錄」): each rule's chained rolling forward record — see ``chain``.
+        2026-10-23 (使用者：整個網頁在使用的速度很慢): kept until the records, the archive or a monthly list change —
+        reading the 190 MB of records took 3.3 s of every pool and overview page."""
         from quant_platform.research.rolling import folder as rolling_folder
 
+        lists_folder = rolling_folder(self._base)
+        paths = [self.log_path, self._folder / "log-archive.jsonl",
+                 *(sorted(lists_folder.glob("*.json")) if lists_folder.is_dir() else [])]
+        key = (str(self._folder.resolve()), today.isoformat(),
+               tuple((str(path), path.stat().st_mtime_ns, path.stat().st_size) if path.is_file() else 0 for path in paths))
+        if _CHAINED.get("key") == key:
+            return {rule: dict(value) for rule, value in _CHAINED["value"].items()}
         lists: dict[str, set[str]] = {}
-        for path in sorted(rolling_folder(self._base).glob("*.json")) if rolling_folder(self._base).is_dir() else []:
+        for path in sorted(lists_folder.glob("*.json")) if lists_folder.is_dir() else []:
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except ValueError:
@@ -419,7 +429,9 @@ class StockForwardTracker:
             passed = {str(row.get("rule_hash")) for row in payload.get("graded") or [] if row.get("passed")}
             if passed and payload.get("cutoff"):
                 lists[payload["cutoff"]] = passed
-        return chain(self.archived() + self.records(), lists, today)
+        found = chain(self.archived() + self.records(), lists, today)
+        _CHAINED.update(key=key, value=found)
+        return {rule: dict(value) for rule, value in found.items()}
 
     def records(self) -> list[dict[str, object]]:
         if not self.log_path.is_file():
@@ -1181,6 +1193,9 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date) -> dict[
     for that list (started the day after the cutoff, so a month before M: M's first session has the day before it);
     the unit returns (net of each day's money) are chained over the latest run of consecutive months up to ``today``'s
     month in which the rule was on the list; leaving a list starts it again. The same for 0050 from the same accounts.
+    2026-10-23 (使用者：叫你要浮動的；12/29 距離現在兩個月嗎): the run's first month counts its list's whole forward
+    account — every session from the day after the cutoff (the two months the cutoff leaves for the forward test, its
+    first session against the money put in), not only that month's own sessions.
 
     ``records``: forward records, live and archived (each with ``since``); ``lists``: cutoff (ISO) → rule hashes that
     passed. Returns rule hash → sessions, months, start, the chained returns and ``excess`` (rule's minus 0050's)."""
@@ -1207,13 +1222,17 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date) -> dict[
         if not run:
             continue
         rule_units, base_units, sessions = 1.0, 1.0, 0
-        for month in run:
+        for position, month in enumerate(run):
             cutoff = cutoff_for(date(int(month[:4]), int(month[5:]), 1))
             since = (cutoff + timedelta(days=1)).isoformat()
-            days = by_account.get((rule_hash, since), {})
+            days = dict(by_account.get((rule_hash, since), {}))
             ordered = sorted(days)
+            if not position and ordered:             # the account's first session, against the money put in
+                start = float(days[ordered[0]]["contributed"])
+                days[""] = {"value": start, "benchmark_value": start, "contributed": start}
+                ordered = ["", *ordered]
             for previous, day in zip(ordered, ordered[1:]):
-                if not day.startswith(month):
+                if day[:7] > month or (position and not day.startswith(month)):
                     continue
                 before, now = days[previous], days[day]
                 flow = float(now["contributed"]) - float(before["contributed"])

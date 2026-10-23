@@ -46,6 +46,9 @@ from quant_platform.research.factors import table as factor_table
 from quant_platform.research.jobs import JobLog
 from quant_platform.research.pool import _svg as value_chart
 from quant_platform.research.pool import basis_counts, pool_view, rule_detail, yearly_matrix
+from quant_platform.research.progress import chart as progress_chart
+from quant_platform.research.progress import search_scale
+from quant_platform.research.progress import view as progress_view
 from quant_platform.research.after_close import load as after_close_load
 from quant_platform.research.forward_board import load as forward_board_load
 from quant_platform.research.forward_board import load_recent as forward_recent_load
@@ -216,6 +219,22 @@ def _taipei_text(value: datetime | None, pattern: str = "%m/%d %H:%M") -> str:
 RESEARCH_TABS = ("overview", "orders", "factors", "ml", "news", "forward", "hypothesis", "jobs", "legacy")
 OLD_RESEARCH_TABS = {"rules": "ranking", "promotion": "promotion", "agent": "agent"}
 BEST_TIERS = ("T0", "T0（高風險）", "T0 候選", "T0 候選（高風險）", "T1")
+# 2026-10-23 (使用者：整個網頁在使用的速度很慢): the overview lists the BEST_ROWS richest (and the frontier), the pool
+# POOL_ROWS rules a page — the pages were 5 MB (1,173 and 2,852 rows); the rest are one filter or link away
+BEST_ROWS = 40
+POOL_ROWS = 200
+FORWARD_ROWS = 100
+POOL_FILTERS = ("q", "family", "tier", "trait")
+
+
+def pool_match(row: dict, picked: dict[str, str]) -> bool:
+    """The pool page's filters: words in the name, the family, the grade (不採用 for a rule holding 0050), a trait."""
+    category = row.get("category") or {}
+    grade = "不採用" if row.get("uses_0050") else row.get("tier")
+    return ((not picked.get("q") or picked["q"] in str(row.get("name") or ""))
+            and (not picked.get("family") or category.get("family") == picked["family"])
+            and (not picked.get("tier") or grade == picked["tier"])
+            and (not picked.get("trait") or picked["trait"] in (category.get("traits") or [])))
 CONCLUSIONS_HEADING = "目前結論（網站"
 
 
@@ -1002,6 +1021,15 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         jobs = JobLog(research_dir).jobs()
         overview = pool_view(research_dir, basis=_default_basis(research_dir)) if tab == "overview" else None
         best = [row for row in overview["daily"] if row["tier"] in BEST_TIERS and not row["uses_0050"]] if overview else []
+        best_total = len(best)
+        best = sorted(best, key=lambda row: -(row.get("final_value") or 0))[:BEST_ROWS]
+        downside = downside_table(research_dir) if tab == "overview" else None
+        if downside:
+            downside_total = len(downside)
+            richest = {row["rule_hash"] for row in sorted(downside, key=lambda row: -(row.get("final_value") or 0))[:BEST_ROWS]}
+            downside_rows = [row for row in downside if row.get("frontier") or row["rule_hash"] in richest]
+        else:
+            downside_total, downside_rows = 0, downside
         status = None
         if tab == "overview":     # 2026-10-22 (使用者：研究首頁建一個表讓我快速知道現在狀況): never breaks the page
             try:
@@ -1025,6 +1053,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             rolling_cutoff=cutoff_for(datetime.now(TAIPEI).date()).isoformat(),
             rolling_start=forward_common_start(datetime.now(TAIPEI).date()).isoformat(),
             stock_forward=StockForwardTracker(research_dir).summary(),
+            # 2026-10-23 (使用者：網頁很慢): the forward tab lists the FORWARD_ROWS best of each table (1,200 rows each
+            # made it 3.5 MB); ?all=1 shows every account
+            forward_limit=None if request.args.get("all") else FORWARD_ROWS,
             forward_board=forward_board_load(research_dir) if tab == "forward" else None,
             after_close=after_close_load(research_dir, datetime.now(TAIPEI).date()) if tab == "orders" else None,
             hypotheses=hypothesis_items(research_dir) if tab == "hypothesis" else None,
@@ -1032,7 +1063,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
             ml=ml_view(research_dir) if tab == "ml" else None,
             robustness=robustness_latest(research_dir) if tab == "overview" else None,
-            downside=downside_table(research_dir) if tab == "overview" else None,
+            downside=downside_rows, downside_total=downside_total, best_total=best_total,
+            search_scale=search_scale(research_dir) if tab == "overview" else None,
             news=news_view(research_dir, dependencies.settings) if tab == "news" else None,
             factor_columns=factor_columns(latest_factor_strength(research_dir / "factors")),
             overview=overview,
@@ -1059,7 +1091,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         basis = request.args.get("basis") or _default_basis(research_dir)
         basis = basis if basis in ("seed", "lump_sum", "dca") else "seed"
-        return render_template("v2/research_pool.html", active_nav="research", pool=pool_view(research_dir, basis=basis),
+        view = pool_view(research_dir, basis=basis)
+        picked = {key: (request.args.get(key) or "").strip() for key in POOL_FILTERS}
+        matched = [row for row in view["daily"] if pool_match(row, picked)]
+        shown = matched if request.args.get("all") else matched[:POOL_ROWS]
+        return render_template("v2/research_pool.html", active_nav="research", pool=view, daily_rows=shown,
+                               daily_matched=len(matched), picked=picked, pool_rows=POOL_ROWS,
                                research_tab="pool", jobs=JobLog(research_dir).jobs(), counts=basis_counts(research_dir),
                                generated=datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M"))
 
@@ -1070,6 +1107,48 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         view = pool_view(research_dir, basis=basis if basis in ("seed", "lump_sum", "dca") else "seed")
         view["generated_at"] = datetime.now(TAIPEI).isoformat(timespec="seconds")
         return jsonify(view)
+
+    @blueprint.get("/research/progress")
+    def research_progress():
+        """2026-10-23 (使用者：績效的成長幅度有沒有個線型圖，到底進步了多少、有沒有在成長；給我多一點分析的 dashboard): the best
+        backtest over time, the settings searched, the month's forward accounts day by day, the families."""
+        from markupsafe import Markup
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        start = forward_common_start(datetime.now(TAIPEI).date()).isoformat()
+        data = progress_view(research_dir, start)
+        line = data["timeline"]
+        money = lambda value: f"{value / 10000:,.0f} 萬"          # noqa: E731
+        marks = [(item["at"], "引擎 " + item["engine"].replace("daily-", "")[:3]) for item in line["engines"]
+                 if item["engine"].endswith(".0")]
+        charts = {
+            "best": Markup(progress_chart(
+                line["points"], "at", [{"key": "any", "label": "全部過門檻的最好", "css": "s1"},
+                                       {"key": "risky", "label": "T0 候選（高風險）最好", "css": "s2"},
+                                       {"key": "t0", "label": "一般 T0 候選最好", "css": "s3"}],
+                money, guides=[(line["benchmark"], f"0050 同樣的錢 {money(line['benchmark'])}")] if line["benchmark"] else [],
+                marks=marks, step=True, label="回測最好的規則隨研究時間的變化")),
+            "passing": Markup(progress_chart(
+                line["points"], "at", [{"key": "passing", "label": "過門檻的規則", "css": "s1"},
+                                       {"key": "rules", "label": "完整回測過的規則", "css": "s4", "dashed": True}],
+                lambda value: f"{value:,.0f}", step=True, height=220, label="規則數隨研究時間的變化")),
+            "search": Markup(progress_chart(
+                data["searches"], "at", [{"key": "total", "label": "搜尋過的策略（累計）", "css": "s1"},
+                                         {"key": "scans", "label": "單一策略搜尋（各輪相加）", "css": "s2", "dashed": True}],
+                lambda value: f"{value / 100000000:.2f} 億", guides=[(100_000_000, "1 億")], step=True, height=240,
+                label="搜尋規模隨研究時間的變化")),
+            "forward": Markup(progress_chart(
+                data["forward"]["series"], "date",
+                [{"key": "bench_gain", "label": "0050 同樣的錢", "css": "s0", "dashed": True},
+                 {"key": "median_gain", "label": "全部帳戶的中位數", "css": "s1"},
+                 *[{"key": key, "label": text, "css": f"s{index + 2}"}
+                   for index, (key, text) in enumerate(data["forward"]["named"].items())]],
+                lambda value: f"{value:+,.0f}", band=("p25_gain", "p75_gain"), guides=[(0, "沒賺沒賠")],
+                label="前向帳戶全部賣掉後賺賠（元）")),
+        }
+        return render_template("v2/research_progress.html", active_nav="research", research_tab="progress",
+                               jobs=JobLog(research_dir).jobs(), data=data, charts=charts, start=start,
+                               generated=datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M"))
 
     @blueprint.get("/research/rules/<spec_hash>")
     def research_rule(spec_hash: str):

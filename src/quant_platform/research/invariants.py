@@ -12,9 +12,9 @@ import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-# The roadmap's date table: the 60th session from 2026-10-01 (the exchange's 2026 closures 10/9, 10/26, 12/25 and the
-# typhoon closure on 10/23 — 19 sessions in October, 21 in November, the 20th in December)
-FIRST_T0 = date(2026, 12, 29)
+# The roadmap's date table: the 60th session from 2026-09-01, the October list's forward start (使用者 2026-10-23：叫你要
+# 浮動的 — not from 10-01): 35 sessions to 10-22, 39 by October's end (10/23 typhoon, 10/26 closed), the 21st of November
+FIRST_T0 = date(2026, 11, 30)
 
 
 def _check(name: str, source: str, ok: bool, detail: str) -> dict[str, object]:

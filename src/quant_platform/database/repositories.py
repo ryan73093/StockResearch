@@ -736,6 +736,40 @@ class SqlAlchemyMarketBarRepository:
             for row in latest.values()
         ]
 
+    def latest_bar(self, symbol: str, interval: str = "1d", as_of: datetime | None = None) -> MarketBar | None:
+        """2026-10-23 (使用者：整個網頁在使用的速度很慢): only the newest session's bar — the newest revision public at
+        ``as_of``, as ``list_bars(...)[-1]`` — without reading every session (the holdings page did, per position)."""
+        statement = select(MarketBarModel).where(
+            MarketBarModel.symbol == symbol.upper(),
+            MarketBarModel.interval == interval,
+        )
+        if as_of is not None:
+            statement = statement.where(MarketBarModel.available_time <= _utc_naive(as_of))
+        statement = statement.order_by(
+            MarketBarModel.event_time.desc(),
+            MarketBarModel.available_time.desc(),
+            MarketBarModel.ingested_at.desc(),
+        ).limit(1)
+        with self._session_factory() as session:
+            row = session.scalars(statement).first()
+        if row is None:
+            return None
+        return MarketBar(
+            symbol=row.symbol,
+            market=row.market,
+            interval=row.interval,
+            event_time=_utc_aware(row.event_time),
+            available_time=_utc_aware(row.available_time),
+            ingested_at=_utc_aware(row.ingested_at),
+            open=row.open,
+            high=row.high,
+            low=row.low,
+            close=row.close,
+            adjusted_close=row.adjusted_close,
+            volume=row.volume,
+            source=row.source,
+        )
+
     def list_bars_for_symbols(
         self,
         symbols: list[str],

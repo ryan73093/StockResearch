@@ -64,14 +64,14 @@ def test_a_rule_graded_t0_before_the_first_possible_day_is_caught(tmp_path, monk
     (tmp_path / "forward" / "stocks" / "tracked.json").write_text("[]", encoding="utf-8")
     TrialRegistry(tmp_path / "trials.jsonl").register(kind="candidate", period="recent", spec_hash="h", spec_name="早到的",
                                                        input_hash="h", data_fingerprint="x", metrics={})
-    name = "12/29 以前沒有規則被標成 T0"          # 10/23's typhoon closure moved the 60th session from 12/28
+    name = "11/30 以前沒有規則被標成 T0"          # the 60th session from 9/1 (使用者 2026-10-23：叫你要浮動的)
     monkeypatch.setattr(daily, "tier", lambda metrics, forward=None: ("T0 候選", ""))
     assert {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 21))}[name]["ok"]
     monkeypatch.setattr(daily, "tier", lambda metrics, forward=None: ("T0", ""))
     found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 21))}[name]
     assert not found["ok"] and "1 個" in found["detail"]
-    assert not {item["name"]: item for item in invariants.run(tmp_path, date(2026, 12, 28))}[name]["ok"]
-    assert {item["name"]: item for item in invariants.run(tmp_path, date(2026, 12, 29))}[name]["ok"]
+    assert not {item["name"]: item for item in invariants.run(tmp_path, date(2026, 11, 27))}[name]["ok"]
+    assert {item["name"]: item for item in invariants.run(tmp_path, date(2026, 11, 30))}[name]["ok"]
 
 
 def test_the_latest_trade_audit_must_be_clean(tmp_path):

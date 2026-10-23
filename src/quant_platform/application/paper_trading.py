@@ -110,6 +110,9 @@ class PaperTradingService:
         return self._costs.sell_tax(gross, asset_type)
 
     def _latest_bar(self, symbol: str, as_of: datetime):
+        finder = getattr(self._bars, "latest_bar", None)       # 2026-10-23: the newest bar only, when the store can
+        if finder is not None:
+            return finder(symbol, as_of=as_of)
         values = self._bars.list_bars(symbol, as_of=as_of)
         return values[-1] if values else None
 

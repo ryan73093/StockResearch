@@ -66,6 +66,9 @@ def test_fallback_uses_legacy_bars_only_when_they_are_newer(tmp_path):
     assert fallback.latest_closes(["2330.TW"], before) == {"2330.TW": 1509.0}         # legacy is a day newer
     assert fallback.latest_closes(["0050.TW"], before) == {"0050.TW": 112.0}          # research store
     assert fallback.history("0050.TW")[0] == (date(2026, 9, 30), 110.0)
+    for symbol in ("6488.TWO", "2330.TW", "0050.TW", "9999.TW"):       # 2026-10-23: the newest bar alone, the same
+        newest = fallback.list_bars(symbol, as_of=before)
+        assert fallback.latest_bar(symbol, as_of=before) == (newest[-1] if newest else None)
 
 
 def test_close_job_fetches_once(tmp_path):

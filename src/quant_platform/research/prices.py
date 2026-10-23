@@ -209,6 +209,25 @@ class FallbackPrices:
             return legacy
         return bars
 
+    def latest_bar(self, symbol: str, as_of: datetime | None = None):
+        """``list_bars(symbol, as_of=as_of)[-1]`` (None without bars), asking the legacy store only for its newest bar
+        (2026-10-23, 使用者：網頁很慢 — the holdings page read every legacy session of every position)."""
+        bars = self.primary.list_bars(symbol, as_of=as_of)
+        newest = bars[-1] if bars else None
+        if self.secondary is None:
+            return newest
+        finder = getattr(self.secondary, "latest_bar", None)
+        if finder is not None:
+            legacy = finder(symbol, as_of=as_of)
+        else:
+            older = self.secondary.list_bars(symbol, as_of=as_of)
+            legacy = older[-1] if older else None
+        if newest is None:
+            return legacy
+        if legacy is not None and legacy.event_time.astimezone(TAIPEI).date() > newest.event_time.date():
+            return legacy
+        return newest
+
     def latest_closes(self, symbols: list[str], as_of: datetime | None = None) -> dict[str, float]:
         output = {}
         for symbol in symbols:

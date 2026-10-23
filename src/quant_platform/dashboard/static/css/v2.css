@@ -34,6 +34,8 @@
   --radius-sm: 9px;
   --sidebar: 236px;
   --rail: 84px;
+  --series-3: #c08bff;
+  --series-4: #7fd1d9;
   --font: system-ui, -apple-system, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
 }
@@ -49,6 +51,8 @@
   --border-strong: #cbd3dd;
   --text: #19202a;
   --text-2: #3a4450;
+  --series-3: #7b3fd6;
+  --series-4: #0f7f8a;
   --muted: #5e6a79;
   --accent: #1d62d8;
   --accent-contrast: #ffffff;
@@ -674,6 +678,24 @@ td.wrap { white-space: normal; min-width: 180px; }
 .rule-chart .line-rule { fill: none; stroke: var(--accent); stroke-width: 2; }
 .rule-chart .line-bench { fill: none; stroke: var(--warn); stroke-width: 2; }
 .rule-chart .line-put { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
+/* 2026-10-23 研究進展的折線圖 (research/progress.py chart) */
+.progress-chart { width: 100%; height: auto; display: block; background: var(--surface-2); border-radius: var(--radius-sm); }
+.progress-chart text { fill: var(--muted); font-size: 11px; font-family: var(--font); }
+.progress-chart .grid { stroke: var(--border); stroke-width: 1; }
+.progress-chart .guide { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.progress-chart .guide-text { fill: var(--warn); }
+.progress-chart .mark { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 3; }
+.progress-chart .band { fill: var(--accent-bg); stroke: none; }
+.progress-chart polyline { fill: none; stroke-width: 2.2; stroke-linejoin: round; }
+.progress-chart .dot { fill: transparent; stroke: none; }
+.progress-chart .dot:hover { fill: currentColor; }
+.progress-chart polyline.s0 { stroke: var(--warn); } .progress-chart .dot.s0 { color: var(--warn); }
+.progress-chart polyline.s1 { stroke: var(--accent); } .progress-chart .dot.s1 { color: var(--accent); }
+.progress-chart polyline.s2 { stroke: var(--up); } .progress-chart .dot.s2 { color: var(--up); }
+.progress-chart polyline.s3 { stroke: var(--series-3); } .progress-chart .dot.s3 { color: var(--series-3); }
+.progress-chart polyline.s4 { stroke: var(--series-4); } .progress-chart .dot.s4 { color: var(--series-4); }
+.legend .sw-s0 { background: var(--warn); } .legend .sw-s1 { background: var(--accent); } .legend .sw-s2 { background: var(--up); }
+.legend .sw-s3 { background: var(--series-3); } .legend .sw-s4 { background: var(--series-4); } .legend .sw-band { background: var(--accent-bg); height: 10px; }
 /* 2026-10-20: every sale's result and their running total (forward account, 每一筆交易) */
 .trade-chart { margin: 0 0 6px; }
 /* 2026-10-20: a long list (the day's headlines) scrolls inside its card, its header fixed */

@@ -155,6 +155,10 @@ def create_app(container: Container | None = None) -> Flask:
         )
 
     app.jinja_env.globals["sparkline_points"] = sparkline_points
+    # 2026-10-23 (使用者：為什麼 T0 又要 12/29): the first possible T0 day from one place (research/invariants.py)
+    from quant_platform.research.invariants import FIRST_T0
+
+    app.jinja_env.globals["first_t0"] = f"{FIRST_T0:%Y-%m-%d}（從 10 月名單的前向起點 9/1 起算）"
 
     def shared_chart_points(
         values: list[float], low: float, high: float, width: int = 100, height: int = 36
@@ -3031,6 +3035,37 @@ def create_app(container: Container | None = None) -> Flask:
     return app
 
 
+def _keep_research_warm(dependencies) -> None:
+    """2026-10-23 (使用者：整個網頁在使用的速度很慢): the research pages' slow parts — the chained forward record and the
+    progress page over 190 MB of forward records, the pool — recomputed in the background once their files change, so
+    a visitor finds them ready (each keeps its result until its files change)."""
+    import threading
+    import time
+
+    from quant_platform.container import _instance_dir
+
+    research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+    log = logging.getLogger(__name__)
+
+    def loop() -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from quant_platform.research.forward_board import common_start
+        from quant_platform.research.pool import pool_view
+        from quant_platform.research.progress import view as progress_view
+
+        while True:
+            try:
+                pool_view(research_dir, basis="seed")
+                progress_view(research_dir, common_start(datetime.now(ZoneInfo("Asia/Taipei")).date()).isoformat())
+            except Exception:  # noqa: BLE001 — a warm-up failure must not stop the site; the page computes it itself
+                log.exception("Research pages warm-up failed")
+            time.sleep(60)
+
+    threading.Thread(target=loop, name="research-warm", daemon=True).start()
+
+
 def main() -> None:
     # Service logs go to instance/web.stderr.log (scripts/run_local_services.ps1).
     logging.basicConfig(
@@ -3044,6 +3079,7 @@ def main() -> None:
         if dependencies.settings.scheduler_in_web else None
     )
     app = create_app(dependencies)
+    _keep_research_warm(dependencies)
     try:
         try:
             from waitress import serve

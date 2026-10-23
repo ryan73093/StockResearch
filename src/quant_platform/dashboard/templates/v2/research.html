@@ -22,7 +22,8 @@
   <div class="card__head"><h2>研究現況 <span class="badge">2015-06 起、每天決策</span></h2><span class="muted small">啟動資金 30 萬＋每月 5 日 1 萬，對同樣的錢全部買 0050</span></div>
   {% if overview %}
   <div class="kpis kpis--four">
-    <div class="kpi"><div class="kpi__label">試過的規則（新設計）</div><div class="kpi__value">{{ overview.daily|length }}<small>（舊設計另有 {{ overview.attempts }}）</small></div></div>
+    <div class="kpi"><div class="kpi__label">搜尋過的策略（累計）</div><div class="kpi__value">{% if search_scale %}{{ '{:.2f}'.format(search_scale.total / 100000000) }} 億<small>（單一策略 {{ '{:,.0f}'.format(search_scale.scans / 10000) }} 萬、組合 {{ '{:,.0f}'.format(search_scale.blends / 10000) }} 萬）</small>{% else %}—{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">完整回測的規則（新設計）</div><div class="kpi__value">{{ overview.daily|length }}<small>（{{ '{:,}'.format(search_scale.trials) if search_scale else '—' }} 次試驗；舊設計另有 {{ overview.attempts }}）</small></div></div>
     <div class="kpi"><div class="kpi__label">T0／T0 候選</div><div class="kpi__value">{{ overview.daily_tiers['T0'] }}／{{ overview.daily_tiers['T0 候選'] }}</div></div>
     <div class="kpi"><div class="kpi__label">T0 候選（高風險）／T1</div><div class="kpi__value">{{ overview.daily_tiers['T0（高風險）'] + overview.daily_tiers['T0 候選（高風險）'] }}／{{ overview.daily_tiers['T1'] }}</div></div>
     <div class="kpi"><div class="kpi__label">前向觀察中</div><div class="kpi__value">{{ overview.forward_stocks|rejectattr('stopped')|list|length }}<small>（已停止 {{ overview.forward_stocks|selectattr('stopped')|list|length }}）</small></div></div>
@@ -59,7 +60,7 @@
 {% endif %}
 
 <section class="card" id="best">
-  <div class="card__head"><h2>目前最好的規則 <span class="badge">T0、T0 候選、T1</span></h2><a class="small" href="/research/pool">全部規則</a></div>
+  <div class="card__head"><h2>目前最好的規則 <span class="badge">T0、T0 候選、T1</span></h2><a class="small" href="/research/pool?tier=T0%20%E5%80%99%E9%81%B8#daily">期末最多的前 {{ best|length }} 個，全部 {{ best_total }} 個在選手池</a></div>
   {% if best %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
@@ -79,14 +80,14 @@
       </tbody>
     </table>
   </div>
-  <p class="note">T0 候選要串接滾動前向紀錄（連續留在每月名單上的月份串起來）滿 60 個交易日仍不輸 0050 才是 T0，最快 2026-12-28；T0 候選（高風險）其他門檻都過，但回撤比 0050 深 5～15 個百分點（使用者 2026-10-18：錢賺得多就可以，標註高風險）；T1 贏 0050，但回撤比 0050 深超過 15 個百分點。前向觀察的相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入，明細在<a href="/research?tab=forward">前向觀察</a>。歷史結果只作研究參考。</p>
+  <p class="note">T0 候選要串接滾動前向紀錄（連續留在每月名單上的月份串起來）滿 60 個交易日仍不輸 0050 才是 T0，最快 {{ first_t0 }}；T0 候選（高風險）其他門檻都過，但回撤比 0050 深 5～15 個百分點（使用者 2026-10-18：錢賺得多就可以，標註高風險）；T1 贏 0050，但回撤比 0050 深超過 15 個百分點。前向觀察的相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入，明細在<a href="/research?tab=forward">前向觀察</a>。歷史結果只作研究參考。</p>
   {% else %}<p class="muted" style="margin:0">還沒有過門檻的規則。</p>{% endif %}
   <p class="col-help"><b>欄位說明</b>　<b>規則</b>：點進去看每一次回測。<b>等級</b>：T0 候選＝2015-06 起與 2020-10 起都贏同樣的錢買 0050、回撤不比 0050 深超過 5 個百分點；高風險＝深 5～15 點；T1 只進前向觀察。<b>2015-06 起期末（0050）</b>：啟動 30 萬＋每月 5 日 1 萬到 2026-09 的帳戶價值，括號是同樣的錢買 0050。<b>比 0050</b>：兩段期間期末多或少幾成。<b>最大回撤</b>：帳戶從最高點跌最多的一段（括號 0050）。<b>每月下單</b>：平均每月委託筆數。<b>前向觀察</b>：從當月截止日隔天起的前向帳戶記錄了幾個交易日、目前比同樣的錢買 0050 多或少。</p>
 </section>
 
 {% if yearly and yearly.rows %}
 <section class="card" id="yearly">
-  <div class="card__head"><h2>每一年的報酬 <span class="badge">T0、T0 候選、T1</span></h2><span class="muted small">啟動資金 30 萬＋每月 1 萬的帳戶；綠色＝那一年贏 0050</span></div>
+  <div class="card__head"><h2>每一年的報酬 <span class="badge">期末最多的前 {{ yearly.rows|length }} 個</span></h2><span class="muted small">啟動資金 30 萬＋每月 1 萬的帳戶；綠色＝那一年贏 0050</span></div>
   <div class="table-wrap">
     <table class="table--years">
       <thead><tr><th>規則</th>{% for year in yearly.years %}<th class="num">{{ year }}{% if yearly.months[year] < 12 %}<br><span class="muted small">{{ yearly.months[year] }} 個月</span>{% endif %}</th>{% endfor %}<th class="num">贏的年數</th></tr></thead>
@@ -112,7 +113,7 @@
 
 {% if downside %}
 <section class="card" id="downside">
-  <div class="card__head"><h2>跌市時的表現</h2><span class="muted small">市場不好時會不會比 0050 跌得多（使用者 2026-10-18：避免因此失去信心、做錯決定）・月底資料</span></div>
+  <div class="card__head"><h2>跌市時的表現 <span class="badge">前緣與期末最多的前 40 個，共 {{ downside_total }} 個</span></h2><span class="muted small">市場不好時會不會比 0050 跌得多（使用者 2026-10-18：避免因此失去信心、做錯決定）・月底資料</span></div>
   {% set edge = downside|selectattr('frontier')|list %}
   {% if edge %}
   <p class="small" style="margin:0 0 10px"><b>錢與跌市的取捨</b>（<span class="badge badge--ok">前緣</span>：沒有別的過門檻規則同時賺得更多、0050 大跌時又少跌）——要錢多就往左邊挑，要跌市穩就往右邊挑：
@@ -701,12 +702,14 @@
     <h2>共同起跑線 <span class="badge">{{ forward_board.common_start }} 起</span></h2>
     <span class="muted small">每個策略都從當月截止日（{{ rolling_cutoff }}）的下一天起跑（之後的資料沒有被拿來挑任何策略，每月往後推一個月），30 萬＋每月 1 萬，對同樣的錢買 0050；{{ forward_board.date }} 為止 {{ forward_board.sessions }} 個交易日。和各自回測的月超額比：預期範圍是 90% 區間，時間越短範圍越寬</span>
   </div>
+  {% set board_total = forward_board.rows|selectattr('rank')|list|length %}{% if forward_limit and board_total > forward_limit %}<p class="small" style="margin:0 0 6px">列出前 {{ forward_limit }} 名（共 {{ board_total }} 個）・<a href="/research?tab=forward&amp;all=1#forward-board">顯示全部</a></p>{% endif %}
   <p class="small" style="margin:0 0 10px">{% for label, count in forward_board.counts.items() if count %}<span class="badge {{ 'badge--bad' if label == '警示' else ('badge--ok' if label == '強於預期' else '') }}">{{ label }} {{ count }}</span> {% endfor %}</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th class="num">名次</th><th>策略</th><th>開始實時記錄</th><th class="num">報酬</th><th class="num">比 0050</th><th class="num">回測預期範圍</th><th>狀態</th><th class="num">回撤</th><th class="num">買／賣</th></tr></thead>
       <tbody>
-      {% for row in forward_board.rows|selectattr('rank')|sort(attribute='rank') %}
+      {% set board_rows = forward_board.rows|selectattr('rank')|sort(attribute='rank')|list %}
+      {% for row in (board_rows[:forward_limit] if forward_limit else board_rows) %}
         <tr>
           <td class="num" data-label="名次">{{ row.rank }}{% if row.rank_change %}<span class="small {{ 'up' if row.rank_change > 0 else 'down' }}">（{{ '{:+d}'.format(row.rank_change) }}）</span>{% endif %}</td>
           {% set account = accounts.get(row.rule_hash) %}
@@ -739,11 +742,14 @@
   {% if live %}{% set sold = live|sum(attribute='wins') + live|sum(attribute='losses') %}{% set cashed = live|selectattr('sell_all')|list %}
   <p class="small" style="margin:0 0 10px">{{ live|length }} 個帳戶已賣出 {{ sold }} 筆：賺 {{ live|sum(attribute='wins') }} 筆、賠 {{ live|sum(attribute='losses') }} 筆，合計 <strong class="{{ 'up' if live|sum(attribute='realized') >= 0 else 'down' }}">{{ '{:+,.0f}'.format(live|sum(attribute='realized')) }}</strong> 元（已扣手續費和稅）；還拿著的帳面 {{ '{:+,.0f}'.format(live|sum(attribute='unrealized')) }} 元。如果今天收盤全部賣掉（扣手續費、稅和滑價），有 <strong>{{ cashed|selectattr('sell_all.ahead', 'gt', 0)|list|length }}</strong> 個帳戶拿回的現金比同樣的錢買 0050 再賣掉多。買賣規則是「賠的很快賣、賺的抱著」，所以賣出的筆數多半是小賠，錢在還沒賣的贏家上；「今天全賣」才是現在能拿到的現金。</p>
   {% endif %}
+  {% set live_total = stock_forward|rejectattr('stopped')|selectattr('since', 'equalto', rolling_start)|list|length %}{% if forward_limit and live_total > forward_limit %}<p class="small" style="margin:0 0 6px">依「今天全賣比 0050」列出前 {{ forward_limit }} 個（共 {{ live_total }} 個）・<a href="/research?tab=forward&amp;all=1#stock-forward">顯示全部</a></p>{% endif %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th>規則</th><th class="num">已記錄交易日</th><th class="num">投入（元）</th><th class="num">目前資產（0050）</th><th class="num">相對 0050</th><th class="num">已賣出賺賠</th><th class="num">今天全賣比 0050</th><th class="num">持股／費稅</th><th>對帳</th></tr></thead>
       <tbody>
-      {% for row in stock_forward if not row.stopped and row.since == rolling_start %}
+      {% set live_rows = stock_forward|rejectattr('stopped')|selectattr('since', 'equalto', rolling_start)|list %}
+      {% set ranked = (live_rows|selectattr('sell_all')|sort(attribute='sell_all.ahead', reverse=True)|list) + (live_rows|rejectattr('sell_all')|list) %}
+      {% for row in (ranked[:forward_limit] if forward_limit else ranked) %}
         <tr>
           <td data-primary><strong><a href="/research/forward/{{ row.rule_hash }}">{{ row.name }}</a></strong>{{ risk_badge(row.rule_hash) }}<span class="muted small"> {{ row.since }} 起</span>{% if row.final %} <span class="badge {{ 'badge--ok' if row.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if row.final.passed else '未通過' }} {{ '{:+.0%}'.format(row.final.excess) }}</span>{% endif %}</td>
           <td class="num" data-label="已記錄交易日"><span>{{ row.sessions }}{% if row.late %}<span class="muted small">（補記 {{ row.late }}）</span>{% endif %}</span></td>

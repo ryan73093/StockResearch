@@ -72,6 +72,10 @@ def test_point_in_time_market_bar_query_uses_latest_visible_revision(tmp_path) -
     assert len(before) == len(after) == 1
     assert before[0].close == Decimal("100")
     assert after[0].close == Decimal("105")
+    # 2026-10-23: the newest bar alone follows the same revisions
+    assert repository.latest_bar("SPY", as_of=correction.available_time - timedelta(seconds=1)).close == Decimal("100")
+    assert repository.latest_bar("SPY", as_of=correction.available_time).close == Decimal("105")
+    assert repository.latest_bar("QQQ") is None
 
 
 def test_full_quality_snapshot_is_persisted_and_research_allowed(tmp_path) -> None:

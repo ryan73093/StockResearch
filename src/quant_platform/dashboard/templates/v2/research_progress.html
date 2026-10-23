@@ -1,0 +1,164 @@
+{% extends "v2/base.html" %}
+{% block title %}研究進展 · 交易研究分析平台{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>研究進展</h1>
+    <p class="page-head__sub">從第一個每天決策的規則到現在：回測最好的成績、搜尋了多少策略、9/1 起的前向帳戶全部賣掉後賺多少，到底有沒有在成長。</p>
+  </div>
+  <div class="page-head__meta">更新 {{ generated }}</div>
+</header>
+{% endblock %}
+{% block content %}
+{% include "v2/_research_tabs.html" %}
+{% set line = data.timeline %}{% set points = line.points %}
+{% set first = points[0] if points else None %}{% set last = points[-1] if points else None %}
+{% set t0_first = points|selectattr('t0')|first if points else None %}
+{% set fwd = data.latest_forward %}
+{% macro wan(value) %}{{ '{:,.0f}'.format(value / 10000) }} 萬{% endmacro %}
+
+<section class="card" id="growth" data-tab="成長了多少">
+  <div class="card__head"><h2>回測最好的規則：成長了多少</h2><span class="muted small">2015-06～2026-09、啟動 30 萬＋每月 5 日 1 萬，100% 個股；0050 同樣的錢 {{ wan(line.benchmark) if line.benchmark else '—' }}</span></div>
+  {% if last %}
+  <div class="kpis kpis--four">
+    <div class="kpi"><div class="kpi__label">全部過門檻的最好（{{ first.at.strftime('%m/%d') }} → 現在）</div><div class="kpi__value">{{ wan(last.any) }}<small>（起點 {{ wan(first.any) }}，{{ '{:.1f}'.format(last.any / first.any) }} 倍；0050 的 {{ '{:.1f}'.format(last.any / line.benchmark) }} 倍）</small></div></div>
+    <div class="kpi"><div class="kpi__label">一般 T0 候選的最好</div><div class="kpi__value">{{ wan(last.t0) if last.t0 else '—' }}{% if t0_first %}<small>（{{ t0_first.at.strftime('%m/%d') }} 第一次出現 {{ wan(t0_first.t0) }}，{{ '{:.1f}'.format(last.t0 / t0_first.t0) }} 倍）</small>{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">過門檻的規則（T0 候選，含高風險）</div><div class="kpi__value">{{ '{:,}'.format(last.passing) }}<small>（完整回測過 {{ '{:,}'.format(last.rules) }} 個規則、{{ '{:,}'.format(last.runs) }} 次）</small></div></div>
+    <div class="kpi"><div class="kpi__label">搜尋過的策略（累計）</div><div class="kpi__value">{{ '{:.2f}'.format(data.scale.total / 100000000) }} 億<small>（單一策略 {{ data.scale.scan_rounds }} 輪 {{ '{:,.0f}'.format(data.scale.scans / 10000) }} 萬＋組合最大一輪 {{ '{:,.0f}'.format(data.scale.blends / 10000) }} 萬）</small></div></div>
+  </div>
+  {{ charts.best }}
+  <div class="legend"><span><i class="sw-s1"></i>全部過門檻的最好（含 T1、高風險）</span><span><i class="sw-s2"></i>T0 候選（高風險）最好</span><span><i class="sw-s3"></i>一般 T0 候選最好</span><span><i class="sw-s0"></i>0050 同樣的錢</span><span class="muted">虛線直線：引擎改版</span></div>
+  <p class="note">每一點是那個小時結束時「每個規則最新一次回測」裡最好的（滑鼠移到線上看數字）。引擎改版會把以前的錯誤拿掉、同一個規則重跑，所以曲線會往下掉（例如 1.5.0 補上減資、閒置現金後）——那是更正，不是變差。這些都是從上萬次試驗裡挑出來的最好成績，一定偏樂觀；真正的檢驗是下面「前向」分頁 9/1 起的紀錄。</p>
+  {{ charts.passing }}
+  <div class="legend"><span><i class="sw-s1"></i>過門檻的規則（T0 候選、T0 候選（高風險））</span><span><i class="sw-s4"></i>完整回測過的規則</span></div>
+  {% else %}<p class="muted">還沒有試驗紀錄。</p>{% endif %}
+  <p class="col-help"><b>說明</b>　<b>全部過門檻的最好</b>：T1、T0 候選、T0 候選（高風險）裡期末最多的。<b>一般 T0 候選</b>：回撤不比 0050 深超過 5 個百分點、兩段期間都贏、視窗勝率都夠。<b>倍</b>：現在除以起點。<b>過門檻的規則</b>：每個規則看它最新一次的回測。<b>搜尋過的策略</b>：大規模搜尋每輪篩過的設定加總，加上組合搜尋最大一輪的組合數（每輪組合都含前幾輪的，所以組合不加總）。</p>
+</section>
+
+<section class="card" id="records" data-tab="刷新紀錄">
+  <div class="card__head"><h2>每一次最好成績的變化 <span class="badge">{{ line.changes|length }} 次</span></h2><span class="muted small">最新在上</span></div>
+  <div class="table-wrap table-wrap--stack table-wrap--tall">
+    <table class="table--stack">
+      <thead><tr><th>時間</th><th>哪一個最好</th><th>規則</th><th class="num">期末</th><th class="num">變化</th><th class="num">是 0050 的幾倍</th><th>引擎</th></tr></thead>
+      <tbody>
+      {% for row in line.changes|reverse %}
+        <tr>
+          <td data-primary class="small">{{ row.at.strftime('%m/%d %H:00') }}</td>
+          <td data-label="哪一個最好"><span class="badge">{{ '全部過門檻' if row.group == 'any' else '一般 T0 候選' }}</span></td>
+          <td data-label="規則" data-wide><a href="/research/rules/{{ row.spec_hash }}">#{{ row.trial }} {{ row.name }}</a> <span class="muted small">{{ row.grade }}</span></td>
+          <td class="num" data-label="期末">{{ wan(row.value) }}</td>
+          <td class="num {{ 'up' if row.previous and row.value > row.previous else ('down' if row.previous and row.value < row.previous else '') }}" data-label="變化">{% if row.previous %}{{ '{:+,.0f}'.format((row.value - row.previous) / 10000) }} 萬（{{ '{:+.0%}'.format(row.value / row.previous - 1) }}）{% else %}第一次{% endif %}</td>
+          <td class="num" data-label="0050 的幾倍">{{ '{:.1f}'.format(row.value / line.benchmark) if line.benchmark else '—' }}</td>
+          <td class="small" data-label="引擎">{{ row.engine }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　<b>時間</b>：那個小時結束時最好的換人或變動 0.5% 以上。<b>哪一個最好</b>：全部過門檻（含 T1、高風險）或一般 T0 候選。<b>期末</b>：2015-06 起 30 萬＋每月 1 萬到 2026-09 的帳戶價值。<b>變化</b>：和前一個最好比（紅＝多、綠＝少；變少通常是引擎改版更正）。<b>是 0050 的幾倍</b>：期末 ÷ 同樣的錢買 0050 的期末。<b>引擎</b>：那次回測的引擎版本。</p>
+</section>
+
+<section class="card" id="days" data-tab="每天的進度">
+  <div class="card__head"><h2>每天的進度</h2><span class="muted small">最新在上；前向是 {{ start }} 起的帳戶、全部賣掉計算</span></div>
+  <div class="table-wrap table-wrap--stack table-wrap--tall">
+    <table class="table--stack">
+      <thead><tr><th>日期</th><th class="num">當天回測</th><th class="num">過門檻／回測過的規則</th><th class="num">全部過門檻的最好</th><th class="num">一般 T0 候選最好</th><th class="num">搜尋累計</th><th class="num">前向：帳戶中位數／0050</th><th class="num">前向贏 0050 的帳戶</th></tr></thead>
+      <tbody>
+      {% for row in data.days %}{% set f = row.forward %}
+        <tr>
+          <td data-primary>{{ row.date.strftime('%m/%d') }}</td>
+          <td class="num" data-label="當天回測">{{ '{:,}'.format(row.runs) }} 次</td>
+          <td class="num" data-label="過門檻／回測過">{{ '{:,}'.format(row.passing) }}／{{ '{:,}'.format(row.rules) }}</td>
+          <td class="num" data-label="全部過門檻的最好">{{ wan(row.any) if row.any else '—' }}{% if row.change_any %}<br><span class="small {{ 'up' if row.change_any > 0 else 'down' }}">{{ '{:+,.0f}'.format(row.change_any / 10000) }} 萬</span>{% endif %}</td>
+          <td class="num" data-label="一般 T0 候選最好">{{ wan(row.t0) if row.t0 else '—' }}{% if row.change_t0 %}<br><span class="small {{ 'up' if row.change_t0 > 0 else 'down' }}">{{ '{:+,.0f}'.format(row.change_t0 / 10000) }} 萬</span>{% endif %}</td>
+          <td class="num" data-label="搜尋累計">{{ '{:.2f}'.format(row.searched / 100000000) }} 億</td>
+          <td class="num" data-label="前向中位數／0050">{% if f %}<span class="{{ 'up' if f.median_gain > 0 else 'down' }}">{{ '{:+,.0f}'.format(f.median_gain) }}</span>／<span class="{{ 'up' if f.bench_gain > 0 else 'down' }}">{{ '{:+,.0f}'.format(f.bench_gain) }}</span> 元{% else %}—{% endif %}</td>
+          <td class="num" data-label="贏 0050 的帳戶">{% if f %}{{ '{:.0%}'.format(f.ahead_share) }}<span class="muted small">（{{ f.accounts }} 個）</span>{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　<b>當天回測</b>：那天跑完整引擎的回測次數。<b>過門檻／回測過的規則</b>：那天結束時，每個規則看最新一次回測，過門檻（T0 候選含高風險）的有幾個、總共幾個。<b>最好</b>：那天結束時的最好期末，下面小字是和前一天比。<b>搜尋累計</b>：大規模搜尋加組合搜尋到那天的總數。<b>前向</b>：{{ start }} 起的帳戶在那天收盤全部賣掉（扣手續費、交易稅、滑價）後比投入多或少多少，中位數對同樣的錢買 0050（紅＝賺、綠＝賠）；有前向紀錄的日子才有。</p>
+</section>
+
+<section class="card" id="forward" data-tab="前向（真的在跑的帳戶）">
+  <div class="card__head"><h2>前向帳戶每天的賺賠（{{ start }} 起，全部賣掉計算）</h2><span class="muted small">{{ data.forward.accounts }} 個帳戶；只用截止日以前的資料挑、之後才記錄</span></div>
+  {% if fwd %}
+  <div class="kpis kpis--four">
+    <div class="kpi"><div class="kpi__label">0050 同樣的錢（{{ fwd.date[5:] }}）</div><div class="kpi__value {{ 'up' if fwd.bench_gain > 0 else 'down' }}">{{ '{:+,.0f}'.format(fwd.bench_gain) }} 元</div></div>
+    <div class="kpi"><div class="kpi__label">全部帳戶的中位數</div><div class="kpi__value {{ 'up' if fwd.median_gain > 0 else 'down' }}">{{ '{:+,.0f}'.format(fwd.median_gain) }} 元<small>（比 0050 多 {{ '{:+,.0f}'.format(fwd.median_ahead) }}）</small></div></div>
+    <div class="kpi"><div class="kpi__label">贏 0050 的帳戶</div><div class="kpi__value">{{ '{:.0%}'.format(fwd.ahead_share) }}<small>（{{ fwd.accounts }} 個）</small></div></div>
+    <div class="kpi"><div class="kpi__label">最好／最差的帳戶</div><div class="kpi__value"><span class="up">{{ '{:+,.0f}'.format(fwd.best_gain) }}</span>／<span class="down">{{ '{:+,.0f}'.format(fwd.worst_gain) }}</span></div></div>
+  </div>
+  {{ charts.forward }}
+  <div class="legend"><span><i class="sw-s0"></i>0050 同樣的錢</span><span><i class="sw-s1"></i>全部帳戶的中位數</span><span><i class="sw-band"></i>中間一半的帳戶（25%～75%）</span>{% for key, text in data.forward.named.items() %}<span><i class="sw-s{{ loop.index + 1 }}"></i>{{ text }}</span>{% endfor %}</div>
+  <p class="note">只有 {{ data.forward.series|length }} 個交易日，還分不出好壞；升 T0 要串接前向滿 60 個交易日（最快 {{ first_t0 }}）。</p>
+  {% else %}<p class="muted">還沒有前向紀錄。</p>{% endif %}
+  {% if data.frontier %}
+  <h3 style="margin:16px 0 6px;font-size:15px">取捨前緣上的規則：回測和前向對照</h3>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th class="num">回測期末</th><th class="num">0050 大跌時最糟</th><th class="num">前向全部賣掉</th><th class="num">比 0050</th><th class="num">已賣出的損益</th></tr></thead>
+      <tbody>
+      {% for row in data.frontier %}{% set worst = row.worst_fall %}
+        <tr>
+          <td data-primary><a href="/research/rules/{{ row.rule_hash }}">#{{ row.trial }}</a> {{ row.name }} <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
+          <td class="num" data-label="回測期末">{{ wan(row.final_value) }}</td>
+          <td class="num" data-label="0050 大跌時最糟">{% if worst %}{{ '多跌' if worst.gap < 0 else '少跌' }} {{ '{:.1f}'.format((worst.gap * 100)|abs) }} 點{% else %}—{% endif %}</td>
+          <td class="num {{ 'up' if (row.forward_gain or 0) > 0 else 'down' }}" data-label="前向全部賣掉">{% if row.forward_gain is not none %}<a href="/research/forward/{{ row.rule_hash }}">{{ '{:+,.0f}'.format(row.forward_gain) }} 元</a>{% else %}—{% endif %}</td>
+          <td class="num {{ 'up' if (row.forward_ahead or 0) > 0 else 'down' }}" data-label="比 0050">{{ '{:+,.0f}'.format(row.forward_ahead) if row.forward_ahead is not none else '—' }}</td>
+          <td class="num" data-label="已賣出的損益">{{ '{:+,.0f}'.format(row.realized) if row.realized is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <p class="col-help"><b>欄位說明</b>　<b>全部賣掉計算</b>：那天收盤把持股全部賣掉（扣手續費、交易稅、滑價）後，比投入的錢多或少多少元；0050 也一樣賣掉算。<b>中間一半</b>：把帳戶依賺賠排序，第 25% 到第 75% 的範圍。<b>取捨前緣</b>：沒有別的過門檻規則同時錢更多、0050 大跌時又少跌。<b>0050 大跌時最糟</b>：0050 每次從高點跌 10% 以上的期間，策略最糟一次比 0050 多跌或少跌幾個百分點。<b>比 0050</b>：前向全部賣掉後比同樣的錢買 0050 多或少多少元。<b>已賣出的損益</b>：已經賣掉的股票實際賺賠的合計。</p>
+</section>
+
+<section class="card" id="search" data-tab="搜尋規模">
+  <div class="card__head"><h2>搜尋過的策略（累計）</h2><span class="muted small">{{ data.scale.scan_rounds }} 輪單一策略搜尋＋{{ data.scale.blend_rounds }} 輪組合搜尋；完整回測 {{ '{:,}'.format(data.scale.trials) }} 次</span></div>
+  {{ charts.search }}
+  <div class="legend"><span><i class="sw-s1"></i>搜尋過的策略（單一策略各輪相加＋組合最大一輪）</span><span><i class="sw-s2"></i>只有單一策略搜尋</span><span><i class="sw-s0"></i>1 億</span></div>
+  <div class="table-wrap table-wrap--stack table-wrap--tall" style="margin-top:10px">
+    <table class="table--stack">
+      <thead><tr><th>時間</th><th>哪一種</th><th class="num">這一輪</th><th class="num">累計</th></tr></thead>
+      <tbody>
+      {% for row in data.searches|reverse %}
+        <tr>
+          <td data-primary class="small">{{ row.at.strftime('%m/%d %H:%M') }}</td>
+          <td data-label="哪一種"><span class="badge">{{ '單一策略搜尋' if row.kind == 'scan' else '組合搜尋' }}</span> <span class="muted small">{{ row.name }}</span></td>
+          <td class="num" data-label="這一輪">{{ '{:,}'.format(row.added) }}</td>
+          <td class="num" data-label="累計">{{ '{:.2f}'.format(row.total / 100000000) }} 億</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　<b>單一策略搜尋</b>：大規模搜尋一輪篩過的策略設定（訊號組合 × 股票池 × 持有方式），通過快篩的最後名單才進完整引擎、登錄成試驗。<b>組合搜尋</b>：把過門檻的策略兩兩、三三組成組合帳戶；每輪都含前幾輪的組合，所以累計只算最大的一輪。<b>累計</b>：到那一輪為止。</p>
+</section>
+
+<section class="card" id="families" data-tab="各家族最好的">
+  <div class="card__head"><h2>每一類策略現在最好的</h2><span class="muted small">期末多的在上；100% 個股</span></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>家族</th><th class="num">規則數／過門檻</th><th>最好的規則</th><th class="num">回測期末（是 0050 的幾倍）</th><th class="num">最大回撤</th><th class="num">前向全部賣掉／比 0050</th></tr></thead>
+      <tbody>
+      {% for row in data.families %}
+        <tr>
+          <td data-primary><strong>{{ row.family }}</strong></td>
+          <td class="num" data-label="規則數／過門檻">{{ row.rules }}／{{ row.passing }}</td>
+          <td data-label="最好的規則" data-wide><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge">{{ row.tier }}</span></td>
+          <td class="num" data-label="回測期末">{{ wan(row.final_value) }}{% if row.benchmark %}<span class="muted small">（{{ '{:.1f}'.format(row.final_value / row.benchmark) }} 倍）</span>{% endif %}</td>
+          <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}</td>
+          <td class="num" data-label="前向">{% if row.forward_gain is not none %}<span class="{{ 'up' if row.forward_gain > 0 else 'down' }}">{{ '{:+,.0f}'.format(row.forward_gain) }}</span>／<span class="{{ 'up' if (row.forward_ahead or 0) > 0 else 'down' }}">{{ '{:+,.0f}'.format(row.forward_ahead) }}</span>{% else %}<span class="muted small">沒有前向帳戶</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　<b>家族</b>：策略的類別（深度學習、機器學習、組合帳戶、RL 機器人……）。<b>規則數／過門檻</b>：這一類完整回測過幾個規則、幾個過門檻（T0 候選含高風險）。<b>最好的規則</b>：這一類回測期末最多的（等級在旁邊）。<b>回測期末</b>：2015-06 起 30 萬＋每月 1 萬到 2026-09，括號是 0050 同樣的錢的幾倍。<b>前向</b>：這個規則的前向帳戶全部賣掉後比投入多或少多少元／比 0050 多或少多少元（不在本月名單上的沒有帳戶）。</p>
+</section>
+{% endblock %}

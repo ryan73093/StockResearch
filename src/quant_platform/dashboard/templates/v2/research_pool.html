@@ -22,7 +22,7 @@
       <tbody>
       {% for item in pool.categories %}
         <tr>
-          <td data-primary><strong><a href="#daily" data-pick-family="{{ item.family }}">{{ item.family }}</a></strong><br><span class="muted small">{{ item.note }}</span></td>
+          <td data-primary><strong><a href="/research/pool?family={{ item.family|urlencode }}#daily">{{ item.family }}</a></strong><br><span class="muted small">{{ item.note }}</span></td>
           <td class="num" data-label="規則數">{{ item.count }}</td>
           <td class="num" data-label="T0／T0 候選">{% set top = item.tiers['T0'] + item.tiers['T0 候選'] %}{% if top %}<span class="badge badge--ok">{{ item.tiers['T0'] }}／{{ item.tiers['T0 候選'] }}</span>{% else %}0{% endif %}</td>
           <td class="num" data-label="高風險">{% set risky = item.tiers['T0（高風險）'] + item.tiers['T0 候選（高風險）'] %}{% if risky %}<span class="badge badge--bad">{{ risky }}</span>{% else %}0{% endif %}</td>
@@ -55,21 +55,22 @@
   <div class="kpis kpis--four" style="margin-bottom:12px">
     {% for grade in ('T0', 'T0（高風險）', 'T0 候選', 'T0 候選（高風險）', 'T1', 'T2', 'T3') %}<div class="kpi"><div class="kpi__label">{{ grade }}</div><div class="kpi__value">{{ pool.daily_tiers[grade] }}</div></div>{% endfor %}
   </div>
-  <p class="small" style="margin:0 0 10px">分級：<strong>T0</strong> 全部門檻都過，而且串接滾動前向紀錄（連續留在每月名單上的月份串起來）滿 60 個交易日仍不輸 0050，可以由你核准採用（最快 2026-12-28）；<strong>T0 候選</strong> 全部門檻都過，等前向觀察；<strong>T0 候選（高風險）</strong> 其他門檻都過，但回撤比 0050 深 5～15 個百分點；<strong>T1</strong> 兩段期間都贏、視窗勝率也夠，但回撤比 0050 深超過 15 個百分點（贏但波動大）；<strong>T2</strong> 只有部分期間贏；<strong>T3</strong> 輸 0050。T0 候選與 T1 自動進前向觀察。</p>
+  <p class="small" style="margin:0 0 10px">分級：<strong>T0</strong> 全部門檻都過，而且串接滾動前向紀錄（連續留在每月名單上的月份串起來）滿 60 個交易日仍不輸 0050，可以由你核准採用（最快 {{ first_t0 }}）；<strong>T0 候選</strong> 全部門檻都過，等前向觀察；<strong>T0 候選（高風險）</strong> 其他門檻都過，但回撤比 0050 深 5～15 個百分點；<strong>T1</strong> 兩段期間都贏、視窗勝率也夠，但回撤比 0050 深超過 15 個百分點（贏但波動大）；<strong>T2</strong> 只有部分期間贏；<strong>T3</strong> 輸 0050。T0 候選與 T1 自動進前向觀察。</p>
   <p class="muted small" style="margin:0 0 10px">帳戶：啟動資金 30 萬、每月 5 日再投入 1 萬，整個帳戶都能買賣；每個交易日收盤後檢查，掉出保留區才賣、新進榜才買；比同樣的錢買 0050。門檻：2015-06 起與 2020-10 起都贏 0050、3 年視窗勝率 ≥ 60% 且中位為正、1 年視窗勝率 ≥ 50%、回撤不比 0050 深超過 5 個百分點。最後以 2026-10-05 起的前向觀察判斷。</p>
   {% if pool.daily %}
-  <div class="filters">
-    <input type="search" id="daily-search" placeholder="搜尋規則名稱" aria-label="搜尋規則名稱">
-    <select id="daily-family" aria-label="分類"><option value="">全部分類</option>{% for family in pool.category_order %}<option value="{{ family }}">{{ family }}</option>{% endfor %}</select>
-    <select id="daily-tier" aria-label="等級"><option value="">全部等級</option>{% for grade in ('T0', 'T0（高風險）', 'T0 候選', 'T0 候選（高風險）', 'T1', 'T2', 'T3') %}<option value="{{ grade }}">{{ grade }}</option>{% endfor %}<option value="不採用">不採用（含 0050）</option></select>
-    <select id="daily-trait" aria-label="特性"><option value="">全部特性</option>{% for trait in pool.traits %}<option value="{{ trait }}">{{ trait }}</option>{% endfor %}</select>
-    <span class="muted small" id="daily-count"></span>
-  </div>
+  <form class="filters" id="daily-filters" method="get" action="/research/pool#daily">
+    {% if pool.basis != 'seed' %}<input type="hidden" name="basis" value="{{ pool.basis }}">{% endif %}
+    <input type="search" id="daily-search" name="q" value="{{ picked.q }}" placeholder="搜尋規則名稱（按 Enter）" aria-label="搜尋規則名稱">
+    <select id="daily-family" name="family" aria-label="分類"><option value="">全部分類</option>{% for family in pool.category_order %}<option value="{{ family }}"{% if picked.family == family %} selected{% endif %}>{{ family }}</option>{% endfor %}</select>
+    <select id="daily-tier" name="tier" aria-label="等級"><option value="">全部等級</option>{% for grade in ('T0', 'T0（高風險）', 'T0 候選', 'T0 候選（高風險）', 'T1', 'T2', 'T3') %}<option value="{{ grade }}"{% if picked.tier == grade %} selected{% endif %}>{{ grade }}</option>{% endfor %}<option value="不採用"{% if picked.tier == '不採用' %} selected{% endif %}>不採用（含 0050）</option></select>
+    <select id="daily-trait" name="trait" aria-label="特性"><option value="">全部特性</option>{% for trait in pool.traits %}<option value="{{ trait }}"{% if picked.trait == trait %} selected{% endif %}>{{ trait }}</option>{% endfor %}</select>
+    <span class="muted small" id="daily-count">符合 {{ daily_matched }}／{{ pool.daily|length }} 個{% if daily_rows|length < daily_matched %}，列出前 {{ daily_rows|length }} 個・<a href="?{% for key, value in picked.items() if value %}{{ key }}={{ value|urlencode }}&amp;{% endfor %}all=1#daily">顯示全部</a>{% endif %}{% if picked.values()|select|list %}・<a href="/research/pool#daily">清除篩選</a>{% endif %}</span>
+  </form>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th>規則</th><th>分類</th><th>等級</th><th class="num">2015-06 起期末（0050）</th><th class="num">比 0050</th><th class="num">2020-10 起比 0050</th><th class="num">1 年／3 年視窗勝率</th><th class="num">最大回撤（0050）</th><th class="num">費稅佔投入・每月下單</th></tr></thead>
       <tbody>
-      {% for row in pool.daily %}
+      {% for row in daily_rows %}
         <tr data-name="{{ row.name }}" data-family="{{ row.category.family }}" data-tier="{{ '不採用' if row.uses_0050 else row.tier }}" data-traits="|{{ row.category.traits|join('|') }}|">
           <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong>{{ risk_badge(row.spec_hash) }}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
           <td data-label="分類" data-wide><span class="badge">{{ row.category.family }}</span>{% if row.category.detail %} <span class="small">{{ row.category.detail }}</span>{% endif %}<br><span class="muted small">{{ row.category.traits|join('・') }}</span></td>
@@ -186,25 +187,12 @@
 </div>
 <script>
 (function () {
-  var search = document.getElementById('daily-search');
-  if (!search) { return; }
-  var family = document.getElementById('daily-family'), tier = document.getElementById('daily-tier'),
-      trait = document.getElementById('daily-trait'), count = document.getElementById('daily-count');
-  var rows = Array.prototype.slice.call(document.querySelectorAll('#daily tbody tr'));
-  function apply() {
-    var text = search.value.trim(), shown = 0;
-    rows.forEach(function (row) {
-      var ok = (!text || row.dataset.name.indexOf(text) >= 0) && (!family.value || row.dataset.family === family.value)
-        && (!tier.value || row.dataset.tier === tier.value) && (!trait.value || row.dataset.traits.indexOf('|' + trait.value + '|') >= 0);
-      row.hidden = !ok; if (ok) { shown += 1; }
-    });
-    count.textContent = '顯示 ' + shown + '／' + rows.length + ' 個';
-  }
-  [search, family, tier, trait].forEach(function (el) { el.addEventListener('input', apply); });
-  Array.prototype.forEach.call(document.querySelectorAll('[data-pick-family]'), function (link) {
-    link.addEventListener('click', function () { family.value = link.dataset.pickFamily; apply(); });
+  // 2026-10-23: the filters run on the server (the page was 5 MB with every rule); a choice reloads the list
+  var form = document.getElementById('daily-filters');
+  if (!form) { return; }
+  ['daily-family', 'daily-tier', 'daily-trait'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', function () { form.submit(); });
   });
-  apply();
 })();
 (function () {
   var search = document.getElementById('rule-search'), status = document.getElementById('rule-status'),
