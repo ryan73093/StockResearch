@@ -17,11 +17,71 @@ from pathlib import Path
 FIRST_T0 = date(2026, 11, 30)
 
 
+CONSOLES = ("ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS")
+OWN_MARKS = (".venv", "quant_platform", "quant-web", "quant-api", "quant-worker", "research-pipeline", "start-research")
+
+
+def desktop_windows() -> list[dict[str, object]]:
+    """2026-10-23 (AGENTS.md：背景程式不開視窗; 使用者 2026-10-20 看到一堆沒說明的空白 cmd 視窗): the visible top-level
+    windows on this desktop — title, class, process id, the program's path (Windows only; the worker runs in the
+    owner's session, so it sees the same desktop)."""
+    import sys
+
+    if sys.platform != "win32":
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    found: list[dict[str, object]] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(window, _param):
+        if not user32.IsWindowVisible(window):
+            return True
+        length = user32.GetWindowTextLengthW(window)
+        title = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(window, title, length + 1)
+        kind = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(window, kind, 256)
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(window, ctypes.byref(pid))
+        path = ""
+        handle = kernel32.OpenProcess(0x1000, False, pid.value)          # PROCESS_QUERY_LIMITED_INFORMATION
+        if handle:
+            size = wintypes.DWORD(1024)
+            buffer = ctypes.create_unicode_buffer(1024)
+            if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+                path = buffer.value
+            kernel32.CloseHandle(handle)
+        found.append({"title": title.value, "class": kind.value, "pid": int(pid.value), "path": path})
+        return True
+
+    user32.EnumWindows(each, 0)
+    return found
+
+
+def own_windows(windows: list[dict[str, object]], root: Path) -> list[dict[str, object]]:
+    """The windows this project opened: any of its own programs' (the .venv's python, quant-web/api/worker), or a
+    console window whose title names the project, its .venv or its research scripts."""
+    folder = str(root).lower()
+    output = []
+    for window in windows:
+        path, title = str(window.get("path") or "").lower(), str(window.get("title") or "").lower()
+        if path.startswith(folder) or (window.get("class") in CONSOLES
+                                       and (folder in title or any(mark in title for mark in OWN_MARKS))):
+            output.append(window)
+    return output
+
+
 def _check(name: str, source: str, ok: bool, detail: str) -> dict[str, object]:
     return {"name": name, "source": source, "ok": bool(ok), "detail": detail}
 
 
-def run(research: str | Path, today: date, backups: Path | None = None) -> list[dict[str, object]]:
+def run(research: str | Path, today: date, backups: Path | None = None,
+        windows: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
     from quant_platform.research.categories import uses_0050
     from quant_platform.research.forward_board import common_start
     from quant_platform.research.rolling import cutoff_for, folder as rolling_folder
@@ -233,6 +293,15 @@ def run(research: str | Path, today: date, backups: Path | None = None) -> list[
     except Exception as exc:                            # noqa: BLE001 - a broken build is itself the finding
         checks.append(_check("研究知識庫收了每一個試驗", "使用者 2026-10-22：失敗紀錄都要記起來，作為知識庫", False,
                              f"建立失敗：{str(exc)[:120]}"))
+    # 2026-10-23 (AGENTS.md：背景程式不開視窗; 使用者 2026-10-20 關掉一堆沒說明的空白 cmd 視窗，研究跟著中斷)
+    try:
+        opened = own_windows(desktop_windows() if windows is None else windows, research.parent.parent)
+        checks.append(_check("桌面沒有本專案開出的視窗", "AGENTS.md：背景程式不開視窗（使用者 2026-10-20）", not opened,
+                             (f"{len(opened)} 個：" + "；".join(f"{item['title'] or item['class']}（PID {item['pid']}）"
+                                                             for item in opened[:3])) if opened else "沒有"))
+    except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
+        checks.append(_check("桌面沒有本專案開出的視窗", "AGENTS.md：背景程式不開視窗（使用者 2026-10-20）", False,
+                             f"沒辦法檢查：{str(exc)[:120]}"))
     return checks
 
 

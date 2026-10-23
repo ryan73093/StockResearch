@@ -137,3 +137,24 @@ def test_the_worker_skips_the_checks_on_a_closed_day(tmp_path, monkeypatch):
     zone = ZoneInfo("Asia/Taipei")
     assert check_invariants(container, datetime(2026, 10, 23, 16, 0, tzinfo=zone)) is None and not ran
     assert check_invariants(container, datetime(2026, 10, 22, 16, 0, tzinfo=zone)) == [] and len(ran) == 1
+
+
+def test_a_window_the_project_opened_is_caught(tmp_path):
+    """2026-10-23 (AGENTS.md：背景程式不開視窗): a console titled with the project's .venv, or any window of its own
+    programs, fails the check; the owner's own windows do not."""
+    root = tmp_path / "proj"
+    research = root / "instance" / "research"
+    (research / "forward" / "stocks").mkdir(parents=True)
+    (research / "forward" / "stocks" / "tracked.json").write_text("[]", encoding="utf-8")
+    name = "桌面沒有本專案開出的視窗"
+    windows = [{"title": "Claude", "class": "Chrome_WidgetWin_1", "pid": 1, "path": r"C:\Apps\claude.exe"},
+               {"title": "Windows PowerShell", "class": "ConsoleWindowClass", "pid": 2, "path": r"C:\Windows\System32\conhost.exe"}]
+
+    def found():
+        return {item["name"]: item for item in invariants.run(research, date(2026, 10, 23), windows=windows)}[name]
+    assert found()["ok"] and found()["detail"] == "沒有"
+    windows.append({"title": str(root / ".venv" / "Scripts" / "python.exe"), "class": "ConsoleWindowClass", "pid": 3,
+                    "path": r"C:\Windows\System32\conhost.exe"})
+    assert not found()["ok"] and "PID 3" in found()["detail"]
+    windows[-1] = {"title": "", "class": "TkTopLevel", "pid": 4, "path": str(root / ".venv" / "Scripts" / "pythonw.exe")}
+    assert not found()["ok"] and "PID 4" in found()["detail"]
