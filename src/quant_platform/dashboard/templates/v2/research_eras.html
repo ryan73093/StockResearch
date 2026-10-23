@@ -1,0 +1,21 @@
+{# 2026-10-23: the dashboard's window of rules that faded or rose between the periods (research/eras.py). #}
+{% from "v2/_dashboard.html" import pts %}
+<p class="small" style="margin:0 0 8px">同一個規則、同一個帳戶切成時期，每年報酬比同時期的 0050 多或少幾個百分點。前期＝2015-06～2019、後期＝2020～2026-09；「明顯」＝每年 5 個百分點以上。</p>
+<h3 class="dash-h">前期明顯贏、後期變輸（{{ era.faded|length }} 個）</h3>
+{% macro rows(items) %}
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>規則</th>{% for label in era.labels %}<th class="num">{{ label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in items %}
+      <tr><td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge">{{ row.family }}</span> <span class="muted small">{{ row.tier }}</span></td>
+        {% for label in era.labels %}<td class="num" data-label="{{ label }}">{{ pts(row.periods[label].excess) }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+{% if era.faded %}{{ rows(era.faded[:30]) }}{% else %}<p class="muted">沒有。</p>{% endif %}
+<h3 class="dash-h">前期輸、後期明顯贏（{{ era.rose|length }} 個，列前 30）</h3>
+{% if era.rose %}{{ rows(era.rose[:30]) }}{% else %}<p class="muted">沒有。</p>{% endif %}
+<p class="col-help"><b>說明</b>　數字是那個時期每年報酬比 0050 多（紅）或少（綠）幾個百分點。0050 每年：{% for label in era.labels %}{{ label }} {{ '{:+.0%}'.format(era.benchmark[label]) if era.benchmark[label] is not none else '—' }}{% if not loop.last %}、{% endif %}{% endfor %}。前期變輸的多半是到 2023 年都還贏、2024 年後被 0050 的台積電行情拉開；後期才變強的多半是深度學習（2016 年起才有足夠資料訓練）。</p>

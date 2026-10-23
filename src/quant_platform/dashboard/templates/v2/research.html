@@ -2,6 +2,7 @@
 {% from "v2/_risk.html" import risk_badge %}
 {% from "v2/_icons.html" import icon %}
 {% from "v2/_research_status.html" import research_status %}
+{% from "v2/_dashboard.html" import dashboard as dashboard_section %}
 {% block title %}研究 · 交易研究分析平台{% endblock %}
 {% block heading %}
 <header class="page-head">
@@ -17,20 +18,11 @@
 {% set running_count = (jobs or [])|selectattr('status', 'equalto', 'running')|list|length %}
 
 {% if research_tab == 'overview' %}
+{{ dashboard_section(dashboard) }}
 {{ research_status(status) }}
-<section class="card">
-  <div class="card__head"><h2>研究現況 <span class="badge">2015-06 起、每天決策</span></h2><span class="muted small">啟動資金 30 萬＋每月 5 日 1 萬，對同樣的錢全部買 0050</span></div>
-  {% if overview %}
-  <div class="kpis kpis--four">
-    <div class="kpi"><div class="kpi__label">搜尋過的策略（累計）</div><div class="kpi__value">{% if search_scale %}{{ '{:.2f}'.format(search_scale.total / 100000000) }} 億<small>（單一策略 {{ '{:,.0f}'.format(search_scale.scans / 10000) }} 萬、組合 {{ '{:,.0f}'.format(search_scale.blends / 10000) }} 萬）</small>{% else %}—{% endif %}</div></div>
-    <div class="kpi"><div class="kpi__label">完整回測的規則（新設計）</div><div class="kpi__value">{{ overview.daily|length }}<small>（{{ '{:,}'.format(search_scale.trials) if search_scale else '—' }} 次試驗；舊設計另有 {{ overview.attempts }}）</small></div></div>
-    <div class="kpi"><div class="kpi__label">T0／T0 候選</div><div class="kpi__value">{{ overview.daily_tiers['T0'] }}／{{ overview.daily_tiers['T0 候選'] }}</div></div>
-    <div class="kpi"><div class="kpi__label">T0 候選（高風險）／T1</div><div class="kpi__value">{{ overview.daily_tiers['T0（高風險）'] + overview.daily_tiers['T0 候選（高風險）'] }}／{{ overview.daily_tiers['T1'] }}</div></div>
-    <div class="kpi"><div class="kpi__label">前向觀察中</div><div class="kpi__value">{{ overview.forward_stocks|rejectattr('stopped')|list|length }}<small>（已停止 {{ overview.forward_stocks|selectattr('stopped')|list|length }}）</small></div></div>
-  </div>
-  {% endif %}
+<section class="card" id="conclusions">
+  <div class="card__head"><h2>目前結論</h2><span class="muted small">研究方法第 7 節的摘要</span></div>
   {% if conclusions %}
-  <h3 style="margin:16px 0 6px;font-size:15px">目前結論</h3>
   <ul class="reasons">{% for item in conclusions %}<li>{{ item|safe }}</li>{% endfor %}</ul>
   {% endif %}
   <p class="muted small" style="margin:10px 0 0">完整的方法、數字與淘汰原因：<a href="/project/research_method">研究方法</a>（第 7～9 節）；每個規則走到哪一關：<a href="/research/pool">選手池</a>。</p>

@@ -4,7 +4,7 @@
 {% macro money(value) %}{% if value is none %}—{% else %}{{ '{:,.0f}'.format(value / 1e4) }} 萬{% endif %}{% endmacro %}
 {% macro research_status(status) %}
 {% if status %}
-<section class="card" id="status" data-tab="現況總表" data-tab-default>
+<section class="card" id="status" data-tab="現況總表">
   <div class="card__head"><h2>研究現況總表</h2><span class="muted small">{{ status.built }} 更新・檔案有變才重算</span></div>
   <div class="tabset" data-tabset>
 

@@ -1,0 +1,66 @@
+{# 2026-10-23: one strategy family in the dashboard's window (research/dashboard.py); a fragment, not a page. #}
+{% from "v2/_dashboard.html" import wan, pts %}
+{% set f = family %}{% set e = f.eras %}
+{% if f.note %}<p class="small" style="margin:0 0 10px">{{ f.note }}</p>{% endif %}
+<div class="dash-kpis">
+  <div class="kpi"><div class="kpi__label">最好的規則（回測）</div><div class="kpi__value">{{ wan(f.best.final_value) if f.best else '—' }}</div><div class="kpi__note">{% if f.best and benchmark %}0050 的 {{ '{:.1f}'.format(f.best.final_value / benchmark) }} 倍・{{ f.best.tier }}・回撤 {{ '{:.0%}'.format(f.best.max_drawdown) if f.best.max_drawdown is not none else '—' }}{% endif %}</div></div>
+  <div class="kpi"><div class="kpi__label">2020-10 起最好</div><div class="kpi__value">{{ wan(f.recent.since_2020_final_value) if f.recent else '—' }}</div><div class="kpi__note">{% if f.recent and recent_benchmark %}0050 的 {{ '{:.1f}'.format(f.recent.since_2020_final_value / recent_benchmark) }} 倍{% else %}沒有過門檻的{% endif %}</div></div>
+  <div class="kpi"><div class="kpi__label">規則／過門檻</div><div class="kpi__value">{{ f.rules }}／{{ f.passing }}</div><div class="kpi__note">{% if f.short_rules %}另有短歷史賽道 {{ f.short_rules }} 個{% else %}2015-06 起的規則{% endif %}</div></div>
+  <div class="kpi"><div class="kpi__label">前向（{{ f.accounts }} 個帳戶）</div><div class="kpi__value">{{ '{:.0%}'.format(f.ahead_share) if f.ahead_share is not none else '—' }} 贏 0050</div><div class="kpi__note">{% if f.median_ahead is not none %}中位數比 0050 {{ '{:+,.0f}'.format(f.median_ahead) }} 元、最好 {{ '{:+,.0f}'.format(f.best_ahead) }} 元{% else %}不在本月名單上{% endif %}</div></div>
+</div>
+
+<h3 class="dash-h">訓練狀況</h3>
+{% if f.models %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>模型</th><th>學什麼</th><th class="num">特徵</th><th>付費資料</th><th>訓練</th><th>門檻</th></tr></thead>
+    <tbody>
+    {% for m in f.models %}
+      <tr><td class="small">{{ m.version }}</td><td class="small">{{ m.label or '—' }}</td><td class="num">{{ m.features }}</td>
+        <td class="small">{% if m.paid %}{{ m.paid|join('、') }}{% else %}<span class="muted">沒有</span>{% endif %}</td>
+        <td class="small">{{ m.years or '—' }}{% if m.monthly %}・每月重訓到 {{ m.monthly }}{% endif %}{% if m.trained_at %}<br><span class="muted">{{ m.trained_at }} 訓練</span>{% endif %}</td>
+        <td class="small">{% if m.gate %}<span class="badge {{ 'badge--ok' if m.gate.passed else 'badge--bad' }}">{{ '過' if m.gate.passed else '沒過' }}</span> {{ m.gate.text }}{% else %}<span class="muted">—</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="col-help"><b>說明</b>　這一類的規則用到的模型。<b>學什麼</b>：模型的標籤（excess＝20 日超額報酬、deep2＝深度學習第二版前一成、ensemble＝提升樹集成）。<b>特徵</b>：模型讀幾個因子（機器人是幾個訊號區塊）。<b>訓練</b>：逐年滾動訓練的年份；每月重訓的模型只用截止日以前的資料。<b>門檻</b>：訓練前寫好的模型門檻（2016～2020 前 20 名多賺多少）。</p>
+{% elif f.family == 'T0 共識清單' %}<p class="small">沒有自己的模型：每天由所有 T0 候選各自排名、取平均成一張清單（成員用到的模型就是它用到的）。</p>
+{% else %}<p class="small">這一類不訓練模型：規則直接用因子排名選股，「優化」是換因子組合、持有方式、成交時點與否決。</p>{% endif %}
+
+<h3 class="dash-h">用到的資料</h3>
+<p class="small" style="margin:0 0 6px">{% for s in f.sources %}<span class="badge {{ 'badge--warn' if s.paid else '' }}">{{ s.label }}・{{ s.rules }} 個規則</span> {% else %}<span class="muted">只用價量（股價、成交量）</span>{% endfor %}</p>
+<p class="small" style="margin:0">{% if f.uses_paid %}FinMind 付費資料：{{ f.paid_rules }} 個規則用到、其中 {{ f.paid_passing }} 個過門檻{% if f.best_paid %}；用到的裡面最好的 {{ wan(f.best_paid.final_value) }}（{{ f.best_paid.tier }}）{% endif %}。{% else %}<b>還沒有規則用到 FinMind 付費資料。</b>{% endif %}</p>
+
+{% if e %}
+<h3 class="dash-h">各時期：這一類每年比 0050（中位數，百分點）</h3>
+<div class="table-wrap">
+  <table>
+    <thead><tr>{% for label in labels %}<th class="num">{{ label }}</th>{% endfor %}<th class="num">前期→後期</th><th class="num">前期贏、後期還贏</th></tr></thead>
+    <tbody><tr>{% for label in labels %}<td class="num">{{ pts(e.periods[label].median) }}<br><span class="muted small">{{ '{:.0%}'.format(e.periods[label].beat) if e.periods[label].beat is not none else '' }} 贏</span></td>{% endfor %}
+      <td class="num">{{ pts(e.median_early) }} → {{ pts(e.median_late) }}</td><td class="num">{{ e.still_winning }}／{{ e.early_winners }}</td></tr></tbody>
+  </table>
+</div>
+{% if f.faded %}<p class="small" style="margin:6px 0 0">前期每年贏五點以上、後期變輸的：{% for row in f.faded %}<a href="/research/rules/{{ row.spec_hash }}">{{ row.name[:40] }}</a>（{{ pts(row.periods.early.excess) }} → {{ pts(row.periods.late.excess) }}）{% if not loop.last %}；{% endif %}{% endfor %}</p>{% endif %}
+{% endif %}
+
+<h3 class="dash-h">最好的規則</h3>
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>規則</th><th class="num">回測期末</th><th class="num">2020-10 起</th><th class="num">前向比 0050</th></tr></thead>
+    <tbody>
+    {% for row in f.top %}
+      <tr><td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else '') }}">{{ row.tier }}</span></td>
+        <td class="num" data-label="回測期末">{{ wan(row.final_value) }}</td>
+        <td class="num" data-label="2020-10 起">{{ wan(row.since_2020_final_value) }}</td>
+        <td class="num {{ 'up' if row.forward and row.forward.ahead > 0 else ('down' if row.forward else '') }}" data-label="前向比 0050">{% if row.forward %}<a href="/research/forward/{{ row.spec_hash }}">{{ '{:+,.0f}'.format(row.forward.ahead) }}</a>{% else %}<span class="muted small">不在名單</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="small" style="margin:6px 0 0"><a href="/research/pool?family={{ f.family|urlencode }}#daily">這一類全部 {{ f.rules }} 個規則</a></p>
+
+{% if f.log %}
+<h3 class="dash-h">最近的最佳化</h3>
+<ul class="reasons small">{% for row in f.log %}<li><b>{{ row.date }}</b> <span class="badge {{ 'badge--ok' if row.verdict.startswith('過') else ('badge--warn' if row.verdict in ('進行中', '部分', '診斷') or row.verdict.startswith('部分') else 'badge--bad') }}">{{ row.verdict }}</span> {{ row.what }}<br><span class="muted">{{ row.result }}</span></li>{% endfor %}</ul>
+{% endif %}

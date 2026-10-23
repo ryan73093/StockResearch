@@ -46,9 +46,7 @@ from quant_platform.research.factors import table as factor_table
 from quant_platform.research.jobs import JobLog
 from quant_platform.research.pool import _svg as value_chart
 from quant_platform.research.pool import basis_counts, pool_view, rule_detail, yearly_matrix
-from quant_platform.research.progress import chart as progress_chart
 from quant_platform.research.progress import search_scale
-from quant_platform.research.progress import view as progress_view
 from quant_platform.research.after_close import load as after_close_load
 from quant_platform.research.forward_board import load as forward_board_load
 from quant_platform.research.forward_board import load_recent as forward_recent_load
@@ -225,6 +223,17 @@ BEST_ROWS = 40
 POOL_ROWS = 200
 FORWARD_ROWS = 100
 POOL_FILTERS = ("q", "family", "tier", "trait")
+
+
+def dashboard_data(research_dir: Path) -> dict[str, object]:
+    """2026-10-23 (使用者：總覽就是一個完整的 dashboard): the overview dashboard (research/dashboard.py; kept until its
+    files change, warmed in the background by dashboard.app)."""
+    from quant_platform.research.dashboard import view as research_dashboard
+
+    gates = {item["version"]: item["gate"] for item in ml_view(research_dir)["models"]}
+    optimizations = research_optimizations(_project_root() / DOCS["research_method"][1])
+    return research_dashboard(research_dir, forward_common_start(datetime.now(TAIPEI).date()).isoformat(),
+                              optimizations, gates)
 
 
 def pool_match(row: dict, picked: dict[str, str]) -> bool:
@@ -1030,7 +1039,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             downside_rows = [row for row in downside if row.get("frontier") or row["rule_hash"] in richest]
         else:
             downside_total, downside_rows = 0, downside
-        status = None
+        status = dashboard = None
+        if tab == "overview":     # 2026-10-23: the dashboard first; a failure shows the rest of the page
+            try:
+                dashboard = dashboard_data(research_dir)
+            except Exception:  # noqa: BLE001
+                logger.exception("Research dashboard failed")
         if tab == "overview":     # 2026-10-22 (使用者：研究首頁建一個表讓我快速知道現在狀況): never breaks the page
             try:
                 from quant_platform.research.status import overview as research_status
@@ -1064,7 +1078,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             ml=ml_view(research_dir) if tab == "ml" else None,
             robustness=robustness_latest(research_dir) if tab == "overview" else None,
             downside=downside_rows, downside_total=downside_total, best_total=best_total,
-            search_scale=search_scale(research_dir) if tab == "overview" else None,
+            search_scale=search_scale(research_dir) if tab == "overview" else None, dashboard=dashboard,
             news=news_view(research_dir, dependencies.settings) if tab == "news" else None,
             factor_columns=factor_columns(latest_factor_strength(research_dir / "factors")),
             overview=overview,
@@ -1110,52 +1124,27 @@ def create_v2_blueprint(dependencies) -> Blueprint:
 
     @blueprint.get("/research/progress")
     def research_progress():
-        """2026-10-23 (使用者：績效的成長幅度有沒有個線型圖，到底進步了多少、有沒有在成長；給我多一點分析的 dashboard): the best
-        backtest over time, the settings searched, the month's forward accounts day by day, the families."""
-        from markupsafe import Markup
+        """2026-10-23 (使用者：研究進展看不懂你想表達什麼): replaced by the overview's dashboard."""
+        return redirect(url_for("v2.research"))
+
+    @blueprint.get("/research/family/<path:family>")
+    def research_family(family: str):
+        """2026-10-23 (使用者：點深度學習就跳出浮動視窗顯示它目前大致的訓練狀況): one family, the dashboard's window."""
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        data = dashboard_data(research_dir)
+        found = next((item for item in data["families"] if item["family"] == family), None)
+        if found is None:
+            abort(404)
+        return render_template("v2/research_family.html", family=found, labels=data["eras"]["labels"],
+                               benchmark=data["benchmark"], recent_benchmark=data["recent_benchmark"])
+
+    @blueprint.get("/research/eras")
+    def research_eras():
+        """2026-10-23 (使用者：哪些前期賺很大、到後面變得比較不賺): the dashboard's window of faded and risen rules."""
+        from quant_platform.research.eras import analyze
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        start = forward_common_start(datetime.now(TAIPEI).date()).isoformat()
-        data = progress_view(research_dir, start)
-        line = data["timeline"]
-        money = lambda value: f"{value / 10000:,.0f} 萬"          # noqa: E731
-        marks = [(item["at"], "引擎 " + item["engine"].replace("daily-", "")[:3]) for item in line["engines"]
-                 if item["engine"].endswith(".0")]
-        charts = {
-            "best": Markup(progress_chart(
-                line["points"], "at", [{"key": "any", "label": "全部過門檻的最好", "css": "s1", "wide": True},
-                                       {"key": "risky", "label": "T0 候選（高風險）最好", "css": "s2"},
-                                       {"key": "t0", "label": "一般 T0 候選最好", "css": "s3"}],
-                money, guides=[(line["benchmark"], f"0050 同樣的錢 {money(line['benchmark'])}")] if line["benchmark"] else [],
-                marks=marks, step=True, label="回測最好的規則隨研究時間的變化")),
-            # 2026-10-23 (使用者：短賽道績效呢): the same rules from 2020-10-26, a fresh account then
-            "recent": Markup(progress_chart(
-                line["points"], "at", [{"key": "recent_any", "label": "全部過門檻的最好（2020-10 起）", "css": "s1", "wide": True},
-                                       {"key": "recent_t0", "label": "一般 T0 候選最好（2020-10 起）", "css": "s3"}],
-                money, guides=[(line["recent_benchmark"], f"0050 同樣的錢 {money(line['recent_benchmark'])}")]
-                if line.get("recent_benchmark") else [], marks=marks, step=True,
-                label="2020-10 起最好的規則隨研究時間的變化")),
-            "passing": Markup(progress_chart(
-                line["points"], "at", [{"key": "passing", "label": "過門檻的規則", "css": "s1"},
-                                       {"key": "rules", "label": "完整回測過的規則", "css": "s4", "dashed": True}],
-                lambda value: f"{value:,.0f}", step=True, height=220, label="規則數隨研究時間的變化")),
-            "search": Markup(progress_chart(
-                data["searches"], "at", [{"key": "total", "label": "搜尋過的策略（累計）", "css": "s1"},
-                                         {"key": "scans", "label": "單一策略搜尋（各輪相加）", "css": "s2", "dashed": True}],
-                lambda value: f"{value / 100000000:.2f} 億", guides=[(100_000_000, "1 億")], step=True, height=240,
-                label="搜尋規模隨研究時間的變化")),
-            "forward": Markup(progress_chart(
-                data["forward"]["series"], "date",
-                [{"key": "bench_gain", "label": "0050 同樣的錢", "css": "s0", "dashed": True},
-                 {"key": "median_gain", "label": "全部帳戶的中位數", "css": "s1"},
-                 *[{"key": key, "label": text, "css": f"s{index + 2}"}
-                   for index, (key, text) in enumerate(data["forward"]["named"].items())]],
-                lambda value: f"{value:+,.0f}", band=("p25_gain", "p75_gain"), guides=[(0, "沒賺沒賠")],
-                label="前向帳戶全部賣掉後賺賠（元）")),
-        }
-        return render_template("v2/research_progress.html", active_nav="research", research_tab="progress",
-                               jobs=JobLog(research_dir).jobs(), data=data, charts=charts, start=start,
-                               generated=datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M"))
+        return render_template("v2/research_eras.html", era=analyze(research_dir))
 
     @blueprint.get("/research/rules/<spec_hash>")
     def research_rule(spec_hash: str):

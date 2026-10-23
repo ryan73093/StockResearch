@@ -319,7 +319,7 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
             "max_drawdown": metrics.get("max_drawdown"), "benchmark_max_drawdown": metrics.get("benchmark_max_drawdown"),
             "xirr": metrics.get("xirr"), "benchmark_xirr": metrics.get("benchmark_xirr"),
             "cost_share": metrics.get("cost_share"), "orders_per_month": metrics.get("orders_per_month"),
-            "forward_since": since.get(spec_hash), "report_file": record.report_file,
+            "forward_since": since.get(spec_hash), "report_file": record.report_file, "start": metrics.get("start"),
             "category": classify(_spec_of(base, record.report_file), origin.get(spec_hash, "")),
             "uses_0050": uses_0050(_spec_of(base, record.report_file)),
         })

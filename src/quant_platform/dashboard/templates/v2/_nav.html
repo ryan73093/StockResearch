@@ -2,7 +2,6 @@
    list for the sidebar groups (wide screens) and the in-page tabs (phones and the icon rail). #}
 {% set research_pages = [
   ('overview', '總覽', '/research'),
-  ('progress', '研究進展（成長了多少）', '/research/progress'),
   ('orders', '今天的盤後單', '/research?tab=orders'),
   ('forward', '前向觀察', '/research?tab=forward'),
   ('pool', '選手池', '/research/pool'),
@@ -18,7 +17,7 @@
 ] %}
 {# 2026-10-17 (使用者：分類到底有沒有好好分類): the sidebar shows the research pages in four groups #}
 {% set research_groups = [
-  ('每天看', ('overview', 'progress', 'orders', 'forward')),
+  ('每天看', ('overview', 'orders', 'forward')),
   ('策略', ('pool', 'roles')),
   ('方法與模型', ('factors', 'ml', 'rl', 'news', 'hypothesis')),
   ('程式與紀錄', ('knowledge', 'jobs', 'legacy')),

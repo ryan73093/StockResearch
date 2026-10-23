@@ -1,0 +1,80 @@
+{# 2026-10-23 (使用者：總覽就是一個完整的 dashboard，重要資料顯示上去就好、不要充版面；點深度學習就跳出浮動視窗顯示它
+   目前大致的訓練狀況): research/dashboard.py. A card opens its family in a window (fetched: /research/family/<name>). #}
+{% macro wan(value) %}{% if value is none %}—{% else %}{{ '{:,.0f}'.format(value / 10000) }} 萬{% endif %}{% endmacro %}
+{% macro pts(value) %}{% if value is none %}—{% else %}<span class="{{ 'up' if value > 0.0005 else ('down' if value < -0.0005 else '') }}">{{ '{:+.1f}'.format(value * 100) }}</span>{% endif %}{% endmacro %}
+{% macro dashboard(d) %}
+{% if d %}
+{% set fw = d.forward %}{% set era = d.eras %}{% set all = era.all %}
+<section class="card" id="dashboard" data-tab="儀表板" data-tab-default>
+  <div class="card__head"><h2>研究儀表板</h2><span class="muted small">2015-06～2026-09 回測：30 萬＋每月 5 日 1 萬，100% 個股；前向：{{ fw.start }} 起、全部賣掉計算</span></div>
+  <div class="dash-kpis">
+    <div class="kpi"><div class="kpi__label">0050 同樣的錢</div><div class="kpi__value">{{ wan(d.benchmark) }}</div><div class="kpi__note">2020-10 起：{{ wan(d.recent_benchmark) }}</div></div>
+    <div class="kpi"><div class="kpi__label">最好的策略（回測）</div><div class="kpi__value">{{ wan(d.overall.final_value) if d.overall else '—' }}</div><div class="kpi__note">{% if d.overall and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.overall.final_value / d.benchmark) }} 倍・{{ d.overall.tier }}{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">一般 T0 候選最好</div><div class="kpi__value">{{ wan(d.ordinary.final_value) if d.ordinary else '—' }}</div><div class="kpi__note">{% if d.ordinary and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.ordinary.final_value / d.benchmark) }} 倍{% endif %}{% if d.recent %}・2020-10 起最好 {{ wan(d.recent.since_2020_final_value) }}{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">前向 {{ fw.accounts }} 個帳戶（全部賣掉）</div><div class="kpi__value">{{ '{:.0%}'.format(fw.ahead_share) if fw.ahead_share is not none else '—' }} 贏 0050</div><div class="kpi__note">中位數 <span class="{{ 'up' if (fw.median_gain or 0) > 0 else 'down' }}">{{ '{:+,.0f}'.format(fw.median_gain or 0) }}</span> 元・0050 <span class="{{ 'up' if (fw.bench_gain or 0) > 0 else 'down' }}">{{ '{:+,.0f}'.format(fw.bench_gain or 0) }}</span> 元</div></div>
+    <div class="kpi"><div class="kpi__label">離 T0</div><div class="kpi__value">{{ d.t0.sessions }}／{{ d.t0.needed }} 交易日</div><div class="kpi__note">最快 {{ first_t0[:10] }}・{{ '{:,}'.format(d.t0.not_behind) }} 個不輸 0050</div></div>
+  </div>
+  <p class="muted small" style="margin:6px 0 0">完整回測 {{ '{:,}'.format(d.rules) }} 個規則、{{ '{:,}'.format(d.passing) }} 個過門檻；搜尋過 {{ '{:.2f}'.format(d.scale.total / 100000000) }} 億個策略設定。點下面任何一類看它的模型、資料、各時期表現與最好的規則。</p>
+
+  <h3 class="dash-h">各類策略</h3>
+  <div class="family-grid">
+    {% for f in d.families %}{% set e = f.eras %}
+    <button type="button" class="family-card" data-family="{{ f.family }}">
+      <span class="family-card__name">{{ f.family }}{% if f.uses_paid %} <span class="badge">用付費資料 {{ f.paid_rules }}</span>{% endif %}</span>
+      <span class="family-card__value">{{ wan(f.best.final_value) if f.best else '—' }}{% if f.best and d.benchmark %}<small>（0050 的 {{ '{:.1f}'.format(f.best.final_value / d.benchmark) }} 倍）</small>{% endif %}</span>
+      <span class="family-card__line">{{ f.rules }} 個規則・<b>{{ f.passing }}</b> 個過門檻{% if f.accounts %}・前向 {{ '{:.0%}'.format(f.ahead_share) }} 贏 0050{% endif %}</span>
+      {% if e %}<span class="family-card__line muted">每年比 0050（中位數）：{% for label in era.labels %}{{ pts(e.periods[label].median) }}{% if not loop.last %} ／ {% endif %}{% endfor %}</span>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
+  <p class="col-help"><b>說明</b>　<b>最好</b>：這一類過門檻的規則裡回測期末最多的（整類都沒過門檻才取期末最多的）。<b>過門檻</b>：T0 候選（含高風險）。<b>前向</b>：本月名單上這一類的帳戶，全部賣掉後比同樣的錢買 0050 多的比例。<b>每年比 0050</b>：這一類規則在 {{ era.labels|join('、') }} 每年報酬比 0050 多或少幾個百分點的中位數（紅＝多、綠＝少）。<b>用付費資料</b>：用到 FinMind 付費資料（集保、融資維持率、借貸、鉅額、主力、八大行庫、分點）的規則數。</p>
+
+  <h3 class="dash-h">同一個策略在不同時期還適用嗎</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>時期</th><th class="num">0050 每年</th><th class="num">贏 0050 的規則</th><th class="num">規則每年比 0050（中位數）</th><th class="num">最好的多幾點</th></tr></thead>
+      <tbody>
+      {% for label in era.labels %}{% set p = all.periods[label] %}
+        <tr><td>{{ label }}</td><td class="num">{{ '{:+.1%}'.format(era.benchmark[label]) if era.benchmark.get(label) is not none else '—' }}</td>
+          <td class="num">{{ '{:.0%}'.format(p.beat) if p.beat is not none else '—' }}</td><td class="num">{{ pts(p.median) }} 點</td><td class="num">{{ pts(p.best) }} 點</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <ul class="reasons small" style="margin-top:8px">
+    <li>2015-06～2019 贏 0050 的 {{ '{:,}'.format(all.early_winners) }} 個規則，2020 年以後還贏的 {{ '{:,}'.format(all.still_winning) }} 個（{{ '{:.0%}'.format(all.still_winning / all.early_winners) if all.early_winners else '—' }}）；前後期的排名相關 {{ all.correlation }}（1＝完全一樣、0＝無關）。</li>
+    <li>前期每年贏 0050 五個百分點以上的 {{ all.big_early }} 個：後期仍贏五點以上 {{ all.big_still }} 個，<b>變成輸 0050 的 {{ all.big_faded }} 個</b>；前期輸、後期每年贏五點以上的 {{ era.rose|length }} 個（多半是深度學習與 2020 年後才變強的組合）。</li>
+    {% if era.benchmark.get(era.labels[-1]) is not none and all.periods[era.labels[-1]].beat is not none %}<li>差最多的是 2024～2026-09：0050（台積電佔一半）每年 {{ '{:+.0%}'.format(era.benchmark[era.labels[-1]]) }}，只有 {{ '{:.0%}'.format(all.periods[era.labels[-1]].beat) }} 的規則贏它——規則本身多半還在賺，但每檔等額的選股追不上權值股集中的行情；2020～2023 反而有七成以上的規則贏 0050。</li>{% endif %}
+  </ul>
+  <p><button type="button" class="button-link" data-eras>看前期大賺、後期不賺的規則（{{ era.faded|length }} 個）與後期才變強的</button></p>
+  <p class="col-help"><b>說明</b>　每個規則同一個帳戶（2015-06 起 30 萬＋每月 1 萬）切成時期，每年報酬扣掉當月投入，和同時期的 0050 比；「每年比 0050」是年化報酬相減。前期＝2015-06～2019、後期＝2020～2026-09。只看 2015 年起的規則（不含短歷史賽道）。</p>
+</section>
+
+<dialog class="dash-dialog" id="dash-dialog" data-notab>
+  <div class="dash-dialog__bar"><strong id="dash-dialog-title"></strong><button type="button" class="dash-dialog__close" aria-label="關閉">×</button></div>
+  <div id="dash-dialog-body" class="dash-dialog__body"><p class="muted">載入中…</p></div>
+</dialog>
+<script>
+(() => {
+  const dialog = document.getElementById('dash-dialog');
+  if (!dialog) return;
+  const body = document.getElementById('dash-dialog-body'), title = document.getElementById('dash-dialog-title');
+  const open = async (heading, url) => {
+    title.textContent = heading;
+    body.innerHTML = '<p class="muted">載入中…</p>';
+    dialog.showModal();
+    try {
+      const response = await fetch(url, { headers: { 'X-Requested-With': 'fetch' } });
+      body.innerHTML = response.ok ? await response.text() : '<p class="down">讀取失敗（' + response.status + '）</p>';
+    } catch (error) { body.innerHTML = '<p class="down">讀取失敗</p>'; }
+  };
+  document.querySelectorAll('[data-family]').forEach((card) => card.addEventListener('click', () =>
+    open(card.dataset.family, '/research/family/' + encodeURIComponent(card.dataset.family))));
+  document.querySelectorAll('[data-eras]').forEach((button) => button.addEventListener('click', () =>
+    open('前期大賺、後期不賺的規則', '/research/eras')));
+  dialog.querySelector('.dash-dialog__close').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
+})();
+</script>
+{% endif %}
+{% endmacro %}

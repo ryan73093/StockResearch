@@ -3036,9 +3036,9 @@ def create_app(container: Container | None = None) -> Flask:
 
 
 def _keep_research_warm(dependencies) -> None:
-    """2026-10-23 (使用者：整個網頁在使用的速度很慢): the research pages' slow parts — the chained forward record and the
-    progress page over 190 MB of forward records, the pool — recomputed in the background once their files change, so
-    a visitor finds them ready (each keeps its result until its files change)."""
+    """2026-10-23 (使用者：整個網頁在使用的速度很慢): the research pages' slow parts — the chained forward record over
+    190 MB of forward records, the pool, the overview's dashboard — recomputed in the background once their files
+    change, so a visitor finds them ready (each keeps its result until its files change)."""
     import threading
     import time
 
@@ -3051,14 +3051,13 @@ def _keep_research_warm(dependencies) -> None:
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
-        from quant_platform.research.forward_board import common_start
+        from quant_platform.dashboard.v2 import dashboard_data
         from quant_platform.research.pool import pool_view
-        from quant_platform.research.progress import view as progress_view
 
         while True:
             try:
                 pool_view(research_dir, basis="seed")
-                progress_view(research_dir, common_start(datetime.now(ZoneInfo("Asia/Taipei")).date()).isoformat())
+                dashboard_data(research_dir)
             except Exception:  # noqa: BLE001 — a warm-up failure must not stop the site; the page computes it itself
                 log.exception("Research pages warm-up failed")
             time.sleep(60)
