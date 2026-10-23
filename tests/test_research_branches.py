@@ -75,3 +75,25 @@ def test_the_outcome_starts_the_session_after_and_is_measured_against_the_averag
     assert np.isnan(found["excess"][:, 40 - 6]).all()                 # its outcome is past the end
     one = close[:, column + 1] / close[:, column] - 1
     assert found["next1"][:, column] == pytest.approx(one - one.mean())
+
+
+def test_a_stock_read_once_is_kept_in_one_file_until_a_day_is_added(tmp_path):
+    """2026-10-23: the 720,000 small day files took about 30 s a stock; the cache holds one stock in one file."""
+    folder = tmp_path / "raw" / "finmind" / "branches" / "2330"
+    folder.mkdir(parents=True)
+
+    def day(name, rows):
+        (folder / f"{name}.json.gz").write_bytes(gzip.compress(json.dumps({"date": name, "rows": rows}).encode()))
+    day("2026-10-01", [["A", 1, 2, 100.0, 200.0]])
+    cache = branches.cache_path(folder)
+    assert cache == tmp_path / "branches" / "2330.npz"
+    first = branches.load_stock(folder, cache)
+    assert cache.is_file() and first[0] == ["2026-10-01"] and first[1] == ["A"]
+    (folder / "2026-10-01.json.gz").write_bytes(b"not read again")       # the cache answers while the count is the same
+    assert branches.load_stock(folder, cache)[2].tolist() == [[100.0]]
+    day("2026-10-01", [["A", 1, 2, 100.0, 200.0]])
+    day("2026-10-02", [["B", 1, 0, 50.0, 0.0]])                        # a new day: read again
+    days, names, bought, sold = branches.load_stock(folder, cache)
+    assert days == ["2026-10-01", "2026-10-02"] and names == ["A", "B"] and bought.tolist() == [[100.0, 0.0], [0.0, 50.0]]
+    loaded = list(branches.stocks(folder.parent, ["2330"]))
+    assert loaded[0][0] == "2330" and loaded[0][1][0] == days

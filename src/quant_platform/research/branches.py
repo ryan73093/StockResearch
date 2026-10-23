@@ -52,19 +52,32 @@ def raw_folder(base: str | Path) -> Path:
     return Path(base) / "raw" / "finmind" / "branches"
 
 
-def read_stock(folder: Path, index: dict[date, int], names: dict[str, int]):
-    """One stock's day files: (columns, branch ids, money bought, money sold) — the session columns it has (ascending),
-    the global id of each branch that traded it (``names`` grows), columns × branches."""
-    days, rows = [], []
-    for path in sorted(folder.glob("*.json.gz")):
+def cache_path(folder: Path) -> Path:
+    """history/branches/<code>.npz beside history/raw: one stock's day files in one file (2026-10-23: the 720,000
+    small files took about 30 s a stock to read cold, 10 hours for the two passes)."""
+    return folder.parents[3] / "branches" / f"{folder.name}.npz"
+
+
+def load_stock(folder: Path, cache: Path | None = None) -> tuple[list[str], list[str], np.ndarray, np.ndarray]:
+    """One stock's day files as (days ISO, branch names, money bought, money sold — days × branches, days ascending),
+    from ``cache`` when it was written from as many day files as there are now, else read and the cache written."""
+    files = sorted(folder.glob("*.json.gz"))
+    if cache is not None and cache.is_file():
         try:
-            day = date.fromisoformat(path.name[:10])
+            with np.load(cache, allow_pickle=False) as stored:
+                if int(stored["files"]) == len(files):
+                    return ([str(day) for day in stored["days"]], [str(name) for name in stored["names"]],
+                            stored["bought"].astype(float), stored["sold"].astype(float))
+        except (OSError, ValueError, KeyError):
+            pass
+    days, rows = [], []
+    for path in files:
+        try:
+            date.fromisoformat(path.name[:10])
         except ValueError:
             continue
-        if day not in index:
-            continue
         payload = json.loads(gzip.decompress(path.read_bytes()))
-        days.append(index[day])
+        days.append(path.name[:10])
         rows.append(payload.get("rows") or [])
     local: dict[str, int] = {}
     for day_rows in rows:
@@ -77,11 +90,52 @@ def read_stock(folder: Path, index: dict[date, int], names: dict[str, int]):
             at = np.fromiter((local[str(row[0])] for row in day_rows), dtype=np.int64, count=len(day_rows))
             bought[number, at] = [float(row[3]) for row in day_rows]
             sold[number, at] = [float(row[4]) for row in day_rows]
+    order = np.argsort(np.array(days), kind="stable")
+    days, bought, sold = [days[at] for at in order], bought[order], sold[order]
+    if cache is not None:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        partial = cache.with_name(cache.stem + ".partial.npz")
+        np.savez_compressed(partial, files=len(files), days=np.array(days, dtype="U10"),
+                            names=np.array(list(local), dtype="U16"), bought=bought.astype(np.float32),
+                            sold=sold.astype(np.float32))
+        partial.replace(cache)
+    return days, list(local), bought, sold
+
+
+def place(loaded, index: dict[date, int], names: dict[str, int]):
+    """A loaded stock on the sessions: (columns, global branch ids, bought, sold) — days not sessions dropped,
+    ``names`` grows with the branches first seen."""
+    days, local, bought, sold = loaded
+    keep = [number for number, day in enumerate(days) if date.fromisoformat(day) in index]
+    columns = np.array([index[date.fromisoformat(days[number])] for number in keep], dtype=np.int64)
     for name in local:
         names.setdefault(name, len(names))
     ids = np.array([names[name] for name in local], dtype=np.int64)
-    order = np.argsort(np.array(days, dtype=np.int64), kind="stable")
-    return np.array(days, dtype=np.int64)[order], ids, bought[order], sold[order]
+    return columns, ids, bought[keep], sold[keep]
+
+
+def read_stock(folder: Path, index: dict[date, int], names: dict[str, int], cache: Path | None = None):
+    """One stock's day files: (columns, branch ids, money bought, money sold) — the session columns it has (ascending),
+    the global id of each branch that traded it (``names`` grows), columns × branches."""
+    return place(load_stock(folder, cache), index, names)
+
+
+def stocks(folder: Path, codes: list[str], workers: int = 4):
+    """(code, loaded) for each code in order, read up to ``2 × workers`` ahead on threads (the reading is mostly
+    waiting on the disk; the bound keeps a few stocks in memory, not all)."""
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        waiting: deque = deque()
+        for code in codes:
+            waiting.append((code, pool.submit(load_stock, folder / code, cache_path(folder / code))))
+            if len(waiting) >= 2 * workers:
+                ready, future = waiting.popleft()
+                yield ready, future.result()
+        while waiting:
+            ready, future = waiting.popleft()
+            yield ready, future.result()
 
 
 def outcomes(close: np.ndarray, eligible, columns: range, horizon: int = HORIZON) -> dict[str, np.ndarray]:
@@ -209,10 +263,10 @@ def run(history: str | Path, research: str | Path, job=None) -> Path:
     folder = raw_folder(history)
     codes = sorted(path.name for path in folder.iterdir() if path.is_dir() and path.name in rows_of) if folder.is_dir() else []
     last = len(sessions) - 1
-    for number, code in enumerate(codes):                       # first pass: what each branch's trades were worth
+    for number, (code, loaded) in enumerate(stocks(folder, codes)):   # first pass: what each branch's trades were worth
         if job and number % 10 == 0:
             job.update(done=number, total=2 * len(codes), current=f"挑分點 {code}")
-        columns, ids, bought, sold = read_stock(folder / code, index, names)
+        columns, ids, bought, sold = place(loaded, index, names)
         if not len(columns):
             continue
         row = rows_of[code]
@@ -243,10 +297,10 @@ def run(history: str | Path, research: str | Path, job=None) -> Path:
     persist = {name: {"chosen": [0.0, 0.0, 0.0], "others": [0.0, 0.0, 0.0]} for name in PERIODS}
     flips = {name: {"next1": [0.0, 0.0, 0.0], "next5": [0.0, 0.0, 0.0]} for name in PERIODS}
     out_rows = []
-    for number, code in enumerate(codes):                       # second pass: the signals, the report
+    for number, (code, loaded) in enumerate(stocks(folder, codes)):   # second pass: the signals, the report
         if job and number % 10 == 0:
             job.update(done=len(codes) + number, total=2 * len(codes), current=f"分點訊號 {code}")
-        columns, ids, bought, sold = read_stock(folder / code, index, names)
+        columns, ids, bought, sold = place(loaded, index, names)
         if not len(columns):
             continue
         row = rows_of[code]
