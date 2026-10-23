@@ -146,6 +146,27 @@
   {{ charts.forward }}
   <div class="legend"><span><i class="sw-s0"></i>0050 同樣的錢</span><span><i class="sw-s1"></i>全部帳戶的中位數</span><span><i class="sw-band"></i>中間一半的帳戶（25%～75%）</span>{% for key, text in data.forward.named.items() %}<span><i class="sw-s{{ loop.index + 1 }}"></i>{{ text }}</span>{% endfor %}</div>
   <p class="note">只有 {{ data.forward.series|length }} 個交易日，還分不出好壞；升 T0 要串接前向滿 60 個交易日（最快 {{ first_t0 }}）。</p>
+  {% set t0 = data.t0 %}
+  <h3 style="margin:16px 0 6px;font-size:15px">離 T0 還差多少：串接前向 {{ t0.sessions }}／{{ t0.needed }} 個交易日</h3>
+  <p class="small" style="margin:0 0 8px">本月名單上過門檻的 {{ '{:,}'.format(t0.rules) }} 個規則裡，串起來不輸 0050 的有 <strong>{{ '{:,}'.format(t0.not_behind) }}</strong> 個；還差 {{ t0.needed - t0.sessions }} 個交易日，最快 {{ first_t0 }} 收盤後，連續留在名單上、串起來仍不輸 0050、對帳正常的升 T0，再由你核准。</p>
+  {% if t0.nearest %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>規則</th><th class="num">串接交易日</th><th class="num">串起來的報酬（0050）</th><th class="num">比 0050</th><th class="num">回測期末</th></tr></thead>
+      <tbody>
+      {% for row in t0.nearest %}
+        <tr>
+          <td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
+          <td class="num" data-label="串接交易日">{{ row.sessions }}／{{ t0.needed }}</td>
+          <td class="num" data-label="串起來的報酬">{{ '{:+.1%}'.format(row['return']) }}<span class="muted small">（{{ '{:+.1%}'.format(row.benchmark_return) }}）</span></td>
+          <td class="num {{ 'up' if row.excess > 0 else 'down' }}" data-label="比 0050">{{ '{:+.1%}'.format(row.excess) }}</td>
+          <td class="num" data-label="回測期末">{{ wan(row.final_value) if row.final_value else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
   {% else %}<p class="muted">還沒有前向紀錄。</p>{% endif %}
   {% if data.frontier %}
   <h3 style="margin:16px 0 6px;font-size:15px">取捨前緣上的規則：回測和前向對照</h3>
@@ -167,7 +188,7 @@
     </table>
   </div>
   {% endif %}
-  <p class="col-help"><b>欄位說明</b>　<b>全部賣掉計算</b>：那天收盤把持股全部賣掉（扣手續費、交易稅、滑價）後，比投入的錢多或少多少元；0050 也一樣賣掉算。<b>中間一半</b>：把帳戶依賺賠排序，第 25% 到第 75% 的範圍。<b>取捨前緣</b>：沒有別的過門檻規則同時錢更多、0050 大跌時又少跌。<b>0050 大跌時最糟</b>：0050 每次從高點跌 10% 以上的期間，策略最糟一次比 0050 多跌或少跌幾個百分點。<b>比 0050</b>：前向全部賣掉後比同樣的錢買 0050 多或少多少元。<b>已賣出的損益</b>：已經賣掉的股票實際賺賠的合計。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>全部賣掉計算</b>：那天收盤把持股全部賣掉（扣手續費、交易稅、滑價）後，比投入的錢多或少多少元；0050 也一樣賣掉算。<b>中間一半</b>：把帳戶依賺賠排序，第 25% 到第 75% 的範圍。<b>取捨前緣</b>：沒有別的過門檻規則同時錢更多、0050 大跌時又少跌。<b>0050 大跌時最糟</b>：0050 每次從高點跌 10% 以上的期間，策略最糟一次比 0050 多跌或少跌幾個百分點。<b>比 0050</b>：前向全部賣掉後比同樣的錢買 0050 多或少多少元。<b>已賣出的損益</b>：已經賣掉的股票實際賺賠的合計。<b>串接交易日</b>：連續留在每月名單上的月份串起來的前向交易日（第一個月從那份名單的截止日隔天算起）。<b>串起來的報酬</b>：每天扣掉投入的錢後串起來的報酬，括號是同一批帳戶裡的 0050。<b>比 0050</b>：兩者相減；離 T0 最近的依交易日多、再依比 0050 多排。</p>
 </section>
 
 <section class="card" id="search" data-tab="搜尋規模">

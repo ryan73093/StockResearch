@@ -258,6 +258,23 @@ def recent_best(pool_rows: list[dict], count: int = 15) -> list[dict[str, object
     return sorted(rows, key=lambda row: -row["since_2020_final_value"])[:count]
 
 
+def toward_t0(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, dict], count: int = 15) -> dict[str, object]:
+    """How far the monthly lists' rules are from T0 (使用者 2026-10-23：T0 為什麼又要 12/29): the chained forward
+    sessions so far, how many are not behind 0050, the passing rules nearest to it (most ahead first)."""
+    from quant_platform.research.daily import FORWARD_SESSIONS
+
+    rows = {row["spec_hash"]: row for row in pool_rows}
+    candidates = [(key, value) for key, value in chained.items()
+                  if (rows.get(key) or {}).get("tier") in PASSING and not (rows.get(key) or {}).get("uses_0050")]
+    sessions = max((value["sessions"] for _key, value in candidates), default=0)
+    nearest = sorted(candidates, key=lambda item: (-item[1]["sessions"], -item[1]["excess"]))[:count]
+    return {"sessions": sessions, "needed": FORWARD_SESSIONS, "rules": len(candidates),
+            "not_behind": sum(value["excess"] >= 0 for _key, value in candidates),
+            "nearest": [{"spec_hash": key, "name": rows[key]["name"], "tier": rows[key]["tier"],
+                         "final_value": rows[key].get("final_value"), **value,
+                         "gain": ((summary.get(key) or {}).get("sell_all") or {}).get("gain")} for key, value in nearest]}
+
+
 def families(pool_rows: list[dict], summary: dict[str, dict]) -> list[dict[str, object]]:
     """The richest rule of each family (100% stocks), how many it has and how many passed, its forward account."""
     groups: dict[str, list[dict]] = {}
@@ -332,6 +349,7 @@ def view(research: str | Path, start: str) -> dict[str, object]:
                                   "sessions": (summary.get(row["rule_hash"]) or {}).get("sessions")})
         return {"timeline": line, "searches": search_rows, "scale": search_scale(research), "forward": fwd,
                 "short": short_rules(research, summary), "recent": recent_best(pool["daily"]),
+                "t0": toward_t0(StockForwardTracker(research).chained(date.today()), pool["daily"], summary),
                 "latest_forward": latest, "frontier": frontier_rows,
                 "families": families(pool["daily"], summary),
                 "days": daily_table(line["points"], search_rows, fwd["series"])}
