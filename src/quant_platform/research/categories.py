@@ -61,7 +61,7 @@ def _core(core: float) -> str:
     return "一半放 0050" if abs(core - 0.5) < 1e-9 else (f"{core:.0%} 放 0050" if core else "全部個股")
 
 
-ROBOT_FACTORS = ("rl_blocks", "block_equal", "rl_rolling", "rolling_equal", "rl_rolling32", "rolling32_equal", "rl_rolling33", "rolling33_equal", "rl_rolling34", "rolling34_equal", "rl_all", "all_equal", "rl_free", "rl_free41",
+ROBOT_FACTORS = ("rl_blocks", "block_equal", "rl_rolling", "rolling_equal", "rl_rolling32", "rolling32_equal", "rl_rolling33", "rolling33_equal", "rl_rolling34", "rolling34_equal", "rl_rolling35", "rolling35_equal", "rl_all", "all_equal", "rl_free", "rl_free41",
                  "rl_timing", "tech_equal")
 
 

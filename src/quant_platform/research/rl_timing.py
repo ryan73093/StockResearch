@@ -102,12 +102,23 @@ ROLLING33_VERSION = "block-rl-3.3.0"
 ROLLING34_VERSION = "block-rl-3.4.0"
 SLOTS_34 = {"進攻": ("ml_deep2_top",), "趨勢因子": ("high_52w", "trend_200", "momentum_6"),
             "防守": ("low_volatility_250", "low_volatility_60", "low_ivol_60", "low_max_return")}
-ROLLING_VERSIONS = (ROLLING_VERSION, ROLLING32_VERSION, ROLLING33_VERSION, ROLLING34_VERSION)
-WARM = (ROLLING33_VERSION,)
+# 3.5.0 (2026-10-23; 使用者：策略類別有用新的付費資料做訓練嗎、有去做重新的優化嗎 — the dashboard showed the robots use
+# none): 3.3 (the years without a record held by the slots alike) with two slots of FinMind's paid data — the holders
+# (fewer holders, small holders leaving, big holders adding) and margin and loans (margin far from a call, no new
+# unrestricted loans) — and models I and J in the model slot; each slot's member still chosen from the record before
+# the year (research_method §7「RL 機器人 3.5」). Judged as 3.3, and against 3.3.
+ROLLING35_VERSION = "block-rl-3.5.0"
+SLOTS_35 = {**SLOTS_32, "模型": ("ml_gbm_ens", "ml_gbm_ext", "ml_deep2_top", "ml_gbm_i", "ml_gbm_j"),
+            "集保籌碼": ("holders_down_4w", "retail_down_4w", "big_holder_up_4w"),
+            "融資與借貸": ("margin_safe", "low_pledge_loan_20")}
+ROLLING_VERSIONS = (ROLLING_VERSION, ROLLING32_VERSION, ROLLING33_VERSION, ROLLING34_VERSION, ROLLING35_VERSION)
+WARM = (ROLLING33_VERSION, ROLLING35_VERSION)
 
 
 def _slots(version: str) -> dict[str, tuple[str, ...]]:
     """A rolling robot's slots (looked up when called, so a test can swap them)."""
+    if version == ROLLING35_VERSION:
+        return SLOTS_35
     if version == ROLLING34_VERSION:
         return SLOTS_34
     return SLOTS_32 if version in (ROLLING32_VERSION, ROLLING33_VERSION) else SLOTS

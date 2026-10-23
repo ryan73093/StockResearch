@@ -286,6 +286,8 @@ META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現�
                 "rl_rolling34": "RL 機器人 3.4（只決定三個角色的權重：深度學習進攻、趨勢因子、跌市穩防守）",
                 "rolling34_equal": "三個角色平均（機器人 3.4 的對照）",
                 "rolling33_equal": "9 個逐年挑選的槽位平均，2015-06 起（機器人 3.3 的對照）",
+                "rl_rolling35": "RL 機器人 3.5（3.3 的槽位加上付費資料：集保籌碼、融資與借貸兩個槽位，模型槽加模型 I、J）",
+                "rolling35_equal": "11 個逐年挑選的槽位平均，2015-06 起（機器人 3.5 的對照）",
                 "rl_free": "RL 機器人 4.0 的每檔比重（每天自己決定買哪些、各多少、留多少現金；只受交易所規則限制）",
                 "rl_free41": "RL 機器人 4.1 的每檔比重（同 4.0，訓練帳戶是 30 萬＋每月 1 萬、最低手續費、整股）",
                 # 2026-10-20 (使用者：LLM 能不能做成交易 agent): the LLM trader's daily choice and its mechanical twin
@@ -621,6 +623,7 @@ class FactorPanel:
                 ROLLING32_VERSION,
                 ROLLING33_VERSION,
                 ROLLING34_VERSION,
+                ROLLING35_VERSION,
                 ROLLING_VERSION,
                 WORST_VERSION,
             )
@@ -629,13 +632,15 @@ class FactorPanel:
                        ROLLING32_VERSION if factor in ("rl_rolling32", "rolling32_equal") else
                        ROLLING33_VERSION if factor in ("rl_rolling33", "rolling33_equal") else
                        ROLLING34_VERSION if factor in ("rl_rolling34", "rolling34_equal") else
+                       ROLLING35_VERSION if factor in ("rl_rolling35", "rolling35_equal") else
                        BLOCK_VERSION if factor in ("rl_blocks", "block_equal") else
                        WORST_VERSION if factor == "rl_worst" else
                        ROLLING_VERSION if factor in ("rl_rolling", "rolling_equal") else ROBOT_VERSION)
             folder = Path(self.models) / version if self.models is not None else Path("missing")
             return robot_scores(self, folder,
                                 "equal" if factor in ("tech_equal", "all_equal", "block_equal", "rolling_equal",
-                                                      "rolling32_equal", "rolling33_equal", "rolling34_equal")
+                                                      "rolling32_equal", "rolling33_equal", "rolling34_equal",
+                                                      "rolling35_equal")
                                 else "robot",
                                 version)
         if factor in CONSENSUS_FACTORS:
@@ -2444,16 +2449,26 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]))
         payload["robot_rolling"] = robot_digest(models_root(history) / ROLLING_VERSION)    # the yardstick reads it too
     for pair, key in ((("rl_rolling32", "rolling32_equal"), "32"), (("rl_rolling33", "rolling33_equal"), "33"),
-                      (("rl_rolling34", "rolling34_equal"), "34")):
+                      (("rl_rolling34", "rolling34_equal"), "34"), (("rl_rolling35", "rolling35_equal"), "35")):
         if any(name in pair for name in factor_names):           # 2026-10-20: the robots 3.2 and 3.3
             from quant_platform.research.model import MODELS, digest, model_dir, models_root
-            from quant_platform.research.rl_timing import ROLLING32_VERSION, ROLLING33_VERSION, ROLLING34_VERSION
+            from quant_platform.research.rl_timing import (
+                ROLLING32_VERSION, ROLLING33_VERSION, ROLLING34_VERSION, ROLLING35_VERSION,
+            )
             from quant_platform.research.rl_timing import digest as robot_digest
 
-            for factor in ("ml_gbm_ens", "ml_gbm_ext", "ml_deep2_top"):
+            for factor in ("ml_gbm_ens", "ml_gbm_ext", "ml_deep2_top") + (("ml_gbm_i", "ml_gbm_j") if key == "35" else ()):
                 payload[f"model_{factor}"] = digest(model_dir(history, MODELS[factor]["version"]))
+            if key == "35":                                      # 2026-10-23: its paid slots read these tables
+                from quant_platform.research.chips import PAID_SOURCES
+                from quant_platform.research.history.paid import digest as paid_digest
+                from quant_platform.research.history.tdcc import digest as holders_digest
+
+                payload["holders"] = holders_digest(history, RECENT_END)
+                payload["paid"] = paid_digest(history, RECENT_END, sorted({PAID_SOURCES["margin_safe"],
+                                                                           PAID_SOURCES["low_pledge_loan_20"]}))
             payload[f"robot_rolling{key}"] = robot_digest(models_root(history) / {
-                "32": ROLLING32_VERSION, "33": ROLLING33_VERSION, "34": ROLLING34_VERSION}[key])
+                "32": ROLLING32_VERSION, "33": ROLLING33_VERSION, "34": ROLLING34_VERSION, "35": ROLLING35_VERSION}[key])
     if any(name in TECH_FACTORS for name in factor_names):      # 2026-10-10: the technical robot's policies
         from quant_platform.research.tech_rl import digest as tech_digest
         from quant_platform.research.tech_rl import tech_dir
@@ -4315,6 +4330,31 @@ def robot33_batch() -> list:
                       factors={"rolling33_equal": 1.0}, **common)]
 
 
+def robot35_batch() -> list:
+    """2026-10-23 (使用者：策略類別有用新的付費資料做訓練嗎、有去做重新的優化嗎): the robot 3.5 (rl_timing.SLOTS_35: 3.3's
+    slots with the holders and margin-and-loans slots and models I and J) and its yardstick, the same rule otherwise as
+    robot33_batch. Registered (research_method §7「RL 機器人 3.5」): it passes if it beats its yardstick in both periods
+    and is a T0 候選; the paid data helped if it also ends above 3.3's robot with a drawdown at most 2 points deeper."""
+    common = {"top": 20, "check": "weekly", "industry_cap": 0.3, "hold": "trend"}
+    return [DailyRule(name="RL 機器人 3.5：11 個逐年槽位（加集保籌碼、融資與借貸、模型 I／J）由機器人決定權重、前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"rl_rolling35": 1.0}, **common),
+            DailyRule(name="11 個逐年槽位平均（含集保籌碼、融資與借貸，2015-06 起）：前 20 名、同產業最多 3 成、每週決策、月線上續抱",
+                      factors={"rolling35_equal": 1.0}, **common)]
+
+
+# 2026-10-23 (使用者：策略類別有用新的付費資料做訓練嗎 — the dashboard: the trend family uses none, the robots almost
+# none): the paid vetoes on the trend family's eight passing rules (fewer holders: h2; margin near a call: m1) and on
+# the robot family's six richest passing rules (h2). Registered (research_method §7「付費資料否決補到趨勢與 RL」): each
+# passes if it ends above its own rule with a drawdown at most 2 points deeper.
+PAID_VETO_TREND = (6599, 6594, 6280, 6268, 4789, 4790, 6624, 5797)
+PAID_VETO_ROBOTS = (6542, 6534, 6135, 6136, 5173, 6640)
+
+
+def paid_veto_batch() -> list[DailyRule]:
+    return _veto_rules([(trial, "h2") for trial in PAID_VETO_TREND] + [(trial, "m1") for trial in PAID_VETO_TREND]
+                       + [(trial, "h2") for trial in PAID_VETO_ROBOTS])
+
+
 def robot31_batch() -> list:
     """2026-10-16: the robot 3.1 (each year's slot factors chosen before the year) and its yardstick; the same rule
     otherwise as robot30_batch."""
@@ -4473,7 +4513,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
-           "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "paidveto": paid_veto_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

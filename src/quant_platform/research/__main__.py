@@ -322,7 +322,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
                             "limits-overrides", "knowledge", "govbank-events", "branches"),
     )
@@ -965,7 +965,8 @@ def main() -> int:
                           "rolling_equal": rl_timing.ROLLING_VERSION, "rl_rolling32": rl_timing.ROLLING32_VERSION,
                           "rolling32_equal": rl_timing.ROLLING32_VERSION, "rl_rolling33": rl_timing.ROLLING33_VERSION,
                           "rolling33_equal": rl_timing.ROLLING33_VERSION, "rl_rolling34": rl_timing.ROLLING34_VERSION,
-                          "rolling34_equal": rl_timing.ROLLING34_VERSION}
+                          "rolling34_equal": rl_timing.ROLLING34_VERSION, "rl_rolling35": rl_timing.ROLLING35_VERSION,
+                          "rolling35_equal": rl_timing.ROLLING35_VERSION}
                 benchmark = None
                 robots_done: set[str] = set()
                 for version in sorted({robots[factor] for factor in read if factor in robots}):
@@ -1285,7 +1286,7 @@ def main() -> int:
                                    ensure_ascii=False), flush=True)
         return 0
 
-    if args.command in ("block-rl31", "block-rl32", "block-rl33", "block-rl34"):
+    if args.command in ("block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35"):
         # 2026-10-16 (the audit): the robot 3.1 — each test year's slot factors chosen before the year (rl_timing.py);
         # 2026-10-20: 3.2, nine slots with today's models and a defensive one
         from quant_platform.research import daily as daily_research
@@ -1294,12 +1295,13 @@ def main() -> int:
         from quant_platform.research.model import models_root
 
         version = {"block-rl32": rl_timing.ROLLING32_VERSION, "block-rl33": rl_timing.ROLLING33_VERSION,
-                   "block-rl34": rl_timing.ROLLING34_VERSION}.get(
+                   "block-rl34": rl_timing.ROLLING34_VERSION, "block-rl35": rl_timing.ROLLING35_VERSION}.get(
             args.command, rl_timing.ROLLING_VERSION)
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         title = {"block-rl32": "RL 機器人 3.2：逐年滾動訓練（9 個槽位，含深度學習與跌市穩）",
                  "block-rl33": "RL 機器人 3.3：逐年滾動訓練（同 3.2，沒有紀錄的年份用平均）",
-                 "block-rl34": "RL 機器人 3.4：逐年滾動訓練（只分配進攻、趨勢因子、防守三個角色）"}.get(
+                 "block-rl34": "RL 機器人 3.4：逐年滾動訓練（只分配進攻、趨勢因子、防守三個角色）",
+                 "block-rl35": "RL 機器人 3.5：逐年滾動訓練（3.3 加上付費資料：集保籌碼、融資與借貸、模型 I／J）"}.get(
             args.command, "RL 機器人 3.1：逐年滾動訓練（每年只用之前的資料挑 8 個槽位的因子）")
         with JobLog(RESEARCH).start(title, command) as job:
             data, fp = daily_research.load(Path(args.base))

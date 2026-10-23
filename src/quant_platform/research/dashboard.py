@@ -72,6 +72,14 @@ def sources(spec: dict, models: Path) -> tuple[set[str], set[str]]:
     return found, versions
 
 
+LABELS = {"rank": "之後 20 日報酬的排名", "excess": "之後 20 日比當天中位數多賺多少", "ensemble": "提升樹集成（多個模型平均）",
+          "deep": "深度學習第一版（排名）", "deep2": "之後 20 日會不會進當天前 10%（深度學習）",
+          "deep_risk": "之後會不會大跌（風險模型）", "deep_risk2": "扣掉波動後會不會大跌", "meta": "這次買會不會贏 0050（第二層）"}
+PREFIX_LABELS = {"block-rl": "每年學各訊號區塊的權重（強化學習）", "free-rl": "每天自己決定每檔比重與現金（強化學習）",
+                 "factor-rl": "學全部因子的權重（強化學習）", "tech-rl": "只看價量的機器人（強化學習）",
+                 "worst-rl": "學著賠最多（反向檢查）", "exit-": "學什麼時候賣"}
+
+
 def model_view(models: Path, version: str, gates: dict[str, object]) -> dict[str, object]:
     """One model: what it learns, its features (and the paid ones), how it is trained, when, its gate."""
     meta = model_meta(models, version)
@@ -80,7 +88,9 @@ def model_view(models: Path, version: str, gates: dict[str, object]) -> dict[str
     monthly = sorted(path.stem for path in (models / version / "monthly").glob("*.pkl")) \
         if (models / version / "monthly").is_dir() else []
     years = sorted((meta.get("years") or meta.get("yearly") or {}).keys())
-    return {"version": version, "label": meta.get("label"), "features": len(features), "paid": paid,
+    label = LABELS.get(str(meta.get("label"))) or next((text for prefix, text in PREFIX_LABELS.items()
+                                                         if version.startswith(prefix)), meta.get("label"))
+    return {"version": version, "label": label, "features": len(features), "paid": paid,
             "trained_at": str(meta.get("trained_at") or "")[:10], "years": f"{years[0]}～{years[-1]}" if years else "",
             "monthly": monthly[-1] if monthly else None, "gate": gates.get(version)}
 
