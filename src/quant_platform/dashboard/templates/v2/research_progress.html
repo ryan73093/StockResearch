@@ -27,7 +27,7 @@
     <div class="kpi"><div class="kpi__label">搜尋過的策略（累計）</div><div class="kpi__value">{{ '{:.2f}'.format(data.scale.total / 100000000) }} 億<small>（單一策略 {{ data.scale.scan_rounds }} 輪 {{ '{:,.0f}'.format(data.scale.scans / 10000) }} 萬＋組合最大一輪 {{ '{:,.0f}'.format(data.scale.blends / 10000) }} 萬）</small></div></div>
   </div>
   {{ charts.best }}
-  <div class="legend"><span><i class="sw-s1"></i>全部過門檻的最好（含 T1、高風險）</span><span><i class="sw-s2"></i>T0 候選（高風險）最好</span><span><i class="sw-s3"></i>一般 T0 候選最好</span><span><i class="sw-s0"></i>0050 同樣的錢</span><span class="muted">虛線直線：引擎改版</span></div>
+  <div class="legend"><span><i class="sw-s1"></i>全部過門檻的最好（含 T1、高風險）</span><span><i class="sw-s2"></i>T0 候選（高風險）最好</span><span><i class="sw-s3"></i>一般 T0 候選最好</span><span><i class="sw-s0"></i>0050 同樣的錢</span><span class="muted">藍色粗線和其他線重疊＝同一個規則；虛線直線：引擎改版</span></div>
   <p class="note">每一點是那個小時結束時「每個規則最新一次回測」裡最好的（滑鼠移到線上看數字）。引擎改版會把以前的錯誤拿掉、同一個規則重跑，所以曲線會往下掉（例如 1.5.0 補上減資、閒置現金後）——那是更正，不是變差。這些都是從上萬次試驗裡挑出來的最好成績，一定偏樂觀；真正的檢驗是下面「前向」分頁 9/1 起的紀錄。</p>
   {{ charts.passing }}
   <div class="legend"><span><i class="sw-s1"></i>過門檻的規則（T0 候選、T0 候選（高風險））</span><span><i class="sw-s4"></i>完整回測過的規則</span></div>

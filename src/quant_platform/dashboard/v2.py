@@ -1123,7 +1123,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                  if item["engine"].endswith(".0")]
         charts = {
             "best": Markup(progress_chart(
-                line["points"], "at", [{"key": "any", "label": "全部過門檻的最好", "css": "s1"},
+                line["points"], "at", [{"key": "any", "label": "全部過門檻的最好", "css": "s1", "wide": True},
                                        {"key": "risky", "label": "T0 候選（高風險）最好", "css": "s2"},
                                        {"key": "t0", "label": "一般 T0 候選最好", "css": "s3"}],
                 money, guides=[(line["benchmark"], f"0050 同樣的錢 {money(line['benchmark'])}")] if line["benchmark"] else [],

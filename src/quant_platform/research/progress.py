@@ -350,11 +350,11 @@ def chart(points: list[dict], x_key: str, lines: list[dict], y_text, width: int 
     for value, text in guides:
         parts.append(f'<line class="guide" x1="{left}" x2="{width - right}" y1="{sy(value):.1f}" y2="{sy(value):.1f}"/>'
                      f'<text class="guide-text" x="{width - right - 4}" y="{sy(value) - 4:.1f}" text-anchor="end">{escape(text)}</text>')
-    for at, text in marks:
+    for index, (at, text) in enumerate(marks):          # labels on two rows so close ones do not overlap
         x = sx(_x(at))
         if left <= x <= width - right:
             parts.append(f'<line class="mark" x1="{x:.1f}" x2="{x:.1f}" y1="{top}" y2="{height - bottom}"/>'
-                         f'<text class="mark-text" x="{x + 3:.1f}" y="{top + 10}">{escape(text)}</text>')
+                         f'<text class="mark-text" x="{x + 3:.1f}" y="{top + 10 + 12 * (index % 2)}">{escape(text)}</text>')
     for line in lines:
         coords, last = [], None
         for x, point in zip(xs, points):
@@ -367,7 +367,8 @@ def chart(points: list[dict], x_key: str, lines: list[dict], y_text, width: int 
             last = value
         if coords:
             dashed = ' stroke-dasharray="5 4"' if line.get("dashed") else ""
-            parts.append(f'<polyline class="{line["css"]}"{dashed} points="{" ".join(coords)}"/>')
+            wide = " wide" if line.get("wide") else ""          # under the others: still seen where they coincide
+            parts.append(f'<polyline class="{line["css"]}{wide}"{dashed} points="{" ".join(coords)}"/>')
         for x, point in zip(xs, points):
             value = point.get(line["key"])
             if value is not None:

@@ -687,6 +687,7 @@ td.wrap { white-space: normal; min-width: 180px; }
 .progress-chart .mark { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 3; }
 .progress-chart .band { fill: var(--accent-bg); stroke: none; }
 .progress-chart polyline { fill: none; stroke-width: 2.2; stroke-linejoin: round; }
+.progress-chart polyline.wide { stroke-width: 7; stroke-opacity: .45; }
 .progress-chart .dot { fill: transparent; stroke: none; }
 .progress-chart .dot:hover { fill: currentColor; }
 .progress-chart polyline.s0 { stroke: var(--warn); } .progress-chart .dot.s0 { color: var(--warn); }
