@@ -84,21 +84,21 @@ def _entries(research: Path) -> list[dict]:
 
 
 def _best(entries: list[dict], until: str | None = None) -> dict[str, dict]:
-    """role → its best rule (by final value) among every rule's newest-engine record created before ``until``."""
+    """role → its best rule among every rule's newest-engine record created before ``until`` — the richest passing
+    one, else the richest (categories.best_of, the pool's pick too)."""
+    from quant_platform.research.categories import best_of
+    from quant_platform.research.daily import tier
     from quant_platform.research.registry import newest
 
     known = [entry for entry in entries if until is None or entry["created"] < until]
     latest = newest([entry["record"] for entry in known])
     by_spec = {entry["spec"]: entry for entry in known}
-    output: dict[str, dict] = {}
+    groups: dict[str, list[dict]] = defaultdict(list)
     for spec, record in latest.items():
         value = (record.metrics or {}).get("final_value")
-        if not value:
-            continue
-        name = by_spec[spec]["role"]
-        if name not in output or value > (output[name]["record"].metrics or {}).get("final_value", 0):
-            output[name] = {"record": record, "role": name}
-    return output
+        if value:
+            groups[by_spec[spec]["role"]].append({"final_value": value, "tier": tier(record.metrics)[0], "record": record})
+    return {name: {"record": best_of(rows)["record"], "role": name} for name, rows in groups.items()}
 
 
 def _view(record) -> dict[str, object]:

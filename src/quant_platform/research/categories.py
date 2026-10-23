@@ -180,6 +180,18 @@ def uses_0050(spec: dict) -> bool:
     return bool(spec.get("core")) or spec.get("account_filter") not in (None, "none")
 
 
+def best_of(rows: list[dict[str, object]]) -> dict[str, object] | None:
+    """2026-10-23 (待辦：選手池與角色頁同一個「每類最好」): a family's best — the richest rule that passes the gates (T0,
+    T0 候選 and their high-risk grades; 使用者 2026-10-18：錢賺得多就可以), else the richest; rows carry ``tier`` and
+    ``final_value``. The pool, the roles page and the progress page all pick with it."""
+    from quant_platform.research.daily import PASSING_TIERS
+
+    ranked = [row for row in rows if row.get("final_value")]
+    if not ranked:
+        return None
+    return max(ranked, key=lambda row: (row.get("tier") in PASSING_TIERS, float(row["final_value"])))
+
+
 def summary(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """Per category, in a fixed order: how many rules, how many in each tier, and the best one."""
     from quant_platform.research.daily import TIERS
@@ -189,7 +201,7 @@ def summary(rows: list[dict[str, object]]) -> list[dict[str, object]]:
         mine = [row for row in rows if (row.get("category") or {}).get("family") == family]
         if not mine:
             continue
-        best = max(mine, key=lambda row: (-TIERS.index(row["tier"]), row.get("excess") if row.get("excess") is not None else -9))
+        best = best_of(mine) or mine[0]
         output.append({"family": family, "note": FAMILY_NOTES.get(family, ""), "count": len(mine),
                        "tiers": {tier: sum(1 for row in mine if row["tier"] == tier) for tier in TIERS},
                        "best": best})

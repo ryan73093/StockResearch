@@ -276,14 +276,17 @@ def toward_t0(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str
 
 
 def families(pool_rows: list[dict], summary: dict[str, dict]) -> list[dict[str, object]]:
-    """The richest rule of each family (100% stocks), how many it has and how many passed, its forward account."""
+    """Each family's best (100% stocks; categories.best_of — the pool's and the roles page's pick), how many rules it
+    has and how many passed, its forward account."""
     groups: dict[str, list[dict]] = {}
     for row in pool_rows:
         if not row.get("uses_0050") and row.get("final_value"):
             groups.setdefault((row.get("category") or {}).get("family") or "其他", []).append(row)
     out = []
+    from quant_platform.research.categories import best_of
+
     for family, members in groups.items():
-        best = max(members, key=lambda row: row["final_value"])
+        best = best_of(members)
         cashed = (summary.get(best["spec_hash"]) or {}).get("sell_all") or {}
         out.append({"family": family, "rules": len(members), "passing": sum(row["tier"] in PASSING for row in members),
                     "name": best["name"], "spec_hash": best["spec_hash"], "tier": best["tier"],

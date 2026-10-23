@@ -24,12 +24,15 @@ def test_a_blend_is_its_own_category():
 
 
 def test_the_summary_counts_tiers_and_names_the_best():
-    rows = [{"name": "甲", "tier": "T1", "excess": 1.0, "category": {"family": "趨勢動能"}},
-            {"name": "乙", "tier": "T0 候選", "excess": 0.5, "category": {"family": "趨勢動能"}},
-            {"name": "丙", "tier": "T3", "excess": -1.0, "category": {"family": "籌碼"}}]
+    """2026-10-23 (one pick for the pool, the roles and the progress page, categories.best_of): the richest passing
+    rule — high-risk grades too (使用者 2026-10-18：錢賺得多就可以) — before a richer one that does not pass."""
+    rows = [{"name": "甲", "tier": "T1", "final_value": 900.0, "category": {"family": "趨勢動能"}},
+            {"name": "乙", "tier": "T0 候選", "final_value": 300.0, "category": {"family": "趨勢動能"}},
+            {"name": "丁", "tier": "T0 候選（高風險）", "final_value": 500.0, "category": {"family": "趨勢動能"}},
+            {"name": "丙", "tier": "T3", "final_value": 100.0, "category": {"family": "籌碼"}}]
     first, second = summary(rows)
-    assert first["family"] == "趨勢動能" and first["count"] == 2 and first["best"]["name"] == "乙"
-    assert first["tiers"]["T1"] == 1 and second["family"] == "籌碼"
+    assert first["family"] == "趨勢動能" and first["count"] == 3 and first["best"]["name"] == "丁"
+    assert first["tiers"]["T1"] == 1 and second["family"] == "籌碼" and second["best"]["name"] == "丙"
 
 
 def test_rules_that_hold_0050_are_marked():
