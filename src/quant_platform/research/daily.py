@@ -4502,7 +4502,7 @@ def bear_guard_batch() -> list:
 
 
 # 2026-10-25 (research_method §7「空頭減碼第三版」, written before the run): each family's five richest passing
-# 100%-stock rules outside BEAR_GUARD_ORIGINS on the 2015-06 track, fixed by number (picked 10/25 00:40)
+# 100%-stock rules outside BEAR_GUARD_ORIGINS on the 2015-06 track, fixed by number (picked 10/25 00:25)
 BEAR_HALF_WIDE = (6759, 6760, 6665, 6365, 6741, 6786, 6783, 6775, 6498, 5983, 6504, 6510, 6505, 6512, 4589, 5122, 6516,
                   6503, 5106, 6540, 6542, 6897, 6534, 7128, 6847, 6575, 6535, 5052, 5237, 6553, 7120, 6594, 7121, 6280,
                   7122)
