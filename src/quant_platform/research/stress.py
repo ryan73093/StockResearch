@@ -37,6 +37,17 @@ FAST = 40                                            # sessions from the high to
 WORSE = 0.10
 MODELS = "models_long"
 CRISIS = (date(2007, 6, 1), date(2009, 12, 31))      # the 2008 bear is the one whose high falls in here
+# 2026-10-24 (research_method §7「空頭減碼檢驗」, fixed before the run; no setting tried on 2007-2014): the ways of
+# holding fewer stocks in a bear, each added to every strategy (every sleeve of a blend); the money out waits in cash.
+OVERLAYS = {
+    "taiex_200": ("加權指數跌破 200 日均線就不持股", {"market_filter": "taiex_200"}),
+    "taiex_10m": ("月底加權指數跌破 10 個月均線就不持股一個月", {"market_filter": "taiex_10m"}),
+    "taiex_12m": ("月底加權指數比一年前低就不持股一個月", {"market_filter": "taiex_12m"}),
+    "stop_15": ("跌離買進後最高價 15% 就賣", {"stop_loss": 0.15}),
+    "vol_v1": ("波動大時減碼到現金", {"vol_scale": "v1"}),
+}
+HELPS = 2                                            # held at least this many more scenarios (the median strategy)
+KEEPS = 0.8                                          # and keeps at least this share of its 2015-06 money
 
 
 def models_dir(history: str | Path) -> Path:
@@ -309,7 +320,143 @@ def run(history: str | Path, research: str | Path, job=None) -> Path:
     return path
 
 
-def latest(research: str | Path) -> dict | None:
+def latest(research: str | Path, prefix: str = "stress") -> dict | None:
     folder = Path(research) / "stress"
-    files = sorted(folder.glob("stress-*.json")) if folder.is_dir() else []
+    files = sorted(folder.glob(f"{prefix}-*.json")) if folder.is_dir() else []
     return json.loads(files[-1].read_text(encoding="utf-8")) if files else None
+
+
+def _has(spec: dict, fields: dict) -> bool:
+    """The strategy already holds fewer stocks this way (a blend: any sleeve)."""
+    rules = [sleeve.get("rule") or {} for sleeve in spec.get("sleeves") or []] if spec.get("kind") == "blend" else [spec]
+    return any(rule.get(key) not in (None, "none", 0, 0.0) for rule in rules for key in fields)
+
+
+def _overlaid(account, data, fp, costs, fields: dict):
+    """A blend account whose sleeves all hold fewer stocks the given way; the rankings, weights and parking reused."""
+    from quant_platform.research.daily import DailyRule, exposure_schedule
+
+    copy = object.__new__(type(account))
+    copy.__dict__.update(account.__dict__)
+    copy.parts = []
+    for sleeve, ranks, weights, parked, _exposure in account.parts:
+        rule = DailyRule.model_validate({**sleeve.rule.model_dump(), **fields})
+        copy.parts.append((sleeve.model_copy(update={"rule": rule}), ranks, weights, parked,
+                           exposure_schedule(data, fp, rule, costs)))
+    return copy
+
+
+def off_share(fp, kind: str, days: list[date]) -> dict[str, object]:
+    """How much of the time a market filter kept the money out, and how many times it switched."""
+    flags = [fp.risk_on(fp.index[day], kind) for day in days]
+    switches = sum(1 for before, after in zip(flags, flags[1:]) if before != after)
+    return {"off": round(1 - sum(flags) / max(len(flags), 1), 4), "switches": switches}
+
+
+def overlay_verdict(rows: list[dict], key: str, base_final: float) -> dict[str, object]:
+    """One way of holding fewer stocks over the strategies that took it (research_method §7, written before the run):
+    helps = the median strategy held HELPS more scenarios and half or more held 2008; keeps = the median 2015-06 money
+    at least KEEPS of the strategy's own without it, and the median 2007 money still beats 0050."""
+    pairs = [(row["variants"]["none"], row["variants"][key]) for row in rows
+             if "final" in row["variants"].get("none", {}) and "final" in row["variants"].get(key, {})]
+    if not pairs:
+        return {"tested": 0}
+    more = float(np.median([mine["held_count"] - plain["held_count"] for plain, mine in pairs]))
+    crisis = sum(1 for _plain, mine in pairs if mine.get("held_2008"))
+    kept = float(np.median([mine["recent_final"] / plain["recent_final"] for plain, mine in pairs]))
+    long = float(np.median([mine["final"] for _plain, mine in pairs]))
+    helps = more >= HELPS and crisis * 2 >= len(pairs)
+    keeps = kept >= KEEPS and long > base_final
+    return {"tested": len(pairs), "more_held": more, "held_2008": crisis, "kept": round(kept, 4),
+            "long_final": round(long, 2), "helps": helps, "keeps": keeps,
+            "verdict": "值得做成規則" if helps and keeps else ("空頭有幫助、代價太大" if helps else "沒有幫助")}
+
+
+def protect(history: str | Path, research: str | Path, job=None) -> Path:
+    """2026-10-24 (research_method §7「空頭減碼檢驗」): each strategy again with each way of holding fewer stocks in a
+    bear (OVERLAYS), from START through the same scenarios and from 2015-06, against the strategy as it is."""
+    from quant_platform.research.blend import BlendAccount, parse_spec
+    from quant_platform.research.costs import broker_costs
+    from quant_platform.research.daily import (
+        RECENT_END, RECENT_START, DailyRule, account_parking, daily_weights, exposure_schedule, simulate_daily,
+    )
+    from quant_platform.research.decisions import rankings
+
+    strategies = chosen(research)
+    data, fp = load_long(history)
+    costs = broker_costs("cathay")
+    end = RECENT_END
+    base = simulate_daily(data, None, costs, START, end)
+    base_units = _units(base)
+    falls = bears(base.days, base_units)
+    recent = simulate_daily(data, None, costs, RECENT_START, end)
+    report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "start": START.isoformat(),
+              "recent_start": RECENT_START.isoformat(), "helps": HELPS, "keeps": KEEPS, "worse": WORSE,
+              "overlays": {key: {"label": label, **(off_share(fp, fields["market_filter"], base.days)
+                                                     if "market_filter" in fields else {})}
+                           for key, (label, fields) in OVERLAYS.items()},
+              "scenarios": [{"high": base.days[item["high"]].isoformat(), "low": base.days[item["low"]].isoformat(),
+                             "fall": round(item["fall"], 4), **kind(item)} for item in falls],
+              "base_final": round(base.final_value, 2), "base_recent_final": round(recent.final_value, 2), "rows": []}
+    variants = {"none": {}, **{key: fields for key, (_label, fields) in OVERLAYS.items()}}
+    for number, item in enumerate(strategies):
+        spec = item["spec"]
+        row = {**{k: v for k, v in item.items() if k != "spec"}, "variants": {}}
+        try:
+            if spec.get("kind") == "blend":
+                account = BlendAccount(data, fp, parse_spec(spec), costs, START, end)
+
+                def make(fields, account=account):
+                    changed = _overlaid(account, data, fp, costs, fields) if fields else account
+                    return lambda first: changed.run(first, end)
+            else:
+                rule = DailyRule.model_validate(spec)
+                ranks = rankings(fp, rule, START, end)
+                weights, parked = daily_weights(fp, rule, ranks), account_parking(data, fp, rule, costs)
+
+                def make(fields, rule=rule, ranks=ranks, weights=weights, parked=parked):
+                    changed = DailyRule.model_validate({**rule.model_dump(), **fields}) if fields else rule
+                    exposure = exposure_schedule(data, fp, changed, costs)
+                    return lambda first: simulate_daily(data, changed, costs, first, end, ranks, weights=weights,
+                                                        parked=parked, exposure=exposure)
+        except Exception as exc:                            # noqa: BLE001 - one strategy's failure is reported
+            report["rows"].append({**row, "error": f"{type(exc).__name__}: {exc}"[:300]})
+            continue
+        for key, fields in variants.items():
+            if job:
+                job.update(done=number, total=len(strategies), current=f"#{item['trial']}：{OVERLAYS[key][0] if key in OVERLAYS else '不加'}")
+            if fields and _has(spec, fields):
+                row["variants"][key] = {"skip": "本來就有"}
+                continue
+            try:
+                runner = make(fields)
+                result = runner(START)
+                units = _units(result)
+                if result.days != base.days:
+                    units = np.interp([day.toordinal() for day in base.days], [day.toordinal() for day in result.days], units)
+                judged = judge(base.days, units, base_units, falls)
+                summary = verdict(judged)
+                later = runner(RECENT_START)
+            except Exception as exc:                        # noqa: BLE001
+                row["variants"][key] = {"error": f"{type(exc).__name__}: {exc}"[:300]}
+                print(item["trial"], key, row["variants"][key]["error"], flush=True)
+                continue
+            row["variants"][key] = {
+                "final": round(result.final_value, 2), "recent_final": round(later.final_value, 2),
+                "max_drawdown": round(float((units / np.maximum.accumulate(units) - 1).min()), 4),
+                "bears": [{"fall": bear["fall"], "gap": bear["gap"], "days": bear["days"], "held": bear["held"]}
+                          for bear in judged],
+                **{k: summary[k] for k in ("held_count", "held_2008", "held_all", "scenario_count")}}
+            print(item["trial"], key, round(result.final_value), round(later.final_value), summary["held_count"],
+                  summary["held_2008"], flush=True)
+        report["rows"].append(row)
+    rows = [row for row in report["rows"] if not row.get("error")]
+    report["verdicts"] = {key: overlay_verdict(rows, key, report["base_final"]) for key in OVERLAYS}
+    for position, scenario in enumerate(report["scenarios"]):     # each scenario: how many held, with each way
+        scenario["held"] = {key: sum(1 for row in rows if row["variants"].get(key, {}).get("bears")
+                                     and row["variants"][key]["bears"][position]["held"]) for key in variants}
+    folder = Path(research) / "stress"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"protect-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path

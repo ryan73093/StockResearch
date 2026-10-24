@@ -32,6 +32,26 @@ def test_a_strategy_is_judged_over_0050s_fall_and_back_from_its_own_low():
     assert stress.kind({"high": 1, "low": 200, "fall": -0.17})["size"] == "修正"
 
 
+def test_a_way_of_holding_fewer_stocks_is_judged_on_the_median_strategy():
+    """research_method §7 空頭減碼檢驗 (written before the run): helps = 2 more scenarios held and half held 2008; keeps
+    = 80% of the 2015-06 money and the 2007 money still beating 0050."""
+    def variant(held, crisis, final, recent):
+        return {"held_count": held, "held_2008": crisis, "final": final, "recent_final": recent}
+
+    rows = [{"variants": {"none": variant(3, False, 100, 50), "taiex_10m": variant(6, True, 90, 45)}},
+            {"variants": {"none": variant(4, False, 80, 40), "taiex_10m": variant(6, False, 70, 30)}},
+            {"variants": {"none": variant(4, False, 80, 40), "taiex_10m": {"skip": "本來就有"}}}]
+    found = stress.overlay_verdict(rows, "taiex_10m", 50)
+    assert found["tested"] == 2 and found["more_held"] == 2.5 and found["held_2008"] == 1
+    assert found["kept"] == 0.825 and found["verdict"] == "值得做成規則"
+    assert stress.overlay_verdict(rows, "taiex_10m", 85)["verdict"] == "空頭有幫助、代價太大"
+    rows[0]["variants"]["taiex_10m"]["held_2008"] = False
+    assert stress.overlay_verdict(rows, "taiex_10m", 50)["verdict"] == "沒有幫助"
+    assert stress.overlay_verdict(rows, "stop_15", 50) == {"tested": 0}
+    assert stress._has({"kind": "blend", "sleeves": [{"rule": {"stop_loss": 0.15}}, {"rule": {}}]}, {"stop_loss": 0.15})
+    assert not stress._has({"market_filter": "none"}, {"market_filter": "taiex_200"})
+
+
 def test_an_account_opened_on_the_high_counts_its_loss_against_the_money_put_in():
     from quant_platform.research.legacy_challenger import RunResult
 

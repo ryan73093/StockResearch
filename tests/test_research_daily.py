@@ -178,7 +178,7 @@ class PricedPanel(ScriptedPanel):
     def price(self, symbol, position):
         return self.prices[symbol][position]
 
-    def risk_on(self, position):
+    def risk_on(self, position, kind="taiex_200"):
         return self.on[position]
 
 
@@ -221,6 +221,28 @@ def test_market_filter_compares_taiex_with_its_200_session_average():
     assert fp.risk_on(10) and fp.risk_on(229) and not fp.risk_on(240)
     with pytest.raises(ValueError):
         FactorPanel(Panel(data)).risk_on(240)
+
+
+def test_month_end_filters_decide_on_the_last_session_and_hold_to_the_next():
+    """2026-10-24 (research_method §7 空頭減碼檢驗): Faber's 10-month average and the 12-month absolute momentum."""
+    days = weekdays(date(2022, 1, 3), date(2024, 6, 28))
+    data = market(days, {"1101.TW": {day: 10.0 for day in days}})
+    taiex = np.array([90.0 if day >= date(2023, 6, 15) else 100.0 for day in days])
+    fp = FactorPanel(Panel(data), market=taiex)
+    at = {day: position for position, day in enumerate(days)}
+
+    def on(kind, day):
+        return fp.risk_on(at[day], kind)
+
+    # 12 months: 2023-06-30 closes at 90 against 100 a year before — out from that close to July's last session
+    assert on("taiex_12m", date(2023, 6, 29)) and not on("taiex_12m", date(2023, 6, 30))
+    assert not on("taiex_12m", date(2023, 7, 31)) and not on("taiex_12m", date(2024, 6, 28))
+    # 10 months: 90 against an average of 99 at 2023-06-30; back on once ten month-ends sit at 90 (2024-03-29)
+    assert on("taiex_10m", date(2023, 6, 29)) and not on("taiex_10m", date(2023, 6, 30))
+    assert not on("taiex_10m", date(2024, 3, 28)) and on("taiex_10m", date(2024, 3, 29))
+    assert on("taiex_10m", date(2022, 3, 31))                  # fewer than ten month-ends: on
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, market_filter="taiex_10m")
+    assert rule.canonical()["market_filter"] == "taiex_10m"
 
 
 def test_risk_controls_are_part_of_the_rule_only_when_on():

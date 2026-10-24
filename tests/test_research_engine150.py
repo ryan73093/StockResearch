@@ -60,7 +60,7 @@ class Panel:
     def price(self, symbol, position):
         return self.prices.get(symbol, [100.0] * len(self.sessions))[position]
 
-    def risk_on(self, position):
+    def risk_on(self, position, kind="taiex_200"):
         return True if self.on is None else self.on[position]
 
     def market_locks(self):

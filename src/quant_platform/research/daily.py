@@ -331,9 +331,11 @@ class DailyRule(BaseModel):
     # R7 (2026-10-05), risk controls, left out of the hash when off. stop_loss: sell a holding whose
     # adjusted close falls this far below its highest since it was bought, and do not buy it back for
     # STOP_COOLDOWN sessions. market_filter "taiex_200": no stocks while TAIEX closes below its
-    # 200-session average (the 0050 core stays; contributions wait in cash).
+    # 200-session average (the 0050 core stays; contributions wait in cash). 2026-10-24 (research_method §7「空頭減碼
+    # 檢驗」): "taiex_10m" / "taiex_12m" decide on each month's last session and keep it to the next — TAIEX below the
+    # average of its last 10 month-end closes (Faber 2007), or below its close 12 month-ends before (Antonacci 2014).
     stop_loss: float = Field(default=0.0, ge=0.0, le=0.5)
-    market_filter: Literal["none", "taiex_200"] = "none"
+    market_filter: Literal["none", "taiex_200", "taiex_10m", "taiex_12m"] = "none"
     # R7b (2026-10-06), risk controls that look at the holdings themselves, left out of the hash when
     # off. weighting "inverse_vol": each pick's target in proportion to 1 / its 60-session volatility
     # (the calmer, the more money) instead of equal amounts. account_filter "own_200": while this rule's
@@ -993,12 +995,38 @@ class FactorPanel:
         """The adjusted close (dividends reinvested): its ratios between two days are the total return."""
         return float(self.panel.filled[self.row[symbol], position])
 
-    def risk_on(self, position: int) -> bool:
-        """TAIEX at or above its 200-session average (true until 200 sessions exist)."""
+    def risk_on(self, position: int, kind: str = "taiex_200") -> bool:
+        """TAIEX at or above its 200-session average (true until 200 sessions exist); "taiex_10m" / "taiex_12m" the
+        month-end decisions (``monthly_risk``)."""
         if self.market is None:
             raise ValueError("市場濾網需要加權指數序列（FactorPanel market）")
+        if kind in ("taiex_10m", "taiex_12m"):
+            return bool(self.monthly_risk(kind)[position])
         average = self._market_average[position]
         return bool(not np.isfinite(average) or self.market[position] >= average)
+
+    def monthly_risk(self, kind: str) -> np.ndarray:
+        """Per session, the latest month-end decision at or before it (a month's last session decides on its close, the
+        trades follow the next session like every decision): "taiex_10m" TAIEX at or above the average of its last 10
+        month-end closes, "taiex_12m" at or above its close 12 month-ends before; true until those months exist. The
+        data's last, unfinished month decides nothing."""
+        cache = self.__dict__.setdefault("_monthly_risk", {})
+        if kind not in cache:
+            count = len(self.sessions)
+            ends = [p for p in range(count - 1) if self.sessions[p + 1].month != self.sessions[p].month]
+            closes = np.asarray([self.market[p] for p in ends], dtype=float)
+            flags = np.ones(count, dtype=bool)
+            for number, p in enumerate(ends):
+                if kind == "taiex_10m":
+                    window = closes[max(number - 9, 0):number + 1]
+                    known = number >= 9 and np.isfinite(window).all()
+                    on = not known or closes[number] >= window.mean()
+                else:
+                    known = number >= 12 and np.isfinite(closes[number]) and np.isfinite(closes[number - 12])
+                    on = not known or closes[number] >= closes[number - 12]
+                flags[p:ends[number + 1] if number + 1 < len(ends) else count] = on
+            cache[kind] = flags
+        return cache[kind]
 
     def eligible(self, rule: DailyRule, position: int) -> np.ndarray:
         mask = ((self.panel.close[:, position] >= rule.min_price) & (self.turnover_20[:, position] >= rule.min_turnover)
@@ -1388,7 +1416,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             risky_out = {symbol for symbol in current if symbol in fp.risky(position, RISK_EXIT_SHARE)}
             out |= risky_out
             cause.update({symbol: "深度風險模型：下跌機率最高的 5%" for symbol in risky_out})
-        risk_off = rule.market_filter != "none" and not fp.risk_on(position)
+        risk_off = rule.market_filter != "none" and not fp.risk_on(position, rule.market_filter)
         if not decide:
             if not (current or pending_slots):
                 continue

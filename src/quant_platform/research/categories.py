@@ -149,7 +149,7 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
         if spec.get("stop_loss"):
             traits.append("停損")
         if spec.get("market_filter") not in (None, "none"):
-            traits.append("大盤濾網")
+            traits.append({"taiex_10m": "大盤 10 個月均線濾網", "taiex_12m": "大盤一年動能濾網"}.get(spec["market_filter"], "大盤濾網"))
         if spec.get("account_filter") not in (None, "none"):
             traits.append("帳戶濾網")
         if spec.get("smooth"):
