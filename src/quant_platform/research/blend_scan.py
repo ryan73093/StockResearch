@@ -248,6 +248,43 @@ def role_blends(research: str | Path = Path("instance") / "research", splits=ROL
     return output
 
 
+PERIOD_YEARS = ((2015, 2016), (2017, 2019), (2020, 2021), (2022, 2023), (2024, 2026))   # research/eras.py's
+
+
+def every_period(member: dict) -> bool:
+    """2026-10-24 (使用者：每個時期同樣的策略是否還適用): the member beat 0050 in each period (research/eras.py's five,
+    the last one cut at DEV_END), each period's month returns net of the money put in, compounded and annualized."""
+    rule = month_returns(member["values"], member["paid"])
+    bench = month_returns(member["bench"], member["paid"])
+    years = np.array([int(month[:4]) for month in member["months"][1:]])
+    for first, last in PERIOD_YEARS:
+        inside = (years >= first) & (years <= last)
+        if inside.sum() < 6:
+            continue
+        months = inside.sum()
+        mine = np.prod(1 + rule[inside]) ** (12 / months) - 1
+        theirs = np.prod(1 + bench[inside]) ** (12 / months) - 1
+        if mine <= theirs:
+            return False
+    return True
+
+
+def consistent_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+    """2026-10-24 (research_method §7 組合搜尋第七輪; written before the run): the search over the rules that beat 0050 in
+    every period up to the month's cutoff only (every_period), the development months up to the cutoff as rolling_batch."""
+    from datetime import date
+
+    from quant_platform.research.rolling import cutoff_for
+
+    global DEV_END
+    kept = DEV_END
+    DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
+    try:
+        return batch(research, keep=every_period)
+    finally:
+        DEV_END = kept
+
+
 def rolling_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
     """2026-10-22 (research_method §7 組合搜尋第六輪; written before the run): the same search with the development months
     up to the month's cutoff (the end of the month two months back) instead of 2020-09 — how the monthly list grades
@@ -265,13 +302,17 @@ def rolling_batch(research: str | Path = Path("instance") / "research", today=No
         DEV_END = kept
 
 
-def batch(research: str | Path = Path("instance") / "research") -> list:
-    """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json."""
+def batch(research: str | Path = Path("instance") / "research", keep=None) -> list:
+    """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json.
+    ``keep``: which pool members to search over (all by default)."""
     from quant_platform.research.registry import TrialRegistry
 
     research = Path(research)
     taken = {record.spec_hash for record in TrialRegistry(research / "trials.jsonl").records()}
-    found = search(pool(research), taken=taken)
+    members = pool(research)
+    if keep is not None:
+        members = [member for member in members if keep(member)]
+    found = search(members, taken=taken)
     folder = research / "blend_scan"
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
