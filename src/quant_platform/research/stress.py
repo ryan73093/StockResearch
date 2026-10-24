@@ -53,7 +53,8 @@ OVERLAYS = {
 }
 SHORT = {"none": "不加", "taiex_200": "200 日均線", "taiex_10m": "10 個月均線", "taiex_12m": "一年動能",
          "stop_15": "15% 停損", "vol_v1": "依波動減碼", "taiex_200s": "均線下彎才出", "taiex_half": "減碼一半",
-         "taiex_staged": "分段減碼", "taiex_half_wide": "減碼一半（各類前 5 個）"}
+         "taiex_staged": "分段減碼", "taiex_half_wide": "減碼一半（各類前 5 個）",
+         "risk_bear": "空頭時賣高風險股", "risk_bear_half": "減碼一半＋賣高風險股"}
 RANKED = ("market_filter", "stop_loss")             # these act where the day's targets are decided: ranked again
 HELPS = 2                                            # held at least this many more scenarios (the median strategy)
 KEEPS = 0.8                                          # and keeps at least this share of its 2015-06 money
@@ -421,12 +422,14 @@ def protect_view(report: dict | None) -> dict | None:
 def guard_ways() -> list[tuple[str, str, dict, tuple[int, ...]]]:
     """(key, words, settings, the original rules) of every guard graded so far: the second version's three on the stress
     strategies, the third version's staged guard on them and the half guard on each family's five richest."""
-    from quant_platform.research.daily import BEAR_GUARD_ORIGINS, BEAR_GUARDS, BEAR_HALF_WIDE, BEAR_STAGED
+    from quant_platform.research.daily import BEAR_GUARD_ORIGINS, BEAR_GUARDS, BEAR_HALF_WIDE, BEAR_RISK, BEAR_STAGED
 
     ways = [(key, word, fields, BEAR_GUARD_ORIGINS) for key, (word, fields) in BEAR_GUARDS.items()]
     ways.append(("taiex_staged", BEAR_STAGED[0], BEAR_STAGED[1], BEAR_GUARD_ORIGINS))
     ways.append(("taiex_half_wide", BEAR_GUARDS["taiex_half"][0] + "（各類錢最多的 5 個）", BEAR_GUARDS["taiex_half"][1],
                  BEAR_HALF_WIDE))
+    for key, (word, fields) in zip(("risk_bear", "risk_bear_half"), BEAR_RISK):     # 第四版
+        ways.append((key, word, fields, BEAR_GUARD_ORIGINS))
     return ways
 
 

@@ -267,6 +267,11 @@ def test_the_deep_risk_overlay_skips_and_sells_the_riskiest():
     assert plain[DAYS[0]] == ["A", "B", "C"] and veto[DAYS[0]] == ["B", "C", "D"]   # A is the riskiest that day
     assert DAYS[2] not in veto and sell[DAYS[2]] == ["C", "D"]                       # B turns risky: dl1x sells it
     assert "risk_veto" not in DailyRule(**base).canonical()
+    # 2026-10-25 (空頭防護第四版): dl1m is dl1x below TAIEX's 200-session average and nothing above it
+    panel.risk_on = lambda position, kind="taiex_200": True
+    assert daily_rankings(panel, DailyRule(**base, risk_veto="dl1m"), DAYS[0], DAYS[4]) == plain
+    panel.risk_on = lambda position, kind="taiex_200": False
+    assert daily_rankings(panel, DailyRule(**base, risk_veto="dl1m"), DAYS[0], DAYS[4]) == sell
 
 
 def test_the_opening_auction_fills_at_the_open_and_not_at_a_locked_open():

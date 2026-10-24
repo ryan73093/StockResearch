@@ -274,6 +274,13 @@ def test_half_twins_take_the_passing_rules_without_a_market_guard():
     assert daily.half_twins([plain], {twins[0].rule_hash}) == []
 
 
+def test_the_bear_only_risk_veto_rests_above_the_average():
+    """2026-10-25 (research_method §7 空頭防護第四版): dl1m acts like dl1x only below TAIEX's 200-session average."""
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, risk_veto="dl1m")
+    assert rule.canonical()["risk_veto"] == "dl1m"
+    assert "dl1m" not in DailyRule(name="x", factors={"trend_200": 1.0}).canonical().values()
+
+
 def test_risk_controls_are_part_of_the_rule_only_when_on():
     base = DailyRule(name="x", factors={"trend_200": 1.0})
     assert "stop_loss" not in base.canonical() and "market_filter" not in base.canonical()

@@ -169,7 +169,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                     stale.add(version)
             elif spec.get("refit") != "monthly" and not (models / version / "monthly" / f"{cutoff.isoformat()}.pkl").is_file():
                 stale.add(version)
-        elif factor in ("dl1", "dl1x"):
+        elif factor in ("dl1", "dl1x", "dl1m"):
             if not (models / research_model.MODELS["dl_risk"]["version"] / "monthly" / f"{cutoff.isoformat()}-0.pt").is_file():
                 stale.add("風險模型 " + factor)
         elif factor in ("dl2", "dl2x"):

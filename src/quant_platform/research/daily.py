@@ -416,8 +416,10 @@ class DailyRule(BaseModel):
     eligibility: Literal["both", "entry"] = "both"
     # 2026-10-16 (使用者：深度學習能不能用到交易裡輔助這些策略？): the deep-learning risk model (research/model_risk.py)
     # as an overlay — "dl1": no new buy among the day's top tenth by drop probability; "dl1x": also sell a holding
-    # once it is in the top twentieth (every session). Left out of the hash when "none".
-    risk_veto: Literal["none", "dl1", "dl1x", "r3", "meta1"] = "none"
+    # once it is in the top twentieth (every session). Left out of the hash when "none". "dl1m" (2026-10-25, 空頭防護
+    # 第四版): "dl1x" only while TAIEX closes below its 200-session average — momentum's crashes come in bear markets
+    # (Daniel & Moskowitz 2016); always on, the veto had cut the winners.
+    risk_veto: Literal["none", "dl1", "dl1x", "r3", "meta1", "dl1m"] = "none"
     # 2026-10-18 (使用者：繼續研究有什麼更好的策略; the deep rule held 30% of the account in one stock and 48% in
     # shipping on 2021-06-30 — the industry cap counts stocks when bought, winners grow past it): on a decision day a
     # holding worth more than ``trim_above`` times its target is sold back to its target, the money topping up the
@@ -1360,6 +1362,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             vetoed = vetoed | fp.meta_vetoed(position)
         elif risk_veto == "r3":               # 2026-10-17: the vol-neutral model, the riskiest tenth of each group
             vetoed = vetoed | fp.risky_neutral(position)
+        elif risk_veto == "dl1m" and fp.risk_on(position):
+            pass                              # 2026-10-25: the bear-only veto rests above the 200-session average
         elif risk_veto != "none":
             vetoed = vetoed | fp.risky(position, RISK_VETO_SHARE)   # the deep risk model: not the riskiest tenth
         held, chosen = set(kept), []
@@ -1422,7 +1426,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                     out.add(symbol)
                     stopped[symbol] = count
                     cause[symbol] = f"從買進後的最高價跌超過 {rule.stop_loss:.0%}（停損）"
-        if risk_veto == "dl1x" and current:          # the deep risk model: the riskiest twentieth sold, every session
+        if current and (risk_veto == "dl1x" or (risk_veto == "dl1m" and not fp.risk_on(position))):
+            # the deep risk model: the riskiest twentieth sold, every session (dl1m: below the 200-session average)
             risky_out = {symbol for symbol in current if symbol in fp.risky(position, RISK_EXIT_SHARE)}
             out |= risky_out
             cause.update({symbol: "深度風險模型：下跌機率最高的 5%" for symbol in risky_out})
@@ -2393,7 +2398,7 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
     if veto != "none" or weighting == "inverse_risk":           # 2026-10-16: the deep risk model it reads
         from quant_platform.research.model import MODELS, digest, model_dir
 
-        if veto in ("dl1", "dl1x") or weighting == "inverse_risk":   # 2026-10-17: R1's weights read it too
+        if veto in ("dl1", "dl1x", "dl1m") or weighting == "inverse_risk":   # 2026-10-17: R1's weights read it too
             payload["dl_risk"] = digest(model_dir(history, MODELS["dl_risk"]["version"]))
         if veto == "r3":
             payload["dl_risk2"] = digest(model_dir(history, MODELS["dl_risk2"]["version"]))
@@ -4576,6 +4581,16 @@ def half_twins(rules: list, registered: set[str]) -> list:
     return output
 
 
+BEAR_RISK = [("大盤跌破年線時不買也賣掉深度風險最高的股票", {"risk_veto": "dl1m"}),
+             ("大盤跌破年線時減碼一半、並賣掉深度風險最高的股票", {"risk_veto": "dl1m", "vol_scale": "taiex_half"})]
+
+
+def bear_guard4_batch() -> list:
+    """2026-10-25 (research_method §7「空頭防護第四版」, written before the run): the deep risk model's veto only below
+    the 200-session average, alone and with the half guard, on BEAR_GUARD_ORIGINS — graded the usual way."""
+    return _guarded(BEAR_GUARD_ORIGINS, BEAR_RISK)
+
+
 def bear_guard3_batch() -> list:
     """2026-10-25 (research_method §7「空頭減碼第三版」, written before the run): the half guard on BEAR_HALF_WIDE, and
     the staged guard on BEAR_GUARD_ORIGINS — graded the usual way on 2015-06 onwards."""
@@ -4747,7 +4762,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
-           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bearguard4": bear_guard4_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
