@@ -104,6 +104,22 @@ def chosen(research: str | Path) -> list[dict[str, object]]:
     return sorted(output, key=lambda item: -(item["final_value"] or 0))
 
 
+def fixed(research: str | Path, trials: tuple[int, ...]) -> list[dict[str, object]]:
+    """The strategies ``trials`` as ``chosen`` gives them (2026-10-25: the overlay check reruns on the same 20 — read
+    from the pool again, the list had taken in the guarded rules and dropped eight)."""
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path(research)
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    output = []
+    for trial in trials:
+        record = records[trial]
+        spec = json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        output.append({"trial": trial, "spec_hash": record.spec_hash, "name": record.spec_name, "why": "壓力測試的 20 個",
+                       "tier": None, "final_value": (record.metrics or {}).get("final_value"), "spec": spec})
+    return output
+
+
 def versions(strategies: list[dict]) -> list[str]:
     from quant_platform.research.dashboard import factor_names
     from quant_platform.research.model import MODELS
@@ -494,7 +510,9 @@ def protect(history: str | Path, research: str | Path, job=None) -> Path:
     )
     from quant_platform.research.decisions import rankings
 
-    strategies = chosen(research)
+    from quant_platform.research.daily import BEAR_GUARD_ORIGINS
+
+    strategies = fixed(research, BEAR_GUARD_ORIGINS)
     data, fp = load_long(history)
     costs = broker_costs("cathay")
     end = RECENT_END
