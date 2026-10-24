@@ -158,7 +158,8 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
         if spec.get("exit_model") not in (None, "none"):
             traits.append("學習出場")
         if spec.get("vol_scale") not in (None, "none"):
-            traits.append("大盤跌破年線減碼一半" if spec["vol_scale"] == "taiex_half" else "波動大時減碼")
+            traits.append({"taiex_half": "大盤跌破年線減碼一半", "taiex_staged": "大盤跌破年線減碼一半、大跌全出"}
+                          .get(spec["vol_scale"], "波動大時減碼"))
         if spec.get("news_veto") == "v1":
             traits.append("新聞否決")
         elif spec.get("news_veto") == "v1-off":

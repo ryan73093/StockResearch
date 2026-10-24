@@ -48,9 +48,12 @@ OVERLAYS = {
     # 第二版 (research_method §7「空頭減碼第二版」, written before the run)
     "taiex_200s": ("加權指數跌破下彎的 200 日均線才不持股", {"market_filter": "taiex_200s"}),
     "taiex_half": ("加權指數跌破 200 日均線就減碼一半", {"vol_scale": "taiex_half"}),
+    # 第三版 (research_method §7「空頭減碼第三版」, written before the run)
+    "taiex_staged": ("跌破 200 日均線減碼一半、比一年高點低 20% 就不持股", {"vol_scale": "taiex_staged"}),
 }
 SHORT = {"none": "不加", "taiex_200": "200 日均線", "taiex_10m": "10 個月均線", "taiex_12m": "一年動能",
-         "stop_15": "15% 停損", "vol_v1": "依波動減碼", "taiex_200s": "均線下彎才出", "taiex_half": "減碼一半"}
+         "stop_15": "15% 停損", "vol_v1": "依波動減碼", "taiex_200s": "均線下彎才出", "taiex_half": "減碼一半",
+         "taiex_staged": "分段減碼"}
 RANKED = ("market_filter", "stop_loss")             # these act where the day's targets are decided: ranked again
 HELPS = 2                                            # held at least this many more scenarios (the median strategy)
 KEEPS = 0.8                                          # and keeps at least this share of its 2015-06 money
@@ -399,13 +402,25 @@ def protect_view(report: dict | None) -> dict | None:
             "base_recent_final": report.get("base_recent_final"), "errors": [row for row in report["rows"] if row.get("error")]}
 
 
+def guard_ways() -> list[tuple[str, str, dict, tuple[int, ...]]]:
+    """(key, words, settings, the original rules) of every guard graded so far: the second version's three on the stress
+    strategies, the third version's staged guard on them and the half guard on each family's five richest."""
+    from quant_platform.research.daily import BEAR_GUARD_ORIGINS, BEAR_GUARDS, BEAR_HALF_WIDE, BEAR_STAGED
+
+    ways = [(key, word, fields, BEAR_GUARD_ORIGINS) for key, (word, fields) in BEAR_GUARDS.items()]
+    ways.append(("taiex_staged", BEAR_STAGED[0], BEAR_STAGED[1], BEAR_GUARD_ORIGINS))
+    ways.append(("taiex_half_wide", BEAR_GUARDS["taiex_half"][0] + "（各類錢最多的 5 個）", BEAR_GUARDS["taiex_half"][1],
+                 BEAR_HALF_WIDE))
+    return ways
+
+
 def guard_summary(rows: list[dict]) -> list[dict[str, object]]:
-    """Per way (BEAR_GUARDS), the graded versions against their originals: how many pass, the medians of the money
+    """Per way (guard_ways), the graded versions against their originals: how many pass, the medians of the money
     kept, the drawdown and the worst 0050-fall gap changed (points), how many fell less than the original."""
-    from quant_platform.research.daily import BEAR_GUARDS, PASSING_TIERS
+    from quant_platform.research.daily import PASSING_TIERS
 
     output = []
-    for key, (word, _fields) in BEAR_GUARDS.items():
+    for key, word, _fields, _trials in guard_ways():
         part = [row for row in rows if row["guard"] == key]
         if not part:
             continue
@@ -424,9 +439,7 @@ def grade_guards(research: str | Path) -> Path:
     """2026-10-25 (research_method §7「空頭減碼第二版」): every guarded version (BEAR_GUARD_ORIGINS x BEAR_GUARDS, matched
     by settings) against its original — the newest run on this engine — saved for the dashboard and the window."""
     from quant_platform.research.blend import parse_spec
-    from quant_platform.research.daily import (
-        BEAR_GUARD_ORIGINS, BEAR_GUARDS, ENGINE_VERSION, PASSING_TIERS, DailyRule, tier,
-    )
+    from quant_platform.research.daily import ENGINE_VERSION, PASSING_TIERS, DailyRule, tier
     from quant_platform.research.downside import frontier, profile, table
     from quant_platform.research.registry import TrialRegistry, newest
 
@@ -446,10 +459,10 @@ def grade_guards(research: str | Path) -> Path:
 
     front = frontier(table(research), PASSING_TIERS)
     rows = []
-    for trial in BEAR_GUARD_ORIGINS:
-        origin = by_hash.get(by_trial[trial].spec_hash)
-        spec = spec_of(by_trial[trial])
-        for key, (_word, fields) in BEAR_GUARDS.items():
+    for key, _word, fields, trials in guard_ways():
+        for trial in trials:
+            origin = by_hash.get(by_trial[trial].spec_hash)
+            spec = spec_of(by_trial[trial])
             if spec.get("kind") == "blend":
                 rule = parse_spec({**spec, "sleeves": [{**sleeve, "rule": {**sleeve["rule"], **fields}}
                                                        for sleeve in spec["sleeves"]]})

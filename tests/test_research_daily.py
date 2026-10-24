@@ -258,6 +258,9 @@ def test_the_slope_filter_and_the_half_wait_for_the_200_session_average():
     levels = daily.exposure_schedule(data, fp, rule, FREE)
     assert levels[days[250]] == 1.0 and levels[days[262]] == daily.MARKET_HALF
     assert rule.canonical()["vol_scale"] == "taiex_half"
+    staged = daily.exposure_schedule(data, fp, DailyRule(name="x", factors={"trend_200": 1.0}, vol_scale="taiex_staged"), FREE)
+    # 262: 120 against a high of 151.8 (21% below) and under the average — nothing; 250: above the average — all
+    assert staged[days[250]] == 1.0 and staged[days[262]] == 0.0 and staged[days[300]] == 0.0
 
 
 def test_risk_controls_are_part_of_the_rule_only_when_on():

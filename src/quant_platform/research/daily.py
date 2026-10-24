@@ -363,8 +363,9 @@ class DailyRule(BaseModel):
     # momentum crashes come after its volatility has jumped (Barroso & Santa-Clara 2015; Daniel & Moskowitz
     # 2016). Left out of the hash when "none". See ``exposure_schedule``. "taiex_half" (2026-10-24, 空頭減碼第二版): half
     # the stock part while TAIEX closes below its 200-session average, the rest in cash (Moreira & Muir 2017: scale
-    # the exposure instead of all or nothing).
-    vol_scale: Literal["none", "v1", "taiex_half"] = "none"
+    # the exposure instead of all or nothing). "taiex_staged" (2026-10-25, 空頭減碼第三版): half below the average,
+    # nothing once TAIEX is also MARKET_BEAR below its highest close of the last MARKET_HIGH sessions.
+    vol_scale: Literal["none", "v1", "taiex_half", "taiex_staged"] = "none"
     # 2026-10-09 (使用者：只在大型股裡挑，但不要照 0050 的比例買台積電): only the ``large_caps`` largest listed
     # stocks by market value (the previous close times shares issued, chips.py ``market_cap``) can be picked;
     # the picks still get equal amounts, so no stock is held at its market-value share. 0 = no limit, left
@@ -1988,6 +1989,8 @@ def price_limits(data: LegacyData, symbol: str, day: date) -> tuple[float | None
 
 MARKET_SLOPE = 20                    # taiex_200s: the 200-session average against itself this many sessions before
 MARKET_HALF = 0.5                    # vol_scale "taiex_half": the stock part held while TAIEX is below its average
+MARKET_BEAR = 0.2                    # "taiex_staged": nothing held below the average and this far below the high
+MARKET_HIGH = 250                    # the high: the highest close of this many sessions
 
 
 def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel) -> dict[date, float] | None:
@@ -1998,8 +2001,16 @@ def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs:
     Known at the close it is used on (the account without scaling, replayed from SHADOW_WARMUP). None when off."""
     if getattr(rule, "vol_scale", "none") == "none":
         return None
-    if rule.vol_scale == "taiex_half":            # 2026-10-24: half while TAIEX closes below its 200-session average
-        output = {day: 1.0 if fp.risk_on(position) else MARKET_HALF for position, day in enumerate(fp.sessions)}
+    if rule.vol_scale in ("taiex_half", "taiex_staged"):   # 2026-10-24/25: by TAIEX against its average (and high)
+        high = pd.Series(fp.market).rolling(MARKET_HIGH, min_periods=1).max().to_numpy()
+
+        def level(position: int) -> float:
+            if fp.risk_on(position):
+                return 1.0
+            deep = rule.vol_scale == "taiex_staged" and fp.market[position] <= high[position] * (1 - MARKET_BEAR)
+            return 0.0 if deep else MARKET_HALF
+
+        output = {day: level(position) for position, day in enumerate(fp.sessions)}
         if lag_of(rule):
             later = dict(zip(fp.sessions, fp.sessions[1:]))
             output = {later[day]: level for day, level in output.items() if day in later}
@@ -4490,6 +4501,52 @@ def bear_guard_batch() -> list:
     return output
 
 
+# 2026-10-25 (research_method §7「空頭減碼第三版」, written before the run): each family's five richest passing
+# 100%-stock rules outside BEAR_GUARD_ORIGINS on the 2015-06 track, fixed by number (picked 10/25 00:40)
+BEAR_HALF_WIDE = (6759, 6760, 6665, 6365, 6741, 6786, 6783, 6775, 6498, 5983, 6504, 6510, 6505, 6512, 4589, 5122, 6516,
+                  6503, 5106, 6540, 6542, 6897, 6534, 7128, 6847, 6575, 6535, 5052, 5237, 6553, 7120, 6594, 7121, 6280,
+                  7122)
+BEAR_STAGED = ("加權指數跌破 200 日均線減碼一半、比一年高點低 20% 就不持股", {"vol_scale": "taiex_staged"})
+
+
+def _guarded(trials: tuple[int, ...], guards: list[tuple[str, dict]]) -> list:
+    """The rules ``trials`` with each guard (a blend: every sleeve), named after the original; settings registered
+    already (under any name) are left out."""
+    import json as _json
+
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.holding import style_of
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = TrialRegistry(research / "trials.jsonl").records()
+    by_trial = {record.trial_id: record for record in records}
+    registered = {record.spec_hash for record in records}
+    output = []
+    for trial in trials:
+        record = by_trial[trial]
+        spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        for word, fields in guards:
+            blend = spec.get("kind") == "blend"
+            tail = f"・{word}（#{trial}）" + ("" if blend else f"｜持有：{style_of(spec) or '固定持有 20 天'}")
+            stem = str(spec.get("name") or record.spec_name).split("｜")[0]
+            name = stem[:max(4, 80 - len(tail) - 1)] + ("…" if len(stem) > 80 - len(tail) - 1 else "") + tail
+            if blend:
+                sleeves = [{**sleeve, "rule": {**sleeve["rule"], **fields}} for sleeve in spec["sleeves"]]
+                rule = parse_spec({**spec, "sleeves": sleeves, "name": name})
+            else:
+                rule = DailyRule.model_validate({**spec, **fields, "name": name})
+            if rule.rule_hash not in registered:
+                output.append(rule)
+    return output
+
+
+def bear_guard3_batch() -> list:
+    """2026-10-25 (research_method §7「空頭減碼第三版」, written before the run): the half guard on BEAR_HALF_WIDE, and
+    the staged guard on BEAR_GUARD_ORIGINS — graded the usual way on 2015-06 onwards."""
+    return _guarded(BEAR_HALF_WIDE, [BEAR_GUARDS["taiex_half"]]) + _guarded(BEAR_GUARD_ORIGINS, [BEAR_STAGED])
+
+
 def paid_veto_batch() -> list[DailyRule]:
     return _veto_rules([(trial, "h2") for trial in PAID_VETO_TREND] + [(trial, "m1") for trial in PAID_VETO_TREND]
                        + [(trial, "h2") for trial in PAID_VETO_ROBOTS])
@@ -4655,7 +4712,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
-           "bearguard": bear_guard_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
