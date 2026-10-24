@@ -272,9 +272,13 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     newest = max(copies, key=lambda row: str(row.get("started_at") or ""), default=None)
     fresh = bool(newest) and newest.get("status") == "done" and str(newest.get("started_at") or "") >= (
         today - timedelta(days=2)).isoformat()
-    checks.append(_check("研究資料第二份備份（另一顆硬碟，2 天內）", "使用者 2026-10-19：評估專案可能失敗的原因並排除（每日 03:30）",
-                         fresh, f"最近一次 {str(newest.get('started_at'))[:16] if newest else '沒有'}，{newest.get('status') if newest else '—'}"
-                         + (f"：{newest.get('summary')}" if newest and newest.get("summary") else "")))
+    # 2026-10-24 (使用者：我從來就沒有說 D 槽要給你備份): only when a second disk is set (RESEARCH_MIRROR_DIR)
+    import os
+
+    if os.getenv("RESEARCH_MIRROR_DIR", "").strip():
+        checks.append(_check("研究資料第二份備份（另一顆硬碟，2 天內）", "使用者 2026-10-19：評估專案可能失敗的原因並排除（每日 03:30）",
+                             fresh, f"最近一次 {str(newest.get('started_at'))[:16] if newest else '沒有'}，{newest.get('status') if newest else '—'}"
+                             + (f"：{newest.get('summary')}" if newest and newest.get("summary") else "")))
     # 2026-10-22 (使用者：我所有的失敗紀錄都要記起來，作為知識庫，讓後面的人可以用 AI 問): every finished experiment
     # has its result written (research method or development history), and the knowledge base holds every trial
     from quant_platform.research import knowledge

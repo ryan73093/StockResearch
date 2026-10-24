@@ -93,7 +93,7 @@ def test_the_latest_trade_audit_must_be_clean(tmp_path):
     assert checked()["ok"]
 
 
-def test_the_news_and_the_second_copy_are_checked(tmp_path):
+def test_the_news_and_the_second_copy_are_checked(tmp_path, monkeypatch):
     """2026-10-22: the previous session's news on disk; the copy on the other disk done within two days."""
     import pandas as pd
 
@@ -112,6 +112,9 @@ def test_the_news_and_the_second_copy_are_checked(tmp_path):
     (news / "20261021").mkdir()
     assert checked("新聞收到前一個交易日")["ok"]
     copy = "研究資料第二份備份（另一顆硬碟，2 天內）"
+    monkeypatch.delenv("RESEARCH_MIRROR_DIR", raising=False)        # 2026-10-24: no second disk set, no check
+    assert copy not in {item["name"] for item in invariants.run(tmp_path, date(2026, 10, 22))}
+    monkeypatch.setenv("RESEARCH_MIRROR_DIR", "E:/elsewhere")
     assert not checked(copy)["ok"]
     (tmp_path / "jobs").mkdir()
     (tmp_path / "jobs" / "1.json").write_text(json.dumps({"name": "研究資料第二份備份（另一顆硬碟）", "status": "done",
