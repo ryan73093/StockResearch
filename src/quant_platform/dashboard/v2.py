@@ -1141,10 +1141,11 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     @blueprint.get("/research/stress")
     def research_stress():
         """2026-10-24 (使用者：2008 年的金融海嘯你撐得過嗎): the stress test's window (research/stress.py)."""
-        from quant_platform.research.stress import latest
+        from quant_platform.research.stress import latest, protect_view
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        return render_template("v2/research_stress.html", report=latest(research_dir))
+        return render_template("v2/research_stress.html", report=latest(research_dir),
+                               protect=protect_view(latest(research_dir, "protect")))
 
     @blueprint.get("/research/eras")
     def research_eras():

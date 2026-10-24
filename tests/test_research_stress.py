@@ -88,3 +88,36 @@ def test_the_window_shows_every_scenario_and_the_entries_on_the_high(tmp_path):
     body = app.test_client().get("/research/stress").get_data(as_text=True)
     assert "每一次空頭（1 次）" in body and "大空頭" in body and "每次都撐過" in body and "-40%" in body
     assert "3.2 年" in body and "23 個月回本" in body and "沒跑成：boom" in body
+
+
+def test_the_window_shows_the_overlay_check(tmp_path):
+    """research_method §7 空頭減碼檢驗: each way of holding fewer stocks, every scenario and every strategy."""
+    import json
+
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+
+    folder = tmp_path / "research" / "stress"
+    folder.mkdir(parents=True)
+    plain = {"final": 130_000_000, "recent_final": 31_000_000, "held_count": 4, "held_2008": False,
+             "bears": [{"fall": -0.7, "gap": -0.15, "days": 2000, "held": False}]}
+    calm = {"final": 44_000_000, "recent_final": 11_900_000, "held_count": 6, "held_2008": True,
+            "bears": [{"fall": -0.45, "gap": 0.1, "days": 900, "held": True}]}
+    (folder / "protect-20261024-230000.json").write_text(json.dumps({
+        "generated_at": "2026-10-24T23:00:00", "base_final": 24_730_000, "base_recent_final": 9_820_000,
+        "overlays": {"taiex_200": {"label": "加權指數跌破 200 日均線就不持股", "off": 0.31, "switches": 88},
+                     "vol_v1": {"label": "波動大時減碼到現金"}},
+        "scenarios": [{"high": "2007-10-29", "low": "2008-11-20", "fall": -0.55, "held": {"none": 0, "taiex_200": 0, "vol_v1": 1}}],
+        "verdicts": {"taiex_200": {"tested": 0}, "vol_v1": stress.overlay_verdict(
+            [{"variants": {"none": plain, "vol_v1": calm}}], "vol_v1", 24_730_000)},
+        "rows": [{"trial": 6490, "spec_hash": "h", "name": "深度學習", "why": "取捨前緣",
+                  "variants": {"none": plain, "taiex_200": {"error": "boom"}, "vol_v1": calm}},
+                 {"trial": 1, "spec_hash": "x", "name": "壞", "why": "w", "error": "bad"}]}), encoding="utf-8")
+    view = stress.protect_view(stress.latest(tmp_path / "research", "protect"))
+    assert [way["key"] for way in view["ways"]] == ["taiex_200", "vol_v1"] and view["ways"][1]["held"] == 6.0
+    assert view["ways"][1]["verdict"] == "空頭有幫助、代價太大" and view["ways"][0]["failed"] == 1
+    app = create_app(build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}")))
+    body = app.test_client().get("/research/stress").get_data(as_text=True)
+    assert "大空頭來時減碼，有沒有用" in body and "31%" in body and "進出 88 次" in body
+    assert "空頭有幫助、代價太大" in body and "沒跑成：bad" in body and "依波動減碼" in body

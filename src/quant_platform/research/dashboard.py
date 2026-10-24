@@ -204,7 +204,7 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
                "median_gain": statistics.median(item["gain"] for item in cashed) if cashed else None,
                "bench_gain": statistics.median(item["bench_gain"] for item in cashed) if cashed else None,
                "ahead_share": sum(item["ahead"] > 0 for item in cashed) / len(cashed) if cashed else None}
-    from quant_platform.research.stress import latest as stress_latest
+    from quant_platform.research.stress import SHORT, latest as stress_latest
 
     stress = None
     found = stress_latest(research)
@@ -219,6 +219,10 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
                   "beat": sum(1 for row in rows if row["final"] > row["base_final"]),
                   "steady": {"trial": steady["trial"], "held": steady.get("held_count"), "of": steady.get("scenario_count")}
                   if steady else None}
+        checked = stress_latest(research, "protect")             # 2026-10-24: holding fewer stocks in a bear
+        if checked and checked.get("verdicts"):
+            stress["protect"] = [{"label": SHORT.get(key, key), "verdict": found.get("verdict", "—")}
+                                 for key, found in checked["verdicts"].items()]
     return {"benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
             "stress": stress,
             "recent": recent_all, "forward": forward, "scale": search_scale(research),

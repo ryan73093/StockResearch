@@ -71,3 +71,52 @@
 </div>
 <p class="col-help"><b>說明</b>　<b>撐過</b>：那一次空頭裡，策略跌幅不比 0050 深超過 10 個百分點，而且回到 0050 高點那天的帳戶水準不比 0050 晚（跑之前寫好的判定，不改等級）。<b>策略跌多少</b>：0050 從高點跌到低點的同一段，策略的跌幅（扣掉投入的錢；紅＝撐過、綠＝沒撐過），下面是多久回到原來的水準。<b>空頭前的最高點才開始投資</b>：在那次空頭的最高點開一個新帳戶（30 萬＋每月 1 萬），最多虧到投入金額的幾成（紅＝比 0050 虧得少），下面是從開始到回本的時間。限制：2011 年以前沒有減資資料；注意處置股、當沖 2014 年起、集保 2010 年起才有；2007 年的模型只學了約 2 年。</p>
 {% endif %}
+{% macro times(value) %}{% if value is none %}—{% else %}{{ '%g'|format(value) }}{% endif %}{% endmacro %}
+{% if protect %}
+<h3 class="dash-h">大空頭來時減碼，有沒有用（{{ protect.rows|length }} 個策略各加一種，2007 年起）</h3>
+<p class="small" style="margin:0 0 8px">五種文獻上的減碼方式，設定事先固定、沒有在 2007～2014 試參數；不持股的錢放現金（不放 0050）。判定跑之前寫好：撐過的次數中位數多 2 次以上、一半以上的策略撐過 2008 才算「空頭有幫助」；2015-06 起的期末留住沒加時的 8 成以上、2007 起仍贏 0050 才算「代價可接受」。{{ protect.generated_at[:16]|replace('T', ' ') }} 跑完。</p>
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>減碼方式</th><th class="num">不持股的時間</th><th class="num">撐過幾次（不加）</th><th class="num">撐過 2008</th><th class="num">2015-06 起留住</th><th class="num">2007 起期末（0050）</th><th>判定</th></tr></thead>
+    <tbody>
+    {% for w in protect.ways %}
+      <tr>
+        <td data-primary><b>{{ w.label }}</b>{% if w.skipped %}<span class="muted small"> {{ w.skipped }} 個本來就有</span>{% endif %}{% if w.failed %}<span class="small down"> {{ w.failed }} 個沒跑成</span>{% endif %}</td>
+        <td class="num" data-label="不持股的時間">{% if w.off is defined %}{{ '{:.0%}'.format(w.off) }}<span class="muted small">（進出 {{ w.switches }} 次）</span>{% else %}—{% endif %}</td>
+        <td class="num" data-label="撐過幾次">{{ times(w.held) }}／{{ protect.scenarios|length }}<span class="muted small">（{{ times(w.plain_held) }}）</span></td>
+        <td class="num" data-label="撐過 2008">{% if w.tested %}{{ w.held_2008 }}／{{ w.tested }}{% else %}—{% endif %}</td>
+        <td class="num" data-label="2015-06 起留住">{% if w.kept is defined %}{{ '{:.0%}'.format(w.kept) }}{% else %}—{% endif %}</td>
+        <td class="num" data-label="2007 起期末">{% if w.long_final is defined %}{{ wan(w.long_final) }}{% else %}—{% endif %}<span class="muted small">（{{ wan(protect.base_final) }}）</span></td>
+        <td data-label="判定">{% if w.verdict is defined %}<span class="badge {{ 'badge--ok' if w.verdict == '值得做成規則' else ('badge--warn' if w.helps else 'badge--bad') }}">{{ w.verdict }}</span>{% else %}—{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h3 class="dash-h">每一次空頭，加了減碼後撐過的策略數</h3>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>空頭</th>{% for key in protect.columns %}<th class="num">{{ protect.short[key] }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for sc in protect.scenarios %}
+      <tr><td class="small">{{ sc.high[:7] }}<br><span class="muted">0050 {{ pct(sc.fall) }}</span></td>{% for key in protect.columns %}<td class="num">{{ sc.held[key] }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h3 class="dash-h">每個策略加了減碼之後（撐過幾次、2007 起期末）</h3>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>策略</th>{% for key in protect.columns %}<th class="num">{{ protect.short[key] }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in protect.rows %}
+      <tr><td class="small">#{{ row.trial }}</td>{% for key in protect.columns %}{% set v = row.variants.get(key, {}) %}<td class="num">{% if v.final is defined %}{{ v.held_count }} 次{% if v.held_2008 %} <span class="badge badge--ok">2008</span>{% endif %}<br><span class="muted small">{{ wan(v.final) }}</span>{% elif v.skip %}<span class="muted small">{{ v.skip }}</span>{% else %}<span class="small down">沒跑成</span>{% endif %}</td>{% endfor %}</tr>
+    {% endfor %}
+    {% for row in protect.errors %}<tr><td class="small">#{{ row.trial }}</td><td colspan="{{ protect.columns|length }}" class="small down">沒跑成：{{ row.error }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="col-help"><b>說明</b>　<b>不持股的時間</b>：2007 年起，大盤濾網叫你空手的交易日比例與進出次數（停損與依波動減碼看個股或帳戶，不列）。<b>撐過幾次</b>：20 個策略加了這種減碼後，撐過的空頭次數的中位數，括號是沒加時。<b>2015-06 起留住</b>：同一個策略從 2015-06 開帳戶，加了之後的期末是沒加時的幾成（中位數）。<b>2007 起期末</b>：加了之後的期末中位數，括號是 0050。綠色「2008」＝那個版本撐過 2008。</p>
+{% endif %}

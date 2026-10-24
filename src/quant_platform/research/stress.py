@@ -46,6 +46,8 @@ OVERLAYS = {
     "stop_15": ("跌離買進後最高價 15% 就賣", {"stop_loss": 0.15}),
     "vol_v1": ("波動大時減碼到現金", {"vol_scale": "v1"}),
 }
+SHORT = {"none": "不加", "taiex_200": "200 日均線", "taiex_10m": "10 個月均線", "taiex_12m": "一年動能",
+         "stop_15": "15% 停損", "vol_v1": "依波動減碼"}
 RANKED = ("market_filter", "stop_loss")             # these act where the day's targets are decided: ranked again
 HELPS = 2                                            # held at least this many more scenarios (the median strategy)
 KEEPS = 0.8                                          # and keeps at least this share of its 2015-06 money
@@ -372,6 +374,26 @@ def overlay_verdict(rows: list[dict], key: str, base_final: float) -> dict[str, 
     return {"tested": len(pairs), "more_held": more, "held_2008": crisis, "kept": round(kept, 4),
             "long_final": round(long, 2), "helps": helps, "keeps": keeps,
             "verdict": "值得做成規則" if helps and keeps else ("空頭有幫助、代價太大" if helps else "沒有幫助")}
+
+
+def protect_view(report: dict | None) -> dict | None:
+    """The overlay check for the page: per way, the median scenarios held with and without it and the verdict; per
+    scenario how many held with each way; per strategy each way's scenarios held and 2007 money."""
+    if not report or not report.get("rows"):
+        return None
+    rows = [row for row in report["rows"] if not row.get("error")]
+    ways = []
+    for key, meta in report["overlays"].items():
+        pairs = [(row["variants"]["none"], row["variants"][key]) for row in rows
+                 if "final" in row["variants"].get("none", {}) and "final" in row["variants"].get(key, {})]
+        ways.append({"key": key, "short": SHORT.get(key, key), **meta, **(report.get("verdicts") or {}).get(key, {}),
+                     "plain_held": float(np.median([plain["held_count"] for plain, _mine in pairs])) if pairs else None,
+                     "held": float(np.median([mine["held_count"] for _plain, mine in pairs])) if pairs else None,
+                     "skipped": sum(1 for row in rows if row["variants"].get(key, {}).get("skip")),
+                     "failed": sum(1 for row in rows if row["variants"].get(key, {}).get("error"))})
+    return {"generated_at": report["generated_at"], "ways": ways, "columns": ["none", *report["overlays"]], "short": SHORT,
+            "scenarios": report["scenarios"], "rows": rows, "base_final": report["base_final"],
+            "base_recent_final": report.get("base_recent_final"), "errors": [row for row in report["rows"] if row.get("error")]}
 
 
 def protect(history: str | Path, research: str | Path, job=None) -> Path:
