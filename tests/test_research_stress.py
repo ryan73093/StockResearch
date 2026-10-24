@@ -27,3 +27,27 @@ def test_a_strategy_is_judged_over_0050s_fall_and_back_from_its_own_low():
     assert held["held_2008"] is False                      # back a day after 0050 (and exactly 10 points worse)
     row["back"], row["days"] = row["base_back"], row["base_days"]
     assert stress.verdict([row])["held_2008"] is True and stress.verdict([row])["worse_bears"] == 0
+
+
+def test_the_window_shows_each_strategy_through_2008(tmp_path):
+    import json
+
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+
+    folder = tmp_path / "research" / "stress"
+    folder.mkdir(parents=True)
+    bear = {"high": "2007-10-29", "low": "2008-11-20", "base_fall": -0.55, "fall": -0.40, "worst": -0.42, "gap": 0.15,
+            "base_back": "2011-01-28", "back": "2010-03-01", "base_days": 1187, "days": 854}
+    row = {"trial": 6490, "spec_hash": "h", "name": "深度學習", "why": "取捨前緣", "tier": "T0 候選", "final_value": 1,
+           "final": 5_000_000, "base_final": 2_473_000, "contributed": 2_500_000, "max_drawdown": -0.45,
+           "base_max_drawdown": -0.55, "bears": [bear], "held_2008": True, "worse_bears": 0}
+    account = {"bears": [{"high": "2007-10-29", "low": "2008-11-20", "fall": -0.55, "back": "2011-01-28"}],
+               "base_final": 2_473_000, "rows": [row, {"trial": 1, "spec_hash": "x", "name": "壞", "why": "w", "error": "boom"}]}
+    (folder / "stress-20261024-180000.json").write_text(json.dumps({
+        "generated_at": "2026-10-24T18:00:00", "bear": 0.2, "accounts": {"from_2007": account, "from_2007_top": account}}),
+        encoding="utf-8")
+    app = create_app(build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}")))
+    body = app.test_client().get("/research/stress").get_data(as_text=True)
+    assert "撐過" in body and "-40%" in body and "少跌 15.0 點" in body and "2010-03" in body and "沒跑成：boom" in body

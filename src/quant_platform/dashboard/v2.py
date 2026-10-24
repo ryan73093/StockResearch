@@ -1138,6 +1138,14 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         return render_template("v2/research_family.html", family=found, labels=data["eras"]["labels"],
                                benchmark=data["benchmark"], recent_benchmark=data["recent_benchmark"])
 
+    @blueprint.get("/research/stress")
+    def research_stress():
+        """2026-10-24 (使用者：2008 年的金融海嘯你撐得過嗎): the stress test's window (research/stress.py)."""
+        from quant_platform.research.stress import latest
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        return render_template("v2/research_stress.html", report=latest(research_dir))
+
     @blueprint.get("/research/eras")
     def research_eras():
         """2026-10-23 (使用者：哪些前期賺很大、到後面變得比較不賺): the dashboard's window of faded and risen rules."""

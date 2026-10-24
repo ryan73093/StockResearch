@@ -1,0 +1,43 @@
+{# 2026-10-24 (使用者：測這些策略在每一次的大空頭有沒有辦法撐過去，2008 年的金融海嘯你撐得過嗎): research/stress.py,
+   the dashboard's window. #}
+{% from "v2/_dashboard.html" import wan %}
+{% macro pct(value) %}{% if value is none %}—{% else %}{{ '{:+.0%}'.format(value) }}{% endif %}{% endmacro %}
+{% if not report %}<p class="muted">壓力測試還沒跑完。</p>{% else %}
+<p class="small" style="margin:0 0 8px">規則都是用 2015-06 以後的資料挑的，2007～2014 是它們沒看過的年份；模型用 2004 年起的資料逐年重訓（2007 年的模型只看到 2006 年底）。帳戶 30 萬＋每月 1 萬；大空頭＝0050 從高點跌 {{ '{:.0%}'.format(report.bear) }} 以上。{{ report.generated_at[:16]|replace('T', ' ') }} 跑完。</p>
+{% for key, title in (('from_2007', '2007-01 開始投資'), ('from_2007_top', '2007-10 金融海嘯前的高點才開始投資（最壞的時機）')) %}{% set acc = report.accounts[key] %}
+<h3 class="dash-h">{{ title }}</h3>
+<p class="small" style="margin:0 0 6px">0050 的大空頭：{% for bear in acc.bears %}<b>{{ bear.high[:7] }}～{{ bear.low[:7] }}</b> 跌 {{ '{:.0%}'.format(-bear.fall) }}（{{ bear.back[:7] if bear.back else '還沒' }} 回到高點）{% if not loop.last %}；{% endif %}{% endfor %}。0050 期末 {{ wan(acc.base_final) }}。</p>
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>策略</th><th>撐過 2008</th><th class="num">2008 跌幅（0050）</th><th class="num">回到 2007 高點（0050）</th><th class="num">大空頭多跌 10 點以上</th><th class="num">期末（0050）</th><th class="num">最大回撤（0050）</th></tr></thead>
+    <tbody>
+    {% for row in acc.rows %}{% set crisis = (row.bears or [])|selectattr('high', 'ge', '2007-06')|selectattr('high', 'le', '2009-12-31')|first %}
+      <tr>
+        <td data-primary><a href="/research/rules/{{ row.spec_hash }}">#{{ row.trial }}</a> {{ row.name }} <span class="badge">{{ row.why }}</span></td>
+        {% if row.error %}<td colspan="6" class="small down">沒跑成：{{ row.error }}</td>{% else %}
+        <td data-label="撐過 2008"><span class="badge {{ 'badge--ok' if row.held_2008 else ('badge--bad' if row.held_2008 is sameas false else '') }}">{{ '撐過' if row.held_2008 else ('撐不過' if row.held_2008 is sameas false else '—') }}</span></td>
+        <td class="num" data-label="2008 跌幅">{% if crisis %}{{ pct(crisis.fall) }}<span class="muted small">（{{ pct(crisis.base_fall) }}）</span><br><span class="small {{ 'down' if crisis.gap < -0.0005 else 'up' }}">{{ '多跌' if crisis.gap < 0 else '少跌' }} {{ '{:.1f}'.format((crisis.gap * 100)|abs) }} 點</span>{% else %}—{% endif %}</td>
+        <td class="num" data-label="回到 2007 高點">{% if crisis %}{{ crisis.back[:7] if crisis.back else '還沒回來' }}<span class="muted small">（{{ crisis.base_back[:7] if crisis.base_back else '—' }}）</span>{% else %}—{% endif %}</td>
+        <td class="num" data-label="多跌 10 點以上">{{ row.worse_bears }}／{{ row.bears|length }} 次</td>
+        <td class="num {{ 'up' if row.final > row.base_final else 'down' }}" data-label="期末">{{ wan(row.final) }}<span class="muted small">（{{ wan(row.base_final) }}）</span></td>
+        <td class="num" data-label="最大回撤">{{ pct(row.max_drawdown) }}<span class="muted small">（{{ pct(row.base_max_drawdown) }}）</span></td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<details style="margin-top:8px"><summary class="small">每一次大空頭的細節（策略跌幅／0050 跌幅）</summary>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>策略</th>{% for bear in acc.bears %}<th class="num">{{ bear.high[:7] }}～{{ bear.low[:7] }}<br><span class="muted small">0050 {{ pct(bear.fall) }}</span></th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in acc.rows if not row.error %}
+      <tr><td class="small">#{{ row.trial }}</td>{% for item in row.bears %}<td class="num {{ 'down' if item.gap < -0.1 else '' }}">{{ pct(item.fall) }}<br><span class="muted small">{{ item.back[:7] if item.back else '還沒回來' }}</span></td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></details>
+{% endfor %}
+<p class="col-help"><b>說明</b>　<b>撐過 2008</b>：2007～2009 那次大空頭裡，跌幅不比 0050 深超過 10 個百分點，而且回到 0050 高點那天的水準不比 0050 晚（跑之前寫好的判定，不改等級）。<b>2008 跌幅</b>：0050 從 2007 高點跌到 2008 低點的同一段，策略跌多少（括號 0050），下面是多跌或少跌幾點。<b>回到 2007 高點</b>：從自己的低點之後，回到 0050 高點那天的帳戶水準的月份（扣掉投入的錢；括號 0050）。<b>大空頭多跌 10 點以上</b>：所有大空頭裡，跌得比 0050 多 10 個百分點以上的次數。<b>期末</b>：到 2026-09 的帳戶（括號同樣的錢買 0050）。限制：2011 年以前沒有減資資料；注意處置股、當沖 2014 年起、集保 2010 年起才有。</p>
+{% endif %}

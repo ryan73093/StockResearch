@@ -113,7 +113,7 @@ def view(research: str | Path, start: str, optimizations: list[dict], gates: dic
     research = Path(research)
     paths = [research / "trials.jsonl", research / "forward" / "stocks" / "log.jsonl",
              research / "forward" / "stocks" / "tracked.json", research / "rolling", research / "models",
-             research / "scans", research / "blend_scan"]
+             research / "scans", research / "blend_scan", research / "stress"]
     key = (str(research.resolve()), start, len(optimizations), json.dumps(optimizations[:1], ensure_ascii=False),
            tuple((path.stat().st_mtime_ns, path.stat().st_size) if path.exists() else 0 for path in paths))
     if _VIEW.get("key") != key:
@@ -204,7 +204,21 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
                "median_gain": statistics.median(item["gain"] for item in cashed) if cashed else None,
                "bench_gain": statistics.median(item["bench_gain"] for item in cashed) if cashed else None,
                "ahead_share": sum(item["ahead"] > 0 for item in cashed) / len(cashed) if cashed else None}
+    from quant_platform.research.stress import latest as stress_latest
+
+    stress = None
+    found = stress_latest(research)
+    if found:                                   # 2026-10-24: the bear-market stress test, from 2007
+        rows = [row for row in found["accounts"]["from_2007"]["rows"] if not row.get("error")]
+        crises = [(row, next((item for item in row["bears"] if "2007-06" <= item["high"] <= "2009-12-31"), None)) for row in rows]
+        crises = [(row, item) for row, item in crises if item]
+        best = max(crises, key=lambda pair: pair[1]["fall"], default=None)
+        stress = {"tested": len(rows), "held": sum(1 for row in rows if row.get("held_2008")),
+                  "beat": sum(1 for row in rows if row["final"] > row["base_final"]),
+                  "crisis_fall": crises[0][1]["base_fall"] if crises else None,
+                  "best": {"trial": best[0]["trial"], "fall": best[1]["fall"]} if best else None}
     return {"benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
+            "stress": stress,
             "recent": recent_all, "forward": forward, "scale": search_scale(research),
             "t0": toward_t0(tracker.chained(date.today()), pool["daily"], summary, count=0),
             "families": families, "eras": periods, "passing": sum(row["tier"] in PASSING_TIERS for row in main),
