@@ -47,18 +47,19 @@
 <h3 class="dash-h">最好的規則</h3>
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
-    <thead><tr><th>規則</th><th class="num">回測期末</th><th class="num">2020-10 起</th><th class="num">前向比 0050</th></tr></thead>
+    <thead><tr><th>規則</th><th class="num">回測期末</th><th class="num">2020-10 起</th><th class="num">各時期每年比 0050<br><span class="muted small">{{ labels|join('／') }}</span></th><th class="num">前向比 0050</th></tr></thead>
     <tbody>
     {% for row in f.top %}
       <tr><td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else '') }}">{{ row.tier }}</span></td>
         <td class="num" data-label="回測期末">{{ wan(row.final_value) }}</td>
         <td class="num" data-label="2020-10 起">{{ wan(row.since_2020_final_value) }}</td>
+        <td class="num small" data-label="各時期每年比 0050">{% if row.periods %}{% for label in labels %}{{ pts(row.periods[label].excess) }}{% if not loop.last %}／{% endif %}{% endfor %}{% else %}—{% endif %}</td>
         <td class="num {{ 'up' if row.forward and row.forward.ahead > 0 else ('down' if row.forward else '') }}" data-label="前向比 0050">{% if row.forward %}<a href="/research/forward/{{ row.spec_hash }}">{{ '{:+,.0f}'.format(row.forward.ahead) }}</a>{% else %}<span class="muted small">不在名單</span>{% endif %}</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
-<p class="small" style="margin:6px 0 0"><a href="/research/pool?family={{ f.family|urlencode }}#daily">這一類全部 {{ f.rules }} 個規則</a></p>
+<p class="small" style="margin:6px 0 0"><a href="/research/pool?family={{ f.family|urlencode }}#daily">這一類全部 {{ f.rules }} 個規則</a>・<b>各時期每年比 0050</b>：同一個帳戶在 {{ labels|join('、') }} 每年報酬比 0050 多（紅）或少（綠）幾個百分點——前面賺、後面不賺的一眼看得出來。</p>
 
 {% if f.log %}
 <h3 class="dash-h">最近的最佳化</h3>

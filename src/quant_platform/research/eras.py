@@ -89,6 +89,7 @@ def summarize(rows: list[dict]) -> dict[str, object]:
 
 def analyze(research: str | Path) -> dict[str, object]:
     """Every main-track 100%-stock rule (newest run) by period, by family, and the rules that faded or rose."""
+    from quant_platform.research.daily import short_track
     from quant_platform.research.pool import pool_view, yearly_returns
 
     research = Path(research)
@@ -105,7 +106,9 @@ def analyze(research: str | Path) -> dict[str, object]:
             stored = {}
     rows, fresh = [], {}
     for row in pool_view(research, basis="seed")["daily"]:
-        if row.get("uses_0050") or str(row.get("start") or "2015-06-01") > "2015-06-01" or not row.get("report_file"):
+        # 2026-10-24: the short track by its rule (2020-10-26 on), not "after 2015-06-01" — a rule trading the next
+        # session starts 2015-06-02, and the first version left out every such rule (the richest ones)
+        if row.get("uses_0050") or short_track({"start": row.get("start")}) or not row.get("report_file"):
             continue
         marker = f"{row['spec_hash']}:{row['report_file']}"
         found = stored.get(marker)

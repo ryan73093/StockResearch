@@ -137,6 +137,7 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
     summary = {row["rule_hash"]: row for row in tracker.summary()}
     live = {key: row for key, row in summary.items() if not row.get("stopped") and row.get("since") == start and row.get("sell_all")}
     periods = eras(research)
+    by_rule = {row["spec_hash"]: row["periods"] for row in periods["rows"]}       # each rule's own periods
     labels = {key: label for key, label, _paid, _group in source_groups()}
     labels["news"] = "新聞（LLM 標題事件）"
     paid_keys = {key for key, _label, paid, _group in source_groups() if paid}
@@ -185,7 +186,8 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
             "median_ahead": statistics.median(ahead) if ahead else None, "best_ahead": max(ahead) if ahead else None,
             "eras": periods["families"].get(family), "log": family_log(optimizations, family),
             "faded": [row for row in periods["faded"] if row["family"] == family][:5],
-            "top": [{**row, "forward": (live.get(row["spec_hash"]) or {}).get("sell_all")} for row in top],
+            "top": [{**row, "forward": (live.get(row["spec_hash"]) or {}).get("sell_all"),
+                     "periods": by_rule.get(row["spec_hash"])} for row in top],
         })
     order = {name: index for index, name in enumerate(FAMILY_ORDER)}
     families.sort(key=lambda item: (-(item["best"]["final_value"] if item["best"] else 0), order.get(item["family"], 99)))
