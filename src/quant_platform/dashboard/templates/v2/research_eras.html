@@ -1,20 +1,23 @@
 {# 2026-10-23: the dashboard's window of rules that faded or rose between the periods (research/eras.py). #}
 {% from "v2/_dashboard.html" import pts %}
 <p class="small" style="margin:0 0 8px">同一個規則、同一個帳戶切成時期，每年報酬比同時期的 0050 多或少幾個百分點。前期＝2015-06～2019、後期＝2020～2026-09；「明顯」＝每年 5 個百分點以上。</p>
-<h3 class="dash-h">前期明顯贏、後期變輸（{{ era.faded|length }} 個）</h3>
 {% macro rows(items) %}
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
-    <thead><tr><th>規則</th>{% for label in era.labels %}<th class="num">{{ label }}</th>{% endfor %}</tr></thead>
+    <thead><tr><th>規則</th><th class="num">回測期末</th>{% for label in era.labels %}<th class="num">{{ label }}</th>{% endfor %}</tr></thead>
     <tbody>
     {% for row in items %}
       <tr><td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge">{{ row.family }}</span> <span class="muted small">{{ row.tier }}</span></td>
+        <td class="num" data-label="回測期末">{{ '{:,.0f}'.format(row.final_value / 10000) if row.final_value else '—' }} 萬</td>
         {% for label in era.labels %}<td class="num" data-label="{{ label }}">{{ pts(row.periods[label].excess) }}</td>{% endfor %}</tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
 {% endmacro %}
+<h3 class="dash-h">五個時期都贏 0050（{{ era.consistent|length }} 個，期末多的在上，列前 30）</h3>
+{% if era.consistent %}{{ rows(era.consistent[:30]) }}{% else %}<p class="muted">沒有。</p>{% endif %}
+<h3 class="dash-h">前期明顯贏、後期變輸（{{ era.faded|length }} 個）</h3>
 {% if era.faded %}{{ rows(era.faded[:30]) }}{% else %}<p class="muted">沒有。</p>{% endif %}
 <h3 class="dash-h">前期輸、後期明顯贏（{{ era.rose|length }} 個，列前 30）</h3>
 {% if era.rose %}{{ rows(era.rose[:30]) }}{% else %}<p class="muted">沒有。</p>{% endif %}

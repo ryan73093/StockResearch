@@ -46,7 +46,8 @@
     <li>前期每年贏 0050 五個百分點以上的 {{ all.big_early }} 個：後期仍贏五點以上 {{ all.big_still }} 個，<b>變成輸 0050 的 {{ all.big_faded }} 個</b>；前期輸、後期每年贏五點以上的 {{ era.rose|length }} 個（多半是深度學習與 2020 年後才變強的組合）。</li>
     {% if era.benchmark.get(era.labels[-1]) is not none and all.periods[era.labels[-1]].beat is not none %}<li>差最多的是 2024～2026-09：0050（台積電佔一半）每年 {{ '{:+.0%}'.format(era.benchmark[era.labels[-1]]) }}，只有 {{ '{:.0%}'.format(all.periods[era.labels[-1]].beat) }} 的規則贏它——規則本身多半還在賺，但每檔等額的選股追不上權值股集中的行情；2020～2023 反而有七成以上的規則贏 0050。</li>{% endif %}
   </ul>
-  <p><button type="button" class="button-link" data-eras>看前期大賺、後期不賺的規則（{{ era.faded|length }} 個）與後期才變強的</button></p>
+  <p><b>五個時期都贏 0050 的：{{ era.consistent|length }} 個</b>{% if era.consistent %}——最多的 {{ era.consistent[0].name[:30] }}… {{ wan(era.consistent[0].final_value) }}（{{ era.consistent[0].tier }}）{% endif %}。{% for count in range(era.labels|length - 1, -1, -1) %}贏 {{ count }} 個時期的 {{ era.won[count] }} 個{% if not loop.last %}、{% endif %}{% endfor %}。</p>
+  <p><button type="button" class="button-link" data-eras>看五個時期都贏的、前期大賺後期不賺的（{{ era.faded|length }} 個）與後期才變強的</button></p>
   <p class="col-help"><b>說明</b>　每個規則同一個帳戶（2015-06 起 30 萬＋每月 1 萬）切成時期，每年報酬扣掉當月投入，和同時期的 0050 比；「每年比 0050」是年化報酬相減。前期＝2015-06～2019、後期＝2020～2026-09。只看 2015 年起的規則（不含短歷史賽道）。</p>
 </section>
 
@@ -71,7 +72,7 @@
   document.querySelectorAll('[data-family]').forEach((card) => card.addEventListener('click', () =>
     open(card.dataset.family, '/research/family/' + encodeURIComponent(card.dataset.family))));
   document.querySelectorAll('[data-eras]').forEach((button) => button.addEventListener('click', () =>
-    open('前期大賺、後期不賺的規則', '/research/eras')));
+    open('各時期還適用嗎：規則清單', '/research/eras')));
   dialog.querySelector('.dash-dialog__close').addEventListener('click', () => dialog.close());
   dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
 })();

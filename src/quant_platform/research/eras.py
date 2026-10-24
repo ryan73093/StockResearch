@@ -138,7 +138,13 @@ def analyze(research: str | Path) -> dict[str, object]:
                    key=lambda row: -row["periods"]["early"]["excess"])
     rose = sorted((row for row in usable if row["periods"]["early"]["excess"] <= 0 and row["periods"]["late"]["excess"] >= BIG),
                   key=lambda row: -row["periods"]["late"]["excess"])
-    value = {"labels": [label for label, _first, _last in PERIODS], "all": summarize(rows),
+    labels = [label for label, _first, _last in PERIODS]
+    complete = [row for row in rows if all(row["periods"][label]["excess"] is not None for label in labels)]
+    won = {row["spec_hash"]: sum(row["periods"][label]["excess"] > 0 for label in labels) for row in complete}
+    # 2026-10-24 (使用者：每個時期同樣的策略是否還適用): the rules that beat 0050 in every period, richest first
+    consistent = sorted((row for row in complete if won[row["spec_hash"]] == len(labels)), key=lambda row: -(row["final_value"] or 0))
+    value = {"labels": labels, "all": summarize(rows), "consistent": consistent,
+             "won": {count: sum(1 for value in won.values() if value == count) for count in range(len(labels) + 1)},
              "families": {name: summarize(members) for name, members in families.items()},
              "rows": rows, "faded": faded, "rose": rose,
              "benchmark": {label: next((row["periods"][label]["base"] for row in rows
