@@ -334,8 +334,10 @@ class DailyRule(BaseModel):
     # 200-session average (the 0050 core stays; contributions wait in cash). 2026-10-24 (research_method §7「空頭減碼
     # 檢驗」): "taiex_10m" / "taiex_12m" decide on each month's last session and keep it to the next — TAIEX below the
     # average of its last 10 month-end closes (Faber 2007), or below its close 12 month-ends before (Antonacci 2014).
+    # "taiex_200s" (2026-10-24, 空頭減碼第二版): out only while TAIEX is below its 200-session average and that average is
+    # lower than MARKET_SLOPE sessions before — a correction inside a rising trend does not sell everything.
     stop_loss: float = Field(default=0.0, ge=0.0, le=0.5)
-    market_filter: Literal["none", "taiex_200", "taiex_10m", "taiex_12m"] = "none"
+    market_filter: Literal["none", "taiex_200", "taiex_10m", "taiex_12m", "taiex_200s"] = "none"
     # R7b (2026-10-06), risk controls that look at the holdings themselves, left out of the hash when
     # off. weighting "inverse_vol": each pick's target in proportion to 1 / its 60-session volatility
     # (the calmer, the more money) instead of equal amounts. account_filter "own_200": while this rule's
@@ -359,8 +361,10 @@ class DailyRule(BaseModel):
     # 2026-10-09 (使用者：好的策略應該要能夠避免回撤、知道什麼時候要賣): "v1" = the stock part is scaled by
     # the rule's own recent volatility against its usual level, the rest held in cash (never 0050) —
     # momentum crashes come after its volatility has jumped (Barroso & Santa-Clara 2015; Daniel & Moskowitz
-    # 2016). Left out of the hash when "none". See ``exposure_schedule``.
-    vol_scale: Literal["none", "v1"] = "none"
+    # 2016). Left out of the hash when "none". See ``exposure_schedule``. "taiex_half" (2026-10-24, 空頭減碼第二版): half
+    # the stock part while TAIEX closes below its 200-session average, the rest in cash (Moreira & Muir 2017: scale
+    # the exposure instead of all or nothing).
+    vol_scale: Literal["none", "v1", "taiex_half"] = "none"
     # 2026-10-09 (使用者：只在大型股裡挑，但不要照 0050 的比例買台積電): only the ``large_caps`` largest listed
     # stocks by market value (the previous close times shares issued, chips.py ``market_cap``) can be picked;
     # the picks still get equal amounts, so no stock is held at its market-value share. 0 = no limit, left
@@ -1003,6 +1007,11 @@ class FactorPanel:
         if kind in ("taiex_10m", "taiex_12m"):
             return bool(self.monthly_risk(kind)[position])
         average = self._market_average[position]
+        if kind == "taiex_200s":                 # out only below a falling average
+            before = self._market_average[position - MARKET_SLOPE] if position >= MARKET_SLOPE else np.nan
+            if not (np.isfinite(average) and np.isfinite(before)):
+                return True
+            return bool(self.market[position] >= average or average >= before)
         return bool(not np.isfinite(average) or self.market[position] >= average)
 
     def monthly_risk(self, kind: str) -> np.ndarray:
@@ -1977,6 +1986,10 @@ def price_limits(data: LegacyData, symbol: str, day: date) -> tuple[float | None
     return low, high
 
 
+MARKET_SLOPE = 20                    # taiex_200s: the 200-session average against itself this many sessions before
+MARKET_HALF = 0.5                    # vol_scale "taiex_half": the stock part held while TAIEX is below its average
+
+
 def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel) -> dict[date, float] | None:
     """vol_scale "v1": for every session, the share of the stock part to hold — 1.25 times the usual
     volatility of the rule's own stock account (the median of its 21-session volatility over the past 750
@@ -1985,6 +1998,12 @@ def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs:
     Known at the close it is used on (the account without scaling, replayed from SHADOW_WARMUP). None when off."""
     if getattr(rule, "vol_scale", "none") == "none":
         return None
+    if rule.vol_scale == "taiex_half":            # 2026-10-24: half while TAIEX closes below its 200-session average
+        output = {day: 1.0 if fp.risk_on(position) else MARKET_HALF for position, day in enumerate(fp.sessions)}
+        if lag_of(rule):
+            later = dict(zip(fp.sessions, fp.sessions[1:]))
+            output = {later[day]: level for day, level in output.items() if day in later}
+        return output
     shadow = rule.model_copy(update={"vol_scale": "none", "core": 0.0, "account_filter": "none"})
     sessions = fp.sessions
     start, end = sessions[min(SHADOW_WARMUP, len(sessions) - 1)], sessions[-1]
@@ -4424,6 +4443,37 @@ PAID_VETO_TREND = (6599, 6594, 6280, 6268, 4789, 4790, 6624, 5797)
 PAID_VETO_ROBOTS = (6542, 6534, 6135, 6136, 5173, 6640)
 
 
+BEAR_GUARDS = {
+    "taiex_200": ("加權指數跌破 200 日均線就不持股", {"market_filter": "taiex_200"}),
+    "taiex_200s": ("加權指數跌破下彎的 200 日均線才不持股", {"market_filter": "taiex_200s"}),
+    "taiex_half": ("加權指數跌破 200 日均線就減碼一半", {"vol_scale": "taiex_half"}),
+}
+
+
+def bear_guard_batch() -> list:
+    """2026-10-24 (research_method §7「空頭減碼第二版」, written before the run): the stress test's 20 strategies
+    (stress.chosen), each with each of BEAR_GUARDS (a blend: every sleeve) — all 60 graded the usual way on 2015-06
+    onwards; none is picked by its 2008 result."""
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.holding import style_of
+    from quant_platform.research.stress import chosen
+
+    output = []
+    for item in chosen(Path("instance") / "research"):
+        spec = item["spec"]
+        for word, fields in BEAR_GUARDS.values():
+            blend = spec.get("kind") == "blend"
+            tail = f"・{word}（#{item['trial']}）" + ("" if blend else f"｜持有：{style_of(spec) or '固定持有 20 天'}")
+            stem = str(spec.get("name") or item["name"]).split("｜")[0]
+            name = stem[:max(4, 80 - len(tail) - 1)] + ("…" if len(stem) > 80 - len(tail) - 1 else "") + tail
+            if blend:
+                sleeves = [{**sleeve, "rule": {**sleeve["rule"], **fields}} for sleeve in spec["sleeves"]]
+                output.append(parse_spec({**spec, "sleeves": sleeves, "name": name}))
+            else:
+                output.append(DailyRule.model_validate({**spec, **fields, "name": name}))
+    return output
+
+
 def paid_veto_batch() -> list[DailyRule]:
     return _veto_rules([(trial, "h2") for trial in PAID_VETO_TREND] + [(trial, "m1") for trial in PAID_VETO_TREND]
                        + [(trial, "h2") for trial in PAID_VETO_ROBOTS])
@@ -4587,7 +4637,8 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
-           "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
+           "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2], "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

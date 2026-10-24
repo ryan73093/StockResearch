@@ -245,6 +245,21 @@ def test_month_end_filters_decide_on_the_last_session_and_hold_to_the_next():
     assert rule.canonical()["market_filter"] == "taiex_10m"
 
 
+def test_the_slope_filter_and_the_half_wait_for_the_200_session_average():
+    """2026-10-24 (research_method §7 空頭減碼第二版): out only below a falling average; half below the average."""
+    days = weekdays(date(2023, 1, 2), date(2024, 6, 28))
+    data = market(days, {"1101.TW": {day: 10.0 for day in days}})
+    taiex = np.array([100 + 0.2 * i for i in range(260)] + [120.0] * 10 + [70.0] * (len(days) - 270))
+    fp = FactorPanel(Panel(data), market=taiex)
+    # 262: a dip to 120 below the average (about 132) while the average still rises — only the plain filter sells
+    assert not fp.risk_on(262) and fp.risk_on(262, "taiex_200s")
+    assert not fp.risk_on(360, "taiex_200s")                  # at 70 for 90 sessions: the average has turned down
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, vol_scale="taiex_half")
+    levels = daily.exposure_schedule(data, fp, rule, FREE)
+    assert levels[days[250]] == 1.0 and levels[days[262]] == daily.MARKET_HALF
+    assert rule.canonical()["vol_scale"] == "taiex_half"
+
+
 def test_risk_controls_are_part_of_the_rule_only_when_on():
     base = DailyRule(name="x", factors={"trend_200": 1.0})
     assert "stop_loss" not in base.canonical() and "market_filter" not in base.canonical()

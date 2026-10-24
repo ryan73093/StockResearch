@@ -45,9 +45,12 @@ OVERLAYS = {
     "taiex_12m": ("月底加權指數比一年前低就不持股一個月", {"market_filter": "taiex_12m"}),
     "stop_15": ("跌離買進後最高價 15% 就賣", {"stop_loss": 0.15}),
     "vol_v1": ("波動大時減碼到現金", {"vol_scale": "v1"}),
+    # 第二版 (research_method §7「空頭減碼第二版」, written before the run)
+    "taiex_200s": ("加權指數跌破下彎的 200 日均線才不持股", {"market_filter": "taiex_200s"}),
+    "taiex_half": ("加權指數跌破 200 日均線就減碼一半", {"vol_scale": "taiex_half"}),
 }
 SHORT = {"none": "不加", "taiex_200": "200 日均線", "taiex_10m": "10 個月均線", "taiex_12m": "一年動能",
-         "stop_15": "15% 停損", "vol_v1": "依波動減碼"}
+         "stop_15": "15% 停損", "vol_v1": "依波動減碼", "taiex_200s": "均線下彎才出", "taiex_half": "減碼一半"}
 RANKED = ("market_filter", "stop_loss")             # these act where the day's targets are decided: ranked again
 HELPS = 2                                            # held at least this many more scenarios (the median strategy)
 KEEPS = 0.8                                          # and keeps at least this share of its 2015-06 money

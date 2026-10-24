@@ -149,7 +149,8 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
         if spec.get("stop_loss"):
             traits.append("停損")
         if spec.get("market_filter") not in (None, "none"):
-            traits.append({"taiex_10m": "大盤 10 個月均線濾網", "taiex_12m": "大盤一年動能濾網"}.get(spec["market_filter"], "大盤濾網"))
+            traits.append({"taiex_10m": "大盤 10 個月均線濾網", "taiex_12m": "大盤一年動能濾網",
+                           "taiex_200s": "大盤均線下彎濾網"}.get(spec["market_filter"], "大盤濾網"))
         if spec.get("account_filter") not in (None, "none"):
             traits.append("帳戶濾網")
         if spec.get("smooth"):
@@ -157,7 +158,7 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
         if spec.get("exit_model") not in (None, "none"):
             traits.append("學習出場")
         if spec.get("vol_scale") not in (None, "none"):
-            traits.append("波動大時減碼")
+            traits.append("大盤跌破年線減碼一半" if spec["vol_scale"] == "taiex_half" else "波動大時減碼")
         if spec.get("news_veto") == "v1":
             traits.append("新聞否決")
         elif spec.get("news_veto") == "v1-off":
