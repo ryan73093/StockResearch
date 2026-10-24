@@ -263,6 +263,17 @@ def test_the_slope_filter_and_the_half_wait_for_the_200_session_average():
     assert staged[days[250]] == 1.0 and staged[days[262]] == 0.0 and staged[days[300]] == 0.0
 
 
+def test_half_twins_take_the_passing_rules_without_a_market_guard():
+    """2026-10-25 (research_method §7 空頭減碼第三版): every batch's passing rules get the half-guard twin."""
+    plain = DailyRule(name="甲｜持有：固定持有 20 天", factors={"trend_200": 1.0})
+    guarded = DailyRule(name="乙", factors={"trend_200": 1.0}, market_filter="taiex_200")
+    cored = DailyRule(name="丙", factors={"trend_200": 1.0}, core=0.5)
+    twins = daily.half_twins([plain, guarded, cored, plain], set())
+    assert len(twins) == 1 and twins[0].vol_scale == "taiex_half" and twins[0].factors == plain.factors
+    assert twins[0].name == "甲・加權指數跌破 200 日均線就減碼一半｜持有：固定持有 20 天"
+    assert daily.half_twins([plain], {twins[0].rule_hash}) == []
+
+
 def test_risk_controls_are_part_of_the_rule_only_when_on():
     base = DailyRule(name="x", factors={"trend_200": 1.0})
     assert "stop_loss" not in base.canonical() and "market_filter" not in base.canonical()

@@ -278,9 +278,23 @@ def _daily(args, registry: TrialRegistry) -> int:
     with JobLog(RESEARCH).start(f"每天決策規則・{args.name}（2015-06 起、啟動資金 30 萬＋每月 1 萬）", command,
                                 total=len(rules)) as job:
         loaded: dict[str, tuple] = {}
+        passing: list = []
+
+        def with_twins():
+            """The batch, then its passing rules' half-guard twins (2026-10-25, research_method §7 空頭減碼第三版)."""
+            yield from rules
+            if args.no_half or args.name.startswith(daily_research.NO_HALF_TWINS):
+                return
+            twins = daily_research.half_twins(passing, {record.spec_hash for record in registry.records()})
+            if twins:
+                print(f"過門檻的 {len(passing)} 個規則補評「跌破 200 日均線就減碼一半」版本 {len(twins)} 個", flush=True)
+                job.update(total=len(rules) + len(twins), force=True)
+                record_sources(RESEARCH, twins, f"每天決策批次 {args.name}（減碼一半版本）")
+                yield from twins
+
         stamp = datetime.now(TAIPEI).strftime("%Y%m%d-%H%M%S")
         passed, failed = 0, []
-        for index, rule in enumerate(rules):
+        for index, rule in enumerate(with_twins()):
             # 2026-10-20 (AGENTS.md: research runs keep out of 13:30–14:40, the after-close orders): wait between rules
             while datetime.now(TAIPEI).weekday() < 5 and "13:30" <= datetime.now(TAIPEI).strftime("%H:%M") < "14:40":
                 job.update(current="13:30～14:40 盤後單時段，暫停", force=True)
@@ -308,6 +322,8 @@ def _daily(args, registry: TrialRegistry) -> int:
                 continue
             reasons = record.metrics.get("reasons") or []
             passed += not reasons
+            if not reasons:
+                passing.append(rule)
             verdict = "過門檻" if not reasons else "；".join(reasons)
             print(f"{rule.name}：2015-06 起比 0050 {report['full_period_excess']:+.1%}、"
                   f"2020-10 起 {report['since_2020']['excess']:+.1%}；{verdict}", flush=True)
@@ -327,6 +343,8 @@ def main() -> int:
                             "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
+    parser.add_argument("--no-half", action="store_true",
+                        help="daily：不替過門檻的規則補評「跌破 200 日均線就減碼一半」版本（2026-10-25 起預設會補）")
     parser.add_argument("--ask", help="knowledge：問研究知識庫（AI 只根據紀錄回答；沒有金鑰時列出最相關的紀錄）")
     parser.add_argument("--index", action="store_true", help="knowledge：把新的或改過的紀錄編成 BGE-M3 向量存進 Qdrant")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), help="knowledge --index：用哪個裝置編碼（預設 auto）")

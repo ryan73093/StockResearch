@@ -4541,6 +4541,41 @@ def _guarded(trials: tuple[int, ...], guards: list[tuple[str, dict]]) -> list:
     return output
 
 
+NO_HALF_TWINS = ("bearguard",)        # batches whose passing rules get no half twin (they are the guards themselves)
+
+
+def half_twins(rules: list, registered: set[str]) -> list:
+    """2026-10-25 (research_method §7「空頭減碼第三版」, its judgement met: 35 rules of seven families kept 78% of the
+    money and 34 fell less in 0050's worst fall): a batch's passing rules again with the half guard (vol_scale
+    "taiex_half"; a blend: every sleeve) — not a rule that keeps 0050, already scales its stocks or filters by the
+    market, or whose settings are ``registered``."""
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.holding import style_of
+
+    word, fields = BEAR_GUARDS["taiex_half"]
+    output, seen = [], set(registered)
+    for rule in rules:
+        spec = rule.canonical()
+        blend = spec.get("kind") == "blend"
+        inner = [sleeve.get("rule") or {} for sleeve in spec.get("sleeves") or []] if blend else [spec]
+        if uses_0050(spec) or any(item.get("vol_scale", "none") != "none" or item.get("market_filter", "none") != "none"
+                                  for item in inner):
+            continue
+        tail = f"・{word}" + ("" if blend else f"｜持有：{style_of(spec) or '固定持有 20 天'}")
+        stem = rule.name.split("｜")[0]
+        name = stem[:max(4, 80 - len(tail) - 1)] + ("…" if len(stem) > 80 - len(tail) - 1 else "") + tail
+        if blend:
+            twin = parse_spec({**spec, "name": name,
+                               "sleeves": [{**sleeve, "rule": {**sleeve["rule"], **fields}} for sleeve in spec["sleeves"]]})
+        else:
+            twin = DailyRule.model_validate({**spec, **fields, "name": name})
+        if twin.rule_hash not in seen:
+            seen.add(twin.rule_hash)
+            output.append(twin)
+    return output
+
+
 def bear_guard3_batch() -> list:
     """2026-10-25 (research_method §7「空頭減碼第三版」, written before the run): the half guard on BEAR_HALF_WIDE, and
     the staged guard on BEAR_GUARD_ORIGINS — graded the usual way on 2015-06 onwards."""
