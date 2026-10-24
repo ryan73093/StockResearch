@@ -4450,17 +4450,31 @@ BEAR_GUARDS = {
 }
 
 
+# The stress test's 20 strategies (stress-20261024-190336.json), fixed: the second half of the first run read
+# stress.chosen after the first half's rules had joined the pool and got another list (19 missed, 2 doubled).
+BEAR_GUARD_ORIGINS = (6490, 6090, 6773, 6774, 7024, 6784, 6903, 6491, 6979, 7091, 6885, 7047, 6896, 6890, 5054, 7144,
+                      6139, 7102, 6599, 6642)
+
+
 def bear_guard_batch() -> list:
     """2026-10-24 (research_method §7「空頭減碼第二版」, written before the run): the stress test's 20 strategies
-    (stress.chosen), each with each of BEAR_GUARDS (a blend: every sleeve) — all 60 graded the usual way on 2015-06
-    onwards; none is picked by its 2008 result."""
+    (BEAR_GUARD_ORIGINS), each with each of BEAR_GUARDS (a blend: every sleeve) — all 60 graded the usual way on
+    2015-06 onwards; none is picked by its 2008 result. Settings registered already (under any name) are left out."""
+    import json as _json
+
     from quant_platform.research.blend import parse_spec
     from quant_platform.research.holding import style_of
-    from quant_platform.research.stress import chosen
+    from quant_platform.research.registry import TrialRegistry
 
+    research = Path("instance") / "research"
+    records = TrialRegistry(research / "trials.jsonl").records()
+    by_trial = {record.trial_id: record for record in records}
+    registered = {record.spec_hash for record in records}
     output = []
-    for item in chosen(Path("instance") / "research"):
-        spec = item["spec"]
+    for trial in BEAR_GUARD_ORIGINS:
+        record = by_trial[trial]
+        spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        item = {"trial": trial, "name": record.spec_name}
         for word, fields in BEAR_GUARDS.values():
             blend = spec.get("kind") == "blend"
             tail = f"・{word}（#{item['trial']}）" + ("" if blend else f"｜持有：{style_of(spec) or '固定持有 20 天'}")
@@ -4468,9 +4482,11 @@ def bear_guard_batch() -> list:
             name = stem[:max(4, 80 - len(tail) - 1)] + ("…" if len(stem) > 80 - len(tail) - 1 else "") + tail
             if blend:
                 sleeves = [{**sleeve, "rule": {**sleeve["rule"], **fields}} for sleeve in spec["sleeves"]]
-                output.append(parse_spec({**spec, "sleeves": sleeves, "name": name}))
+                rule = parse_spec({**spec, "sleeves": sleeves, "name": name})
             else:
-                output.append(DailyRule.model_validate({**spec, **fields, "name": name}))
+                rule = DailyRule.model_validate({**spec, **fields, "name": name})
+            if rule.rule_hash not in registered:
+                output.append(rule)
     return output
 
 
@@ -4638,7 +4654,8 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
-           "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2], "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
+           "bearguard": bear_guard_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

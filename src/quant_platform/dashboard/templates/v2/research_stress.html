@@ -74,7 +74,7 @@
 {% macro times(value) %}{% if value is none %}—{% else %}{{ '%g'|format(value) }}{% endif %}{% endmacro %}
 {% if protect %}
 <h3 class="dash-h">大空頭來時減碼，有沒有用（{{ protect.rows|length }} 個策略各加一種，2007 年起）</h3>
-<p class="small" style="margin:0 0 8px">五種文獻上的減碼方式，設定事先固定、沒有在 2007～2014 試參數；不持股的錢放現金（不放 0050）。判定跑之前寫好：撐過的次數中位數多 2 次以上、一半以上的策略撐過 2008 才算「空頭有幫助」；2015-06 起的期末留住沒加時的 8 成以上、2007 起仍贏 0050 才算「代價可接受」。{{ protect.generated_at[:16]|replace('T', ' ') }} 跑完。</p>
+<p class="small" style="margin:0 0 8px">{{ protect.ways|length }} 種文獻上的減碼方式（第一版 5 種、第二版 2 種），設定事先固定、沒有在 2007～2014 試參數；不持股的錢放現金（不放 0050）。判定跑之前寫好：撐過的次數中位數多 2 次以上、一半以上的策略撐過 2008 才算「空頭有幫助」；2015-06 起的期末留住沒加時的 8 成以上、2007 起仍贏 0050 才算「代價可接受」。{{ protect.generated_at[:16]|replace('T', ' ') }} 開始跑的結果。</p>
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
     <thead><tr><th>減碼方式</th><th class="num">不持股的時間</th><th class="num">撐過幾次（不加）</th><th class="num">撐過 2008</th><th class="num">2015-06 起留住</th><th class="num">2007 起期末（0050）</th><th>判定</th></tr></thead>
