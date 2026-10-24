@@ -1089,7 +1089,7 @@ def main() -> int:
                     print(scenario["high"], scenario["low"], scenario["fall"], scenario["size"], scenario["speed"],
                           f"撐過 {scenario.get('held')}／{scenario.get('tested')}", flush=True)
                 for row in rows:
-                    print(row.get("trial"), row.get("why"), row.get("held_count"), "/", row.get("bears"),
+                    print(row.get("trial"), row.get("why"), row.get("held_count"), "/", row.get("scenario_count"),
                           row.get("held_2008"), row.get("final"), row.get("base_final"), row.get("error", ""), flush=True)
                 print(f"已寫入 {path}")
         return 0

@@ -217,7 +217,7 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
                   "held_2008": sum(1 for row in rows if row.get("held_2008")),
                   "held_all": sum(1 for row in rows if row.get("held_all")),
                   "beat": sum(1 for row in rows if row["final"] > row["base_final"]),
-                  "steady": {"trial": steady["trial"], "held": steady.get("held_count"), "of": steady.get("bears")}
+                  "steady": {"trial": steady["trial"], "held": steady.get("held_count"), "of": steady.get("scenario_count")}
                   if steady else None}
     return {"benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
             "stress": stress,

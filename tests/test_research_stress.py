@@ -56,7 +56,7 @@ def test_the_window_shows_every_scenario_and_the_entries_on_the_high(tmp_path):
            "final": 5_000_000, "base_final": 2_473_000, "contributed": 2_500_000, "max_drawdown": -0.45,
            "base_max_drawdown": -0.55, "bears": [bear], "tops": [{"worst": -0.35, "worst_day": "2008-11-20", "even_days": 700,
                                                                   "base_worst": -0.5, "base_even_days": 1100}],
-           "held_2008": True, "held_count": 1, "held_all": True, "worse_bears": 0}
+           "held_2008": True, "held_count": 1, "held_all": True, "worse_bears": 0, "scenario_count": 1}
     scenario = {"high": "2007-10-29", "low": "2008-11-20", "fall": -0.55, "size": "大空頭", "speed": "慢跌", "sessions": 270,
                 "back": "2011-01-28", "base_days": 1187, "held": 1, "tested": 1,
                 "least": {"trial": 6490, "fall": -0.40}, "most": {"trial": 6490, "fall": -0.40}}

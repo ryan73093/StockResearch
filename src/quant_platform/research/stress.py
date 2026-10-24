@@ -194,7 +194,7 @@ def verdict(rows: list[dict]) -> dict[str, object]:
     crisis = next((row for row in rows if CRISIS[0].isoformat() <= row["high"] <= CRISIS[1].isoformat()), None)
     return {"held_2008": crisis["held"] if crisis else None, "held_count": sum(row["held"] for row in rows),
             "held_all": bool(rows) and all(row["held"] for row in rows),
-            "worse_bears": sum(row["gap"] < -WORSE for row in rows), "bears": len(rows)}
+            "worse_bears": sum(row["gap"] < -WORSE for row in rows), "scenario_count": len(rows)}
 
 
 def kind(item: dict) -> dict[str, object]:
