@@ -158,3 +158,34 @@ def test_a_window_the_project_opened_is_caught(tmp_path):
     assert not found()["ok"] and "PID 3" in found()["detail"]
     windows[-1] = {"title": "", "class": "TkTopLevel", "pid": 4, "path": str(root / ".venv" / "Scripts" / "pythonw.exe")}
     assert not found()["ok"] and "PID 4" in found()["detail"]
+
+
+def test_an_interrupted_or_dead_pipeline_is_caught(tmp_path):
+    """2026-10-24 (10-23 03:27 a restart stopped half of the branch download unnoticed for 36 hours): a pipeline record
+    "interrupted", or "running" without its process, fails the check; "done" and a live "running" do not."""
+    import os
+
+    (tmp_path / "forward" / "stocks").mkdir(parents=True)
+    (tmp_path / "forward" / "stocks" / "tracked.json").write_text("[]", encoding="utf-8")
+    folder = tmp_path / "pipelines"
+    folder.mkdir()
+    name = "研究流程沒有中斷了沒恢復的"
+
+    def write(record_name, status, pid):                  # started now: a live PID is this test's own process
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        started = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%dT%H:%M:%S")
+        (folder / f"{record_name}.json").write_text(json.dumps({"name": record_name, "pid": pid, "status": status,
+                                                                "started_at": started}), encoding="utf-8")
+
+    def found():
+        return {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 24), windows=[])}[name]
+    write("ok", "done", 0)
+    write("alive", "running", os.getpid())
+    assert found()["ok"], found()["detail"]
+    write("fmdaily_a", "interrupted", 0)
+    assert not found()["ok"] and "fmdaily_a（中斷" in found()["detail"]
+    write("fmdaily_a", "done", 0)
+    write("fmdaily_b", "running", 999999)
+    assert not found()["ok"] and "fmdaily_b（程序已不在" in found()["detail"]

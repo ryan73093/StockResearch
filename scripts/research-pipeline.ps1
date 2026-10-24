@@ -60,6 +60,15 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
     $process = Start-Process -FilePath $python -ArgumentList $Arguments -WorkingDirectory $root -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput $out -RedirectStandardError $err
     Write-Note "步驟 $Label 結束（結束碼 $($process.ExitCode)）"
+    # 2026-10-24: the restart from the Start menu on 10-23 03:27 killed fmdaily_a's download step; the pipeline logged
+    # the code, ran to its end and wrote "done", so it was never resumed (fmdaily_b, killed whole, was). A step ended by
+    # the system (0x40010004 terminated, 0xC000013A console closed, 0xC0000142 / 0xC000026B shutdown) stops the
+    # pipeline as "interrupted": resume-research.ps1 starts it again (each pipeline resumes where it can).
+    if ($process.ExitCode -in @(1073807364, -1073741510, -1073741502, -1073741205)) {
+        Write-Note "步驟 $Label 被系統結束（關機、重開機或主控台關閉）：流程標成中斷，服務下次啟動時自動重開"
+        Write-PipelineRecord "interrupted"
+        exit 1
+    }
 }
 
 switch ($Name) {

@@ -17,9 +17,10 @@ foreach ($file in Get-ChildItem $folder -Filter "*.json") {
     } catch {
         continue
     }
-    if ($record.status -ne "running") { continue }
+    # 2026-10-24: "interrupted" - a step the system ended (research-pipeline.ps1 Invoke-Step) - resumes too
+    if ($record.status -notin @("running", "interrupted")) { continue }
     $started = [datetime]::Parse($record.started_at)
-    if ($started -ge $boot) { continue }                      # began after this boot: not a reboot's casualty
+    if ($record.status -eq "running" -and $started -ge $boot) { continue }   # began after this boot: not a reboot's casualty
     $alive = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$record.pid)" -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -like "*research-pipeline.ps1*-Name $($record.name)*" }
     if ($alive) { continue }

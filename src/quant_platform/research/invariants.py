@@ -293,6 +293,30 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     except Exception as exc:                            # noqa: BLE001 - a broken build is itself the finding
         checks.append(_check("研究知識庫收了每一個試驗", "使用者 2026-10-22：失敗紀錄都要記起來，作為知識庫", False,
                              f"建立失敗：{str(exc)[:120]}"))
+    # 2026-10-24 (10-23 03:27 the restart from the Start menu stopped half of the branch download and nothing noticed it
+    # for 36 hours): every research pipeline is done, running, or resumed — none interrupted or dead while "running"
+    from quant_platform.research.jobs import _alive
+
+    stuck = []
+    for path in sorted((research / "pipelines").glob("*.json")) if (research / "pipelines").is_dir() else []:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        status = record.get("status")
+        started = None
+        try:
+            started = datetime.fromisoformat(str(record.get("started_at")))
+            if started.tzinfo is None:                     # the pipeline writes Taipei time without its offset
+                from zoneinfo import ZoneInfo
+
+                started = started.replace(tzinfo=ZoneInfo("Asia/Taipei"))
+        except ValueError:
+            pass
+        if status == "interrupted" or (status == "running" and not _alive(int(record.get("pid") or 0), started)):
+            stuck.append(f"{record.get('name')}（{'中斷' if status == 'interrupted' else '程序已不在'}，{str(record.get('started_at'))[:16]} 開始）")
+    checks.append(_check("研究流程沒有中斷了沒恢復的", "AGENTS.md 長時間程式：重開機或關機後要接著跑", not stuck,
+                         "；".join(stuck[:4]) if stuck else "沒有"))
     # 2026-10-23 (AGENTS.md：背景程式不開視窗; 使用者 2026-10-20 關掉一堆沒說明的空白 cmd 視窗，研究跟著中斷)
     try:
         opened = own_windows(desktop_windows() if windows is None else windows, research.parent.parent)
