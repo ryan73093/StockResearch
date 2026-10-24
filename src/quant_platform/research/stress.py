@@ -6,13 +6,16 @@ they were never picked on — a test, not a selection (no rule is chosen or grad
   and each family's best (categories.best_of) — single rules and blends (each sleeve on its share of every amount).
 - The models they read are trained again, year by year, on data from FIRST_DATA_YEAR only up to each year (the 2007
   model knows 2006's end and nothing after), into ``models_long`` beside the research models (which stay as they are).
-- Two accounts each, 30 萬 and 1 萬 on every 5th like every rule: from START, and from the 2007 top (PEAK_START).
-- The bear markets: 0050's falls of BEAR or more from a high (sessions, net of the money put in). For each: how far the
-  strategy fell over the same days, and when it was back to where it stood on 0050's high, against 0050's own.
+- 30 萬 and 1 萬 on every 5th like every rule: one account from START, and for each scenario one opened on its high.
+- The scenarios (使用者 2026-10-24：我不要只有 2008 的，應該要很多空頭情境，你都要分析給我): every 0050 fall of BEAR or
+  more from a high (sessions, net of the money put in) — 大空頭 from BIG, 修正 below; 急殺 when the low came within FAST
+  sessions, 慢跌 after. For each: how far the strategy fell over the same days, and when it was back to where it stood
+  on 0050's high, against 0050's own; for the account opened on the high, its deepest loss against the money put in and
+  when it was worth that money again.
 
-Verdict per strategy (written before the run; it changes no grade): it held through 2008 if over 0050's 2007-2008 fall
-it fell at most WORSE further than 0050 and was back no later than 0050; in any bear, falling more than WORSE further is
-marked. Limits: no capital reductions before 2011; the alerts, day trading and holder data start 2014, 2014 and 2010
+Verdict (written before the run; it changes no grade): a strategy held through a scenario if it fell at most WORSE
+further than 0050 and was back no later than 0050; held_2008 is the scenario whose high falls in CRISIS; held_all is
+every scenario. Limits: no capital reductions before 2011; the alerts, day trading and holder data start 2014, 2014 and 2010
 (the conditions on them are idle before); the 2007 models learnt from two years."""
 
 from __future__ import annotations
@@ -28,8 +31,9 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 FIRST_DATA_YEAR = 2004
 FIRST_MODEL_YEAR = 2007
 START = date(2007, 1, 2)
-PEAK_START = date(2007, 10, 31)
-BEAR = 0.20
+BEAR = 0.15                                          # every 0050 fall of 15% or more is a scenario
+BIG = 0.20                                           # 大空頭 from here; 修正 below
+FAST = 40                                            # sessions from the high to the low: 急殺 within
 WORSE = 0.10
 MODELS = "models_long"
 CRISIS = (date(2007, 6, 1), date(2009, 12, 31))      # the 2008 bear is the one whose high falls in here
@@ -177,18 +181,51 @@ def judge(days: list[date], mine: np.ndarray, base: np.ndarray, falls: list[dict
     return output
 
 
+def held(row: dict) -> bool:
+    """Held through one bear: at most WORSE further than 0050 over its fall, and back no later than 0050."""
+    late = row["days"] is None or (row["base_days"] is not None and row["days"] > row["base_days"])
+    return row["gap"] >= -WORSE and not late
+
+
 def verdict(rows: list[dict]) -> dict[str, object]:
-    """Held through 2008: in the bear whose high falls in CRISIS, at most WORSE further than 0050 and back no later."""
+    """Every bear held or not; the 2008 one (its high in CRISIS) on its own."""
+    for row in rows:
+        row["held"] = held(row)
     crisis = next((row for row in rows if CRISIS[0].isoformat() <= row["high"] <= CRISIS[1].isoformat()), None)
-    held = None
-    if crisis:
-        late = crisis["days"] is None or (crisis["base_days"] is not None and crisis["days"] > crisis["base_days"])
-        held = crisis["gap"] >= -WORSE and not late
-    return {"held_2008": held, "worse_bears": sum(row["gap"] < -WORSE for row in rows),
-            "bears": len(rows)}
+    return {"held_2008": crisis["held"] if crisis else None, "held_count": sum(row["held"] for row in rows),
+            "held_all": bool(rows) and all(row["held"] for row in rows),
+            "worse_bears": sum(row["gap"] < -WORSE for row in rows), "bears": len(rows)}
+
+
+def kind(item: dict) -> dict[str, object]:
+    """A bear's size (大空頭 from BIG, 修正 below) and speed (急殺 when the low came within FAST sessions)."""
+    sessions = item["low"] - item["high"]
+    return {"size": "大空頭" if item["fall"] <= -BIG else "修正", "speed": "急殺" if sessions <= FAST else "慢跌",
+            "sessions": sessions}
+
+
+def entry(result, until: date | None) -> dict[str, object]:
+    """An account opened on a bear's high: its deepest loss against the money put in (up to ``until``, 0050's day
+    back, or the end) and the days until it was worth the money put in again after that low."""
+    paid, pointer, total = [], 0, 0.0
+    flows = sorted(result.contributions)
+    for day in result.days:
+        while pointer < len(flows) and flows[pointer][0] <= day:
+            total += flows[pointer][1]
+            pointer += 1
+        paid.append(total)
+    ratio = np.asarray(result.values, dtype=float) / np.maximum(np.asarray(paid, dtype=float), 1.0) - 1
+    stop = len(result.days) if until is None else next((index for index, day in enumerate(result.days) if day > until),
+                                                       len(result.days))
+    bottom = int(np.argmin(ratio[:max(stop, 1)]))
+    back = next((index for index in range(bottom, len(ratio)) if ratio[index] >= 0), None)
+    return {"worst": round(float(ratio[bottom]), 4), "worst_day": result.days[bottom].isoformat(),
+            "even_days": (result.days[back] - result.days[0]).days if back is not None else None}
 
 
 def run(history: str | Path, research: str | Path, job=None) -> Path:
+    """2026-10-24 (使用者：我不要只有 2008 的，應該要很多空頭情境，你都要分析給我): one account per strategy from START
+    through every 0050 fall of BEAR or more (each held or not), and for each fall an account opened on its high."""
     from quant_platform.research.blend import BlendAccount, parse_spec
     from quant_platform.research.costs import broker_costs
     from quant_platform.research.daily import RECENT_END, DailyRule, account_parking, daily_weights, exposure_schedule
@@ -199,46 +236,72 @@ def run(history: str | Path, research: str | Path, job=None) -> Path:
     data, fp = load_long(history)
     costs = broker_costs("cathay")
     end = RECENT_END
+    base = simulate_daily(data, None, costs, START, end)
+    base_units = _units(base)
+    falls = bears(base.days, base_units)
+    scenarios = [{"high": base.days[item["high"]].isoformat(), "low": base.days[item["low"]].isoformat(),
+                  "fall": round(item["fall"], 4), **kind(item),
+                  "back": base.days[item["back"]].isoformat() if item["back"] is not None else None,
+                  "base_days": (base.days[item["back"]] - base.days[item["high"]]).days if item["back"] is not None else None}
+                 for item in falls]
+    base_tops = []
+    for item in falls:                           # 0050 opened on each high, judged to its own day back
+        opened = simulate_daily(data, None, costs, base.days[item["high"]], end)
+        base_tops.append(entry(opened, base.days[item["back"]] if item["back"] is not None else None))
     report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "start": START.isoformat(),
-              "peak_start": PEAK_START.isoformat(), "bear": BEAR, "worse": WORSE, "models": versions(strategies),
-              "accounts": {}}
-    for key, first in (("from_2007", START), ("from_2007_top", PEAK_START)):
-        base = simulate_daily(data, None, costs, first, end)
-        base_units = _units(base)
-        falls = bears(base.days, base_units)
-        rows = []
-        for number, item in enumerate(strategies):
-            if job:
-                job.update(done=number, total=len(strategies), current=f"{'2007-01' if key == 'from_2007' else '2007-10 高點'} 起：#{item['trial']}")
-            spec = item["spec"]
-            try:
-                if spec.get("kind") == "blend":
-                    account = BlendAccount(data, fp, parse_spec(spec), costs, first, end)
-                    result = account.run(first, end)
-                else:
-                    rule = DailyRule.model_validate(spec)
-                    ranks = rankings(fp, rule, first, end)
-                    result = simulate_daily(data, rule, costs, first, end, ranks, weights=daily_weights(fp, rule, ranks),
-                                            parked=account_parking(data, fp, rule, costs),
-                                            exposure=exposure_schedule(data, fp, rule, costs))
-            except Exception as exc:                    # noqa: BLE001 - one strategy's failure is reported, not fatal
-                rows.append({**{k: v for k, v in item.items() if k != "spec"}, "error": f"{type(exc).__name__}: {exc}"[:300]})
-                continue
+              "bear": BEAR, "big": BIG, "fast": FAST, "worse": WORSE, "models": versions(strategies),
+              "scenarios": scenarios, "base_final": round(base.final_value, 2),
+              "base_max_drawdown": round(float((base_units / np.maximum.accumulate(base_units) - 1).min()), 4),
+              "base_tops": base_tops, "rows": []}
+    for number, item in enumerate(strategies):
+        if job:
+            job.update(done=number, total=len(strategies), current=f"#{item['trial']}：2007 起與每次空頭高點起")
+        spec = item["spec"]
+        try:
+            if spec.get("kind") == "blend":
+                account = BlendAccount(data, fp, parse_spec(spec), costs, START, end)
+
+                def runner(first, account=account):
+                    return account.run(first, end)
+            else:
+                rule = DailyRule.model_validate(spec)
+                ranks = rankings(fp, rule, START, end)
+                weights, parked = daily_weights(fp, rule, ranks), account_parking(data, fp, rule, costs)
+                exposure = exposure_schedule(data, fp, rule, costs)
+
+                def runner(first, rule=rule, ranks=ranks, weights=weights, parked=parked, exposure=exposure):
+                    return simulate_daily(data, rule, costs, first, end, ranks, weights=weights, parked=parked,
+                                          exposure=exposure)
+            result = runner(START)
             units = _units(result)
             if result.days != base.days:
                 units = np.interp([day.toordinal() for day in base.days], [day.toordinal() for day in result.days], units)
             judged = judge(base.days, units, base_units, falls)
-            rows.append({**{k: v for k, v in item.items() if k != "spec"},
-                         "final": round(result.final_value, 2), "base_final": round(base.final_value, 2),
-                         "contributed": round(result.contributed, 2),
-                         "max_drawdown": round(float((units / np.maximum.accumulate(units) - 1).min()), 4),
-                         "base_max_drawdown": round(float((base_units / np.maximum.accumulate(base_units) - 1).min()), 4),
-                         "bears": judged, **verdict(judged)})
-        report["accounts"][key] = {"bears": [{"high": base.days[item["high"]].isoformat(), "low": base.days[item["low"]].isoformat(),
-                                              "fall": round(item["fall"], 4),
-                                              "back": base.days[item["back"]].isoformat() if item["back"] is not None else None}
-                                             for item in falls],
-                                   "base_final": round(base.final_value, 2), "rows": rows}
+            summary = verdict(judged)
+            tops = []
+            for fall, mine_base in zip(falls, base_tops):
+                opened = runner(base.days[fall["high"]])
+                found = entry(opened, base.days[fall["back"]] if fall["back"] is not None else None)
+                tops.append({**found, "base_worst": mine_base["worst"], "base_even_days": mine_base["even_days"]})
+        except Exception as exc:                        # noqa: BLE001 - one strategy's failure is reported, not fatal
+            report["rows"].append({**{k: v for k, v in item.items() if k != "spec"},
+                                   "error": f"{type(exc).__name__}: {exc}"[:300]})
+            continue
+        report["rows"].append({**{k: v for k, v in item.items() if k != "spec"},
+                               "final": round(result.final_value, 2), "base_final": round(base.final_value, 2),
+                               "contributed": round(result.contributed, 2),
+                               "max_drawdown": round(float((units / np.maximum.accumulate(units) - 1).min()), 4),
+                               "base_max_drawdown": report["base_max_drawdown"], "bears": judged, "tops": tops, **summary})
+    rows = [row for row in report["rows"] if not row.get("error")]
+    for position, scenario in enumerate(scenarios):   # each scenario: how many held, the least and the most fallen
+        items = [(row, row["bears"][position]) for row in rows]
+        scenario["held"] = sum(1 for _row, item in items if item["held"])
+        scenario["tested"] = len(items)
+        if items:
+            best = max(items, key=lambda pair: pair[1]["fall"])
+            worst = min(items, key=lambda pair: pair[1]["fall"])
+            scenario["least"] = {"trial": best[0]["trial"], "fall": best[1]["fall"]}
+            scenario["most"] = {"trial": worst[0]["trial"], "fall": worst[1]["fall"]}
     folder = Path(research) / "stress"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"stress-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"

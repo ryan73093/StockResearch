@@ -209,14 +209,16 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
     stress = None
     found = stress_latest(research)
     if found:                                   # 2026-10-24: the bear-market stress test, from 2007
-        rows = [row for row in found["accounts"]["from_2007"]["rows"] if not row.get("error")]
-        crises = [(row, next((item for item in row["bears"] if "2007-06" <= item["high"] <= "2009-12-31"), None)) for row in rows]
-        crises = [(row, item) for row, item in crises if item]
-        best = max(crises, key=lambda pair: pair[1]["fall"], default=None)
-        stress = {"tested": len(rows), "held": sum(1 for row in rows if row.get("held_2008")),
+        rows = [row for row in found.get("rows") or [] if not row.get("error")]
+        scenarios = found.get("scenarios") or []
+        steady = max(rows, key=lambda row: (row.get("held_count") or 0, row["final"]), default=None)
+        stress = {"tested": len(rows), "scenarios": len(scenarios),
+                  "big": sum(1 for item in scenarios if item.get("size") == "大空頭"),
+                  "held_2008": sum(1 for row in rows if row.get("held_2008")),
+                  "held_all": sum(1 for row in rows if row.get("held_all")),
                   "beat": sum(1 for row in rows if row["final"] > row["base_final"]),
-                  "crisis_fall": crises[0][1]["base_fall"] if crises else None,
-                  "best": {"trial": best[0]["trial"], "fall": best[1]["fall"]} if best else None}
+                  "steady": {"trial": steady["trial"], "held": steady.get("held_count"), "of": steady.get("bears")}
+                  if steady else None}
     return {"benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
             "stress": stress,
             "recent": recent_all, "forward": forward, "scale": search_scale(research),

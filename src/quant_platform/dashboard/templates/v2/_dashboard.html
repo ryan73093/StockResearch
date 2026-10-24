@@ -49,10 +49,10 @@
   <p><b>五個時期都贏 0050 的：{{ era.consistent|length }} 個</b>{% if era.consistent %}——最多的 {{ era.consistent[0].name[:30] }}… {{ wan(era.consistent[0].final_value) }}（{{ era.consistent[0].tier }}）{% endif %}。{% for count in range(era.labels|length - 1, -1, -1) %}贏 {{ count }} 個時期的 {{ era.won[count] }} 個{% if not loop.last %}、{% endif %}{% endfor %}。</p>
   <p><button type="button" class="button-link" data-eras>看五個時期都贏的、前期大賺後期不賺的（{{ era.faded|length }} 個）與後期才變強的</button></p>
   {% set st = d.stress %}
-  <h3 class="dash-h">大空頭撐得過嗎（2007 年起，含 2008 金融海嘯）</h3>
+  <h3 class="dash-h">每一次空頭撐得過嗎（2007 年起，含 2008 金融海嘯）</h3>
   {% if st %}
-  <p class="small" style="margin:0 0 6px">{{ st.tested }} 個策略從 2007-01 起跑（規則沒看過 2007～2014）：<b>撐過 2008 的 {{ st.held }} 個</b>；0050 那次跌 {{ '{:.0%}'.format(-st.crisis_fall) if st.crisis_fall is not none else '—' }}。{% if st.best %}2008 跌最少的是 #{{ st.best.trial }}（跌 {{ '{:.0%}'.format(-st.best.fall) }}）。{% endif %}2007 起期末贏 0050 的 {{ st.beat }} 個。</p>
-  <p><button type="button" class="button-link" data-stress>看每個策略在每一次大空頭的表現</button></p>
+  <p class="small" style="margin:0 0 6px">{{ st.tested }} 個策略從 2007-01 起跑（規則沒看過 2007～2014），經過 {{ st.scenarios }} 次 0050 跌 15% 以上的空頭（其中 {{ st.big }} 次跌 20% 以上）：<b>每一次都撐過的 {{ st.held_all }} 個</b>、撐過 2008 的 {{ st.held_2008 }} 個{% if st.steady %}；撐過最多次的是 #{{ st.steady.trial }}（{{ st.steady.held }}／{{ st.steady.of }} 次）{% endif %}；2007 起期末贏 0050 的 {{ st.beat }} 個。</p>
+  <p><button type="button" class="button-link" data-stress>看每一次空頭、每個策略，以及在高點才進場的虧損與回本時間</button></p>
   {% else %}<p class="small muted" style="margin:0 0 6px">壓力測試背景執行中（模型從 2004 年起逐年重訓，再讓策略從 2007 年跑過每一次大空頭）。</p>{% endif %}
   <p class="col-help"><b>說明</b>　每個規則同一個帳戶（2015-06 起 30 萬＋每月 1 萬）切成時期，每年報酬扣掉當月投入，和同時期的 0050 比；「每年比 0050」是年化報酬相減。前期＝2015-06～2019、後期＝2020～2026-09。只看 2015 年起的規則（不含短歷史賽道）。</p>
 </section>

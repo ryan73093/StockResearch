@@ -1,43 +1,73 @@
-{# 2026-10-24 (使用者：測這些策略在每一次的大空頭有沒有辦法撐過去，2008 年的金融海嘯你撐得過嗎): research/stress.py,
-   the dashboard's window. #}
+{# 2026-10-24 (使用者：測這些策略在每一次的大空頭有沒有辦法撐過去；我不要只有 2008 的，應該要很多空頭情境，你都要分析給我):
+   research/stress.py, the dashboard's window. #}
 {% from "v2/_dashboard.html" import wan %}
 {% macro pct(value) %}{% if value is none %}—{% else %}{{ '{:+.0%}'.format(value) }}{% endif %}{% endmacro %}
-{% if not report %}<p class="muted">壓力測試還沒跑完。</p>{% else %}
-<p class="small" style="margin:0 0 8px">規則都是用 2015-06 以後的資料挑的，2007～2014 是它們沒看過的年份；模型用 2004 年起的資料逐年重訓（2007 年的模型只看到 2006 年底）。帳戶 30 萬＋每月 1 萬；大空頭＝0050 從高點跌 {{ '{:.0%}'.format(report.bear) }} 以上。{{ report.generated_at[:16]|replace('T', ' ') }} 跑完。</p>
-{% for key, title in (('from_2007', '2007-01 開始投資'), ('from_2007_top', '2007-10 金融海嘯前的高點才開始投資（最壞的時機）')) %}{% set acc = report.accounts[key] %}
-<h3 class="dash-h">{{ title }}</h3>
-<p class="small" style="margin:0 0 6px">0050 的大空頭：{% for bear in acc.bears %}<b>{{ bear.high[:7] }}～{{ bear.low[:7] }}</b> 跌 {{ '{:.0%}'.format(-bear.fall) }}（{{ bear.back[:7] if bear.back else '還沒' }} 回到高點）{% if not loop.last %}；{% endif %}{% endfor %}。0050 期末 {{ wan(acc.base_final) }}。</p>
+{% macro span(days) %}{% if days is none %}還沒{% elif days < 60 %}{{ days }} 天{% elif days < 730 %}{{ '%.0f'|format(days / 30.4) }} 個月{% else %}{{ '%.1f'|format(days / 365.25) }} 年{% endif %}{% endmacro %}
+{% if not report or not report.scenarios %}<p class="muted">壓力測試還沒跑完。</p>{% else %}
+{% set rows = report.rows|rejectattr('error')|list %}
+<p class="small" style="margin:0 0 8px">規則都是用 2015-06 以後的資料挑的，2007～2014 是它們沒看過的年份；模型用 2004 年起的資料逐年重訓（2007 年的模型只看到 2006 年底）。帳戶 30 萬＋每月 1 萬，2007-01 起；同樣的錢買 0050 對照。空頭情境＝0050 從高點跌 {{ '{:.0%}'.format(report.bear) }} 以上的每一次（跌 {{ '{:.0%}'.format(report.big) }} 以上是大空頭；{{ report.fast }} 個交易日內跌到底是急殺）。{{ report.generated_at[:16]|replace('T', ' ') }} 跑完。</p>
+
+<h3 class="dash-h">每一次空頭（{{ report.scenarios|length }} 次）</h3>
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
-    <thead><tr><th>策略</th><th>撐過 2008</th><th class="num">2008 跌幅（0050）</th><th class="num">回到 2007 高點（0050）</th><th class="num">大空頭多跌 10 點以上</th><th class="num">期末（0050）</th><th class="num">最大回撤（0050）</th></tr></thead>
+    <thead><tr><th>空頭</th><th>類型</th><th class="num">0050 跌幅</th><th class="num">0050 多久回到高點</th><th class="num">撐過的策略</th><th class="num">跌最少／最多的策略</th></tr></thead>
     <tbody>
-    {% for row in acc.rows %}{% set crisis = (row.bears or [])|selectattr('high', 'ge', '2007-06')|selectattr('high', 'le', '2009-12-31')|first %}
+    {% for sc in report.scenarios %}
       <tr>
-        <td data-primary><a href="/research/rules/{{ row.spec_hash }}">#{{ row.trial }}</a> {{ row.name }} <span class="badge">{{ row.why }}</span></td>
-        {% if row.error %}<td colspan="6" class="small down">沒跑成：{{ row.error }}</td>{% else %}
-        <td data-label="撐過 2008"><span class="badge {{ 'badge--ok' if row.held_2008 else ('badge--bad' if row.held_2008 is sameas false else '') }}">{{ '撐過' if row.held_2008 else ('撐不過' if row.held_2008 is sameas false else '—') }}</span></td>
-        <td class="num" data-label="2008 跌幅">{% if crisis %}{{ pct(crisis.fall) }}<span class="muted small">（{{ pct(crisis.base_fall) }}）</span><br><span class="small {{ 'down' if crisis.gap < -0.0005 else 'up' }}">{{ '多跌' if crisis.gap < 0 else '少跌' }} {{ '{:.1f}'.format((crisis.gap * 100)|abs) }} 點</span>{% else %}—{% endif %}</td>
-        <td class="num" data-label="回到 2007 高點">{% if crisis %}{{ crisis.back[:7] if crisis.back else '還沒回來' }}<span class="muted small">（{{ crisis.base_back[:7] if crisis.base_back else '—' }}）</span>{% else %}—{% endif %}</td>
-        <td class="num" data-label="多跌 10 點以上">{{ row.worse_bears }}／{{ row.bears|length }} 次</td>
-        <td class="num {{ 'up' if row.final > row.base_final else 'down' }}" data-label="期末">{{ wan(row.final) }}<span class="muted small">（{{ wan(row.base_final) }}）</span></td>
-        <td class="num" data-label="最大回撤">{{ pct(row.max_drawdown) }}<span class="muted small">（{{ pct(row.base_max_drawdown) }}）</span></td>
-        {% endif %}
+        <td data-primary><b>{{ sc.high[:7] }}～{{ sc.low[:7] }}</b></td>
+        <td data-label="類型"><span class="badge {{ 'badge--bad' if sc.size == '大空頭' else 'badge--warn' }}">{{ sc.size }}</span> <span class="badge">{{ sc.speed }}</span><span class="muted small"> {{ sc.sessions }} 個交易日跌到底</span></td>
+        <td class="num" data-label="0050 跌幅">{{ pct(sc.fall) }}</td>
+        <td class="num" data-label="0050 回到高點">{{ span(sc.base_days) }}</td>
+        <td class="num" data-label="撐過的策略"><b>{{ sc.held }}</b>／{{ sc.tested }}</td>
+        <td class="num" data-label="跌最少／最多">{% if sc.least %}#{{ sc.least.trial }} {{ pct(sc.least.fall) }}／#{{ sc.most.trial }} {{ pct(sc.most.fall) }}{% else %}—{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
-<details style="margin-top:8px"><summary class="small">每一次大空頭的細節（策略跌幅／0050 跌幅）</summary>
+
+<h3 class="dash-h">每個策略撐過幾次</h3>
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>策略</th><th class="num">撐過</th><th>2008 金融海嘯</th><th class="num">2007 起期末（0050）</th><th class="num">最大回撤（0050）</th></tr></thead>
+    <tbody>
+    {% for row in rows|sort(attribute='held_count', reverse=True) %}
+      <tr>
+        <td data-primary><a href="/research/rules/{{ row.spec_hash }}">#{{ row.trial }}</a> {{ row.name }} <span class="badge">{{ row.why }}</span></td>
+        <td class="num" data-label="撐過"><b>{{ row.held_count }}</b>／{{ row.bears }} 次{% if row.held_all %} <span class="badge badge--ok">每次都撐過</span>{% endif %}</td>
+        <td data-label="2008"><span class="badge {{ 'badge--ok' if row.held_2008 else ('badge--bad' if row.held_2008 is sameas false else '') }}">{{ '撐過' if row.held_2008 else ('撐不過' if row.held_2008 is sameas false else '—') }}</span></td>
+        <td class="num {{ 'up' if row.final > row.base_final else 'down' }}" data-label="期末">{{ wan(row.final) }}<span class="muted small">（{{ wan(row.base_final) }}）</span></td>
+        <td class="num" data-label="最大回撤">{{ pct(row.max_drawdown) }}<span class="muted small">（{{ pct(row.base_max_drawdown) }}）</span></td>
+      </tr>
+    {% endfor %}
+    {% for row in report.rows if row.error %}<tr><td data-primary>#{{ row.trial }} {{ row.name }}</td><td colspan="4" class="small down">沒跑成：{{ row.error }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h3 class="dash-h">每一次空頭，策略跌多少（同一段時間）</h3>
 <div class="table-wrap">
   <table>
-    <thead><tr><th>策略</th>{% for bear in acc.bears %}<th class="num">{{ bear.high[:7] }}～{{ bear.low[:7] }}<br><span class="muted small">0050 {{ pct(bear.fall) }}</span></th>{% endfor %}</tr></thead>
+    <thead><tr><th>策略</th>{% for sc in report.scenarios %}<th class="num">{{ sc.high[:7] }}<br><span class="muted small">0050 {{ pct(sc.fall) }}</span></th>{% endfor %}</tr></thead>
     <tbody>
-    {% for row in acc.rows if not row.error %}
-      <tr><td class="small">#{{ row.trial }}</td>{% for item in row.bears %}<td class="num {{ 'down' if item.gap < -0.1 else '' }}">{{ pct(item.fall) }}<br><span class="muted small">{{ item.back[:7] if item.back else '還沒回來' }}</span></td>{% endfor %}</tr>
+    {% for row in rows %}
+      <tr><td class="small">#{{ row.trial }}</td>{% for item in row.bears %}<td class="num {{ 'up' if item.held else 'down' }}">{{ pct(item.fall) }}<br><span class="muted small">{{ span(item.days) }}回來</span></td>{% endfor %}</tr>
     {% endfor %}
     </tbody>
   </table>
-</div></details>
-{% endfor %}
-<p class="col-help"><b>說明</b>　<b>撐過 2008</b>：2007～2009 那次大空頭裡，跌幅不比 0050 深超過 10 個百分點，而且回到 0050 高點那天的水準不比 0050 晚（跑之前寫好的判定，不改等級）。<b>2008 跌幅</b>：0050 從 2007 高點跌到 2008 低點的同一段，策略跌多少（括號 0050），下面是多跌或少跌幾點。<b>回到 2007 高點</b>：從自己的低點之後，回到 0050 高點那天的帳戶水準的月份（扣掉投入的錢；括號 0050）。<b>大空頭多跌 10 點以上</b>：所有大空頭裡，跌得比 0050 多 10 個百分點以上的次數。<b>期末</b>：到 2026-09 的帳戶（括號同樣的錢買 0050）。限制：2011 年以前沒有減資資料；注意處置股、當沖 2014 年起、集保 2010 年起才有。</p>
+</div>
+
+<h3 class="dash-h">如果剛好在空頭前的最高點才開始投資</h3>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>策略</th>{% for sc in report.scenarios %}<th class="num">{{ sc.high[:7] }} 進場</th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr><td class="small"><b>0050</b></td>{% for top in report.base_tops %}<td class="num">{{ pct(top.worst) }}<br><span class="muted small">{{ span(top.even_days) }}回本</span></td>{% endfor %}</tr>
+    {% for row in rows %}
+      <tr><td class="small">#{{ row.trial }}</td>{% for top in row.tops %}<td class="num {{ 'up' if top.worst >= top.base_worst else 'down' }}">{{ pct(top.worst) }}<br><span class="muted small">{{ span(top.even_days) }}回本</span></td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="col-help"><b>說明</b>　<b>撐過</b>：那一次空頭裡，策略跌幅不比 0050 深超過 10 個百分點，而且回到 0050 高點那天的帳戶水準不比 0050 晚（跑之前寫好的判定，不改等級）。<b>策略跌多少</b>：0050 從高點跌到低點的同一段，策略的跌幅（扣掉投入的錢；紅＝撐過、綠＝沒撐過），下面是多久回到原來的水準。<b>空頭前的最高點才開始投資</b>：在那次空頭的最高點開一個新帳戶（30 萬＋每月 1 萬），最多虧到投入金額的幾成（紅＝比 0050 虧得少），下面是從開始到回本的時間。限制：2011 年以前沒有減資資料；注意處置股、當沖 2014 年起、集保 2010 年起才有；2007 年的模型只學了約 2 年。</p>
 {% endif %}

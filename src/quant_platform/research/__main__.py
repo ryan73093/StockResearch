@@ -1081,12 +1081,16 @@ def main() -> int:
             else:
                 path = stress.run(Path(args.base), RESEARCH, job=job)
                 report = json.loads(path.read_text(encoding="utf-8"))
-                rows = report["accounts"]["from_2007"]["rows"]
-                held = sum(1 for row in rows if row.get("held_2008"))
-                job.payload["summary"] = f"{len(rows)} 個策略，撐過 2008 的 {held} 個"
+                rows = report["rows"]
+                job.payload["summary"] = (f"{len(rows)} 個策略、{len(report['scenarios'])} 個空頭情境；撐過 2008 的 "
+                                          f"{sum(1 for row in rows if row.get('held_2008'))} 個、每一次都撐過的 "
+                                          f"{sum(1 for row in rows if row.get('held_all'))} 個")
+                for scenario in report["scenarios"]:
+                    print(scenario["high"], scenario["low"], scenario["fall"], scenario["size"], scenario["speed"],
+                          f"撐過 {scenario.get('held')}／{scenario.get('tested')}", flush=True)
                 for row in rows:
-                    print(row.get("trial"), row.get("why"), row.get("held_2008"), row.get("worse_bears"),
-                          row.get("final"), row.get("base_final"), row.get("error", ""), flush=True)
+                    print(row.get("trial"), row.get("why"), row.get("held_count"), "/", row.get("bears"),
+                          row.get("held_2008"), row.get("final"), row.get("base_final"), row.get("error", ""), flush=True)
                 print(f"已寫入 {path}")
         return 0
 
