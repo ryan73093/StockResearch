@@ -120,3 +120,24 @@
 </div>
 <p class="col-help"><b>說明</b>　<b>不持股的時間</b>：2007 年起，大盤濾網叫你空手的交易日比例與進出次數（停損與依波動減碼看個股或帳戶，不列）。<b>撐過幾次</b>：20 個策略加了這種減碼後，撐過的空頭次數的中位數，括號是沒加時。<b>2015-06 起留住</b>：同一個策略從 2015-06 開帳戶，加了之後的期末是沒加時的幾成（中位數）。<b>2007 起期末</b>：加了之後的期末中位數，括號是 0050。綠色「2008」＝那個版本撐過 2008。</p>
 {% endif %}
+{% if guards and guards.ways %}
+<h3 class="dash-h">同樣的減碼，照一般評分（2015-06 起，和原版比）</h3>
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>減碼方式</th><th class="num">過門檻</th><th class="num">錢留住</th><th class="num">最大回撤</th><th class="num">0050 最大那次跌</th><th>錢最多的</th></tr></thead>
+    <tbody>
+    {% for g in guards.ways %}
+      <tr>
+        <td data-primary><b>{{ g.label }}</b>{% if g.frontier %} <span class="badge badge--ok">{% for n in g.frontier %}#{{ n }}{{ '、' if not loop.last }}{% endfor %} 上前緣</span>{% endif %}</td>
+        <td class="num" data-label="過門檻">{{ g.passing }}／{{ g.graded }}</td>
+        <td class="num" data-label="錢留住">{{ '{:.0%}'.format(g.kept) }}</td>
+        <td class="num {{ 'up' if g.drawdown >= 0 else 'down' }}" data-label="最大回撤">{{ '淺' if g.drawdown >= 0 else '深' }} {{ '%.1f'|format(g.drawdown|abs) }} 點</td>
+        <td class="num {{ 'up' if g.gap >= 0 else 'down' }}" data-label="0050 最大那次跌">{{ '少跌' if g.gap >= 0 else '多跌' }} {{ '%.1f'|format(g.gap|abs) }} 點<span class="muted small">（{{ g.less }} 個比原版好）</span></td>
+        <td data-label="錢最多的"><a href="/research/rules/{{ g.best.spec_hash }}">#{{ g.best.trial }}</a> {{ wan(g.best.final) }}<span class="muted small">（原版 #{{ g.best.origin }} {{ wan(g.best.origin_final) }}）</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="col-help"><b>說明</b>　上面的壓力測試看 2007～2014 這些規則沒看過的年份；這裡是同樣的減碼加到 20 個策略上，照一般流程用 2015-06 起的資料評分（決定規則能不能用的標準），和各自的原版比，都是中位數。<b>0050 最大那次跌</b>：0050 跌最多的那一段，策略比 0050 多跌或少跌幾個百分點，和原版相比改善多少。{{ guards.generated_at[:16]|replace('T', ' ') }} 整理。</p>
+{% endif %}

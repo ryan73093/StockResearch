@@ -399,6 +399,78 @@ def protect_view(report: dict | None) -> dict | None:
             "base_recent_final": report.get("base_recent_final"), "errors": [row for row in report["rows"] if row.get("error")]}
 
 
+def guard_summary(rows: list[dict]) -> list[dict[str, object]]:
+    """Per way (BEAR_GUARDS), the graded versions against their originals: how many pass, the medians of the money
+    kept, the drawdown and the worst 0050-fall gap changed (points), how many fell less than the original."""
+    from quant_platform.research.daily import BEAR_GUARDS, PASSING_TIERS
+
+    output = []
+    for key, (word, _fields) in BEAR_GUARDS.items():
+        part = [row for row in rows if row["guard"] == key]
+        if not part:
+            continue
+        output.append({"key": key, "label": word, "short": SHORT.get(key, key), "graded": len(part),
+                       "passing": sum(row["tier"] in PASSING_TIERS for row in part),
+                       "kept": round(float(np.median([row["final"] / row["origin_final"] for row in part])), 4),
+                       "drawdown": round(float(np.median([(row["dd"] - row["origin_dd"]) * 100 for row in part])), 1),
+                       "gap": round(float(np.median([((row["gap"] or 0) - (row["origin_gap"] or 0)) * 100 for row in part])), 1),
+                       "less": sum((row["gap"] or 0) > (row["origin_gap"] or 0) for row in part),
+                       "frontier": [row["trial"] for row in part if row["frontier"]],
+                       "best": max(part, key=lambda row: row["final"])})
+    return output
+
+
+def grade_guards(research: str | Path) -> Path:
+    """2026-10-25 (research_method §7「空頭減碼第二版」): every guarded version (BEAR_GUARD_ORIGINS x BEAR_GUARDS, matched
+    by settings) against its original — the newest run on this engine — saved for the dashboard and the window."""
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.daily import (
+        BEAR_GUARD_ORIGINS, BEAR_GUARDS, ENGINE_VERSION, PASSING_TIERS, DailyRule, tier,
+    )
+    from quant_platform.research.downside import frontier, profile, table
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = Path(research)
+    records = TrialRegistry(research / "trials.jsonl").records()
+    latest_runs = newest([record for record in records if record.kind == "candidate" and record.period == "recent"
+                          and str(record.metrics.get("engine", "")).startswith(ENGINE_VERSION.split("+")[0])])
+    by_hash = {record.spec_hash: record for record in latest_runs.values()}
+    by_trial = {record.trial_id: record for record in records}
+
+    def spec_of(record):
+        return json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+
+    def gap(record):
+        report = json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))
+        return (profile(report.get("curve") or {}).get("worst_fall") or {}).get("gap")
+
+    front = frontier(table(research), PASSING_TIERS)
+    rows = []
+    for trial in BEAR_GUARD_ORIGINS:
+        origin = by_hash.get(by_trial[trial].spec_hash)
+        spec = spec_of(by_trial[trial])
+        for key, (_word, fields) in BEAR_GUARDS.items():
+            if spec.get("kind") == "blend":
+                rule = parse_spec({**spec, "sleeves": [{**sleeve, "rule": {**sleeve["rule"], **fields}}
+                                                       for sleeve in spec["sleeves"]]})
+            else:
+                rule = DailyRule.model_validate({**spec, **fields})
+            record = by_hash.get(rule.rule_hash)
+            if record is None or origin is None:
+                continue
+            rows.append({"trial": record.trial_id, "origin": trial, "guard": key, "tier": tier(record.metrics)[0],
+                         "origin_tier": tier(origin.metrics)[0], "final": record.metrics["final_value"],
+                         "origin_final": origin.metrics["final_value"], "dd": record.metrics["max_drawdown"],
+                         "origin_dd": origin.metrics["max_drawdown"], "gap": gap(record), "origin_gap": gap(origin),
+                         "frontier": record.spec_hash in front, "spec_hash": record.spec_hash})
+    folder = research / "stress"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"guards-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path.write_text(json.dumps({"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"),
+                                "ways": guard_summary(rows), "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path
+
+
 def protect(history: str | Path, research: str | Path, job=None) -> Path:
     """2026-10-24 (research_method §7「空頭減碼檢驗」): each strategy again with each way of holding fewer stocks in a
     bear (OVERLAYS), from START through the same scenarios and from 2015-06, against the strategy as it is."""

@@ -114,6 +114,11 @@ def test_the_window_shows_the_overlay_check(tmp_path):
         "rows": [{"trial": 6490, "spec_hash": "h", "name": "深度學習", "why": "取捨前緣",
                   "variants": {"none": plain, "taiex_200": {"error": "boom"}, "vol_v1": calm}},
                  {"trial": 1, "spec_hash": "x", "name": "壞", "why": "w", "error": "bad"}]}), encoding="utf-8")
+    graded = [{"trial": 7150, "origin": 6773, "guard": "taiex_half", "tier": "T0 候選（高風險）", "origin_tier": "T0 候選（高風險）",
+               "final": 60_020_000, "origin_final": 61_950_000, "dd": -0.44, "origin_dd": -0.47, "gap": 0.022,
+               "origin_gap": -0.057, "frontier": True, "spec_hash": "g"}]
+    (folder / "guards-20261025-002400.json").write_text(json.dumps({
+        "generated_at": "2026-10-25T00:24:00", "ways": stress.guard_summary(graded), "rows": graded}), encoding="utf-8")
     view = stress.protect_view(stress.latest(tmp_path / "research", "protect"))
     assert [way["key"] for way in view["ways"]] == ["taiex_200", "vol_v1"] and view["ways"][1]["held"] == 6.0
     assert view["ways"][1]["verdict"] == "空頭有幫助、代價太大" and view["ways"][0]["failed"] == 1
@@ -121,3 +126,21 @@ def test_the_window_shows_the_overlay_check(tmp_path):
     body = app.test_client().get("/research/stress").get_data(as_text=True)
     assert "大空頭來時減碼，有沒有用" in body and "31%" in body and "進出 88 次" in body
     assert "空頭有幫助、代價太大" in body and "沒跑成：bad" in body and "依波動減碼" in body
+    assert "照一般評分（2015-06 起，和原版比）" in body and "#7150 上前緣" in body and "少跌 7.9 點" in body
+
+
+def test_the_graded_guards_are_summed_up_per_way():
+    """2026-10-25: each way's graded versions against their originals (medians, points)."""
+    def row(trial, guard, tier, final, origin_final, dd, origin_dd, gap, origin_gap, frontier=False):
+        return {"trial": trial, "origin": 1, "guard": guard, "tier": tier, "origin_tier": "T0 候選", "final": final,
+                "origin_final": origin_final, "dd": dd, "origin_dd": origin_dd, "gap": gap, "origin_gap": origin_gap,
+                "frontier": frontier, "spec_hash": str(trial)}
+
+    rows = [row(1, "taiex_half", "T0 候選", 80, 100, -0.30, -0.35, 0.02, -0.05, True),
+            row(2, "taiex_half", "T2", 60, 100, -0.40, -0.38, -0.06, -0.05),
+            row(3, "taiex_200s", "T3", 40, 100, -0.36, -0.35, -0.10, -0.05)]
+    found = {way["key"]: way for way in stress.guard_summary(rows)}
+    half = found["taiex_half"]
+    assert half["graded"] == 2 and half["passing"] == 1 and half["kept"] == 0.7 and half["frontier"] == [1]
+    assert half["drawdown"] == 1.5 and half["gap"] == 3.0 and half["less"] == 1 and half["best"]["trial"] == 1
+    assert found["taiex_200s"]["gap"] == -5.0 and "taiex_200" not in found

@@ -223,6 +223,9 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
         if checked and checked.get("verdicts"):
             stress["protect"] = [{"label": SHORT.get(key, key), "verdict": found.get("verdict", "—")}
                                  for key, found in checked["verdicts"].items()]
+        graded = stress_latest(research, "guards")               # 2026-10-25: the same ways graded from 2015-06
+        if graded:
+            stress["guards"] = graded.get("ways") or []
     return {"benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
             "stress": stress,
             "recent": recent_all, "forward": forward, "scale": search_scale(research),

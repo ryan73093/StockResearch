@@ -1145,7 +1145,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         return render_template("v2/research_stress.html", report=latest(research_dir),
-                               protect=protect_view(latest(research_dir, "protect")))
+                               protect=protect_view(latest(research_dir, "protect")), guards=latest(research_dir, "guards"))
 
     @blueprint.get("/research/eras")
     def research_eras():
