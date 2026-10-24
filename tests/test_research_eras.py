@@ -42,3 +42,23 @@ def test_a_rule_reads_its_vetoes_sleeves_and_models_features(tmp_path):
     assert {"paid", "holders", "statements"} <= found                    # model J's margin, the veto's holders
     plain, none = dashboard.sources({"factors": {"trend_200": 1.0}}, tmp_path)
     assert plain == set() and none == set()
+
+
+def test_a_rule_trading_the_next_session_counts_and_the_short_track_does_not(tmp_path, monkeypatch):
+    """2026-10-24: the first version left out every rule starting 2015-06-02 (the next session's trades) as if it were
+    the short track; the short track is daily.short_track (2020-10-26 on)."""
+    from quant_platform.research import pool
+
+    (tmp_path / "reports").mkdir()
+    curve = {"2015-06": [300_000, 300_000, 300_000], "2015-12": [330_000, 310_000, 300_000],
+             "2021-06": [500_000, 400_000, 300_000], "2021-12": [600_000, 420_000, 300_000]}
+    for name in ("a", "b"):
+        (tmp_path / "reports" / f"{name}.json").write_text(json.dumps({"curve": curve}), encoding="utf-8")
+    rows = [{"spec_hash": "a", "name": "a", "tier": "T0 候選", "report_file": "a.json", "start": "2015-06-02",
+             "category": {"family": "深度學習"}, "final_value": 1.0},
+            {"spec_hash": "b", "name": "b", "tier": "T3", "report_file": "b.json", "start": "2021-07-05",
+             "category": {"family": "籌碼"}, "final_value": 1.0}]
+    monkeypatch.setattr(pool, "pool_view", lambda research, basis="seed": {"daily": rows})
+    eras._CACHE.clear()
+    found = eras.analyze(tmp_path)
+    assert [row["spec_hash"] for row in found["rows"]] == ["a"]
