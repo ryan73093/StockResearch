@@ -324,7 +324,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--ask", help="knowledge：問研究知識庫（AI 只根據紀錄回答；沒有金鑰時列出最相關的紀錄）")
@@ -1064,6 +1064,30 @@ def main() -> int:
         print(f"比對 {report['compared']:,} 個（股票×交易日）：漲跌停價不同 {report['limits_differ']:,} 個、"
               f"漲跌停鎖死判斷不同 {report['locks_differ']:,} 個；各年 {report['limits_differ_by_year']}；鎖死組合 {report['locks']}")
         print(f"已寫入 {path}")
+        return 0
+
+    if args.command in ("stress-train", "stress"):
+        # 2026-10-24 (使用者：2008 年的金融海嘯你撐得過嗎; research_method §7「大空頭壓力測試」)
+        from quant_platform.research import stress
+        from quant_platform.research.jobs import JobLog
+
+        title = ("大空頭壓力測試：模型從 2004 年起逐年重訓（存在 models_long）" if args.command == "stress-train"
+                 else "大空頭壓力測試：策略從 2007 年起跑過每一次大空頭")
+        with JobLog(RESEARCH).start(title, "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+            if args.command == "stress-train":
+                done = stress.train(Path(args.base), RESEARCH, job=job)
+                job.payload["summary"] = f"模型 {len(done)} 個：{'、'.join(done)}"
+                print(job.payload["summary"], flush=True)
+            else:
+                path = stress.run(Path(args.base), RESEARCH, job=job)
+                report = json.loads(path.read_text(encoding="utf-8"))
+                rows = report["accounts"]["from_2007"]["rows"]
+                held = sum(1 for row in rows if row.get("held_2008"))
+                job.payload["summary"] = f"{len(rows)} 個策略，撐過 2008 的 {held} 個"
+                for row in rows:
+                    print(row.get("trial"), row.get("why"), row.get("held_2008"), row.get("worse_bears"),
+                          row.get("final"), row.get("base_final"), row.get("error", ""), flush=True)
+                print(f"已寫入 {path}")
         return 0
 
     if args.command == "branches":
