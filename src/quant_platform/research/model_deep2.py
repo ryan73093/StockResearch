@@ -499,7 +499,7 @@ def train_until(fp, out_dir: str | Path, version: str, cutoff, job=None) -> dict
 
 
 def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None, job=None,
-          only_months: list[int] | None = None) -> dict[str, object]:
+          only_months: list[int] | None = None, gate: bool = True) -> dict[str, object]:
     """Fit ten seeds per year, the development years first; the other years only past the gate (module text).
     2026-10-21 (使用者：每個月都要跑那麼久，我時間很多是不是): ``only_months`` refits only those months of a MONTHLY
     version (the new month, once), the year's other months kept as they were."""
@@ -537,7 +537,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
     meta.setdefault("years", {})
     stored = _load_scores(out, fp.symbols)
     for number, year in enumerate(order):
-        if year not in GATE_YEARS and all(str(item) in meta["years"] for item in GATE_YEARS if item in years):
+        # 2026-10-24: gate=False — the stress test retrains a version that already passed its gate (research/stress.py)
+        if gate and year not in GATE_YEARS and all(str(item) in meta["years"] for item in GATE_YEARS if item in years):
             check = _judge(version, meta, out.parent)
             meta["gate"] = check
             if not check["passed"]:

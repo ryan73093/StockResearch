@@ -270,7 +270,7 @@ def _spearman(left: np.ndarray, right: np.ndarray) -> float | None:
 
 def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] | None = None,
           job=None, label: str = "rank", version: str = MODEL_VERSION, horizon: int = HORIZON,
-          months: list[int] | None = None) -> dict[str, object]:
+          months: list[int] | None = None, gate: bool = True) -> dict[str, object]:
     """Fit and save one model per year; returns the out-of-sample diagnostics. A version keeps the feature
     list it was first trained with (a later year of the same version uses the same features)."""
     if label == "deep":                      # 2026-10-16: the recurrent network (research/model_deep.py)
@@ -280,7 +280,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
     if label == "deep2":                     # 2026-10-17: the second version (research/model_deep2.py)
         from quant_platform.research.model_deep2 import train as train_deep2
 
-        return train_deep2(fp, out_dir, version, years, job, only_months=months)
+        return train_deep2(fp, out_dir, version, years, job, only_months=months, gate=gate)
     if label == "deep_risk2":                # 2026-10-17: the vol-neutral fall (research/model_risk2.py)
         from quant_platform.research.model_risk2 import train as train_risk2
 

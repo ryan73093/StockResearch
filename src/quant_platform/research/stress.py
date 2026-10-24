@@ -113,14 +113,20 @@ def train(history: str | Path, research: str | Path, job=None) -> list[str]:
     done = []
     for number, version in enumerate(wanted):
         out = models_dir(history) / version
-        if out.is_dir() and all((out / f"{year}.pkl").is_file() or (out / str(year)).is_dir() for year in years):
+        missing = [year for year in years if not ((out / f"{year}.pkl").is_file() or (out / f"{year}-0.pt").is_file())]
+        if not missing:                          # every year there (a deep model saves <year>-<seed>.pt)
             done.append(version)
             continue
         if job:
-            job.update(done=number, total=len(wanted), current=f"重訓 {version}（{years[0]}～{years[-1]}）", force=True)
+            job.update(done=number, total=len(wanted), current=f"重訓 {version}（{missing[0]}～{missing[-1]}）", force=True)
         settings = research_model.VERSIONS[version]
-        research_model.train(fp, out, "", years, label=settings["label"], version=version,
-                             horizon=settings.get("horizon", research_model.HORIZON))
+        meta = out / "meta.json"
+        if meta.is_file():                       # 2026-10-24: a stop by the development gate does not apply here
+            stored = json.loads(meta.read_text(encoding="utf-8"))
+            stored.pop("stopped", None)
+            meta.write_text(json.dumps(stored, ensure_ascii=False, indent=1), encoding="utf-8")
+        research_model.train(fp, out, "", missing, label=settings["label"], version=version,
+                             horizon=settings.get("horizon", research_model.HORIZON), gate=False)
         done.append(version)
     return done
 
