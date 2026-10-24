@@ -4342,6 +4342,30 @@ def robot35_batch() -> list:
                       factors={"rolling35_equal": 1.0}, **common)]
 
 
+# 2026-10-24 (使用者：2020 年後交易方式不一樣；每個時期同樣的策略是否還適用 — research_method §7「深度學習一年一訓與每月重訓
+#各半」, written before the run): the yearly deep model and the monthly one averaged (each scores the stock; the rule ranks
+# the mean of their percentiles) in the frontier's three richest frames.
+DEEP_BLEND_FRAMES = (6490, 6491, 6773)
+
+
+def deep_monthly_half_batch() -> list[DailyRule]:
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    from quant_platform.research.holding import style_of
+
+    output = []
+    for trial in DEEP_BLEND_FRAMES:
+        base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
+        veto = f"・{VETO_WORDS[base.exclude]}" if base.exclude in VETO_WORDS else ""
+        name = (f"深度學習一年一訓＋每月重訓各半{veto}（#{trial} 的設定、前 {base.top} 名、開盤賣、收盤買）"
+                f"｜持有：{style_of(base.canonical()) or '固定持有 20 天'}")
+        output.append(DailyRule.model_validate({**base.model_dump(), "factors": {"ml_deep2_top": 0.5, "ml_deep2_monthly": 0.5},
+                                                "name": name}))
+    return output
+
+
 def robot35_styles_batch() -> list:
     """2026-10-24 (AGENTS.md：研究新規則時三種持有方式都要比 — 3.5 had only 月線上續抱): the robot 3.5 and its yardstick in
     the three holding styles, sold at the next open and bought at the next close (the robots' best frame). Registered
@@ -4528,7 +4552,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
-           "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "paidveto": paid_veto_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
