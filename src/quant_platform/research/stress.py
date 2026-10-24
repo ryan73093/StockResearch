@@ -46,6 +46,7 @@ OVERLAYS = {
     "stop_15": ("跌離買進後最高價 15% 就賣", {"stop_loss": 0.15}),
     "vol_v1": ("波動大時減碼到現金", {"vol_scale": "v1"}),
 }
+RANKED = ("market_filter", "stop_loss")             # these act where the day's targets are decided: ranked again
 HELPS = 2                                            # held at least this many more scenarios (the median strategy)
 KEEPS = 0.8                                          # and keeps at least this share of its 2015-06 money
 
@@ -333,7 +334,8 @@ def _has(spec: dict, fields: dict) -> bool:
 
 
 def _overlaid(account, data, fp, costs, fields: dict):
-    """A blend account whose sleeves all hold fewer stocks the given way; the rankings, weights and parking reused."""
+    """A blend account whose sleeves all hold fewer stocks the given way; the rankings, weights and parking reused (only
+    for a way outside RANKED)."""
     from quant_platform.research.daily import DailyRule, exposure_schedule
 
     copy = object.__new__(type(account))
@@ -406,8 +408,12 @@ def protect(history: str | Path, research: str | Path, job=None) -> Path:
             if spec.get("kind") == "blend":
                 account = BlendAccount(data, fp, parse_spec(spec), costs, START, end)
 
-                def make(fields, account=account):
-                    changed = _overlaid(account, data, fp, costs, fields) if fields else account
+                def make(fields, account=account, spec=spec):
+                    if any(key in fields for key in RANKED):  # the market filter and the stop decide the targets
+                        sleeves = [{**sleeve, "rule": {**sleeve["rule"], **fields}} for sleeve in spec["sleeves"]]
+                        changed = BlendAccount(data, fp, parse_spec({**spec, "sleeves": sleeves}), costs, START, end)
+                    else:
+                        changed = _overlaid(account, data, fp, costs, fields) if fields else account
                     return lambda first: changed.run(first, end)
             else:
                 rule = DailyRule.model_validate(spec)
@@ -416,8 +422,12 @@ def protect(history: str | Path, research: str | Path, job=None) -> Path:
 
                 def make(fields, rule=rule, ranks=ranks, weights=weights, parked=parked):
                     changed = DailyRule.model_validate({**rule.model_dump(), **fields}) if fields else rule
+                    mine, sizes = ranks, weights
+                    if any(key in fields for key in RANKED):  # the market filter and the stop decide the targets
+                        mine = rankings(fp, changed, START, end)
+                        sizes = daily_weights(fp, changed, mine)
                     exposure = exposure_schedule(data, fp, changed, costs)
-                    return lambda first: simulate_daily(data, changed, costs, first, end, ranks, weights=weights,
+                    return lambda first: simulate_daily(data, changed, costs, first, end, mine, weights=sizes,
                                                         parked=parked, exposure=exposure)
         except Exception as exc:                            # noqa: BLE001 - one strategy's failure is reported
             report["rows"].append({**row, "error": f"{type(exc).__name__}: {exc}"[:300]})
