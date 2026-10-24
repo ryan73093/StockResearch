@@ -53,7 +53,7 @@ OVERLAYS = {
 }
 SHORT = {"none": "不加", "taiex_200": "200 日均線", "taiex_10m": "10 個月均線", "taiex_12m": "一年動能",
          "stop_15": "15% 停損", "vol_v1": "依波動減碼", "taiex_200s": "均線下彎才出", "taiex_half": "減碼一半",
-         "taiex_staged": "分段減碼"}
+         "taiex_staged": "分段減碼", "taiex_half_wide": "減碼一半（各類前 5 個）"}
 RANKED = ("market_filter", "stop_loss")             # these act where the day's targets are decided: ranked again
 HELPS = 2                                            # held at least this many more scenarios (the median strategy)
 KEEPS = 0.8                                          # and keeps at least this share of its 2015-06 money
