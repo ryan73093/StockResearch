@@ -967,7 +967,7 @@ def main() -> int:
                     job.update(done=number, current=version, force=True)
                     trained.append(model_deep2.train_until(fp, research_model.model_dir(Path(args.base), version), version,
                                                            cutoff, job))
-                risky = (bool(read & {"dl1", "dl1x", "dl1m", "dl_risk"})  # the risk overlay and weights
+                risky = (bool(read & {"dl1", "dl1x", "dl1m", "risk_half", "dl_risk"})  # the risk overlay and weights
                          and not refitted(research_model.MODELS["dl_risk"]["version"], f"{month}-0.pt"))
                 if risky:
                     from quant_platform.research import model_risk
@@ -1006,7 +1006,8 @@ def main() -> int:
                                                           cutoff))
                 retrained = ({factor for factor, spec in research_model.MODELS.items()
                               if spec["version"] in set(versions) | set(deep)}
-                             | ({"dl1", "dl1x", "dl1m", "dl_risk"} if risky else set()) | ({"meta1"} if meta_due else set())
+                             | ({"dl1", "dl1x", "dl1m", "risk_half", "dl_risk"} if risky else set())
+                             | ({"meta1"} if meta_due else set())
                              | {factor for factor in read if factor in robots and robots[factor] in robots_done})
                 again = tracker.refit(retrained, f"模型重訓到 {cutoff}（每月滾動），從起算日重新記錄") if args.refit_accounts else []
                 job.payload["summary"] = (f"{len(trained)} 個模型重訓到 {cutoff}（深度學習 {len(deep)} 個）"

@@ -365,7 +365,9 @@ class DailyRule(BaseModel):
     # the stock part while TAIEX closes below its 200-session average, the rest in cash (Moreira & Muir 2017: scale
     # the exposure instead of all or nothing). "taiex_staged" (2026-10-25, 空頭減碼第三版): half below the average,
     # nothing once TAIEX is also MARKET_BEAR below its highest close of the last MARKET_HIGH sessions.
-    vol_scale: Literal["none", "v1", "taiex_half", "taiex_staged"] = "none"
+    # "risk_half" (2026-10-25, 空頭防護第五版): half when the deep risk model's market-wide median drop probability is
+    # in the top RISK_TOP of its last RISK_WINDOW sessions — the model, not the 200-session line, says when.
+    vol_scale: Literal["none", "v1", "taiex_half", "taiex_staged", "risk_half"] = "none"
     # 2026-10-09 (使用者：只在大型股裡挑，但不要照 0050 的比例買台積電): only the ``large_caps`` largest listed
     # stocks by market value (the previous close times shares issued, chips.py ``market_cap``) can be picked;
     # the picks still get equal amounts, so no stock is held at its market-value share. 0 = no limit, left
@@ -1996,6 +1998,8 @@ MARKET_SLOPE = 20                    # taiex_200s: the 200-session average again
 MARKET_HALF = 0.5                    # vol_scale "taiex_half": the stock part held while TAIEX is below its average
 MARKET_BEAR = 0.2                    # "taiex_staged": nothing held below the average and this far below the high
 MARKET_HIGH = 250                    # the high: the highest close of this many sessions
+RISK_WINDOW = 750                    # "risk_half": the market's predicted drop risk against this many sessions
+RISK_TOP = 0.2                       # half while it is in this top share of them (known from 250 sessions)
 
 
 def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel) -> dict[date, float] | None:
@@ -2016,6 +2020,17 @@ def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs:
             return 0.0 if deep else MARKET_HALF
 
         output = {day: level(position) for position, day in enumerate(fp.sessions)}
+        if lag_of(rule):
+            later = dict(zip(fp.sessions, fp.sessions[1:]))
+            output = {later[day]: value for day, value in output.items() if day in later}
+        return output
+    if rule.vol_scale == "risk_half":             # 2026-10-25: the deep risk model's market-wide reading decides
+        risk = fp.matrix("dl_risk")
+        with np.errstate(all="ignore"):
+            median = pd.Series([float(np.nanmedian(column)) if np.isfinite(column).any() else np.nan for column in risk.T])
+        bar = median.rolling(RISK_WINDOW, min_periods=250).quantile(1 - RISK_TOP)
+        output = {day: MARKET_HALF if np.isfinite(now) and np.isfinite(top) and now > top else 1.0
+                  for day, now, top in zip(fp.sessions, median.to_numpy(), bar.to_numpy(), strict=True)}
         if lag_of(rule):
             later = dict(zip(fp.sessions, fp.sessions[1:]))
             output = {later[day]: level for day, level in output.items() if day in later}
@@ -2395,10 +2410,10 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
                "engine": ENGINE_VERSION, "plan": SEED_PLAN}
     payload.update(input_digests(history, rule_inputs(rule), rule.exit_model != "none"))
     veto, weighting = getattr(rule, "risk_veto", "none"), getattr(rule, "weighting", "equal")
-    if veto != "none" or weighting == "inverse_risk":           # 2026-10-16: the deep risk model it reads
+    if veto != "none" or weighting == "inverse_risk" or getattr(rule, "vol_scale", "none") == "risk_half":
         from quant_platform.research.model import MODELS, digest, model_dir
 
-        if veto in ("dl1", "dl1x", "dl1m") or weighting == "inverse_risk":   # 2026-10-17: R1's weights read it too
+        if veto in ("dl1", "dl1x", "dl1m") or weighting == "inverse_risk" or getattr(rule, "vol_scale", "none") == "risk_half":
             payload["dl_risk"] = digest(model_dir(history, MODELS["dl_risk"]["version"]))
         if veto == "r3":
             payload["dl_risk2"] = digest(model_dir(history, MODELS["dl_risk2"]["version"]))
@@ -4585,6 +4600,15 @@ BEAR_RISK = [("大盤跌破年線時不買也賣掉深度風險最高的股票",
              ("大盤跌破年線時減碼一半、並賣掉深度風險最高的股票", {"risk_veto": "dl1m", "vol_scale": "taiex_half"})]
 
 
+BEAR_RISK_HALF = ("深度風險模型看全市場風險偏高時減碼一半", {"vol_scale": "risk_half"})
+
+
+def bear_guard5_batch() -> list:
+    """2026-10-25 (research_method §7「空頭防護第五版」, written before the run): the half guard timed by the deep risk
+    model instead of TAIEX's 200-session line, on BEAR_GUARD_ORIGINS — graded the usual way."""
+    return _guarded(BEAR_GUARD_ORIGINS, [BEAR_RISK_HALF])
+
+
 def bear_guard4_batch() -> list:
     """2026-10-25 (research_method §7「空頭防護第四版」, written before the run): the deep risk model's veto only below
     the 200-session average, alone and with the half guard, on BEAR_GUARD_ORIGINS — graded the usual way."""
@@ -4762,7 +4786,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
-           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bearguard4": bear_guard4_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

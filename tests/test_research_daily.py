@@ -281,6 +281,18 @@ def test_the_bear_only_risk_veto_rests_above_the_average():
     assert "dl1m" not in DailyRule(name="x", factors={"trend_200": 1.0}).canonical().values()
 
 
+def test_the_model_timed_half_follows_the_market_wide_risk():
+    """2026-10-25 (research_method §7 空頭防護第五版): half while the median predicted risk is in its top fifth."""
+    days = weekdays(date(2023, 1, 2), date(2024, 6, 28))
+    data = market(days, {"1101.TW": {day: 10.0 for day in days}, "1102.TW": {day: 10.0 for day in days}})
+    fp = FactorPanel(Panel(data))
+    level = np.array([0.1] * 300 + [0.5] * 20 + [0.1] * (len(days) - 320))
+    fp._cache["dl_risk"] = np.vstack([level, level])
+    levels = daily.exposure_schedule(data, fp, DailyRule(name="x", factors={"trend_200": 1.0}, vol_scale="risk_half"), FREE)
+    assert levels[days[100]] == 1.0                           # under 250 sessions: no bar yet
+    assert levels[days[299]] == 1.0 and levels[days[305]] == daily.MARKET_HALF and levels[days[330]] == 1.0
+
+
 def test_risk_controls_are_part_of_the_rule_only_when_on():
     base = DailyRule(name="x", factors={"trend_200": 1.0})
     assert "stop_loss" not in base.canonical() and "market_filter" not in base.canonical()
