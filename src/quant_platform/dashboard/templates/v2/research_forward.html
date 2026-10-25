@@ -80,14 +80,18 @@
   {% if forward.holdings %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>股票</th><th class="num">股數</th><th class="num">收盤</th><th class="num">市值</th><th class="num">佔帳戶</th></tr></thead>
+      <thead><tr><th>股票</th><th class="num">股數</th><th class="num">平均買價</th><th class="num">成本</th><th class="num">收盤</th><th class="num">市值</th><th class="num">帳面賺賠</th><th class="num">佔帳戶</th></tr></thead>
       <tbody>
       {% for row in forward.holdings %}
         <tr>
           <td data-primary><strong>{% if row.code != '0050' %}<a href="/stock/{{ row.code }}">{{ row.code }} {{ row.name }}</a>{% else %}0050 元大台灣50{% endif %}</strong></td>
+          {% set pos = ((forward.results or {}).positions or {}).get(row.code) %}
           <td class="num" data-label="股數">{{ '{:,.2f}'.format(row.units).rstrip('0').rstrip('.') }}</td>
+          <td class="num" data-label="平均買價">{{ '{:,.2f}'.format(pos.cost / row.units) if pos and row.units else '—' }}</td>
+          <td class="num" data-label="成本">{{ '{:,.0f}'.format(pos.cost) if pos else '—' }}</td>
           <td class="num" data-label="收盤">{{ '{:,.2f}'.format(row.close) }}</td>
           <td class="num" data-label="市值">{{ '{:,.0f}'.format(row.value) }}</td>
+          <td class="num {{ ('up' if pos.pnl >= 0 else 'down') if pos else '' }}" data-label="帳面賺賠">{% if pos %}{{ '{:+,.0f}'.format(pos.pnl) }}<br><span class="small">{{ '{:+.1%}'.format(pos.pnl_pct) }}</span>{% else %}—{% endif %}</td>
           <td class="num" data-label="佔帳戶">{{ '{:.1%}'.format(row.weight) }}</td>
         </tr>
       {% endfor %}
@@ -95,7 +99,7 @@
     </table>
   </div>
   {% else %}<p class="muted" style="margin:0">目前沒有持股。</p>{% endif %}
-  <p class="col-help"><b>欄位說明</b>　<b>股數</b>：目前持有的股數（整股加零股）。<b>收盤</b>：最新收盤價。<b>市值</b>：股數乘收盤。<b>佔帳戶</b>：市值佔帳戶總資產（含現金）的比例。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>股數</b>：目前持有的股數（整股加零股）。<b>平均買價</b>、<b>成本</b>：這次持有期間每一筆買進的金額加手續費（部分賣出後按比例扣掉；除權、減資只改股數不改成本）。<b>帳面賺賠</b>：市值減成本，還沒賣掉、不算真的賺到。<b>收盤</b>：最新收盤價。<b>市值</b>：股數乘收盤。<b>佔帳戶</b>：市值佔帳戶總資產（含現金）的比例。</p>
 </section>
 
 <section class="card">

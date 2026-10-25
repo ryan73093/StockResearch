@@ -1253,6 +1253,8 @@ def switch_mapping(fp: FactorPanel, rule: DailyRule):
         bins = np.minimum((column[known] * 10).astype(int), 9)
         np.add.at(sums, bins, excess)
         np.add.at(counts, bins, 1)
+    if not counts.sum():                     # 2026-10-25: without these years every swap looked worthless
+        raise ValueError("看成本才換股需要 2015-06～2020-09 的股價（載入的資料沒有這段）")
     means = np.maximum.accumulate(np.where(counts > 0, sums / np.maximum(counts, 1), 0.0))
 
     def gain(percentile: float) -> float:

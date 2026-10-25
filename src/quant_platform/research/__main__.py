@@ -340,9 +340,11 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
+    parser.add_argument("--sample", type=int, default=0,
+                        help="forward-audit：隨機抽幾個帳戶檢查（預設 0＝全部）")
     parser.add_argument("--no-half", action="store_true",
                         help="daily：不替過門檻的規則補評「跌破 200 日均線就減碼一半」版本（2026-10-25 起預設會補）")
     parser.add_argument("--ask", help="knowledge：問研究知識庫（AI 只根據紀錄回答；沒有金鑰時列出最相關的紀錄）")
@@ -359,6 +361,8 @@ def main() -> int:
                         help="forward：把每個帳戶最新紀錄背後的決定寫下來（之後重算不再改變已做的決定）")
     parser.add_argument("--rebase", help="forward：把接不上前一天的紀錄標成重算基準，附上原因")
     parser.add_argument("--restart-from", help="forward：所有在跑的帳戶從這天重新起算（舊紀錄封存，YYYY-MM-DD）")
+    parser.add_argument("--restart-live", action="store_true",
+                        help="forward：每個在跑的帳戶（每天決策規則與組合）紀錄和決定都封存，從起算日重新記錄（--reason 寫原因）")
     parser.add_argument("--restart-broken", action="store_true",
                         help="forward：對帳不一致的帳戶封存後從起算日重新記錄（--reason 寫原因；2026-10-22 修復用）")
     parser.add_argument("--reason", help="forward --restart-from：原因")
@@ -820,6 +824,25 @@ def main() -> int:
             print(day, json.dumps(item, ensure_ascii=False), flush=True)
         print("有差異（偷看）" if report["leak"] else "沒有發現偷看", flush=True)
         return 0 if not report["leak"] else 1
+
+    if args.command == "forward-audit":
+        # 2026-10-25 (使用者：你所有策略確定都是合理的嗎): every account's decisions ranked again the way a backtest does
+        from quant_platform.research.jobs import JobLog
+        from quant_platform.research.stock_forward import StockForwardTracker
+
+        with JobLog(RESEARCH).start("前向帳戶決策核對：每個帳戶用回測引擎從起點重算，對照帳上的決策",
+                                    "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+            path = StockForwardTracker(RESEARCH).audit_decisions(sample=args.sample,
+                                                                  seed=int(datetime.now(TAIPEI).strftime("%Y%m%d")))
+            report = json.loads(path.read_text(encoding="utf-8"))
+            job.payload["summary"] = (f"{report['accounts']} 個帳戶、{report['checked_days']} 個決策日；"
+                                      f"和重算不一樣的帳戶 {report['differing_accounts']} 個")
+            print(job.payload["summary"], flush=True)
+            for row in report["rows"][:20]:
+                if row["differed"]:
+                    print(row["rule_hash"][:12], row["differed"], "/", row["days"], row["first"]["day"], row["name"][:50], flush=True)
+            print(f"已寫入 {path}")
+        return 1 if report["differing_accounts"] else 0
 
     if args.command == "forward-board":
         # 2026-10-13: the common-start board (research/forward_board.py; also built after the 15:30 forward record)
@@ -1630,6 +1653,11 @@ def main() -> int:
         if args.restart_from:                   # 2026-10-17: every live account from the common start again
             found = tracker.restart(date.fromisoformat(args.restart_from), args.reason or "使用者：前向從每月滾動起點起算")
             print(f"重新起算：{found}", flush=True)
+        if args.restart_live:                   # 2026-10-25: every live account, its decisions too (restart keeps them)
+            live = {item["rule_hash"] for item in tracker.tracked()
+                    if not item.get("stopped") and item.get("kind") in ("daily", "blend")}
+            names = tracker.restart_accounts(live, args.reason or "從起算日重新記錄")
+            print(f"紀錄與決定封存、從起算日重新記錄的帳戶 {len(names)} 個", flush=True)
         if args.restart_broken:                 # 2026-10-22: accounts out of step, recorded again from their start
             broken = {key for key, found in reconcile(tracker.records(), tracker.rebases()).items() if found}
             names = tracker.restart_accounts(broken, args.reason or "對帳不一致，從起算日重新記錄")

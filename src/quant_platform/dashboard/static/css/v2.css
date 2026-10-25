@@ -823,9 +823,12 @@ td.wrap { white-space: normal; min-width: 180px; }
 .dash-how { margin-top: 12px; font-size: 13px; color: var(--muted); }
 .dash-how summary { cursor: pointer; color: var(--text-2); }
 .dash-how ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.7; }
-.viz { width: 100%; height: auto; display: block; margin-top: 6px; }
-.viz--narrow { display: none; }
-@media (max-width: 640px) { .viz--wide { display: none; } .viz--narrow { display: block; } }
+.viz { width: 100%; height: auto; display: none; margin-top: 6px; }
+.dash-panel, .dash-dialog__body { container-type: inline-size; }
+.viz--narrow { display: block; }
+@container (min-width: 560px) { .viz--narrow { display: none; } .viz--mid { display: block; } }
+@container (min-width: 1100px) { .viz--mid { display: none; } .viz--wide { display: block; } }
+@container (min-width: 1550px) { .viz--wide { display: none; } .viz--xwide { display: block; } }
 .viz text { fill: var(--muted); font-size: 12px; font-family: var(--font); }
 .viz text.lbl { fill: var(--text-2); }
 .viz .grid { stroke: var(--border); stroke-width: 1; }

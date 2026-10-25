@@ -10,7 +10,9 @@ import math
 from datetime import date, datetime
 from html import escape
 
-SIZES = {"wide": (760, 300), "narrow": (360, 250)}
+# 2026-10-25 (使用者：看不懂這畫什麼 — on a 2000px screen one 760px drawing was blown up 2.3 times): four widths, the
+# page shows the one nearest its box (CSS container queries), so the text stays 12px and the height stays put
+SIZES = {"narrow": (360, 250), "mid": (760, 300), "wide": (1200, 320), "xwide": (1700, 340)}
 
 
 def ticks(low: float, high: float, count: int = 5) -> list[float]:
@@ -47,7 +49,7 @@ def line(points: list[dict], lines: list[dict], y_text, x_text, label: str, x_ke
 
 def _line(points, lines, y_text, x_text, label, x_key, guides, band, step, marks, size) -> str:
     width, height = SIZES[size]
-    wide = size == "wide"
+    wide = size != "narrow"
     left, right, top, bottom = (60, 150, 14, 28) if wide else (46, 10, 12, 26)
     xs = [_x(point[x_key]) for point in points]
     values = [point[item["key"]] for point in points for item in lines if point.get(item["key"]) is not None]
@@ -73,7 +75,7 @@ def _line(points, lines, y_text, x_text, label, x_key, guides, band, step, marks
         parts.append(f'<line class="grid" x1="{left}" x2="{width - right}" y1="{sy(value):.1f}" y2="{sy(value):.1f}"/>'
                      f'<text x="{left - 6}" y="{sy(value) + 4:.1f}" text-anchor="end">{escape(y_text(value))}</text>')
     shown, last_x = set(), -1e9
-    for index in sorted({0, len(xs) - 1, *range(0, len(xs), max(1, len(xs) // (6 if wide else 3)))}):
+    for index in sorted({0, len(xs) - 1, *range(0, len(xs), max(1, len(xs) // max(3, width // 120)))}):
         text = x_text(points[index][x_key], False)
         x = sx(xs[index])
         if text in shown or x - last_x < (56 if wide else 60):
@@ -145,7 +147,7 @@ def bars(groups: list[dict], series: list[dict], y_text, label: str, value_label
 
 def _bars(groups, series, y_text, label, value_labels, size) -> str:
     width, height = SIZES[size]
-    wide = size == "wide"
+    wide = size != "narrow"
     notes = any(group.get("note") for group in groups)
     left, right, top, bottom = (54, 8, 26, 44 if notes else 28) if wide else (40, 6, 14, 40 if notes else 26)
     values = [value for group in groups for value in group["values"].values() if value is not None] + [0.0]

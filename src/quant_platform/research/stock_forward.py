@@ -585,7 +585,12 @@ class StockForwardTracker:
         done = {(item["date"], item["rule_hash"]) for item in earlier}
         if not items:
             return []
-        first_year = min(date.fromisoformat(item["since"]).year for item in items) - WARMUP_YEARS
+        # 2026-10-25 (使用者：最強的策略 9/7 到 10/5 都沒交易，怪怪的): the same years as every backtest
+        # (daily.load) — loaded from the accounts' start only, cost-aware switching ("cost1") found no development years
+        # to price a swap with and never swapped (698 accounts held their first picks since 9/1)
+        from quant_platform.research.daily import RECENT_START
+
+        first_year = min([RECENT_START.year] + [date.fromisoformat(item["since"]).year for item in items]) - WARMUP_YEARS
         data = load_stock_data(self._history, first_year, today.year)
         start_all = min(date.fromisoformat(item["since"]) for item in items)
         quoted = {day: 0 for day in data.sessions if start_all <= day <= today}
@@ -890,6 +895,55 @@ class StockForwardTracker:
                 ledger.extend(sells)
                 carry = cash
         return combined
+
+    def audit_decisions(self, sample: int = 0, seed: int = 0) -> Path:
+        """2026-10-25 (使用者：你所有策略確定都是合理的嗎；#6490 從 9/7 到 10/5 都沒交易): every live account's decisions
+        ranked again from its start the way a backtest ranks them (daily.load: the years from 2013), against the
+        decisions the account kept — a difference means the account did not trade as its rule says. ``sample``: that
+        many accounts picked at random (``seed``) instead of all. Written to forward/stocks/audit-<time>.json."""
+        import random
+
+        from quant_platform.research.blend import BlendRule
+        from quant_platform.research.daily import DailyRule, daily_rankings, load
+        from quant_platform.research.decisions import DecisionStore, key
+
+        _data, fp = load(self._history)
+        store = DecisionStore(self._base)
+        items = [item for item in self.tracked() if not item.get("stopped") and item.get("kind") in ("daily", "blend")]
+        if sample and sample < len(items):
+            items = random.Random(seed).sample(items, sample)
+        rows = []
+        for item in items:
+            start = date.fromisoformat(item["since"])
+            if item["kind"] == "blend":
+                parts = [(key(item["rule_hash"], start, number), sleeve.rule)
+                         for number, sleeve in enumerate(BlendRule.model_validate(item["rule"]).sleeves)]
+            else:
+                parts = [(key(item["rule_hash"], start), DailyRule.model_validate(item["rule"]))]
+            days = differed = 0
+            first = None
+            for name, rule in parts:
+                fixed = store.fixed(name)
+                if not fixed or getattr(rule, "universe", "twse") != "twse":
+                    continue
+                again = daily_rankings(fp, rule, start, date.fromisoformat(str(fixed["through"])))
+                for day, symbols in sorted(fixed["days"].items()):
+                    days += 1
+                    found = again.get(date.fromisoformat(day), [])
+                    if set(found) != set(symbols):
+                        differed += 1
+                        if first is None:
+                            first = {"day": day, "kept": sorted(symbols), "again": sorted(found)}
+            rows.append({"rule_hash": item["rule_hash"], "name": item["name"], "days": days, "differed": differed,
+                         "first": first})
+        moment = datetime.now(TAIPEI)
+        report = {"at": moment.isoformat(timespec="seconds"), "accounts": len(rows), "sample": sample,
+                  "checked_days": sum(row["days"] for row in rows),
+                  "differing_accounts": sum(1 for row in rows if row["differed"]),
+                  "rows": sorted(rows, key=lambda row: -row["differed"])}
+        path = self._folder / f"audit-{moment:%Y%m%d-%H%M%S}.json"
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        return path
 
     def explain_backfill(self) -> dict[str, int]:
         """2026-10-19 (使用者：每一筆買賣要有原因): the reasons for the decisions kept before reasons were written down.

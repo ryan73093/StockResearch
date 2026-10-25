@@ -245,6 +245,18 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                          (f"{made:%m-%d %H:%M}：{len(audit.get('rules') or [])} 個規則、{audit.get('orders', 0):,} 筆委託、"
                           f"違規 {sum(counts.values())}" + (f" {counts}" if counts else "")) if audits else "沒有稽核紀錄"))
 
+    # 2026-10-25 (使用者：你所有策略確定都是合理的嗎): the latest check that every forward account traded as its rule says
+    # (forward-audit: each account ranked again the way a backtest ranks it), at most 8 days old, no account differing
+    checked = sorted((research / "forward" / "stocks").glob("audit-*.json")) if (research / "forward" / "stocks").is_dir() else []
+    found = json.loads(checked[-1].read_text(encoding="utf-8")) if checked else {}
+    when = datetime.fromisoformat(found["at"]).replace(tzinfo=None) if found.get("at") else None
+    checks.append(_check("前向帳戶照規則交易（用回測引擎重算決策，8 天內）",
+                         "使用者 2026-10-25：前向帳戶 9/7 到 10/5 都沒交易，策略確定合理嗎（看成本才換股從不換股的事件）",
+                         bool(found) and not found.get("differing_accounts") and when is not None
+                         and (datetime.now() - when).days <= 8,
+                         (f"{when:%m-%d %H:%M}：{found.get('accounts', 0)} 個帳戶、{found.get('checked_days', 0):,} 個決策日，"
+                          f"不一樣的帳戶 {found.get('differing_accounts', 0)} 個") if found else "還沒有核對紀錄"))
+
     if backups is not None:
         files = sorted(backups.glob("*"), key=lambda path: path.stat().st_mtime) if backups.is_dir() else []
         newest = datetime.fromtimestamp(files[-1].stat().st_mtime) if files else None
