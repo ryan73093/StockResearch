@@ -315,6 +315,31 @@ def load_recent(research: Path, rule_hash: str) -> dict | None:
 def load(research: Path) -> dict[str, object] | None:
     path = research / "forward" / "stocks" / "board.json"
     try:
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+        board = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
     except ValueError:
         return None
+    return group_twins(board) if board else None
+
+
+def group_twins(board: dict) -> dict:
+    """2026-10-25 (使用者：可悲 — the top four were the same picks under four names): accounts whose results are the same
+    to the yuan (value, buys, sells, drawdown) are one row, the best-ranked named, the others listed as twins — their
+    differing settings did not come into play yet. Places run over the distinct results; ``distinct`` and ``ahead``
+    count them."""
+    rows = board.get("rows") or []
+    ranked = sorted((row for row in rows if row.get("rank")), key=lambda row: row["rank"])
+    groups: dict[tuple, dict] = {}
+    for row in ranked:
+        key = (round(row.get("value") or 0), row.get("buys"), row.get("sells"), round(row.get("max_drawdown") or 0, 4),
+               row.get("excess"))
+        if key in groups:
+            groups[key].setdefault("twins", []).append({"rule_hash": row["rule_hash"], "name": row["name"],
+                                                         "trial": row.get("trial")})
+            row["twin_of"] = groups[key]["rule_hash"]
+        else:
+            groups[key] = row
+    for place, row in enumerate(groups.values(), start=1):
+        row["place"] = place
+    board["distinct"] = len(groups)
+    board["ahead"] = sum(1 for row in groups.values() if row.get("excess", 0) > 0)
+    return board

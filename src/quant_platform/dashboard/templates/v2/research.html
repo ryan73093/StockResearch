@@ -695,23 +695,23 @@
     <h2>共同起跑線 <span class="badge">{{ forward_board.common_start }} 起</span></h2>
     <span class="muted small">每個策略都從當月截止日（{{ rolling_cutoff }}）的下一天起跑（之後的資料沒有被拿來挑任何策略，每月往後推一個月），30 萬＋每月 1 萬，對同樣的錢買 0050；{{ forward_board.date }} 為止 {{ forward_board.sessions }} 個交易日。和各自回測的月超額比：預期範圍是 90% 區間，時間越短範圍越寬</span>
   </div>
-  {% set board_total = forward_board.rows|selectattr('rank')|list|length %}{% if forward_limit and board_total > forward_limit %}<p class="small" style="margin:0 0 6px">列出前 {{ forward_limit }} 名（共 {{ board_total }} 個）・<a href="/research?tab=forward&amp;all=1#forward-board">顯示全部</a></p>{% endif %}
-  <p class="small" style="margin:0 0 10px">{% for label, count in forward_board.counts.items() if count %}<span class="badge {{ 'badge--bad' if label == '警示' else ('badge--ok' if label == '強於預期' else '') }}">{{ label }} {{ count }}</span> {% endfor %}</p>
+  {% set board_rows = forward_board.rows|selectattr('place')|sort(attribute='place')|list %}
+  {% set board_total = board_rows|length %}
+  <p class="small" style="margin:0 0 10px"><b>{{ '{:,}'.format(forward_board.rows|selectattr('rank')|list|length) }} 個帳戶、{{ '{:,}'.format(forward_board.distinct or 0) }} 種不同的結果</b>（設定不同、但這段期間買賣完全一樣的併成一列）・贏 0050 的 {{ '{:,}'.format(forward_board.ahead or 0) }} 種{% for label, count in forward_board.counts.items() if count and label in ('警示', '弱於預期', '強於預期') %}・<span class="badge {{ 'badge--bad' if label == '警示' else ('badge--ok' if label == '強於預期' else 'badge--warn') }}">{{ label }} {{ count }}</span>{% endfor %}{% if forward_limit and board_total > forward_limit %}・列出前 {{ forward_limit }} 名・<a href="/research?tab=forward&amp;all=1#forward-board">顯示全部</a>{% endif %}</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th class="num">名次</th><th>策略</th><th>開始實時記錄</th><th class="num">報酬</th><th class="num">比 0050</th><th class="num">回測預期範圍</th><th>狀態</th><th class="num">回撤</th><th class="num">買／賣</th></tr></thead>
       <tbody>
-      {% set board_rows = forward_board.rows|selectattr('rank')|sort(attribute='rank')|list %}
       {% for row in (board_rows[:forward_limit] if forward_limit else board_rows) %}
         <tr>
-          <td class="num" data-label="名次">{{ row.rank }}{% if row.rank_change %}<span class="small {{ 'up' if row.rank_change > 0 else 'down' }}">（{{ '{:+d}'.format(row.rank_change) }}）</span>{% endif %}</td>
+          <td class="num" data-label="名次">{{ row.place }}</td>
           {% set account = accounts.get(row.rule_hash) %}
-          <td data-primary><a href="{{ '/research/forward/' ~ row.rule_hash if account else '/research/recent/' ~ row.rule_hash }}">{{ row.name }}</a>{{ risk_badge(row.rule_hash) }}<br><span class="small"><a href="/research/rules/{{ row.rule_hash }}">回測紀錄</a>・<a href="/research/recent/{{ row.rule_hash }}">近 3 個月</a></span></td>
+          <td data-primary><a href="{{ '/research/forward/' ~ row.rule_hash if account else '/research/recent/' ~ row.rule_hash }}">{{ row.name }}</a>{{ risk_badge(row.rule_hash) }}<br><span class="small"><a href="/research/rules/{{ row.rule_hash }}">回測紀錄</a>・<a href="/research/recent/{{ row.rule_hash }}">近 3 個月</a></span>{% if row.twins %}<details class="small"><summary>另外 {{ row.twins|length }} 個設定這段期間買賣完全一樣（差別的設定還沒用到）</summary><ul style="margin:4px 0 0;padding-left:18px">{% for twin in row.twins %}<li><a href="/research/forward/{{ twin.rule_hash }}">{{ twin.name }}</a></li>{% endfor %}</ul></details>{% endif %}</td>
           <td data-label="開始實時記錄">{% if account %}{{ account.since }}{% if account.since > forward_board.common_start %}<br><span class="muted small">之前是補算</span>{% endif %}{% else %}<span class="muted small">沒有實時帳戶</span>{% endif %}</td>
           <td class="num {{ 'up' if row['return'] > 0 else 'down' }}" data-label="報酬">{{ '{:+.2%}'.format(row['return']) }}</td>
           <td class="num {{ 'up' if row.excess > 0 else 'down' }}" data-label="比 0050">{{ '{:+.2%}'.format(row.excess) }}</td>
           <td class="num small" data-label="預期範圍">{% if row.band_low is not none %}{{ '{:+.1%}'.format(row.band_low) }}～{{ '{:+.1%}'.format(row.band_high) }}{% else %}—{% endif %}</td>
-          <td data-label="狀態"><span class="badge {{ 'badge--bad' if row.state == '警示' else ('badge--ok' if row.state == '強於預期' else '') }}" title="{{ row.advice }}">{{ row.state }}</span></td>
+          <td data-label="狀態">{% if row.state == '符合預期' %}<span class="muted small" title="{{ row.advice }}">在預期內</span>{% else %}<span class="badge {{ 'badge--bad' if row.state == '警示' else ('badge--ok' if row.state == '強於預期' else 'badge--warn') }}" title="{{ row.advice }}">{{ row.state }}</span>{% endif %}</td>
           <td class="num" data-label="回撤">{{ '{:.1%}'.format(row.max_drawdown) }}</td>
           <td class="num" data-label="買／賣">{{ row.buys }}／{{ row.sells }}{% if row.recent %}<br><a class="small" href="/research/recent/{{ row.rule_hash }}">近 3 個月 {{ '{:+.0%}'.format(row.recent.excess) }}</a>{% endif %}</td>
         </tr>
@@ -719,7 +719,7 @@
       </tbody>
     </table>
   </div>
-  <p class="col-help"><b>欄位說明</b>　<b>名次</b>：依「比 0050」排，括號是和 5 個交易日前比的變化（正數是往前）。<b>報酬</b>：這個策略從起跑日以來的報酬（30 萬＋每月 1 萬）。<b>比 0050</b>：減去同樣的錢買 0050 的報酬。<b>回測預期範圍</b>：依這個規則回測的月超額推算，這麼多天 90% 會落在的範圍（天數越少範圍越寬）。<b>狀態</b>：符合／強於／弱於預期或警示，滑過看建議；警示＝落在回測幾乎不會出現的範圍，先查原因，一個月後仍在警示線下就停止追蹤。<b>回撤</b>：起跑以來從高點的最大跌幅。<b>買／賣</b>：起跑以來的買進、賣出筆數；下方連結是近 3 個月的模擬操作。<b>開始實時記錄</b>：這個策略的前向帳戶的起點，一律是當月截止日的下一天（這個月 {{ forward_board.common_start }}），和共同起跑線相同；帳戶建立以前的交易日是用同一套規則逐日補記的，之後每個交易日 15:30 記錄。點策略名稱看它的前向帳戶（持股、每一筆交易）。持有方式是每個策略自己的設計（使用者 2026-10-20：持有 20 天、月線上續抱都是策略）：「固定持有 20 天」＝買進後至少持有 20 個交易日；「月線上續抱」＝掉出保留區時站在 20 日均線上就續抱；「不設最短持有」＝掉出保留區就賣。名稱後面的「｜持有：…」寫出它用哪一種。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>名次</b>：依「比 0050」排，只在不同的結果之間排（設定不同、但這段期間每一筆買賣都一樣的帳戶併成一列，點「另外 N 個設定」看是哪些）。<b>報酬</b>：這個策略從起跑日以來的報酬（30 萬＋每月 1 萬）。<b>比 0050</b>：減去同樣的錢買 0050 的報酬。<b>回測預期範圍</b>：依這個規則回測的月超額推算，這麼多天 90% 會落在的範圍（天數越少範圍越寬）。<b>狀態</b>：符合／強於／弱於預期或警示，滑過看建議；警示＝落在回測幾乎不會出現的範圍，先查原因，一個月後仍在警示線下就停止追蹤。<b>回撤</b>：起跑以來從高點的最大跌幅。<b>買／賣</b>：起跑以來的買進、賣出筆數；下方連結是近 3 個月的模擬操作。<b>開始實時記錄</b>：這個策略的前向帳戶的起點，一律是當月截止日的下一天（這個月 {{ forward_board.common_start }}），和共同起跑線相同；帳戶建立以前的交易日是用同一套規則逐日補記的，之後每個交易日 15:30 記錄。點策略名稱看它的前向帳戶（持股、每一筆交易）。持有方式是每個策略自己的設計（使用者 2026-10-20：持有 20 天、月線上續抱都是策略）：「固定持有 20 天」＝買進後至少持有 20 個交易日；「月線上續抱」＝掉出保留區時站在 20 日均線上就續抱；「不設最短持有」＝掉出保留區就賣。名稱後面的「｜持有：…」寫出它用哪一種。</p>
 </section>
 {% endif %}
 {% endif %}

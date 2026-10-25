@@ -53,7 +53,7 @@ def test_the_forward_tab_shows_the_board(tmp_path):
     client = create_app(build_container(
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
     body = client.get("/research?tab=forward").get_data(as_text=True)
-    assert "共同起跑線" in body and "T0 共識清單測試" in body and "符合預期" in body and "/research/rules/h" in body
+    assert "共同起跑線" in body and "T0 共識清單測試" in body and "在預期內" in body and "/research/rules/h" in body
     # 2026-10-17: last month's start line is not shown (the page says it is being rebuilt from this month's start)
     (folder / "board.json").write_text(json.dumps({**board, "common_start": "2020-01-01"}, ensure_ascii=False), encoding="utf-8")
     body = client.get("/research?tab=forward").get_data(as_text=True)
@@ -96,3 +96,19 @@ def test_the_common_start_rolls_with_the_month():
     assert common_start(date(2026, 10, 17)) == date(2026, 9, 1)
     assert common_start(date(2026, 11, 3)) == date(2026, 10, 1)
     assert common_start(date(2027, 1, 6)) == date(2026, 12, 1)
+
+
+def test_accounts_with_the_same_trades_are_one_row():
+    """2026-10-25 (使用者：可悲 — four names, one set of picks): twins share a row, places run over distinct results."""
+    from quant_platform.research.forward_board import group_twins
+
+    def row(rank, name, value, sells=2, excess=0.17):
+        return {"rule_hash": name, "name": name, "rank": rank, "value": value, "buys": 21, "sells": sells,
+                "max_drawdown": -0.062, "excess": excess}
+
+    board = group_twins({"rows": [row(1, "a", 371000.2), row(2, "b", 371000.4), row(3, "c", 370900.0),
+                                  row(4, "d", 300000.0, excess=-0.01)]})
+    first = board["rows"][0]
+    assert [twin["name"] for twin in first["twins"]] == ["b"] and board["rows"][1]["twin_of"] == "a"
+    assert first["place"] == 1 and board["rows"][2]["place"] == 2 and board["rows"][3]["place"] == 3
+    assert board["distinct"] == 3 and board["ahead"] == 2

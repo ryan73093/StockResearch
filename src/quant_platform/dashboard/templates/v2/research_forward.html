@@ -147,7 +147,7 @@
   <p class="note">成交價＝當天收盤價加減 0.2%（買進較貴、賣出較便宜），和研究回測相同；盤後零股實測（R4）多數在收盤價成交，這個假設偏保守。這是模擬帳戶，不是實際下單。</p>
 </section>
 {% else %}
-<section class="card"><p class="muted" style="margin:0">這個規則 {{ forward.item.since }} 加入，還沒有第一筆紀錄；每個交易日 15:30 記錄。</p></section>
+<section class="card"><p class="muted" style="margin:0">{% if forward.item.restarted or forward.item.refit %}{% set again = forward.item.restarted or forward.item.refit %}這個帳戶 {{ again.at[:16]|replace('T', ' ') }} 起從 {{ forward.item.since }} 重新記錄中（{{ again.reason }}）；舊紀錄封存在 log-archive.jsonl，重新記錄完就會顯示，進度看「研究 › 執行中的程式」。{% else %}這個規則 {{ forward.item.since }} 加入，還沒有第一筆紀錄；每個交易日 15:30 記錄。{% endif %}</p></section>
 {% endif %}
 
 {% if forward.rebased %}
