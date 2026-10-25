@@ -374,9 +374,13 @@ def test_every_trade_shows_what_it_made_and_why():
     assert rows[0]["why"] == "新進前 20 名（當天第 2 名）"
     assert rows[1]["why"] == "每月 5 日投入的錢，補到目標比重"                 # money came in that day
     trim = rows[2]                                                            # half of 1,150 cost: 575
-    assert trim["why"] == "漲到目標比重的 2 倍以上，賣回目標比重"
+    assert trim["why"] == "部分賣出（舊紀錄沒有寫原因；這個策略設定漲到目標比重 2 倍以上賣回）"   # no engine reason kept
     assert trim["pnl"] == pytest.approx(55 * 12 - 22 - 575) and trim["pnl_pct"] == pytest.approx(63 / 575)
     assert rows[3]["why"] == "新進名單"                                        # no decision kept: a new name
+    # 2026-10-25: an order carrying the engine's reason shows it, for a partial sale before any guess
+    days[2]["trades_today"][0]["engine_why"] = "漲到目標比重的 2 倍以上（2.3 倍），這個策略設定賣回目標比重"
+    again, _summary = explain_trades(days, why, trim_above=2.0)
+    assert sorted(again, key=lambda row: row["date"])[2]["why"] == "漲到目標比重的 2 倍以上（2.3 倍），這個策略設定賣回目標比重"
     last = rows[4]                                                            # 60.5 shares still cost 575
     assert last["why"] == "跌出前 60 名（當天第 75 名），而且跌破月線"
     assert last["pnl"] == pytest.approx(60.5 * 9 - 21 - 575)

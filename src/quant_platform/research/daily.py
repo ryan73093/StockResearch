@@ -1672,7 +1672,8 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
             ledger.append({"day": day, "symbol": symbol, "side": "BLOCKED", "order": side,
                            "reason": f"超過當天成交值 {share_of(side):.1%}，其餘下個交易日再{'買' if side == 'BUY' else '賣'}"})
 
-    def buy(symbol: str, budget: float, day: date) -> None:
+    def buy(symbol: str, budget: float, day: date, why: str = "") -> None:
+        """``why`` (2026-10-25, 使用者質疑「漲到目標比重兩倍賣回」): the reason written on the order."""
         nonlocal cash
         close = fill_base(symbol, day)
         if budget <= 0 or refused(symbol, day, "BUY"):
@@ -1698,10 +1699,10 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
             result.bought += shares * fill
             if ledger is not None:
                 ledger.append({"day": day, "symbol": symbol, "side": "BUY", "shares": shares, "price": fill,
-                               "fee": fee, "tax": 0})
+                               "fee": fee, "tax": 0, **({"why": why} if why else {})})
 
-    def sell_all(symbol: str, day: date, amount: float | None = None) -> None:
-        """Sell the whole holding, or whole shares worth about ``amount``."""
+    def sell_all(symbol: str, day: date, amount: float | None = None, why: str = "") -> None:
+        """Sell the whole holding, or whole shares worth about ``amount``; ``why`` is written on the order."""
         nonlocal cash
         close = fill_base(symbol, day, "SELL")
         if units[symbol] <= 0 or refused(symbol, day, "SELL"):
@@ -1732,7 +1733,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         result.sold += amount
         if ledger is not None:
             ledger.append({"day": day, "symbol": symbol, "side": "SELL", "shares": shares, "price": fill,
-                           "fee": fee, "tax": tax})
+                           "fee": fee, "tax": tax, **({"why": why} if why else {})})
 
     for day in sessions:
         retry, blocked = blocked, False
@@ -1809,17 +1810,17 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                 floor = 50 * order_fee(1, 100.0, day)          # a trade whose minimum fee is over 2% is not placed
                 total = cash + sum(count * price(symbol, day) for symbol, count in units.items() if count > 0)
                 for symbol in [held for held, count in units.items() if count > 0 and held not in goal]:
-                    sell_all(symbol, day)
+                    sell_all(symbol, day, why="機器人的目標權重沒有這檔")
                 for symbol, weight in goal.items():
                     excess = units[symbol] * price(symbol, day) - total * weight
                     if units[symbol] > 0 and excess >= floor:
-                        sell_all(symbol, day, excess)
+                        sell_all(symbol, day, excess, why="機器人調低這檔的目標權重，賣掉超出的部分")
                 gaps = sorted(((total * weight - units[symbol] * price(symbol, day), symbol)
                                for symbol, weight in goal.items()), reverse=True)
                 for gap, symbol in gaps:
                     amount = min(gap, cash)
                     if amount >= floor:
-                        buy(symbol, amount, day)
+                        buy(symbol, amount, day, why="補到機器人的目標權重")
         elif rule is None:
             if cash > 0:
                 buy(BENCHMARK, cash, day)
@@ -1839,7 +1840,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                 total = cash + sum(count * price(symbol, day) for symbol, count in units.items() if count > 0)
                 excess = units[BENCHMARK] * price(BENCHMARK, day) - total * rule.core
                 if excess >= minimum:
-                    sell_all(BENCHMARK, day, excess)
+                    sell_all(BENCHMARK, day, excess, why="帳戶濾網解除，0050 只留核心比例")
             level = exposure.get(day, applied) if exposure is not None else 1.0
             moved = level != applied
             if today is not None or contribution or park != was_parked or moved or day in topups:
@@ -1854,12 +1855,14 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                     for symbol in picks:
                         excess = units[symbol] * price(symbol, day) - targets.get(symbol, 0.0)
                         if units[symbol] > 0 and excess >= minimum:
-                            sell_all(symbol, day, excess)
+                            sell_all(symbol, day, excess,
+                                     why=f"這個策略的減碼條件成立（{'大盤跌破 200 日均線' if getattr(rule, 'vol_scale', '') in ('taiex_half', 'taiex_staged') else '波動或風險升高'}），個股部位降到 {level:.0%}")
                 if rule.trim_above and today is not None and not park and not again:
                     for symbol in picks:                 # 2026-10-18: a winner grown past trim_above × its target
                         target, held_value = targets.get(symbol, 0.0), units[symbol] * price(symbol, day)
                         if target > 0 and held_value > rule.trim_above * target and not stuck(symbol, day):
-                            sell_all(symbol, day, held_value - target)
+                            sell_all(symbol, day, held_value - target,
+                                     why=f"漲到目標比重的 {rule.trim_above:g} 倍以上（{held_value / target:.1f} 倍），這個策略設定賣回目標比重")
                 orders = []
                 for symbol, target in targets.items():
                     held_value = units[symbol] * price(symbol, day)
@@ -1869,12 +1872,14 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                     adding = (contribution or day in topups) and not stuck(symbol, day)
                     if gap > 0 and (held_value <= 0 or adding or (park and symbol == BENCHMARK)
                                     or (moved and level > applied) or symbol in topping):
-                        orders.append((gap, symbol))
+                        why = ("" if held_value <= 0 else "減碼條件解除，買回目標比重" if moved and level > applied
+                               else "前一天沒買到，再下一次" if symbol in topping else "")
+                        orders.append((gap, symbol, why))
                 applied = level
-                for gap, symbol in sorted(orders, reverse=True):
+                for gap, symbol, why in sorted(orders, reverse=True):
                     amount = min(gap, cash)
                     if amount >= minimum:
-                        buy(symbol, amount, day)
+                        buy(symbol, amount, day, why=why)
         if rule is not None:
             was_parked = parked is not None and day in parked
         receivable = sum(amount for _when, amount, _symbol in owed)       # declared, not yet paid: still owned

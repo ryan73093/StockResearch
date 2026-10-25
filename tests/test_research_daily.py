@@ -762,6 +762,12 @@ def test_a_winner_grown_past_trim_above_times_its_target_is_sold_back_to_it():
     assert trimmed[-1][1] < 1_000 and run.sold > 30_000                    # sold back and the money put to work
     assert DailyRule(name="x", factors={"trend_200": 1.0}).rule_hash == \
         DailyRule(name="x", factors={"trend_200": 1.0}, trim_above=0.0).rule_hash   # off: the same rule
+    # 2026-10-25 (使用者質疑「漲到目標比重兩倍賣回」): the engine writes the reason on each such order
+    ledger: list = []
+    simulate_daily(data, DailyRule(name="x", factors={"trend_200": 1.0}, top=4, min_hold=0, trim_above=2.0), FREE,
+                   days[0], days[-1], ranks, SeedPlan(100_000, 0), ledger=ledger)
+    sells = [entry for entry in ledger if entry["side"] == "SELL"]
+    assert sells and all(entry["symbol"] == "A.TW" and entry["why"].startswith("漲到目標比重的 2 倍以上（") for entry in sells)
 
 
 def test_each_entry_and_exit_says_why():

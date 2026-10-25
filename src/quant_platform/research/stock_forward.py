@@ -1069,9 +1069,9 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
             row = {**trade, "date": day, "amount": shares * price}
             if trade["side"] == "BUY":
                 fresh = units[code] <= 1e-9
-                row["why"] = notes.get(code) or ("新進名單" if fresh else "每月 5 日投入的錢，補到目標比重" if paid_today
-                                                 else "賣出後的現金，補到目標比重" if sold_today
-                                                 else "帳上現金（股利等），補到目標比重")
+                row["why"] = notes.get(code) or trade.get("engine_why") or (
+                    "新進名單" if fresh else "每月 5 日投入的錢，補到目標比重" if paid_today
+                    else "賣出後的現金，補到目標比重" if sold_today else "帳上現金（股利等），補到目標比重")
                 basis[code] += shares * price + costs
                 units[code] += shares
                 row["episode"] = episode[code]
@@ -1081,9 +1081,12 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
                 made = shares * price - costs - cost
                 full = shares >= before - 1e-6
                 row.update(cost=cost, pnl=made, pnl_pct=made / cost if cost else None)
-                row["why"] = notes.get(code) or ("離開名單" if full else
-                                                 f"漲到目標比重的 {trim_above:g} 倍以上，賣回目標比重" if trim_above
-                                                 else "調整比重")
+                # 2026-10-25: the engine's reason first for a partial sale (it was guessed from the rule before)
+                row["why"] = (trade.get("engine_why") or notes.get(code) or "離開名單") if not full else (
+                    notes.get(code) or trade.get("engine_why") or "離開名單")
+                if not full and not trade.get("engine_why"):
+                    row["why"] = notes.get(code) or (f"部分賣出（舊紀錄沒有寫原因；這個策略設定漲到目標比重 {trim_above:g} 倍以上賣回）"
+                                                     if trim_above else "部分賣出（舊紀錄沒有寫原因）")
                 basis[code] -= cost
                 units[code] = max(0.0, before - shares)
                 if full:
@@ -1202,8 +1205,11 @@ def final_validation(research_dir: str | Path) -> dict[str, dict[str, object]]:
 
 def _trade(entry: dict[str, object], names: dict[str, str]) -> dict[str, object]:
     code = str(entry["symbol"]).split(".")[0]
-    return {"code": code, "name": names.get(code, ""), "side": entry["side"], "shares": round(float(entry["shares"]), 6),
-            "price": entry["price"], "fee": entry["fee"], "tax": entry["tax"]}
+    found = {"code": code, "name": names.get(code, ""), "side": entry["side"], "shares": round(float(entry["shares"]), 6),
+             "price": entry["price"], "fee": entry["fee"], "tax": entry["tax"]}
+    if entry.get("why") or entry.get("reason"):       # 2026-10-25: the engine's own reason for the order
+        found["engine_why"] = entry.get("why") or entry.get("reason")
+    return found
 
 
 def _names(history: Path, year: int) -> dict[str, str]:
