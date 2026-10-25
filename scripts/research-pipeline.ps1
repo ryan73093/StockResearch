@@ -757,7 +757,13 @@ switch ($Name) {
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-run" @("-m", "quant_platform.research", "stress-protect")
     }
-    { $_ -in "bearguard_a", "bearguard_b" } {
+    "bearguard_a" {
+        # 2026-10-24 research_method §7「空頭減碼第二版」: the stress strategies with each way, graded the usual way
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", $Name, "--broker", "cathay")
+        # the statistics, the monthly lists and the forward accounts follow in bearguardpost, once both halves are graded
+    }
+    "bearguard_b" {
         # 2026-10-24 research_method §7「空頭減碼第二版」: the stress strategies with each way, graded the usual way
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", $Name, "--broker", "cathay")
@@ -774,7 +780,7 @@ switch ($Name) {
         Invoke-Step "5-forward" @("-m", "quant_platform.research", "forward")
         Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
-    { $_ -in "bearguard5" } {
+    "bearguard5" {
         # 2026-10-25 research_method §7「空頭防護第五版」: the half guard timed by the deep risk model
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", $Name, "--broker", "cathay")
