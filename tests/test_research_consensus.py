@@ -20,9 +20,9 @@ def weekdays(start, end):
     return days
 
 
-def market(stocks=12, seed=4):
+def market(stocks=12, seed=4, first=date(2022, 1, 3), last=date(2023, 12, 29)):
     rng = np.random.default_rng(seed)
-    days = weekdays(date(2022, 1, 3), date(2023, 12, 29))
+    days = weekdays(first, last)
     closes = {}
     for number in range(stocks):
         series = 20 * np.cumprod(1 + 0.0002 * number + rng.normal(0, 0.01, len(days)))
@@ -133,11 +133,16 @@ def test_cost_aware_switching_keeps_a_holding_unless_the_swap_pays_a_round_trip(
 
 
 def test_the_switch_mapping_uses_the_development_period_and_never_expects_less_for_a_better_rank():
-    fp = market(stocks=30)
+    """2026-10-25: this test ran on 2022–2023 only, where the mapping was all zeros and passed — the same blind spot
+    that left 698 forward accounts never swapping. Now on years that hold the development period, and not flat."""
+    fp = market(stocks=30, first=date(2015, 1, 5), last=date(2021, 3, 31))
     rule = DailyRule(name="x", factors={"momentum_3": 1.0})
     percentiles, gain = daily.switch_mapping(fp, rule)
     values = [gain(p / 10 + 0.05) for p in range(10)]
     assert values == sorted(values) and percentiles.shape == (len(fp.symbols), len(fp.sessions))
+    assert values[-1] > values[0]                                   # a mapping, not a flat zero
+    with pytest.raises(ValueError):                                 # no development years: an error, never zeros
+        daily.switch_mapping(market(stocks=30), rule)
 
 
 def test_the_minimum_holding_comparison_changes_only_the_holding():
