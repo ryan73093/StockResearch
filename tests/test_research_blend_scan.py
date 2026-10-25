@@ -86,3 +86,14 @@ def test_the_role_accounts_take_their_shares_by_risk_parity(monkeypatch):
     assert shares[0] == min(shares)                                   # the most volatile role gets the least
     monkeypatch.setattr(blend_scan, "pool", lambda research=None: pool[1:])
     assert blend_scan.role_blends() == []                             # a member missing: no account
+
+
+def test_the_guarded_pool_keeps_the_200_session_guards_only():
+    """2026-10-25 (research_method §7 組合搜尋第八輪)."""
+    from quant_platform.research.blend_scan import guarded
+    from quant_platform.research.daily import DailyRule
+
+    base = {"name": "x", "factors": {"trend_200": 1.0}}
+    assert guarded({"rule": DailyRule(**base, vol_scale="taiex_half")})
+    assert guarded({"rule": DailyRule(**base, market_filter="taiex_200")})
+    assert not guarded({"rule": DailyRule(**base)}) and not guarded({"rule": DailyRule(**base, market_filter="taiex_200s")})

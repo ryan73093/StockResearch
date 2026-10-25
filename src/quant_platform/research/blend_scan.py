@@ -285,6 +285,29 @@ def consistent_batch(research: str | Path = Path("instance") / "research", today
         DEV_END = kept
 
 
+def guarded(member: dict) -> bool:
+    """2026-10-25 (research_method §7 組合搜尋第八輪): a rule that holds fewer stocks while TAIEX is below its 200-session
+    average — half (vol_scale "taiex_half") or none (market_filter "taiex_200"), the two guards that passed grading."""
+    rule = member["rule"]
+    return rule.vol_scale == "taiex_half" or rule.market_filter == "taiex_200"
+
+
+def guarded_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+    """2026-10-25 (research_method §7 組合搜尋第八輪; written before the run): the search over the guarded rules only
+    (``guarded``), the development months up to the month's cutoff as rolling_batch."""
+    from datetime import date
+
+    from quant_platform.research.rolling import cutoff_for
+
+    global DEV_END
+    kept = DEV_END
+    DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
+    try:
+        return batch(research, keep=guarded)
+    finally:
+        DEV_END = kept
+
+
 def rolling_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
     """2026-10-22 (research_method §7 組合搜尋第六輪; written before the run): the same search with the development months
     up to the month's cutoff (the end of the month two months back) instead of 2020-09 — how the monthly list grades

@@ -90,7 +90,8 @@ SOURCES_FILE = "pool_sources.json"      # every batch's rules, built once (_ever
 # 2026-10-23: the batches that search or load every price to name their rules — the blend search over 874 rules ran
 # for many minutes, these four 10 s each, whenever a research folder had no snapshot yet (the page tests hung on it);
 # their runs are written down in SOURCES_LOG as they start (record_sources) and the earlier ones are in the snapshot
-SEARCH_BATCHES = ("blendscan", "blendroll", "blendsteady", "next10blend", "rolesplit", "splitblend", "top10blend")
+SEARCH_BATCHES = ("blendscan", "blendroll", "blendsteady", "blendguard", "next10blend", "rolesplit", "splitblend",
+                  "top10blend")
 SOURCES_LOG = "sources.jsonl"           # the rules each daily batch run went through, appended by the CLI
 
 
