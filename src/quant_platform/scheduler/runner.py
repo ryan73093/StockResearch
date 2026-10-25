@@ -1137,7 +1137,7 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         args=[container],
         trigger=CronTrigger(day_of_week="sun", hour=6, minute=0, timezone=timezone),
         id="trade_audit",
-        name="交易規則稽核（每週日 06:00：每個規則逐筆檢查漲跌停、整股零股、成交量、費稅）",
+        name="交易規則稽核（每週日 06:00：每個規則逐筆檢查漲跌停、整股零股、成交量、費稅；接著用回測引擎核對每個前向帳戶的決策）",
         replace_existing=True,
         coalesce=True,
         max_instances=1,

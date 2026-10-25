@@ -926,14 +926,15 @@ class StockForwardTracker:
                 fixed = store.fixed(name)
                 if not fixed or getattr(rule, "universe", "twse") != "twse":
                     continue
-                again = daily_rankings(fp, rule, start, date.fromisoformat(str(fixed["through"])))
+                through = fixed["through"]
+                again = daily_rankings(fp, rule, start, through if isinstance(through, date) else date.fromisoformat(str(through)))
                 for day, symbols in sorted(fixed["days"].items()):
                     days += 1
-                    found = again.get(date.fromisoformat(day), [])
+                    found = again.get(day if isinstance(day, date) else date.fromisoformat(str(day)), [])
                     if set(found) != set(symbols):
                         differed += 1
                         if first is None:
-                            first = {"day": day, "kept": sorted(symbols), "again": sorted(found)}
+                            first = {"day": str(day), "kept": sorted(symbols), "again": sorted(found)}
             rows.append({"rule_hash": item["rule_hash"], "name": item["name"], "days": days, "differed": differed,
                          "first": first})
         moment = datetime.now(TAIPEI)
