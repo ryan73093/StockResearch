@@ -220,6 +220,9 @@ def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count:
                         "screen_excess": row["excess"], "full_excess": report["full_period_excess"],
                         "since_2020": report["since_2020"]["excess"], "drawdown": report["strategy"]["max_drawdown"],
                         "tier": daily.tier(record.metrics)[0]})
+    twins = daily.grade_half_twins([to_rule(row) for row, item in zip(chosen, results) if item["tier"] in daily.PASSING_TIERS],
+                                   base, registry, research / "reports", costs, data, fp, fingerprint, cache, stamp,
+                                   f"大規模搜尋 {folder.name}（減碼一半版本）", job)
     summary = {"version": VERSION, "stamp": stamp, "development": [str(arrays.days[0]), str(DEV_END)],
                "signals": names, "sizes": sizes, "holds": list(holds), "universes": list(progress.get("universes") or universes),
                "candidates": progress["screened"],
@@ -227,7 +230,7 @@ def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count:
                "earlier_finalists": len(seeds), "finalists": len(chosen),
                "minutes": round((time.time() - started) / 60, 1), "results": results,
                "tiers": dict(Counter(item["tier"] for item in results)),
-               "holds_of_passed": dict(Counter(row.get("hold") for row in rows))}
+               "holds_of_passed": dict(Counter(row.get("hold") for row in rows)), "half_twins": twins}
     (folder / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     (research / "scans" / "bigscan-current.txt").unlink(missing_ok=True)                   # finished
     return summary

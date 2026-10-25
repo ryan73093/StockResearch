@@ -697,6 +697,9 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                         "screen_drawdown": row["drawdown"], "full_excess": report["full_period_excess"],
                         "since_2020": report["since_2020"]["excess"], "drawdown": report["strategy"]["max_drawdown"],
                         "reasons": reasons, "tier": daily.tier(record.metrics)[0]})
+    twins = daily.grade_half_twins([to_rule(row) for row, item in zip(chosen, results) if item["tier"] in daily.PASSING_TIERS],
+                                   base, registry, research / "reports", costs, data, fp, fingerprint, cache, stamp,
+                                   f"大規模搜尋 {folder.name}（減碼一半版本）", job)
     summary = {"version": SCAN_VERSION, "stamp": stamp, "development": [str(arrays.days[0]), str(DEV_END)],
                "signals": arrays.names, "sizes": [smallest, largest], "require": require, "calm": calm,
                "prefilter": json.loads((folder / "prefilter.json").read_text(encoding="utf-8"))
@@ -705,6 +708,6 @@ def run_scan(base: Path, research: Path, costs, workers: int = 6, count: int = 8
                "earlier_finalists": len(seeds),
                "candidates": len(items), "passed_screen": sum(passes(row) for row in rows),
                "finalists": len(chosen), "minutes": round((time.time() - started) / 60, 1), "results": results,
-               "tiers": dict(Counter(item["tier"] for item in results))}
+               "tiers": dict(Counter(item["tier"] for item in results)), "half_twins": twins}
     (folder / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     return summary

@@ -293,6 +293,28 @@ def test_the_model_timed_half_follows_the_market_wide_risk():
     assert levels[days[299]] == 1.0 and levels[days[305]] == daily.MARKET_HALF and levels[days[330]] == 1.0
 
 
+def test_a_search_grades_the_half_twins_of_its_passing_rules(tmp_path, monkeypatch):
+    """2026-10-25: scan and scan-large grade the half twins right after their finalists."""
+    from types import SimpleNamespace
+
+    graded = []
+
+    def fake_run(rule, *args):
+        graded.append(rule)
+        return (SimpleNamespace(trial_id=99, metrics={"reasons": []}),
+                {"full_period_excess": 0.5, "strategy": {"max_drawdown": -0.3}})
+
+    monkeypatch.setattr(daily, "run_trial", fake_run)
+    monkeypatch.setattr(daily, "tier", lambda metrics: ("T0 候選", ""))
+    registry = SimpleNamespace(records=lambda: [])
+    (tmp_path / "research").mkdir()
+    plain = DailyRule(name="甲", factors={"trend_200": 1.0})
+    found = daily.grade_half_twins([plain], None, registry, tmp_path / "research" / "reports", None, None, None, "fp", {},
+                                   None, "大規模搜尋 x（減碼一半版本）")
+    assert len(graded) == 1 and graded[0].vol_scale == "taiex_half"
+    assert found == [{"trial_id": 99, "name": graded[0].name, "tier": "T0 候選", "full_excess": 0.5, "drawdown": -0.3}]
+
+
 def test_risk_controls_are_part_of_the_rule_only_when_on():
     base = DailyRule(name="x", factors={"trend_200": 1.0})
     assert "stop_loss" not in base.canonical() and "market_filter" not in base.canonical()

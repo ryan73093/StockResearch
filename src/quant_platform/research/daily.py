@@ -4622,6 +4622,25 @@ def bear_guard4_batch() -> list:
     return _guarded(BEAR_GUARD_ORIGINS, BEAR_RISK)
 
 
+def grade_half_twins(rules: list, base, registry, reports_dir: Path, costs, data, fp, fingerprint: str, cache: dict,
+                     stamp: str | None, label: str, job=None) -> list[dict[str, object]]:
+    """2026-10-25: a search's passing ``rules`` (scan, scan-large) get their half-guard twins graded right after, as
+    every `daily --name` batch does (half_twins); recorded as the search's source in the pool."""
+    from quant_platform.research.pool import record_sources
+
+    twins = half_twins(rules, {record.spec_hash for record in registry.records()})
+    if twins:
+        record_sources(Path(reports_dir).parent, twins, label)
+    output = []
+    for number, twin in enumerate(twins):
+        if job:
+            job.update(current=f"減碼一半版本（{number + 1}／{len(twins)}）：{twin.name}", force=True)
+        record, report = run_trial(twin, base, registry, reports_dir, costs, data, fp, fingerprint, cache, stamp)
+        output.append({"trial_id": record.trial_id, "name": twin.name, "tier": tier(record.metrics)[0],
+                       "full_excess": report["full_period_excess"], "drawdown": report["strategy"]["max_drawdown"]})
+    return output
+
+
 def bear_guard3_batch() -> list:
     """2026-10-25 (research_method §7「空頭減碼第三版」, written before the run): the half guard on BEAR_HALF_WIDE, and
     the staged guard on BEAR_GUARD_ORIGINS — graded the usual way on 2015-06 onwards."""
