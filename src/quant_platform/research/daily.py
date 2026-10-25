@@ -4575,7 +4575,7 @@ def _guarded(trials: tuple[int, ...], guards: list[tuple[str, dict]]) -> list:
     return output
 
 
-NO_HALF_TWINS = ("bearguard",)        # batches whose passing rules get no half twin (they are the guards themselves)
+NO_HALF_TWINS = ("bearguard", "entryonly")   # batches whose passing rules get no half twin (variants of fixed rules)
 
 
 def half_twins(rules: list, registered: set[str]) -> list:
@@ -4646,6 +4646,17 @@ def grade_half_twins(rules: list, base, registry, reports_dir: Path, costs, data
         output.append({"trial_id": record.trial_id, "name": twin.name, "tier": tier(record.metrics)[0],
                        "full_excess": report["full_period_excess"], "drawdown": report["strategy"]["max_drawdown"]})
     return output
+
+
+ENTRY_ONLY = ("選股條件只管買進", {"eligibility": "entry"})
+
+
+def entry_only_batch() -> list:
+    """2026-10-26 (research_method §7「選股條件只管買進」, written before the run; found in the forward audit: 1,187 of the
+    forced sales were stocks whose 20-session turnover hovered at the 20,000,000 line — bought one week, sold the next):
+    the 55 fixed rules (BEAR_GUARD_ORIGINS, BEAR_HALF_WIDE) with eligibility "entry" — the price, turnover and history
+    lines decide the buys only; a holding leaves by its rule's own exit. Graded the usual way."""
+    return _guarded(BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE, [ENTRY_ONLY])
 
 
 def bear_guard3_batch() -> list:
@@ -4819,7 +4830,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
-           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "entryonly": entry_only_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
