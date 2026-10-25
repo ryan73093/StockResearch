@@ -36,6 +36,8 @@
   --rail: 84px;
   --series-3: #c08bff;
   --series-4: #7fd1d9;
+  /* 2026-10-25: the dashboard's chart colours (dataviz reference slots, validated on --surface-2 in both themes) */
+  --v1: #3987e5; --v2: #d95926; --v3: #199e70; --vref: #8a94a2; --vput: #4d5764; --v1-bg: rgba(57, 135, 229, .18);
   --font: system-ui, -apple-system, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
 }
@@ -53,6 +55,7 @@
   --text-2: #3a4450;
   --series-3: #7b3fd6;
   --series-4: #0f7f8a;
+  --v1: #2a78d6; --v2: #eb6834; --v3: #1baf7a; --vref: #5e6a79; --vput: #b4bdc8; --v1-bg: rgba(42, 120, 214, .13);
   --muted: #5e6a79;
   --accent: #1d62d8;
   --accent-contrast: #ffffff;
@@ -801,3 +804,63 @@ td.wrap { white-space: normal; min-width: 180px; }
 .kb-text { white-space: pre-wrap; font: 13.5px/1.65 var(--font); margin: 0; overflow-wrap: anywhere; }
 .kb-table td { overflow-wrap: anywhere; word-break: break-word; }
 .kb-answer a, .kb-form + p a { overflow-wrap: anywhere; }
+
+/* 2026-10-25 (使用者：不是要你做成滿版的 dashboard 嗎，只給我這麼多文字的表格，線圖呢): the research dashboard, full
+   width and charts first (research/charts.py draws each chart wide and narrow) */
+.page--wide { max-width: none; }
+.dash-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1300px) { .dash-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+.dash-panel { margin: 0; min-width: 0; background: var(--surface-2); border-radius: var(--radius-sm); padding: 12px 14px 10px; }
+.dash-panel--full { grid-column: 1 / -1; }
+.dash-panel figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.dash-panel figcaption h3 { font-size: 16px; margin: 0; }
+.dash-panel figcaption span { font-size: 12.5px; color: var(--muted); }
+@media (max-width: 1000px) { .dash-grid { grid-template-columns: minmax(0, 1fr); } }
+.dash-link { margin: 6px 0 0; }
+.dash-how { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.dash-how summary { cursor: pointer; color: var(--text-2); }
+.dash-how ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.7; }
+.viz { width: 100%; height: auto; display: block; margin-top: 6px; }
+.viz--narrow { display: none; }
+@media (max-width: 640px) { .viz--wide { display: none; } .viz--narrow { display: block; } }
+.viz text { fill: var(--muted); font-size: 12px; font-family: var(--font); }
+.viz text.lbl { fill: var(--text-2); }
+.viz .grid { stroke: var(--border); stroke-width: 1; }
+.viz .zero { stroke: var(--border-strong); stroke-width: 1.5; }
+.viz .guide { stroke: var(--vref); stroke-width: 1; stroke-dasharray: 2 4; }
+.viz polyline { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.viz polyline.v1 { stroke: var(--v1); } .viz polyline.v2 { stroke: var(--v2); } .viz polyline.v3 { stroke: var(--v3); }
+.viz polyline.vref { stroke: var(--vref); stroke-width: 1.8; } .viz polyline.vput { stroke: var(--vput); stroke-width: 1.5; }
+.viz rect.v1, .viz circle.v1 { fill: var(--v1); } .viz rect.v2, .viz circle.v2 { fill: var(--v2); }
+.viz rect.v3, .viz circle.v3 { fill: var(--v3); } .viz rect.vref, .viz circle.vref { fill: var(--vref); }
+.viz circle.vput { fill: var(--vput); }
+.viz .band { fill: var(--v1-bg); stroke: none; }
+.viz .col { fill: transparent; }
+.viz .col:hover { fill: var(--accent-bg); }
+.legend .sw-v1 { background: var(--v1); } .legend .sw-v2 { background: var(--v2); } .legend .sw-v3 { background: var(--v3); }
+.legend .sw-vref { background: repeating-linear-gradient(90deg, var(--vref) 0 5px, transparent 5px 8px); }
+.legend .sw-vput { background: repeating-linear-gradient(90deg, var(--vput) 0 5px, transparent 5px 8px); }
+.legend .sw-band { background: var(--v1-bg); height: 10px; }
+.legend .sw-vbar { background: var(--vref); height: 10px; } .legend .sw-v1bar { background: var(--v1); height: 10px; }
+.legend .sw-v3bar { background: var(--v3); height: 10px; }
+.viz .mark { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 3; }
+.legend .sw-mark { background: var(--text-2); width: 3px; height: 14px; }
+.fbars { display: grid; gap: 4px; margin-top: 8px; }
+.fbar { display: grid; grid-template-columns: 7.5em minmax(0, 1fr) 8.5em; column-gap: 10px; row-gap: 2px; align-items: center;
+  text-align: left; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 6px 8px;
+  color: var(--text); cursor: pointer; font: inherit; }
+.fbar:hover, .fbar:focus-visible { border-color: var(--accent); background: var(--accent-bg); }
+.fbar__name { font-weight: 600; font-size: 14px; }
+.fbar__track { position: relative; height: 14px; background: var(--surface-3); border-radius: 0 4px 4px 0; }
+.fbar__fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--v1); border-radius: 0 4px 4px 0; }
+.fbar__ref { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1px; background: var(--text-2); border-radius: 2px; }
+.fbar__value { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.fbar__value small { color: var(--muted); font-weight: 400; }
+.fbar__sub { grid-column: 2 / 4; font-size: 12px; color: var(--muted); }
+@media (max-width: 640px) {
+  .fbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .fbar__name { grid-column: 1; grid-row: 1; } .fbar__value { grid-column: 2; grid-row: 1; }
+  .fbar__track { grid-column: 1 / 3; grid-row: 2; } .fbar__sub { grid-column: 1 / 3; grid-row: 3; }
+}

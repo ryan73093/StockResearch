@@ -88,7 +88,7 @@
           <span class="when-dark">{{ icon('sun') }}</span><span class="when-light">{{ icon('moon') }}</span>
         </button>
       </header>
-      <main class="page">
+      <main class="page {% block page_class %}{% endblock %}">
         {% block heading %}{% endblock %}
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% for category, message in messages %}

@@ -1,60 +1,91 @@
 {# 2026-10-23 (使用者：總覽就是一個完整的 dashboard，重要資料顯示上去就好、不要充版面；點深度學習就跳出浮動視窗顯示它
-   目前大致的訓練狀況): research/dashboard.py. A card opens its family in a window (fetched: /research/family/<name>). #}
+   目前大致的訓練狀況): research/dashboard.py. A family opens in a window (fetched: /research/family/<name>).
+   2026-10-25 (使用者：各類策略完全看不懂，每年比 0050 寫的 +41、+55、+128 是什麼意思；不是要你做成滿版的 dashboard 嗎，
+   只給我這麼多文字的表格，線圖呢): full width, charts first (research/charts.py), numbers with their units, the
+   explanations folded away. #}
 {% macro wan(value) %}{% if value is none %}—{% else %}{{ '{:,.0f}'.format(value / 10000) }} 萬{% endif %}{% endmacro %}
 {% macro pts(value) %}{% if value is none %}—{% else %}<span class="{{ 'up' if value > 0.0005 else ('down' if value < -0.0005 else '') }}">{{ '{:+.1f}'.format(value * 100) }}</span>{% endif %}{% endmacro %}
+{% macro legend(items) %}<div class="legend">{% for item in items %}<span><i class="sw-{{ item.css }}"></i>{{ item.label }}</span>{% endfor %}</div>{% endmacro %}
 {% macro dashboard(d) %}
 {% if d %}
-{% set fw = d.forward %}{% set era = d.eras %}{% set all = era.all %}
-<section class="card" id="dashboard" data-tab="儀表板" data-tab-default>
-  <div class="card__head"><h2>研究儀表板</h2><span class="muted small">2015-06～2026-09 回測：30 萬＋每月 5 日 1 萬，100% 個股；前向：{{ fw.start }} 起、全部賣掉計算</span></div>
+{% set fw = d.forward %}{% set era = d.eras %}{% set c = d.charts or {} %}{% set st = d.stress %}
+<section class="card dash" id="dashboard" data-tab="儀表板" data-tab-default>
   <div class="dash-kpis">
-    <div class="kpi"><div class="kpi__label">0050 同樣的錢</div><div class="kpi__value">{{ wan(d.benchmark) }}</div><div class="kpi__note">2020-10 起：{{ wan(d.recent_benchmark) }}</div></div>
-    <div class="kpi"><div class="kpi__label">最好的策略（回測）</div><div class="kpi__value">{{ wan(d.overall.final_value) if d.overall else '—' }}</div><div class="kpi__note">{% if d.overall and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.overall.final_value / d.benchmark) }} 倍・{{ d.overall.tier }}{% endif %}</div></div>
-    <div class="kpi"><div class="kpi__label">一般 T0 候選最好</div><div class="kpi__value">{{ wan(d.ordinary.final_value) if d.ordinary else '—' }}</div><div class="kpi__note">{% if d.ordinary and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.ordinary.final_value / d.benchmark) }} 倍{% endif %}{% if d.recent %}・2020-10 起最好 {{ wan(d.recent.since_2020_final_value) }}{% endif %}</div></div>
-    <div class="kpi"><div class="kpi__label">前向 {{ fw.accounts }} 個帳戶（全部賣掉）</div><div class="kpi__value">{{ '{:.0%}'.format(fw.ahead_share) if fw.ahead_share is not none else '—' }} 贏 0050</div><div class="kpi__note">中位數 <span class="{{ 'up' if (fw.median_gain or 0) > 0 else 'down' }}">{{ '{:+,.0f}'.format(fw.median_gain or 0) }}</span> 元・0050 <span class="{{ 'up' if (fw.bench_gain or 0) > 0 else 'down' }}">{{ '{:+,.0f}'.format(fw.bench_gain or 0) }}</span> 元</div></div>
-    <div class="kpi"><div class="kpi__label">離 T0</div><div class="kpi__value">{{ d.t0.sessions }}／{{ d.t0.needed }} 交易日</div><div class="kpi__note">最快 {{ first_t0[:10] }}・{{ '{:,}'.format(d.t0.not_behind) }} 個不輸 0050</div></div>
+    <div class="kpi"><div class="kpi__label">0050（同樣投入）</div><div class="kpi__value">{{ wan(d.benchmark) }}</div><div class="kpi__note">2015-06 起 30 萬＋每月 1 萬</div></div>
+    <div class="kpi"><div class="kpi__label">回測錢最多</div><div class="kpi__value">{{ wan(d.overall.final_value) if d.overall else '—' }}</div><div class="kpi__note">{% if d.overall and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.overall.final_value / d.benchmark) }} 倍・{{ d.overall.tier }}{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">一般風險錢最多</div><div class="kpi__value">{{ wan(d.ordinary.final_value) if d.ordinary else '—' }}</div><div class="kpi__note">{% if d.ordinary and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.ordinary.final_value / d.benchmark) }} 倍・回撤不比 0050 深 5 點以上{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">跌市最穩的錢最多</div><div class="kpi__value">{{ wan(d.steady.final_value) if d.steady else '—' }}</div><div class="kpi__note">{% if d.steady and d.steady.worst_fall %}#{{ d.steady.trial }}・0050 跌最多那次{{ '少跌' if d.steady.worst_fall.gap >= 0 else '多跌' }} {{ '%.1f'|format((d.steady.worst_fall.gap * 100)|abs) }} 點{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">前向：{{ fw.start[5:7]|int }}/{{ fw.start[8:10]|int }} 起照規則做</div><div class="kpi__value">{{ '{:.0%}'.format(fw.ahead_share) if fw.ahead_share is not none else '—' }} 贏 0050</div><div class="kpi__note">{{ '{:,}'.format(fw.accounts) }} 個帳戶，全部賣掉計算</div></div>
+    <div class="kpi"><div class="kpi__label">第一個 T0 最快</div><div class="kpi__value">{{ first_t0[5:7]|int }}/{{ first_t0[8:10]|int }}</div><div class="kpi__note">前向已 {{ d.t0.sessions }}／{{ d.t0.needed }} 個交易日</div></div>
   </div>
-  <p class="muted small" style="margin:6px 0 0">完整回測 {{ '{:,}'.format(d.rules) }} 個規則、{{ '{:,}'.format(d.passing) }} 個過門檻；搜尋過 {{ '{:.2f}'.format(d.scale.total / 100000000) }} 億個策略設定。點下面任何一類看它的模型、資料、各時期表現與最好的規則。</p>
 
-  <h3 class="dash-h">各類策略</h3>
-  <div class="family-grid">
-    {% for f in d.families %}{% set e = f.eras %}
-    <button type="button" class="family-card" data-family="{{ f.family }}">
-      <span class="family-card__name">{{ f.family }}{% if f.uses_paid %} <span class="badge">用付費資料 {{ f.paid_rules }}</span>{% endif %}</span>
-      <span class="family-card__value">{{ wan(f.best.final_value) if f.best else '—' }}{% if f.best and d.benchmark %}<small>（0050 的 {{ '{:.1f}'.format(f.best.final_value / d.benchmark) }} 倍）</small>{% endif %}</span>
-      <span class="family-card__line">{{ f.rules }} 個規則・<b>{{ f.passing }}</b> 個過門檻{% if f.accounts %}・前向 {{ '{:.0%}'.format(f.ahead_share) }} 贏 0050{% endif %}</span>
-      {% if e %}<span class="family-card__line muted">每年比 0050（中位數）：{% for label in era.labels %}{{ pts(e.periods[label].median) }}{% if not loop.last %} ／ {% endif %}{% endfor %}</span>{% endif %}
-    </button>
-    {% endfor %}
+  <div class="dash-grid">
+    {% if c.growth %}
+    <figure class="dash-panel dash-panel--full">
+      <figcaption><h3>錢怎麼長大的</h3><span>2015-06 起 30 萬＋每月 1 萬，每個月底帳戶值多少（萬元）・滑鼠移到圖上看每個月的數字</span></figcaption>
+      {{ c.growth|safe }}
+      {{ legend(c.growth_lines) }}
+    </figure>
+    {% endif %}
+    {% if c.progress %}
+    <figure class="dash-panel">
+      <figcaption><h3>研究進展：最好的成績</h3><span>每次回測後，所有規則裡期末最多的（萬元）</span></figcaption>
+      {{ c.progress|safe }}
+      {{ legend([{'css': 'v1', 'label': '全部過門檻的最好'}, {'css': 'v2', 'label': '一般風險（T0 候選）最好'}, {'css': 'vref', 'label': '0050 同樣的錢'}]) }}
+      <p class="small muted" style="margin:4px 0 0">虛線「引擎」是回測引擎改版：修正以前的錯誤後全部規則重跑，最好的成績可能因此往下修。</p>
+    </figure>
+    {% endif %}
+    {% if c.forward %}
+    <figure class="dash-panel">
+      <figcaption><h3>前向：{{ fw.start[5:7]|int }}/{{ fw.start[8:10]|int }} 起真的照規則做</h3><span>每個帳戶當天全部賣掉，比投入的錢多或少幾元</span></figcaption>
+      {{ c.forward|safe }}
+      {{ legend([{'css': 'v1', 'label': '帳戶的中位數'}, {'css': 'band', 'label': '中間一半的帳戶'}, {'css': 'vref', 'label': '0050 同樣的錢'}]) }}
+    </figure>
+    {% endif %}
+    {% set top = d.families|map(attribute='best')|select|map(attribute='final_value')|max %}
+    <figure class="dash-panel">
+      <figcaption><h3>各類策略：每一類最好的一個</h3><span>2015-06 起的期末（萬元）・點一下看這一類的模型、資料與規則</span></figcaption>
+      <div class="fbars">
+        {% for f in d.families if f.best %}
+        <button type="button" class="fbar" data-family="{{ f.family }}">
+          <span class="fbar__name">{{ f.family }}</span>
+          <span class="fbar__track"><span class="fbar__fill" style="width:{{ '%.1f'|format(f.best.final_value / top * 100) }}%"></span>{% if d.benchmark %}<span class="fbar__ref" style="left:{{ '%.1f'|format(d.benchmark / top * 100) }}%"></span>{% endif %}</span>
+          <span class="fbar__value">{{ wan(f.best.final_value) }}{% if d.benchmark %}<small> {{ '%.1f'|format(f.best.final_value / d.benchmark) }} 倍</small>{% endif %}</span>
+          <span class="fbar__sub">{{ f.passing }}／{{ f.rules }} 個過門檻{% if f.accounts %}・前向 {{ '{:.0%}'.format(f.ahead_share) }} 贏 0050{% endif %}{% if f.uses_paid %}・{{ f.paid_rules }} 個用付費資料{% endif %}</span>
+        </button>
+        {% endfor %}
+      </div>
+      <div class="legend"><span><i class="sw-v1"></i>這一類最好的規則</span><span><i class="sw-mark"></i>0050 同樣的錢（{{ wan(d.benchmark) }}）</span><span>倍＝是 0050 的幾倍</span></div>
+    </figure>
+    {% if c.periods %}
+    <figure class="dash-panel">
+      <figcaption><h3>每個時期，每年賺多少</h3><span>同一個帳戶切成五段，每年報酬（%）・下面是贏 0050 的規則比例</span></figcaption>
+      {{ c.periods|safe }}
+      {{ legend([{'css': 'vbar', 'label': '0050'}, {'css': 'v1bar', 'label': '全部規則的中位數'}]) }}
+      <p class="dash-link"><button type="button" class="button-link" data-eras>哪些規則每個時期都贏 0050（{{ era.consistent|length }} 個）、哪些後來不賺了</button></p>
+    </figure>
+    {% endif %}
+    {% if c.stress %}
+    <figure class="dash-panel dash-panel--full">
+      <figcaption><h3>每一次空頭跌多少（2007 年起）</h3><span>0050 從高點跌 15% 以上的每一次，同一段時間跌了幾 %・下面是 20 個策略裡撐過的個數</span></figcaption>
+      {{ c.stress|safe }}
+      {{ legend([{'css': 'vbar', 'label': '0050'}, {'css': 'v1bar', 'label': '20 個策略（中位數）'}, {'css': 'v3bar', 'label': '同樣的策略加「跌破年線減碼一半」'}]) }}
+      <p class="dash-link"><button type="button" class="button-link" data-stress>看每一次空頭、每個策略與每種減碼方式</button></p>
+    </figure>
+    {% endif %}
   </div>
-  <p class="col-help"><b>說明</b>　<b>最好</b>：這一類過門檻的規則裡回測期末最多的（整類都沒過門檻才取期末最多的）。<b>過門檻</b>：T0 候選（含高風險）。<b>前向</b>：本月名單上這一類的帳戶，全部賣掉後比同樣的錢買 0050 多的比例。<b>每年比 0050</b>：這一類規則在 {{ era.labels|join('、') }} 每年報酬比 0050 多或少幾個百分點的中位數（紅＝多、綠＝少）。<b>用付費資料</b>：用到 FinMind 付費資料（集保、融資維持率、借貸、鉅額、主力、八大行庫、分點）的規則數。</p>
 
-  <h3 class="dash-h">同一個策略在不同時期還適用嗎</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>時期</th><th class="num">0050 每年</th><th class="num">贏 0050 的規則</th><th class="num">規則每年比 0050（中位數）</th><th class="num">最好的多幾點</th></tr></thead>
-      <tbody>
-      {% for label in era.labels %}{% set p = all.periods[label] %}
-        <tr><td>{{ label }}</td><td class="num">{{ '{:+.1%}'.format(era.benchmark[label]) if era.benchmark.get(label) is not none else '—' }}</td>
-          <td class="num">{{ '{:.0%}'.format(p.beat) if p.beat is not none else '—' }}</td><td class="num">{{ pts(p.median) }} 點</td><td class="num">{{ pts(p.best) }} 點</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <ul class="reasons small" style="margin-top:8px">
-    <li>2015-06～2019 贏 0050 的 {{ '{:,}'.format(all.early_winners) }} 個規則，2020 年以後還贏的 {{ '{:,}'.format(all.still_winning) }} 個（{{ '{:.0%}'.format(all.still_winning / all.early_winners) if all.early_winners else '—' }}）；前後期的排名相關 {{ all.correlation }}（1＝完全一樣、0＝無關）。</li>
-    <li>前期每年贏 0050 五個百分點以上的 {{ all.big_early }} 個：後期仍贏五點以上 {{ all.big_still }} 個，<b>變成輸 0050 的 {{ all.big_faded }} 個</b>；前期輸、後期每年贏五點以上的 {{ era.rose|length }} 個（多半是深度學習與 2020 年後才變強的組合）。</li>
-    {% if era.benchmark.get(era.labels[-1]) is not none and all.periods[era.labels[-1]].beat is not none %}<li>差最多的是 2024～2026-09：0050（台積電佔一半）每年 {{ '{:+.0%}'.format(era.benchmark[era.labels[-1]]) }}，只有 {{ '{:.0%}'.format(all.periods[era.labels[-1]].beat) }} 的規則贏它——規則本身多半還在賺，但每檔等額的選股追不上權值股集中的行情；2020～2023 反而有七成以上的規則贏 0050。</li>{% endif %}
-  </ul>
-  <p><b>五個時期都贏 0050 的：{{ era.consistent|length }} 個</b>{% if era.consistent %}——最多的 {{ era.consistent[0].name[:30] }}… {{ wan(era.consistent[0].final_value) }}（{{ era.consistent[0].tier }}）{% endif %}。{% for count in range(era.labels|length - 1, -1, -1) %}贏 {{ count }} 個時期的 {{ era.won[count] }} 個{% if not loop.last %}、{% endif %}{% endfor %}。</p>
-  <p><button type="button" class="button-link" data-eras>看五個時期都贏的、前期大賺後期不賺的（{{ era.faded|length }} 個）與後期才變強的</button></p>
-  {% set st = d.stress %}
-  <h3 class="dash-h">每一次空頭撐得過嗎（2007 年起，含 2008 金融海嘯）</h3>
-  {% if st %}
-  <p class="small" style="margin:0 0 6px">{{ st.tested }} 個策略從 2007-01 起跑（規則沒看過 2007～2014），經過 {{ st.scenarios }} 次 0050 跌 15% 以上的空頭（其中 {{ st.big }} 次跌 20% 以上）：<b>每一次都撐過的 {{ st.held_all }} 個</b>、撐過 2008 的 {{ st.held_2008 }} 個{% if st.steady %}；撐過最多次的是 #{{ st.steady.trial }}（{{ st.steady.held }}／{{ st.steady.of }} 次）{% endif %}；2007 起期末贏 0050 的 {{ st.beat }} 個。{% if st.protect %}<br>大空頭來時減碼（2007 起的壓力測試）：{% for p in st.protect %}{{ p.label }}「{{ p.verdict }}」{{ '、' if not loop.last }}{% endfor %}。{% endif %}{% if st.guards %}<br><b>照一般評分（2015-06 起）</b>：{% for g in st.guards %}{{ g.short }} {{ g.passing }}／{{ g.graded }} 過門檻、錢留住 {{ '{:.0%}'.format(g.kept) }}、回撤{{ '淺' if g.drawdown >= 0 else '深' }} {{ '%.1f'|format(g.drawdown|abs) }} 點{% if g.frontier %}（{% for n in g.frontier %}#{{ n }}{{ '、' if not loop.last }}{% endfor %} 上前緣）{% endif %}{{ '；' if not loop.last }}{% endfor %}。{% endif %}</p>
-  <p><button type="button" class="button-link" data-stress>看每一次空頭、每個策略，以及在高點才進場的虧損與回本時間</button></p>
-  {% else %}<p class="small muted" style="margin:0 0 6px">壓力測試背景執行中（模型從 2004 年起逐年重訓，再讓策略從 2007 年跑過每一次大空頭）。</p>{% endif %}
-  <p class="col-help"><b>說明</b>　每個規則同一個帳戶（2015-06 起 30 萬＋每月 1 萬）切成時期，每年報酬扣掉當月投入，和同時期的 0050 比；「每年比 0050」是年化報酬相減。前期＝2015-06～2019、後期＝2020～2026-09。只看 2015 年起的規則（不含短歷史賽道）。</p>
+  <details class="dash-how">
+    <summary>這些數字怎麼算的</summary>
+    <ul>
+      <li><b>帳戶</b>：2015-06 開戶 30 萬、每月 5 日再投入 1 萬；0050 是同樣的錢全部買 0050。回測期末是 2026-09-30 全部賣掉（扣手續費與稅）的金額。</li>
+      <li><b>一般風險</b>：最大回撤不比 0050 深超過 5 個百分點（T0 候選）；超過的叫高風險（最多深 15 點）。<b>跌市最穩</b>：取捨前緣上，0050 跌最多的那一次沒有比 0050 跌更多的規則裡錢最多的。</li>
+      <li><b>前向</b>：本月名單上的規則從截止日隔天起每天照規則做，當天收盤全部賣掉算賺賠；中間一半＝第 25 到第 75 百分位的帳戶。</li>
+      <li><b>每個時期</b>：每個規則同一個帳戶切成 {{ era.labels|join('、') }}，每年報酬扣掉當月投入；長條是全部 {{ '{:,}'.format(d.rules) }} 個規則的中位數。</li>
+      <li><b>空頭</b>：20 個代表策略的模型用 2004 年起的資料逐年重訓，從 2007 年跑；規則沒看過 2007～2014，是測試不是挑選。</li>
+      <li>完整回測 {{ '{:,}'.format(d.rules) }} 個規則、{{ '{:,}'.format(d.passing) }} 個過門檻；搜尋過 {{ '{:.2f}'.format(d.scale.total / 100000000) }} 億個策略設定。圖 {{ c.built }} 更新。</li>
+    </ul>
+  </details>
 </section>
 
 <dialog class="dash-dialog" id="dash-dialog" data-notab>

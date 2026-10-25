@@ -4,6 +4,7 @@
 {% from "v2/_research_status.html" import research_status %}
 {% from "v2/_dashboard.html" import dashboard as dashboard_section %}
 {% block title %}研究 · 交易研究分析平台{% endblock %}
+{% block page_class %}{% if research_tab == 'overview' %}page--wide{% endif %}{% endblock %}
 {% block heading %}
 <header class="page-head">
   <div>

@@ -121,6 +121,177 @@ def view(research: str | Path, start: str, optimizations: list[dict], gates: dic
     return _VIEW["value"]                           # type: ignore[return-value]
 
 
+def wan(value: float) -> str:
+    return f"{value / 10000:,.0f} 萬"
+
+
+def pct(value: float) -> str:
+    return "0%" if abs(value) < 0.005 else f"{value * 100:+.0f}%"
+
+
+def curve(research: Path, row: dict | None) -> dict[str, list] | None:
+    """A rule's month-end account (value, 0050's, the money put in) from its report."""
+    if not row or not row.get("report_file"):
+        return None
+    try:
+        return json.loads((research / "reports" / row["report_file"]).read_text(encoding="utf-8")).get("curve") or None
+    except (OSError, ValueError):
+        return None
+
+
+def calmest(research: Path) -> dict | None:
+    """The richest passing rule on the money-against-falls frontier that fell no further than 0050 in 0050's worst
+    fall (the frontier's calmest end when none did)."""
+    from quant_platform.research.downside import table
+
+    from quant_platform.research.registry import TrialRegistry
+
+    rows = [row for row in table(research) if row.get("frontier") and row.get("worst_fall")]
+    calm = [row for row in rows if row["worst_fall"]["gap"] >= 0]
+    found = (max(calm, key=lambda row: row["final_value"] or 0) if calm
+             else max(rows, key=lambda row: row["worst_fall"]["gap"], default=None))
+    if found is None:
+        return None
+    record = next((record for record in TrialRegistry(research / "trials.jsonl").records()
+                   if record.trial_id == found["trial"]), None)
+    return {**found, "trial_id": found["trial"], "spec_hash": found["rule_hash"],
+            "report_file": record.report_file if record else None}
+
+
+def charts(research: Path, start: str, overall: dict | None, ordinary: dict | None, steady: dict | None,
+           benchmark: float | None, periods: dict) -> dict[str, str]:
+    """2026-10-25 (使用者：我的 dashboard 呢、線圖呢；每年比 0050 那些數字是什麼意思): the dashboard's charts (research/charts.py)."""
+    from datetime import datetime as _datetime
+
+    from quant_platform.research import charts as svg
+    from quant_platform.research.progress import forward, timeline
+    from quant_platform.research.stress import latest as stress_latest
+
+    output: dict[str, str] = {}
+
+    def month(text: str) -> date:
+        return date(int(text[:4]), int(text[5:7]), 1)
+
+    # 1. the money over 2015-06～2026-09: the richest, the richest ordinary, the calmest, 0050 and the money put in
+    picks, seen = [], set()
+    for row, css, short in ((overall, "v1", "錢最多"), (ordinary, "v2", "一般風險錢最多"), (steady, "v3", "跌市最穩")):
+        key = (row or {}).get("spec_hash") or (row or {}).get("rule_hash")
+        if row and key not in seen and curve(research, row):
+            seen.add(key)
+            picks.append((row, css, short))
+    if picks:
+        base = curve(research, picks[0][0])
+        points = [{"x": month(key), "bench": value[1], "paid": value[2]} for key, value in sorted(base.items())]
+        lines = []
+        for number, (row, css, short) in enumerate(picks):
+            found = curve(research, row)
+            for point in points:
+                value = found.get(point["x"].strftime("%Y-%m"))
+                point[f"s{number}"] = value[0] if value else None
+            lines.append({"key": f"s{number}", "label": f"{short} #{row.get('trial_id') or row.get('trial')}", "css": css,
+                          "short": short})
+        lines += [{"key": "bench", "label": "0050（同樣的錢）", "css": "vref", "dashed": True, "short": "0050"},
+                  {"key": "paid", "label": "投入的錢", "css": "vput", "dashed": True, "short": "投入"}]
+        output["growth"] = svg.line(points, lines, wan, lambda x, full: x.strftime("%Y-%m") if full else str(x.year),
+                                    "30 萬＋每月 1 萬，帳戶每月底的價值")
+        output["growth_lines"] = lines
+    # 2. the research's progress: the best backtest known at each hour
+    line = timeline(research)
+    if line["points"]:
+        output["progress"] = svg.line(
+            line["points"], [{"key": "any", "label": "全部過門檻的最好", "css": "v1", "short": "全部最好"},
+                             {"key": "t0", "label": "一般風險（T0 候選）最好", "css": "v2", "short": "一般風險最好"}],
+            wan, lambda x, full: x.strftime("%m/%d %H:%M" if full else "%m/%d"), "研究進展：回測最好的成績",
+            x_key="at", step=True,
+            guides=[(line["benchmark"], f"0050 同樣的錢 {wan(line['benchmark'])}")] if line.get("benchmark") else [],
+            # an engine version fixes earlier errors and runs every rule again: the best can drop there
+            marks=[(item["at"], "引擎 " + item["engine"].replace("daily-", "")[:3]) for item in line.get("engines") or []
+                   if str(item.get("engine", "")).endswith(".0")])
+    # 3. the forward accounts since the cutoff: everything sold at each close
+    fwd = forward(research, start)
+    if fwd["series"]:
+        points = [{**row, "x": date.fromisoformat(row["date"])} for row in fwd["series"]]
+        output["forward"] = svg.line(
+            points, [{"key": "median_gain", "label": "帳戶中位數", "css": "v1", "short": "帳戶中位數"},
+                     {"key": "bench_gain", "label": "0050（同樣的錢）", "css": "vref", "dashed": True, "short": "0050"}],
+            lambda value: f"{value:+,.0f} 元", lambda x, full: x.strftime("%m/%d"), "前向帳戶全部賣掉後賺賠",
+            band=("p25_gain", "p75_gain"), guides=[(0.0, "沒賺沒賠")])
+        output["forward_last"] = fwd["series"][-1]
+    # 4. each period: what 0050 made a year, what the median rule made a year (and how many beat 0050)
+    groups = []
+    for label in periods.get("labels") or []:
+        bench, found = periods["benchmark"].get(label), periods["all"]["periods"].get(label) or {}
+        if bench is None or found.get("median") is None:
+            continue
+        short = "–".join(part[:4] if index == 0 else part[2:4] for index, part in enumerate(label.split("～")))
+        groups.append({"label": short, "short": short[2:], "note": f"{found['beat']:.0%} 贏",
+                       "values": {"bench": bench, "median": bench + found["median"]},
+                       "titles": {"bench": f"{label} 0050 每年 {pct(bench)}",
+                                  "median": f"{label} 規則每年 {pct(bench + found['median'])}（中位數），"
+                                            f"{found['beat']:.0%} 的規則贏 0050"}})
+    if groups:
+        output["periods"] = svg.bars(groups, [{"key": "bench", "label": "0050", "css": "vref"},
+                                              {"key": "median", "label": "規則（中位數）", "css": "v1"}],
+                                     pct, "各時期每年報酬：0050 與規則的中位數")
+    # 5. each bear: how far 0050 fell, the strategies (median) and the same with the half guard
+    report, checked = stress_latest(research), stress_latest(research, "protect")
+    if report and report.get("scenarios"):
+        rows = [row for row in report.get("rows") or [] if not row.get("error")]
+        halves = [row["variants"]["taiex_half"] for row in (checked or {}).get("rows") or []
+                  if not row.get("error") and "bears" in row.get("variants", {}).get("taiex_half", {})]
+        groups = []
+        for position, scenario in enumerate(report["scenarios"]):
+            falls = [row["bears"][position]["fall"] for row in rows if len(row.get("bears") or []) > position]
+            half = [item["bears"][position]["fall"] for item in halves if len(item["bears"]) > position]
+            values = {"bench": scenario["fall"], "plain": statistics.median(falls) if falls else None,
+                      "half": statistics.median(half) if half else None}
+            year = scenario["high"][:4] if scenario["high"][:4] != "2007" else "2008"
+            groups.append({"label": year, "short": year[2:],
+                           "note": f"撐過 {scenario.get('held', 0)}／{scenario.get('tested', len(rows))}",
+                           "values": values,
+                           "titles": {"bench": f"{scenario['high'][:7]}～{scenario['low'][:7]} 0050 跌 {pct(scenario['fall'])}",
+                                      "plain": f"同一段 20 個策略跌幅中位數 {pct(values['plain'] or 0)}",
+                                      "half": f"加「跌破年線減碼一半」後中位數 {pct(values['half'] or 0)}"}})
+        output["stress"] = svg.bars(groups, [{"key": "bench", "label": "0050", "css": "vref"},
+                                             {"key": "plain", "label": "策略（中位數）", "css": "v1"},
+                                             {"key": "half", "label": "加減碼一半", "css": "v3"}],
+                                    pct, "每一次空頭：0050 與策略跌多少")
+    output["built"] = _datetime.now().strftime("%H:%M")
+    return output
+
+
+def family_charts(research: Path, family: dict, periods: dict) -> dict[str, str]:
+    """2026-10-25: the window's charts — the family's best rule against 0050, and each period's yearly return."""
+    from quant_platform.research import charts as svg
+
+    output: dict[str, str] = {}
+    best = family.get("best")
+    found = curve(research, best)
+    if found:
+        points = [{"x": date(int(key[:4]), int(key[5:7]), 1), "rule": value[0], "bench": value[1], "paid": value[2]}
+                  for key, value in sorted(found.items())]
+        output["growth"] = svg.line(points, [
+            {"key": "rule", "label": f"最好的 #{best.get('trial_id')}", "css": "v1", "short": "最好的"},
+            {"key": "bench", "label": "0050（同樣的錢）", "css": "vref", "dashed": True, "short": "0050"},
+            {"key": "paid", "label": "投入的錢", "css": "vput", "dashed": True, "short": "投入"}],
+            wan, lambda x, full: x.strftime("%Y-%m") if full else str(x.year), "這一類最好的規則與 0050")
+    own = (family.get("eras") or {}).get("periods") or {}
+    groups = []
+    for label in periods.get("labels") or []:
+        bench, item = periods["benchmark"].get(label), own.get(label) or {}
+        if bench is None or item.get("median") is None:
+            continue
+        short = "–".join(part[:4] if index == 0 else part[2:4] for index, part in enumerate(label.split("～")))
+        groups.append({"label": short, "short": short[2:],
+                       "note": f"{item['beat']:.0%} 贏" if item.get("beat") is not None else "",
+                       "values": {"bench": bench, "median": bench + item["median"]}})
+    if groups:
+        output["periods"] = svg.bars(groups, [{"key": "bench", "label": "0050", "css": "vref"},
+                                              {"key": "median", "label": "這一類（中位數）", "css": "v1"}],
+                                     pct, "各時期每年報酬：0050 與這一類的中位數")
+    return output
+
+
 def _build(research: Path, start: str, optimizations: list[dict], gates: dict[str, object]) -> dict[str, object]:
     """The dashboard: headline numbers and one entry per family (the window's contents too)."""
     from quant_platform.research.categories import FAMILY_NOTES, FAMILY_ORDER, best_of
@@ -226,8 +397,10 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
         graded = stress_latest(research, "guards")               # 2026-10-25: the same ways graded from 2015-06
         if graded:
             stress["guards"] = graded.get("ways") or []
+    steady = calmest(research)
     return {"benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
-            "stress": stress,
+            "stress": stress, "steady": steady,
+            "charts": charts(research, start, overall, ordinary, steady, benchmark, periods),
             "recent": recent_all, "forward": forward, "scale": search_scale(research),
             "t0": toward_t0(tracker.chained(date.today()), pool["daily"], summary, count=0),
             "families": families, "eras": periods, "passing": sum(row["tier"] in PASSING_TIERS for row in main),

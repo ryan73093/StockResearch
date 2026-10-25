@@ -1135,8 +1135,11 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         found = next((item for item in data["families"] if item["family"] == family), None)
         if found is None:
             abort(404)
+        from quant_platform.research.dashboard import family_charts
+
         return render_template("v2/research_family.html", family=found, labels=data["eras"]["labels"],
-                               benchmark=data["benchmark"], recent_benchmark=data["recent_benchmark"])
+                               benchmark=data["benchmark"], recent_benchmark=data["recent_benchmark"],
+                               charts=family_charts(research_dir, found, data["eras"]))
 
     @blueprint.get("/research/stress")
     def research_stress():
