@@ -202,8 +202,9 @@ class Arrays:
     liquidity: np.ndarray | None = None  # symbol × session: 20-session turnover, the tie-break (1.2.1)
 
 
-def prepare(data, fp, costs, folder: Path) -> Arrays:
-    """Write the development period's arrays to ``folder`` (memory-mapped by the workers)."""
+def prepare(data, fp, costs, folder: Path, names: list[str] | None = None) -> Arrays:
+    """Write the development period's arrays to ``folder`` (memory-mapped by the workers); ``names``: the signals
+    (default every scan signal; 2026-10-26 the full-period search adds the paid tables')."""
     from quant_platform.research.daily import RECENT_START, DailyRule, check_days, simulate_daily
     from quant_platform.research.metrics import unit_values
     from quant_platform.research.stock_rules import SeedPlan
@@ -215,7 +216,7 @@ def prepare(data, fp, costs, folder: Path) -> Arrays:
     base = DailyRule(name="資格", factors={"trend_200": 1.0})
     eligible = np.column_stack([fp.eligible(base, position) for position in range(first, last + 1)])
     large = eligible & np.column_stack([fp.largest(LARGE, position) for position in range(first, last + 1)])
-    names = signals()
+    names = list(names) if names else signals()
     percentiles = np.lib.format.open_memmap(folder / "percentiles.npy", mode="w+", dtype=np.float16,
                                             shape=(2, len(names), len(fp.symbols), len(days)))
     for index, name in enumerate(names):

@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 
 BATCH = 2048
+HEAD = 160          # 2026-10-26: the places of the order the industry fill walks first (see accounts)
 
 
 def _costs(costs) -> tuple[float, float]:
@@ -120,15 +121,28 @@ def accounts(gpu: Device, items: list[dict], costs) -> tuple[np.ndarray, np.ndar
             if checks[t]:
                 counts = torch.zeros((count, gpu.industries), dtype=torch.long, device=where)
                 counts.scatter_add_(1, industry.expand(count, -1), kept.long())
-                in_order = industry[order]
-                fresh = valid.gather(1, order) & ~kept.gather(1, order)
-                one_hot = torch.nn.functional.one_hot(in_order, gpu.industries).to(torch.int16) * fresh[..., None]
-                before = one_hot.cumsum(1, dtype=torch.int16).gather(2, in_order[..., None]).squeeze(2) - fresh.short()
-                room = limit - counts.gather(1, in_order)
-                taken = fresh & (before < room)
                 cutoff = (TOP - kept.sum(1))[:, None]
-                taken &= taken.long().cumsum(1) <= cutoff
-                new = torch.zeros_like(held).scatter_(1, order, taken)
+
+                def fill(rows_order, rows_valid, rows_kept, rows_counts, rows_cutoff):
+                    in_order = industry[rows_order]
+                    fresh = rows_valid.gather(1, rows_order) & ~rows_kept.gather(1, rows_order)
+                    one_hot = torch.nn.functional.one_hot(in_order, gpu.industries).to(torch.int16) * fresh[..., None]
+                    before = one_hot.cumsum(1, dtype=torch.int16).gather(2, in_order[..., None]).squeeze(2) - fresh.short()
+                    taken = fresh & (before < limit - rows_counts.gather(1, in_order))
+                    return fresh, taken & (taken.long().cumsum(1) <= rows_cutoff)
+
+                # 2026-10-26 (使用者：要真的上億個、全段篩): the fill only walks the first HEAD places of the order (the
+                # one-hot count over every symbol was 60% of a session); a place there is taken exactly as with the
+                # whole order (its count reads only places before it). A row that did not fill up there, while fresh
+                # stocks remain further down, is filled again over its whole order — the same result as before.
+                head = order[:, :HEAD]
+                fresh, taken = fill(head, valid, kept, counts, cutoff)
+                new = torch.zeros_like(held).scatter_(1, head, taken)
+                short = (taken.sum(1) < cutoff[:, 0]) & ((valid & ~kept).sum(1) > fresh.sum(1))
+                if bool(short.any()):
+                    rows = short.nonzero().squeeze(1)
+                    _fresh, whole = fill(order[rows], valid[rows], kept[rows], counts[rows], cutoff[rows])
+                    new[rows] = torch.zeros_like(held[rows]).scatter_(1, order[rows], whole)
                 any_valid = valid.any(1)[:, None]
                 now = (kept | new) & any_valid
                 bought = torch.where(now & ~kept, torch.full_like(bought, t), torch.where(now, bought, -1))

@@ -340,7 +340,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "screen-check"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "screen-check", "scan-full"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--sample", type=int, default=0,
@@ -434,6 +434,9 @@ def main() -> int:
     parser.add_argument("--cutoff", help="rolling：截止日（預設：兩個月前的月底）")
     parser.add_argument("--only-new", action="store_true",
                         help="rolling --step select：只評這個月還沒評過的規則，加進原本的名單（2026-10-18：組合帳戶）")
+    parser.add_argument("--phase", choices=("a", "b"),
+                        help="scan-full：a＝1～4 個訊號一組，b＝a 最常過初篩的 50 個訊號 5 個一組（2026-10-26 全段大搜尋）")
+    parser.add_argument("--part", help="scan-full：只跑第一階段的第 k／n 份（k/n，由 scan-full 自己開的程序用）")
     parser.add_argument("--regrade-uses",
                         help="rolling --step select --only-new：讀這些因子（逗號分隔）的規則也重評（2026-10-26 防偷看修正）")
     parser.add_argument("--all-rules", action="store_true",
@@ -831,6 +834,36 @@ def main() -> int:
         print("有差異（偷看）" if report["leak"] else "沒有發現偷看", flush=True)
         return 0 if not report["leak"] else 1
 
+    if args.command == "scan-full":
+        # 2026-10-26 (使用者：不要再用 2015～2020 篩、全部都測過一遍、要真的上億個、付費資料要進去、最嚴格最完整):
+        # research/scan_full.py — the phase's stage 1 in parallel parts on the GPU, then the finalists in the engine
+        from quant_platform.research import scan_full
+        from quant_platform.research.costs import broker_costs
+        from quant_platform.research.jobs import JobLog
+        from quant_platform.research.rolling import cutoff_for
+
+        cutoff = cutoff_for(datetime.now(TAIPEI).date())
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        out = scan_full.folder(RESEARCH, cutoff, args.phase)
+        if args.part:
+            part, parts = (int(value) for value in args.part.split("/"))
+            plan = json.loads((out / "plan.json").read_text(encoding="utf-8"))
+            with JobLog(RESEARCH).start(f"全段大搜尋第 {args.phase} 段第一階段（第 {part + 1}／{parts} 份，2015-06～{cutoff}，GPU）",
+                                        command) as job:
+                found = scan_full.screen_part(scan_full.folder(RESEARCH, cutoff, "a") / "arrays", plan["names"],
+                                              plan["sizes"], broker_costs(args.broker), out, part, parts, job)
+                job.payload["summary"] = f"{found['screened']:,} 個策略設定、{found['passed']:,} 個過初篩"
+            print(job.payload["summary"], flush=True)
+            return 0
+        with JobLog(RESEARCH).start(f"全段大搜尋第 {args.phase} 段（2015-06～{cutoff} 全段初篩，過了的用回測引擎完整重跑）",
+                                    command) as job:
+            summary = scan_full.run_phase(Path(args.base), RESEARCH, broker_costs(args.broker), args.broker, args.phase,
+                                          cutoff, job)
+            job.payload["summary"] = (f"{summary['candidates']:,} 個策略設定、{summary['passed_screen']:,} 個過初篩、"
+                                      f"{summary['finalists']} 個完整回測；" + "、".join(
+                                          f"{tier} {count}" for tier, count in summary["tiers"].items()))
+        print(job.payload["summary"], flush=True)
+        return 0
     if args.command == "screen-check":
         # 2026-10-26 (使用者：上億個策略都是用正確的方法去做訓練、去做測試的嗎): the search's screen against the engine
         from quant_platform.research.checks import save_screen_check
