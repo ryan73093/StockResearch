@@ -2454,10 +2454,33 @@ def rule_inputs(rule) -> list[str]:
     return names
 
 
+# 2026-10-26 (the leak check): the paid tables' factors that count a missing row as 0 — every code since then, not
+# only the codes the table holds (chips.ChipStore._paid); a run reading them is a new input
+ZERO_FILLED = ("block_volume_20", "block_premium_20", "govbank_net_20", "govbank_dip_buy_20")
+ZERO_FILL_VERSION = "every-code-2026-10-26"
+# 2026-10-26: what read the leaky block_volume_20 — model J learned from it, the robot 3.5 from model J
+LEAK_20261026 = ("block_volume_20", "ml_gbm_j", "rl_rolling35", "rolling35_equal")
+
+
+def reads_any(spec: dict, names) -> bool:
+    """Whether a rule or a blend (a report's spec) reads any of ``names`` — its factors, its exclusion's factors,
+    its sleeves'."""
+    from quant_platform.research.blend import BlendRule, parse_spec
+
+    try:
+        rule = parse_spec(spec)
+    except (ValueError, TypeError):
+        return False
+    members = [sleeve.rule for sleeve in rule.sleeves] if isinstance(rule, BlendRule) else [rule]
+    return any(name in names for member in members for name in rule_inputs(member))
+
+
 def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool) -> dict[str, object]:
     """The files besides prices a run reads, as part of its input: statements, the exit models, the
     trained factor models."""
     payload: dict[str, object] = {}
+    if any(name in ZERO_FILLED for name in factor_names):
+        payload["paid_fill"] = ZERO_FILL_VERSION
     if any(name in STATEMENT_FACTORS for name in factor_names):  # the statements are part of the input
         from quant_platform.research.fundamentals import digest as statements_digest
 
@@ -4804,6 +4827,35 @@ def rerun_all_batch() -> list:
     return rules
 
 
+def leakfix_batch() -> list:
+    """2026-10-26 (the leak check: block_volume_20 knew whether a stock would ever have a block trade; model J
+    learned from it, the robot 3.5 reads model J): every latest 100%-stock rule and blend reading them, run again
+    with the fixed factor, model J and the robot 3.5 retrained (new inputs, so new trials)."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = _Path("instance") / "research"
+    latest = newest(TrialRegistry(research / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent")
+    rules = []
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        except (OSError, ValueError, KeyError):
+            continue
+        if uses_0050(spec) or not reads_any(spec, LEAK_20261026):
+            continue
+        try:
+            rules.append(parse_spec(spec))
+        except ValueError:
+            continue
+    return rules
+
+
 def rerun140_batch() -> list:
     """2026-10-13 night: the same 211 rules on engine 1.4.0 (whole shares, dividends as paid, the turnover cap),
     filled the same day in the after-hours sessions. Not the next session (使用者 2026-10-14：要在 14:30 前算出
@@ -4834,7 +4886,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "leakfix": leakfix_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "veto2": veto2_batch, "veto3_a": lambda: veto3_batch()[0::2],
            "veto3_b": lambda: veto3_batch()[1::2], "veto4": veto4_batch, "veto5": veto5_batch, "veto6": veto6_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],

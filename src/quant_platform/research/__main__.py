@@ -365,6 +365,8 @@ def main() -> int:
     parser.add_argument("--restart-from", help="forward：所有在跑的帳戶從這天重新起算（舊紀錄封存，YYYY-MM-DD）")
     parser.add_argument("--restart-live", action="store_true",
                         help="forward：每個在跑的帳戶（每天決策規則與組合）紀錄和決定都封存，從起算日重新記錄（--reason 寫原因）")
+    parser.add_argument("--restart-uses",
+                        help="forward：讀這些因子（逗號分隔）的在跑帳戶封存後從起算日重新記錄（--reason 寫原因；2026-10-26 防偷看修正）")
     parser.add_argument("--restart-broken", action="store_true",
                         help="forward：對帳不一致的帳戶封存後從起算日重新記錄（--reason 寫原因；2026-10-22 修復用）")
     parser.add_argument("--reason", help="forward --restart-from：原因")
@@ -432,6 +434,8 @@ def main() -> int:
     parser.add_argument("--cutoff", help="rolling：截止日（預設：兩個月前的月底）")
     parser.add_argument("--only-new", action="store_true",
                         help="rolling --step select：只評這個月還沒評過的規則，加進原本的名單（2026-10-18：組合帳戶）")
+    parser.add_argument("--regrade-uses",
+                        help="rolling --step select --only-new：讀這些因子（逗號分隔）的規則也重評（2026-10-26 防偷看修正）")
     parser.add_argument("--all-rules", action="store_true",
                         help="rolling --step select：全部重評（預設：上月比 0050 少三成以上的 T3 沿用上月結果，每季全部重評）")
     parser.add_argument("--calm", action="store_true",
@@ -953,6 +957,11 @@ def main() -> int:
                 def progress(done, total, row):
                     job.update(done=done, total=total, current=f"{row.get('name', '')[:40]}：{'過' if row.get('passed') else '沒過'}")
                 kept = [row for row in payload.get("graded") or [] if not row.get("error")] if args.only_new else []
+                if args.regrade_uses:           # 2026-10-26: the rules reading a fixed factor graded again
+                    names = tuple(name.strip() for name in args.regrade_uses.split(",") if name.strip())
+                    again = [row for row in kept if row.get("spec") and daily_research.reads_any(row["spec"], names)]
+                    kept = [row for row in kept if row not in again]
+                    print(f"重評讀 {'、'.join(names)} 的規則 {len(again)} 個", flush=True)
                 # 2026-10-21 (使用者：每個月都要跑那麼久，我時間很多是不是): a T3 rule that ended under 70% of 0050 last
                 # month cannot pass a month later — its grade is carried; every rule again each quarter
                 carried = ([] if args.only_new or args.all_rules
@@ -1677,6 +1686,15 @@ def main() -> int:
                     if not item.get("stopped") and item.get("kind") in ("daily", "blend")}
             names = tracker.restart_accounts(live, args.reason or "從起算日重新記錄")
             print(f"紀錄與決定封存、從起算日重新記錄的帳戶 {len(names)} 個", flush=True)
+        if args.restart_uses:                   # 2026-10-26: the accounts reading a fixed factor, from their start
+            from quant_platform.research.daily import reads_any
+
+            names = tuple(name.strip() for name in args.restart_uses.split(",") if name.strip())
+            hit = {item["rule_hash"] for item in tracker.tracked()
+                   if not item.get("stopped") and item.get("kind") in ("daily", "blend") and item.get("rule")
+                   and reads_any(item["rule"], names)}
+            restarted = tracker.restart_accounts(hit, args.reason or f"讀 {'、'.join(names)}，從起算日重新記錄")
+            print(f"讀 {'、'.join(names)}、紀錄與決定封存後從起算日重新記錄的帳戶 {len(restarted)} 個", flush=True)
         if args.restart_broken:                 # 2026-10-22: accounts out of step, recorded again from their start
             broken = {key for key, found in reconcile(tracker.records(), tracker.rebases()).items() if found}
             names = tracker.restart_accounts(broken, args.reason or "對帳不一致，從起算日重新記錄")

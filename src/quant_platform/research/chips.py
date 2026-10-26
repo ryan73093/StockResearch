@@ -590,8 +590,13 @@ class ChipStore:
             frame.index = pd.to_datetime(frame.index)
             sessions = pd.to_datetime(pd.Index(self.sessions))
             if zero:
+                # 2026-10-26 (the leak check): every code is 0 on a session without a row once the data starts — not
+                # only the codes the table holds somewhere; a code whose first row came after the session was 0 with
+                # the whole history and missing with the history cut there (whether a stock would ever have a block
+                # trade leaked into block_volume_20 and model J)
                 first = frame.index.min() if len(frame) else None
-                frame = frame.reindex(sessions).fillna(0.0)
+                frame = frame.reindex(index=sessions, columns=list(dict.fromkeys(self._codes)))
+                frame = frame.fillna(0.0) if first is not None else frame
                 if first is not None:
                     frame.loc[frame.index < first] = np.nan
             elif fill:

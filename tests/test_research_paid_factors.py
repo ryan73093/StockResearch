@@ -113,3 +113,24 @@ def test_the_holder_filter_vetoes_the_fifth_whose_chips_disperse_most():
     assert daily.FactorPanel.holder_vetoed(few, 0, "retail_down_4w") == set()        # under 50 known: none
     rule = daily.DailyRule(name="x", factors={"ml_deep2_top": 1.0}, exclude="h1")
     assert rule.canonical()["exclude"] == "h1" and "exclude" not in daily.DailyRule(name="x", factors={"ml_deep2_top": 1.0}).canonical()
+
+
+def test_a_stock_without_block_trades_yet_is_zero_with_the_history_cut_too(tmp_path):
+    """2026-10-26 (the leak check): 2330's first block trade comes late; before it, its 20-session block volume is 0
+    whether the history is whole or cut at the day — not 0 with the whole history and missing with it cut."""
+    sessions = weekdays(date(2024, 1, 1), 40)
+    (tmp_path / "paid").mkdir()
+    (tmp_path / "chips").mkdir()
+    pd.DataFrame({"date": sessions * 2, "code": ["1101"] * 40 + ["2330"] * 40, "NumberOfSharesIssued": 1_000_000.0}
+                 ).to_parquet(tmp_path / "chips" / "TaiwanStockShareholding.parquet", index=False)
+    pd.DataFrame({"date": [sessions[2], sessions[35]], "code": ["1101", "2330"], "volume": [1000.0, 500.0],
+                  "trading_money": [44_000.0, 20_000.0]}).to_parquet(tmp_path / "paid" / "TaiwanStockBlockTrade.parquet",
+                                                                     index=False)
+    close = np.full((2, len(sessions)), 40.0)
+    whole = ChipStore(tmp_path, sessions, ["1101.TW", "2330.TW"], close).paid_matrix("block_volume_20")
+    cut_store = ChipStore(tmp_path, sessions, ["1101.TW", "2330.TW"], close)
+    cut_store.until = sessions[25]
+    cut = cut_store.paid_matrix("block_volume_20")
+    assert whole[1, 25] == pytest.approx(0.0) and cut[1, 25] == pytest.approx(0.0)
+    assert whole[0, 22] == pytest.approx(cut[0, 22]) == pytest.approx(1000 / 1_000_000)
+    assert np.isnan(whole[1, 2]) and np.isnan(cut[1, 2])                       # before the table starts: unknown
