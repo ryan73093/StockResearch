@@ -842,7 +842,17 @@ def main() -> int:
         from quant_platform.research.jobs import JobLog
         from quant_platform.research.rolling import cutoff_for
 
-        cutoff = cutoff_for(datetime.now(TAIPEI).date())
+        # the search keeps the cutoff it started with: a run resumed after a reboot in the next month, or phase b
+        # started then, goes on with phase a's months and arrays (scans/scan-full-current.json; --cutoff to set it)
+        marker = RESEARCH / "scans" / "scan-full-current.json"
+        if args.cutoff:
+            cutoff = datetime.fromisoformat(args.cutoff).date()
+        elif marker.is_file():
+            cutoff = datetime.fromisoformat(json.loads(marker.read_text(encoding="utf-8"))["cutoff"]).date()
+        else:
+            cutoff = cutoff_for(datetime.now(TAIPEI).date())
+        if not args.part:
+            marker.write_text(json.dumps({"cutoff": cutoff.isoformat(), "phase": args.phase}), encoding="utf-8")
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         out = scan_full.folder(RESEARCH, cutoff, args.phase)
         if args.part:
@@ -859,6 +869,8 @@ def main() -> int:
                                     command) as job:
             summary = scan_full.run_phase(Path(args.base), RESEARCH, broker_costs(args.broker), args.broker, args.phase,
                                           cutoff, job)
+            if args.phase == "b":
+                marker.unlink(missing_ok=True)                 # the search is done; the next one takes its own month
             job.payload["summary"] = (f"{summary['candidates']:,} 個策略設定、{summary['passed_screen']:,} 個過初篩、"
                                       f"{summary['finalists']} 個完整回測；" + "、".join(
                                           f"{tier} {count}" for tier, count in summary["tiers"].items()))
