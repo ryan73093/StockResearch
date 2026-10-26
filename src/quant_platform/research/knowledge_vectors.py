@@ -5,8 +5,10 @@ files read from that project's ``models/bge-m3`` (or KNOWLEDGE_BGE_MODEL), nothi
 - Encoder (``BgeM3``): transformers' XLM-R with BGE-M3's weights; dense = the normalized [CLS] state, sparse = ReLU of
   ``sparse_linear.pt`` over each token's state, the largest per token id, special tokens left out — what
   FlagEmbedding's BGEM3FlagModel returns, without its dependencies.
-- Store: ``QdrantClient(path=…/knowledge/qdrant)`` (embedded, no server), opened for each operation and closed again
-  so the web process and the indexing process take turns; named vectors "dense" (cosine) and "sparse".
+- Store: the machine's shared Qdrant server when KNOWLEDGE_QDRANT_URL is set (2026-10-26, 使用者：向量資料庫吃 C:\Dev\DBQdrant，
+  不要放在專案自己的資料夾；the key in .runtime/qdrant/api-key.txt, the collection SERVER_COLLECTION), else
+  ``QdrantClient(path=…/knowledge/qdrant)`` (embedded), opened for each operation and closed again so the web process and
+  the indexing process take turns; named vectors "dense" (cosine) and "sparse".
 - ``index``: only the entries whose text changed are encoded (each point keeps its text's hash); entries gone are
   deleted. ``query``: Qdrant's own RRF over the dense and sparse candidates.
 
@@ -27,7 +29,8 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 TAIPEI = ZoneInfo("Asia/Taipei")
-COLLECTION = "research_knowledge_bge_m3_v1"
+COLLECTION = "research_knowledge_bge_m3_v1"            # the embedded store's
+SERVER_COLLECTION = "stockresearch_knowledge_bge_m3_v1"  # on the shared server: this project's prefix (VectorDB's are ks_…)
 DIMENSION = 1024
 NAMESPACE = uuid.UUID("6f1c2f5e-2f53-4e43-9a1d-6d1f6d2b0a11")
 DOC_TOKENS = 2048                 # an entry is at most MAX_TEXT characters (about this many tokens)
@@ -124,10 +127,28 @@ def store(research: str | Path) -> Path:
     return Path(research) / "knowledge" / "qdrant"
 
 
+def server() -> tuple[str, str | None] | None:
+    """(url, API key) of the shared Qdrant server (C:\Dev\DBQdrant) when KNOWLEDGE_QDRANT_URL is set; the key from
+    KNOWLEDGE_QDRANT_KEY_FILE or .runtime/qdrant/api-key.txt (a copy of the server's, never shown)."""
+    url = os.getenv("KNOWLEDGE_QDRANT_URL", "").strip()
+    if not url:
+        return None
+    key_file = Path(os.getenv("KNOWLEDGE_QDRANT_KEY_FILE", "").strip() or Path.cwd() / ".runtime" / "qdrant" / "api-key.txt")
+    return url, (key_file.read_text(encoding="utf-8").strip() if key_file.is_file() else None)
+
+
+def collection() -> str:
+    return SERVER_COLLECTION if server() else COLLECTION
+
+
 def _open(research: str | Path, tries: int = 40):
-    """The embedded collection's client; another process holding it is waited for (closed after each use)."""
+    """The server's client, or the embedded collection's (another process holding it is waited for; closed after each
+    use)."""
     from qdrant_client import QdrantClient
 
+    found = server()
+    if found:
+        return QdrantClient(url=found[0], api_key=found[1], timeout=30)
     path = store(research)
     path.mkdir(parents=True, exist_ok=True)
     for attempt in range(tries):
@@ -151,8 +172,8 @@ def _hash(entry: dict[str, object]) -> str:
 def _ensure_collection(client) -> None:
     from qdrant_client import models
 
-    if not client.collection_exists(COLLECTION):
-        client.create_collection(COLLECTION,
+    if not client.collection_exists(collection()):
+        client.create_collection(collection(),
                                  vectors_config={"dense": models.VectorParams(size=DIMENSION, distance=models.Distance.COSINE)},
                                  sparse_vectors_config={"sparse": models.SparseVectorParams()})
 
@@ -168,7 +189,7 @@ def index(research: str | Path, entries: list[dict[str, object]], model, batch: 
         stored: dict[str, str] = {}
         offset = None
         while True:
-            points, offset = client.scroll(COLLECTION, limit=1000, offset=offset, with_payload=["hash"], with_vectors=False)
+            points, offset = client.scroll(collection(), limit=1000, offset=offset, with_payload=["hash"], with_vectors=False)
             stored.update({str(point.id): str((point.payload or {}).get("hash")) for point in points})
             if offset is None:
                 break
@@ -179,7 +200,7 @@ def index(research: str | Path, entries: list[dict[str, object]], model, batch: 
             if job:
                 job.update(done=start, total=len(changed), current=f"編碼 {start:,}／{len(changed):,} 筆")
             dense, sparse = model.encode([f"{entry['title']}\n{entry['text']}" for entry in part], DOC_TOKENS, batch)
-            client.upsert(COLLECTION, points=[
+            client.upsert(collection(), points=[
                 models.PointStruct(id=_point_id(str(entry["id"])),
                                    vector={"dense": dense[number].tolist(),
                                            "sparse": models.SparseVector(indices=list(sparse[number]),
@@ -189,11 +210,11 @@ def index(research: str | Path, entries: list[dict[str, object]], model, batch: 
                 for number, entry in enumerate(part)])
         gone = [point for point in stored if point not in wanted]
         if gone:
-            client.delete(COLLECTION, points_selector=models.PointIdsList(points=gone))
-        total = client.count(COLLECTION).count
+            client.delete(collection(), points_selector=models.PointIdsList(points=gone))
+        total = client.count(collection()).count
     finally:
         client.close()
-    report = {"at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "collection": COLLECTION, "points": total,
+    report = {"at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "collection": collection(), "server": bool(server()), "points": total,
               "encoded": len(changed), "deleted": len(gone), "seconds": round(time.time() - started, 1),
               "model": getattr(model, "path", ""), "device": getattr(model, "device", "")}
     (Path(research) / "knowledge" / "vectors.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -214,10 +235,10 @@ def query(research: str | Path, question: str, model, limit: int = CANDIDATES) -
     dense, sparse = model.encode([question], QUERY_TOKENS, 1)
     client = _open(research)
     try:
-        if not client.collection_exists(COLLECTION):
+        if not client.collection_exists(collection()):
             return []
         found = client.query_points(
-            COLLECTION,
+            collection(),
             prefetch=[models.Prefetch(query=dense[0].tolist(), using="dense", limit=limit),
                       models.Prefetch(query=models.SparseVector(indices=list(sparse[0]), values=list(sparse[0].values())),
                                       using="sparse", limit=limit)],
@@ -225,3 +246,39 @@ def query(research: str | Path, question: str, model, limit: int = CANDIDATES) -
     finally:
         client.close()
     return [str((point.payload or {}).get("entry")) for point in found.points]
+
+
+def to_server(research: str | Path) -> dict[str, object]:
+    """2026-10-26: the embedded collection's points, vectors and payloads as they are, copied to the shared server's
+    collection (nothing encoded again); the counts and the first points compared. The embedded store is kept."""
+    from qdrant_client import QdrantClient, models
+
+    found = server()
+    if not found:
+        raise ValueError("KNOWLEDGE_QDRANT_URL 沒有設定")
+    local = QdrantClient(path=str(store(research)))
+    remote = QdrantClient(url=found[0], api_key=found[1], timeout=60)
+    try:
+        if not local.collection_exists(COLLECTION):
+            raise ValueError("內嵌的知識庫沒有向量可搬")
+        if not remote.collection_exists(SERVER_COLLECTION):
+            remote.create_collection(SERVER_COLLECTION,
+                                     vectors_config={"dense": models.VectorParams(size=DIMENSION, distance=models.Distance.COSINE)},
+                                     sparse_vectors_config={"sparse": models.SparseVectorParams()})
+        offset, moved = None, 0
+        while True:
+            points, offset = local.scroll(COLLECTION, limit=256, offset=offset, with_payload=True, with_vectors=True)
+            if points:
+                remote.upsert(SERVER_COLLECTION, points=[models.PointStruct(id=point.id, vector=point.vector,
+                                                                            payload=point.payload) for point in points])
+                moved += len(points)
+            if offset is None:
+                break
+        before, after = local.count(COLLECTION).count, remote.count(SERVER_COLLECTION).count
+        sample, _next = local.scroll(COLLECTION, limit=5, with_payload=True, with_vectors=True)
+        same = all(remote.retrieve(SERVER_COLLECTION, [point.id], with_payload=True, with_vectors=True)[0].payload == point.payload
+                   for point in sample)
+    finally:
+        local.close()
+        remote.close()
+    return {"moved": moved, "embedded": before, "server": after, "same_payloads": same, "collection": SERVER_COLLECTION}

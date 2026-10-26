@@ -349,6 +349,8 @@ def main() -> int:
                         help="daily：不替過門檻的規則補評「跌破 200 日均線就減碼一半」版本（2026-10-25 起預設會補）")
     parser.add_argument("--ask", help="knowledge：問研究知識庫（AI 只根據紀錄回答；沒有金鑰時列出最相關的紀錄）")
     parser.add_argument("--index", action="store_true", help="knowledge：把新的或改過的紀錄編成 BGE-M3 向量存進 Qdrant")
+    parser.add_argument("--to-server", action="store_true",
+                        help="knowledge：把內嵌知識庫的向量原樣搬到共用的 Qdrant 伺服器（C:\\Dev\\DBQdrant，KNOWLEDGE_QDRANT_URL）")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), help="knowledge --index：用哪個裝置編碼（預設 auto）")
     parser.add_argument("--official", action="store_true",
                         help="limits-check：這次用引擎 1.6.0 的交易所漲跌停價（開關 10/31 才正式打開；驗證用）")
@@ -1196,6 +1198,12 @@ def main() -> int:
         from quant_platform.research import knowledge
 
         root = Path(__file__).resolve().parents[3] if (Path(__file__).resolve().parents[3] / "AGENTS.md").is_file() else Path.cwd()
+        if args.to_server:                      # 2026-10-26 (使用者：向量資料庫吃 C:\Dev\DBQdrant)
+            from quant_platform.research import knowledge_vectors
+
+            Settings.from_env()
+            print(json.dumps(knowledge_vectors.to_server(RESEARCH), ensure_ascii=False), flush=True)
+            return 0
         found = knowledge.build(root, RESEARCH)
         print(json.dumps({key: found[key] for key in ("built_at", "entries", "kinds", "verdicts")}, ensure_ascii=False), flush=True)
         if args.index:                          # 2026-10-22 (使用者：向量資料庫可用 BGE-M3、Qdrant)

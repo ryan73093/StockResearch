@@ -173,3 +173,18 @@ def test_an_edit_above_a_record_keeps_its_id(tmp_path):
     knowledge.build(root, research)
     after = {row["title"]: row["id"] for row in knowledge.entries(research) if row["kind"] == "研究紀錄"}
     assert after["停損（2026-10-05，跑之前寫）"] == before["停損（2026-10-05，跑之前寫）"]
+
+
+def test_the_vectors_go_to_the_shared_server_when_one_is_set(tmp_path, monkeypatch):
+    """2026-10-26 (使用者：向量資料庫吃 C:\Dev\DBQdrant): the server's address and key from the settings, this project's
+    collection name there; without them the embedded store as before."""
+    from quant_platform.research import knowledge_vectors
+
+    monkeypatch.delenv("KNOWLEDGE_QDRANT_URL", raising=False)
+    assert knowledge_vectors.server() is None and knowledge_vectors.collection() == knowledge_vectors.COLLECTION
+    key = tmp_path / "api-key.txt"
+    key.write_text("secret-value\n", encoding="utf-8")
+    monkeypatch.setenv("KNOWLEDGE_QDRANT_URL", "http://127.0.0.1:6333")
+    monkeypatch.setenv("KNOWLEDGE_QDRANT_KEY_FILE", str(key))
+    assert knowledge_vectors.server() == ("http://127.0.0.1:6333", "secret-value")
+    assert knowledge_vectors.collection() == "stockresearch_knowledge_bge_m3_v1"
