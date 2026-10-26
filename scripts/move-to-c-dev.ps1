@@ -20,8 +20,8 @@ function Step([string]$text) { Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:
 
 function Invoke-Robocopy([string]$name) {
   $log = Join-Path $logDir "robocopy-$name-$stamp.log"
-  # build\pt_* are pytest scratch folders (28 GB), not project data
-  robocopy $oldRoot $newRoot /MIR /XJ /COPY:DAT /DCOPY:DAT /MT:16 /R:1 /W:1 /NP /NFL /NDL /XD 'pt_*' /UNILOG:$log | Out-Null
+  # build\pt_* are pytest scratch folders (28 GB), not project data; 4 threads (16 starved the shared Qdrant, 10/26)
+  robocopy $oldRoot $newRoot /MIR /XJ /COPY:DAT /DCOPY:DAT /MT:4 /R:1 /W:1 /NP /NFL /NDL /XD 'pt_*' /UNILOG:$log | Out-Null
   $rc = $LASTEXITCODE
   if ($rc -ge 8) { throw "robocopy $name failed with code $rc (see $log)" }
   Step "robocopy $name rc=$rc (log $log)"
