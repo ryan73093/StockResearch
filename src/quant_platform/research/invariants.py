@@ -9,6 +9,7 @@ when one fails, a notification.
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -333,6 +334,10 @@ def run(research: str | Path, today: date, backups: Path | None = None,
             stuck.append(f"{record.get('name')}（{'中斷' if status == 'interrupted' else '程序已不在'}，{str(record.get('started_at'))[:16]} 開始）")
     checks.append(_check("研究流程沒有中斷了沒恢復的", "AGENTS.md 長時間程式：重開機或關機後要接著跑", not stuck,
                          "；".join(stuck[:4]) if stuck else "沒有"))
+    # 2026-10-26 (使用者：我不要再放在這個皮咪資料夾下；向量資料庫吃 C:\\Dev\\DBQdrant)
+    place = placement(research.parent.parent, research)
+    checks.append(_check("專案在 C:\\Dev、知識庫向量在共用的 DBQdrant", "使用者 2026-10-26：比照其他專案搬到 C:\\Dev",
+                         not place, "；".join(place) if place else "是"))
     # 2026-10-23 (AGENTS.md：背景程式不開視窗; 使用者 2026-10-20 關掉一堆沒說明的空白 cmd 視窗，研究跟著中斷)
     try:
         opened = own_windows(desktop_windows() if windows is None else windows, research.parent.parent)
@@ -343,6 +348,21 @@ def run(research: str | Path, today: date, backups: Path | None = None,
         checks.append(_check("桌面沒有本專案開出的視窗", "AGENTS.md：背景程式不開視窗（使用者 2026-10-20）", False,
                              f"沒辦法檢查：{str(exc)[:120]}"))
     return checks
+
+
+def placement(root: Path, research: Path, home: str | None = None) -> list[str]:
+    """What is not where the owner put it on 2026-10-26: the project under the user folder, or the knowledge base's
+    vectors outside the shared Qdrant server (C:\\Dev\\DBQdrant)."""
+    from quant_platform.research import knowledge_vectors
+
+    home = home if home is not None else os.environ.get("USERPROFILE", "")
+    found = []
+    if home and str(Path(root).resolve()).lower().startswith(str(Path(home).resolve()).lower() + os.sep):
+        found.append(f"專案還在使用者資料夾（{root}）")
+    status = knowledge_vectors.status(research)
+    if status and not status.get("server"):
+        found.append(f"知識庫向量還在專案內嵌的 Qdrant（{status.get('collection')}）")
+    return found
 
 
 def _sessions(research: Path) -> list[date]:

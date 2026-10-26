@@ -5,7 +5,7 @@ files read from that project's ``models/bge-m3`` (or KNOWLEDGE_BGE_MODEL), nothi
 - Encoder (``BgeM3``): transformers' XLM-R with BGE-M3's weights; dense = the normalized [CLS] state, sparse = ReLU of
   ``sparse_linear.pt`` over each token's state, the largest per token id, special tokens left out — what
   FlagEmbedding's BGEM3FlagModel returns, without its dependencies.
-- Store: the machine's shared Qdrant server when KNOWLEDGE_QDRANT_URL is set (2026-10-26, 使用者：向量資料庫吃 C:\Dev\DBQdrant，
+- Store: the machine's shared Qdrant server when KNOWLEDGE_QDRANT_URL is set (2026-10-26, 使用者：向量資料庫吃 C:\\Dev\\DBQdrant，
   不要放在專案自己的資料夾；the key in .runtime/qdrant/api-key.txt, the collection SERVER_COLLECTION), else
   ``QdrantClient(path=…/knowledge/qdrant)`` (embedded), opened for each operation and closed again so the web process and
   the indexing process take turns; named vectors "dense" (cosine) and "sparse".
@@ -22,6 +22,7 @@ import os
 import threading
 import time
 import uuid
+import warnings
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -128,7 +129,7 @@ def store(research: str | Path) -> Path:
 
 
 def server() -> tuple[str, str | None] | None:
-    """(url, API key) of the shared Qdrant server (C:\Dev\DBQdrant) when KNOWLEDGE_QDRANT_URL is set; the key from
+    """(url, API key) of the shared Qdrant server (C:\\Dev\\DBQdrant) when KNOWLEDGE_QDRANT_URL is set; the key from
     KNOWLEDGE_QDRANT_KEY_FILE or .runtime/qdrant/api-key.txt (a copy of the server's, never shown)."""
     url = os.getenv("KNOWLEDGE_QDRANT_URL", "").strip()
     if not url:
@@ -148,7 +149,9 @@ def _open(research: str | Path, tries: int = 40):
 
     found = server()
     if found:
-        return QdrantClient(url=found[0], api_key=found[1], timeout=30)
+        with warnings.catch_warnings():   # plain http to this machine's own server (127.0.0.1), as VectorDB uses it
+            warnings.filterwarnings("ignore", message="Api key is used with an insecure connection")
+            return QdrantClient(url=found[0], api_key=found[1], timeout=30)
     path = store(research)
     path.mkdir(parents=True, exist_ok=True)
     for attempt in range(tries):
@@ -257,7 +260,7 @@ def to_server(research: str | Path) -> dict[str, object]:
     if not found:
         raise ValueError("KNOWLEDGE_QDRANT_URL 沒有設定")
     local = QdrantClient(path=str(store(research)))
-    remote = QdrantClient(url=found[0], api_key=found[1], timeout=60)
+    remote = _open(research)
     try:
         if not local.collection_exists(COLLECTION):
             raise ValueError("內嵌的知識庫沒有向量可搬")
@@ -281,4 +284,8 @@ def to_server(research: str | Path) -> dict[str, object]:
     finally:
         local.close()
         remote.close()
+    report = status(research)
+    if report:   # the page names where the vectors are now
+        report.update({"collection": SERVER_COLLECTION, "server": True, "points": after})
+        (Path(research) / "knowledge" / "vectors.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"moved": moved, "embedded": before, "server": after, "same_payloads": same, "collection": SERVER_COLLECTION}

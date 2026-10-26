@@ -94,7 +94,7 @@
   <h3 class="small" style="margin:12px 0 6px">{{ kind or '全部' }}{% if verdict %}・{{ verdict }}{% endif %}（最新 {{ listing|length }} 筆）</h3>
   {{ entry_table(listing) }}
   {% endif %}
-  <p class="small muted" style="margin:8px 0 0">向量索引：{% if vectors %}BGE-M3（語意向量＋學習式稀疏權重）存在內嵌 Qdrant「{{ vectors.collection }}」，{{ '{:,}'.format(vectors.points or 0) }} 筆，{{ (vectors.at or '')[:16].replace('T', ' ') }} 更新（每小時補新紀錄）{% else %}還沒建立（只用關鍵字搜尋）{% endif %}。</p>
+  <p class="small muted" style="margin:8px 0 0">向量索引：{% if vectors %}BGE-M3（語意向量＋學習式稀疏權重）存在{% if vectors.server %}這台電腦共用的 Qdrant 伺服器（C:\Dev\DBQdrant）{% else %}專案內嵌的 Qdrant{% endif %}「{{ vectors.collection }}」，{{ '{:,}'.format(vectors.points or 0) }} 筆，{{ (vectors.at or '')[:16].replace('T', ' ') }} 更新（每小時補新紀錄）{% else %}還沒建立（只用關鍵字搜尋）{% endif %}。</p>
   <p class="col-help"><b>欄位說明</b>　<b>紀錄</b>：知識庫裡這一類的筆數（試驗是每個規則最新一次回測）。<b>失敗／通過／部分</b>：判定（研究紀錄是自動判讀）。<b>其他</b>：說明、事先登錄、進行中、診斷、使用者決定等。來源：研究方法、開發歷程、AGENTS.md、需求、試驗登錄、大規模與組合搜尋的結果檔。</p>
 </section>
 

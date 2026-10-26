@@ -2,6 +2,19 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-10-26 21:00 — 專案搬到 C:\Dev\StockResearch；知識庫向量改放共用的 DBQdrant
+
+- 使用者 10/26：「把這個專案搬到 C:\Dev，比照其他專案的搬移方式」「向量資料庫應該是吃 Dev 資料夾下的 DBQdrant，而不是直接放在專案裡」「請檢視目前跟其他是否會有影響」「我不要再放在這個皮咪資料夾下」「Cloudflare 也確定要沒有問題」。
+- 做法（`scripts\move-to-c-dev.ps1`，照 VectorDB 10/07 的 `move-to-c-dev.ps1`）：`-Prepare` 服務照跑時先複製（20:31～20:38，669,216 個檔案、143.0 GB；`build\pt_*` 測試暫存 28 GB 不搬）；`-Cutover`（20:40）停研究流程與服務 → 再同步一次（20 秒）→ 改 `.env`、`.runtime` 裡的舊路徑、登入時的排程工作 `StockResearchLocalServices`、Home 的 `service-controls.json`（原檔備份在 `C:\Dev\RyanPlatform\.runtime\path-move-backup-stockresearch-20261026-204003`）→ 秘密只給擁有者、SYSTEM、系統管理員 → 從新位置部署。
+- **出錯一**：第一次 `-Prepare` 用 16 條執行緒複製，共用的 Qdrant（VectorDB 在用）被擠到大量換頁、變慢，複製完自己恢復；最後同步改成 4 條（`743e176`）。
+- **出錯二**：切換時 `deploy.ps1` 的 pip 把一行警告（9/30 那次裝到一半留下的 `~uant_platform` 殘留資料夾，跟著搬過來）寫到錯誤輸出，在 `ErrorActionPreference = Stop` 下被當成失敗；回復步驟又因 `$taskBackup[0]` 是雜湊表而沒把排程工作改回去。服務停了約 4.5 分鐘（20:40～20:44），手動從新位置跑 `deploy.ps1` 完成。腳本已修（停服務移進回復範圍、失敗時從舊位置重開研究流程、`$taskBackup` 改成陣列，`8bb8ef9`、`d5c4085`）；殘留資料夾移到 `build\pip-leftovers-20261026\`（不刪），`pip check` 沒有問題。
+- **出錯三（Cloudflare）**：監督程序找 cloudflared 用的是「專案上一層的 YtSummary」，搬到 C:\Dev 後找不到，Tunnel 沒起來。加上使用者資料夾裡共用的那份（和 C:\Dev\VectorDB 用同一份）當備用；`check-public.ps1`：Tunnel 4 條連線、未登入的資料請求被 Home SSO 擋下。
+- 研究流程 `fmdaily_a`、`fmdaily_b`、`branches` 從新位置重開（分點下載從斷點續抓）。
+- 知識庫向量：`knowledge --to-server` 把內嵌 Qdrant 的 4,308 筆向量與內容原樣搬到 `C:\Dev\DBQdrant`（127.0.0.1:6333，collection `stockresearch_knowledge_bge_m3_v1`；金鑰副本在 `.runtime\qdrant\`，`.env` 的 `KNOWLEDGE_QDRANT_URL`）。核對：筆數與內容相同；3 個問題的語意搜尋與關鍵字權重搜尋前 20 名與分數完全一樣（精確搜尋與近似搜尋也一樣），合併排序只差在同分項目的先後。網站知識庫頁顯示「存在這台電腦共用的 Qdrant 伺服器」，查詢走 127.0.0.1:6333。DBQdrant 的 README、AGENTS.md 補上第二個使用者與金鑰副本（DBQdrant `f054d74`）；它每晚 02:30 的備份會自動包含這個 collection。內嵌的舊向量（52 MB）留著當回復用。
+- 對其他專案的影響：只有第一次複製時 Qdrant 變慢；Home 的啟停按鈕改指向新位置（有備份）；VectorDB、DBPostgreSQL、YtSummary、Home 的服務都沒有停或重啟。還放在使用者資料夾的依賴：共用的 cloudflared（`Project\YtSummary\.tools`）與基礎 Python（`.cache\codex-runtimes`），和 VectorDB 一樣。
+- 舊資料夾 `C:\Users\皮咪\Project\StockResearch` 保留作回復用，由使用者確認後刪除。回復方式：`stop-services.ps1` → 把排程工作與 Home 的設定改回（備份如上）→ 舊資料夾的 `start-services.ps1`（切換後寫入的資料不在舊資料夾）。
+- 測試：`test_research_knowledge.py` 7 通過；服務健康檢查 web 200、api 200。
+
 ## 2026-10-26 03:40 — 每筆委託寫原因、再核對 0 不一致；全部測試；選股條件只管買進
 
 - 引擎在每筆委託寫下實際原因（`d6a9ae6`：賣回目標比重寫出倍數、減碼寫出條件與比例、機器人權重、前一天沒買到再下），前向帳戶頁照實顯示，舊紀錄寫明沒有原因；`forwardwhy`（00:40～01:25）重新記錄後再核對：1,362 個帳戶、25,254 個決策日 0 不一致。

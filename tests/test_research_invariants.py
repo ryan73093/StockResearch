@@ -192,3 +192,18 @@ def test_an_interrupted_or_dead_pipeline_is_caught(tmp_path):
     write("fmdaily_a", "done", 0)
     write("fmdaily_b", "running", 999999)
     assert not found()["ok"] and "fmdaily_b（程序已不在" in found()["detail"]
+
+
+def test_placement_flags_the_user_folder_and_embedded_vectors(tmp_path):
+    """2026-10-26 (使用者：不要再放在皮咪資料夾下；向量資料庫吃 DBQdrant)."""
+    import json
+
+    home = tmp_path / "home"
+    root = home / "Project" / "StockResearch"
+    research = root / "instance" / "research"
+    (research / "knowledge").mkdir(parents=True)
+    assert invariants.placement(root, research, str(home)) == ["專案還在使用者資料夾（" + str(root) + "）"]
+    (research / "knowledge" / "vectors.json").write_text(json.dumps({"collection": "a", "server": False}), encoding="utf-8")
+    assert len(invariants.placement(tmp_path / "Dev" / "StockResearch", research, str(home))) == 1
+    (research / "knowledge" / "vectors.json").write_text(json.dumps({"collection": "b", "server": True}), encoding="utf-8")
+    assert invariants.placement(tmp_path / "Dev" / "StockResearch", research, str(home)) == []
