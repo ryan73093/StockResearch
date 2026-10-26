@@ -21,7 +21,7 @@ function Step([string]$text) { Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:
 function Invoke-Robocopy([string]$name) {
   $log = Join-Path $logDir "robocopy-$name-$stamp.log"
   # build\pt_* are pytest scratch folders (28 GB), not project data; 4 threads (16 starved the shared Qdrant, 10/26)
-  robocopy $oldRoot $newRoot /MIR /XJ /COPY:DAT /DCOPY:DAT /MT:4 /R:1 /W:1 /NP /NFL /NDL /XD 'pt_*' /UNILOG:$log | Out-Null
+  robocopy $oldRoot $newRoot /MIR /XJ /COPY:DAT /DCOPY:DAT /MT:4 /R:1 /W:1 /NP /NFL /NDL /XD 'pt_*' '.pytest_cache' /UNILOG:$log | Out-Null
   $rc = $LASTEXITCODE
   if ($rc -ge 8) { throw "robocopy $name failed with code $rc (see $log)" }
   Step "robocopy $name rc=$rc (log $log)"
@@ -70,17 +70,17 @@ foreach ($pipeline in $pipelines) {
 }
 Start-Sleep 3
 
-# 2. The services, through the project's own stop script (checks PIDs, executables, ports).
-Step 'stopping the services'
-& (Join-Path $oldRoot 'scripts\stop-services.ps1') -DuringWorkerJob
-foreach ($port in 5000, 8000) { if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) { throw "port $port still in use" } }
-$left = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$oldRoot*" -and $ownTree -notcontains $_.ProcessId -and $_.Name -ne 'bash.exe' -and $_.Name -ne 'claude.exe' })
-if ($left) { throw ("still running from the old folder: " + (($left | ForEach-Object { "$($_.ProcessId) $($_.Name)" }) -join ', ')) }
-
 $changedTask = $false
 $changedHome = $false
 $taskBackup = $null
 try {
+  # 2. The services, through the project's own stop script (checks PIDs, executables, ports).
+  Step 'stopping the services'
+  & (Join-Path $oldRoot 'scripts\stop-services.ps1') -DuringWorkerJob
+  foreach ($port in 5000, 8000) { if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) { throw "port $port still in use" } }
+  $left = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$oldRoot*" -and $ownTree -notcontains $_.ProcessId -and $_.Name -ne 'bash.exe' -and $_.Name -ne 'claude.exe' })
+  if ($left) { throw ("still running from the old folder: " + (($left | ForEach-Object { "$($_.ProcessId) $($_.Name)" }) -join ', ')) }
+
   # 3. Final sync.
   Invoke-Robocopy 'final'
 
@@ -136,6 +136,7 @@ catch {
   if (-not (Get-NetTCPConnection -State Listen -LocalPort 5000 -ErrorAction SilentlyContinue)) {
     Write-Host 'starting the services again from the old folder' -ForegroundColor Yellow
     & (Join-Path $oldRoot 'scripts\start-services.ps1')
+    foreach ($name in $names) { & (Join-Path $oldRoot 'scripts\start-research.ps1') -Name $name }
   }
   throw
 }
