@@ -52,7 +52,7 @@ def funnel(research: str | Path, pool: list[dict] | None = None) -> dict[str, ob
     rounds = []
     for path in sorted((research / "scans").glob("*/summary.json")) if (research / "scans").is_dir() else []:
         summary = _read(path)
-        if not summary:
+        if not summary or path.parent.name.startswith("scan-full"):     # the full-period search: ``full`` below
             continue
         results = summary.get("results") or []
         tiers = summary.get("tiers") or {}
@@ -80,7 +80,7 @@ def funnel(research: str | Path, pool: list[dict] | None = None) -> dict[str, ob
     total = {key: sum(row[key] for row in rounds) for key in ("candidates", "passed", "finalists", "passing", "beat_full",
                                                               "now_beat", "now_passing", "now_found")}
     biggest = max(blends, key=lambda row: row["candidates"], default=None)
-    return {"rounds": rounds, "blends": blends, "total": total, "biggest_blend": biggest,
+    return {"rounds": rounds, "blends": blends, "total": total, "biggest_blend": biggest, "full": full_search(research),
             "blend_finalists": sum(row["finalists"] for row in blends), "now": pool is not None,
             "minutes": round(sum(row["minutes"] or 0 for row in rounds))}
 
@@ -216,3 +216,38 @@ def correctness(research: str | Path, now: datetime | None = None) -> list[dict[
                        "買不到、整股零股與每月投入的錢。每輪最好的幾個才用真正的回測引擎完整重跑。簡化帳戶會高估，所以名單、"
                        "成績與等級一律用完整回測，初篩只用來縮小範圍。"})
     return out
+
+
+def full_search(research: str | Path) -> dict[str, object] | None:
+    """2026-10-26: the full-period search (research/scan_full.py) — each phase's plan, its stage 1's progress over its
+    parts while it runs, its summary when done."""
+    from math import comb
+
+    research = Path(research)
+    phases = []
+    for out in sorted((research / "scans").glob("scan-full-*")) if (research / "scans").is_dir() else []:
+        plan = _read(out / "plan.json")
+        if not plan:
+            continue
+        planned = sum(comb(len(plan["names"]), size) for size in plan["sizes"]) * 24
+        parts = [_read(path) or {} for path in sorted(out.glob("progress-*-of-*.json"))]
+        summary = _read(out / "summary.json")
+        phases.append({"phase": plan["phase"], "cutoff": plan["cutoff"], "signals": len(plan["names"]), "sizes": plan["sizes"],
+                       "planned": planned, "screened": sum(part.get("screened", 0) for part in parts),
+                       "passed": sum(part.get("passed", 0) for part in parts),
+                       "per_minute": sum(part.get("per_minute", 0) for part in parts if not part.get("finished_at")),
+                       "eta_hours": max([part.get("eta_hours") or 0 for part in parts if not part.get("finished_at")] or [0]),
+                       "summary": summary})
+    if not phases:
+        return None
+    from quant_platform.research.scan_full import SIZES, TOP_SIGNALS
+
+    # phase b's plan is written when phase a ends; until then its size is known from the plan written in advance
+    planned = sum(item["planned"] for item in phases) + (
+        0 if any(item["phase"] == "b" for item in phases) else sum(comb(TOP_SIGNALS, size) for size in SIZES["b"]) * 24)
+    return {"phases": phases, "screened": sum(item["screened"] for item in phases),
+            "passed": sum(item["passed"] for item in phases),
+            "finalists": sum(len((item["summary"] or {}).get("results") or []) for item in phases),
+            "passing": sum(sum(1 for row in (item["summary"] or {}).get("results") or []
+                               if row.get("tier") in ("T0", "T0（高風險）", "T0 候選", "T0 候選（高風險）")) for item in phases),
+            "planned": planned}

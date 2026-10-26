@@ -1,7 +1,26 @@
 {# 2026-10-26 (使用者：上億個策略訓練後的結果跟數據還有訓練狀況我完全沒有看到): the dashboard's window of every search
    round (research/checks.py funnel). #}
 <p class="small" style="margin:0 0 8px">每一輪先用簡化的帳戶篩 2015-06～2020-09（開發期），通過的裡面挑最好、彼此不相似的幾個，用真正的回測引擎從 2015-06 跑到 2026-09。「比 0050 多」「過門檻」是用現在的引擎重算的結果（引擎修正錯誤後全部規則重跑）；括號裡是搜尋當時的數字。</p>
-<h3 class="dash-h">個股搜尋（{{ f.rounds|length }} 輪）</h3>
+{% if f.full %}
+<h3 class="dash-h">全段大搜尋（10/26 起；2015-06～截止日全段初篩，不再只用 2015～2020）</h3>
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>哪一段</th><th class="num">策略設定</th><th class="num">已算完</th><th class="num">過初篩</th><th class="num">完整回測</th><th class="num">過門檻</th></tr></thead>
+    <tbody>
+    {% for ph in f.full.phases %}{% set sm = ph.summary or {} %}
+      <tr><td data-primary>{{ ph.phase }} 段：{{ ph.signals }} 個訊號 {{ ph.sizes|join('、') }} 個一組 <span class="muted small">截止日 {{ ph.cutoff }}</span></td>
+        <td class="num" data-label="策略設定">{{ '{:,}'.format(ph.planned) }}</td>
+        <td class="num" data-label="已算完">{{ '{:,}'.format(ph.screened) }}{% if not ph.summary and ph.per_minute %} <span class="muted small">每分鐘 {{ '{:,}'.format(ph.per_minute) }}，約 {{ ph.eta_hours }} 小時</span>{% endif %}</td>
+        <td class="num" data-label="過初篩">{{ '{:,}'.format(ph.passed) }}</td>
+        <td class="num" data-label="完整回測">{{ (sm.results or [])|length if sm else '—' }}</td>
+        <td class="num" data-label="過門檻">{% if sm %}{{ (sm.tiers or {}).get('T0 候選', 0) + (sm.tiers or {}).get('T0 候選（高風險）', 0) }}{% else %}—{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="col-help"><b>說明</b>　過初篩＝2015-06～截止日全段贏 0050、2020-10 以後也贏 0050、回撤不比 0050 深 15 點以上、一年視窗至少贏一半。b 段＝a 段過初篩最常出現的 50 個訊號 5 個一組，a 段算完才開始。</p>
+{% endif %}
+<h3 class="dash-h">舊的個股搜尋（{{ f.rounds|length }} 輪，只用 2015～2020 初篩，已停用）</h3>
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
     <thead><tr><th>哪一輪</th><th class="num">策略設定</th><th class="num">通過初篩</th><th class="num">完整回測</th><th class="num">比 0050 多</th><th class="num">過門檻</th><th class="num">花了</th></tr></thead>

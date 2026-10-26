@@ -97,3 +97,31 @@ def test_funnel_counts_the_finalists_again_with_the_latest_engine(tmp_path):
     found = checks.funnel(tmp_path, pool)
     assert found["now"] and found["total"]["now_beat"] == 1 and found["total"]["now_passing"] == 1
     assert found["total"]["beat_full"] == 2 and found["total"]["passing"] == 2          # as the round saw them
+
+
+def test_the_full_period_search_is_shown_apart_while_it_runs(tmp_path):
+    """2026-10-26: the full-period search's progress, not added to the old rounds (no setting counted twice)."""
+    from math import comb
+
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+
+    research = tmp_path / "research"
+    _scan(research, "scan-1.0.0-20261010-015056", 1000, 100, [{"full_excess": 0.02}], {"T0 候選": 1})
+    out = research / "scans" / "scan-full-1.0.0-2026-08-31-a"
+    out.mkdir(parents=True)
+    (out / "plan.json").write_text(json.dumps({"phase": "a", "cutoff": "2026-08-31", "names": [f"s{i}" for i in range(6)],
+                                               "sizes": [1, 2]}), encoding="utf-8")
+    for part in range(2):
+        (out / f"progress-{part}-of-2.json").write_text(json.dumps(
+            {"screened": 100, "passed": 7, "per_minute": 900, "eta_hours": 1.5}), encoding="utf-8")
+    found = checks.funnel(research)
+    assert found["total"]["candidates"] == 1000                           # the old rounds only
+    full = found["full"]
+    assert full["screened"] == 200 and full["passed"] == 14
+    assert full["planned"] == (6 + comb(6, 2)) * 24 + comb(50, 5) * 24   # phase b's size known in advance
+    client = create_app(build_container(Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}",
+                                                 scheduler_in_web=False))).test_client()
+    body = client.get("/research/searches").get_data(as_text=True)
+    assert "全段大搜尋" in body and "每分鐘 1,800" in body and "已停用" in body
