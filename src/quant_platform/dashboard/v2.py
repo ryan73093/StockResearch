@@ -1158,6 +1158,23 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         return render_template("v2/research_eras.html", era=analyze(research_dir))
 
+    @blueprint.get("/research/searches")
+    def research_searches():
+        """2026-10-26 (使用者：上億個策略訓練後的結果跟數據還有訓練狀況我完全沒有看到): the dashboard's window of every
+        search round."""
+        from quant_platform.research.checks import funnel
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        return render_template("v2/research_searches.html", f=funnel(research_dir))
+
+    @blueprint.get("/research/checks")
+    def research_checks():
+        """2026-10-26 (使用者：你現在全部都是正確的嗎): the dashboard's window of every check, how it is done, its result."""
+        from quant_platform.research.checks import correctness
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        return render_template("v2/research_checks.html", checks=correctness(research_dir))
+
     @blueprint.get("/research/rules/<spec_hash>")
     def research_rule(spec_hash: str):
         """One rule's every backtest run (periods, cash flows, yearly gaps, value chart) and forward record."""

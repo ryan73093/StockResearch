@@ -113,7 +113,8 @@ def view(research: str | Path, start: str, optimizations: list[dict], gates: dic
     research = Path(research)
     paths = [research / "trials.jsonl", research / "forward" / "stocks" / "log.jsonl",
              research / "forward" / "stocks" / "tracked.json", research / "rolling", research / "models",
-             research / "scans", research / "blend_scan", research / "stress"]
+             research / "scans", research / "blend_scan", research / "stress", research / "audit", research / "leakcheck",
+             research / "invariants.json", research / "forward" / "stocks"]
     key = (str(research.resolve()), start, len(optimizations), json.dumps(optimizations[:1], ensure_ascii=False),
            tuple((path.stat().st_mtime_ns, path.stat().st_size) if path.exists() else 0 for path in paths))
     if _VIEW.get("key") != key:
@@ -398,7 +399,9 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
         if graded:
             stress["guards"] = graded.get("ways") or []
     steady = calmest(research)
-    return {"benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
+    from quant_platform.research.checks import correctness, funnel
+
+    return {"checks": correctness(research), "funnel": funnel(research), "benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
             "stress": stress, "steady": steady,
             "charts": charts(research, start, overall, ordinary, steady, benchmark, periods),
             "recent": recent_all, "forward": forward, "scale": search_scale(research),

@@ -340,7 +340,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "screen-check"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--sample", type=int, default=0,
@@ -827,6 +827,17 @@ def main() -> int:
         print("有差異（偷看）" if report["leak"] else "沒有發現偷看", flush=True)
         return 0 if not report["leak"] else 1
 
+    if args.command == "screen-check":
+        # 2026-10-26 (使用者：上億個策略都是用正確的方法去做訓練、去做測試的嗎): the search's screen against the engine
+        from quant_platform.research.checks import save_screen_check
+
+        path = save_screen_check(RESEARCH)
+        report = json.loads(path.read_text(encoding="utf-8"))
+        if report.get("compared"):
+            print(f"{report['compared']} 個完整回測過的規則：排名相關 {report['rank_correlation']:.2f}；初篩每年比 0050 多 "
+                  f"{report['screen_median']:+.2%}、完整回測 {report['engine_median']:+.2%}（中位數）；初篩贏、完整回測輸的 "
+                  f"{report['screen_only']} 個（{path.name}）", flush=True)
+        return 0
     if args.command == "forward-audit":
         # 2026-10-25 (使用者：你所有策略確定都是合理的嗎): every account's decisions ranked again the way a backtest does
         from quant_platform.research.jobs import JobLog

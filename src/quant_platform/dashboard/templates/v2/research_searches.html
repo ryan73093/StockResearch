@@ -1,0 +1,37 @@
+{# 2026-10-26 (使用者：上億個策略訓練後的結果跟數據還有訓練狀況我完全沒有看到): the dashboard's window of every search
+   round (research/checks.py funnel). #}
+<p class="small" style="margin:0 0 8px">每一輪先用簡化的帳戶篩 2015-06～2020-09（開發期），通過的裡面挑最好、彼此不相似的幾個，用真正的回測引擎從 2015-06 跑到 2026-09。「過門檻」是搜尋當時評的等級；引擎改版後全部規則重跑，最新等級看選手池。</p>
+<h3 class="dash-h">個股搜尋（{{ f.rounds|length }} 輪）</h3>
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>哪一輪</th><th class="num">策略設定</th><th class="num">通過初篩</th><th class="num">完整回測</th><th class="num">整段贏 0050</th><th class="num">過門檻</th><th class="num">花了</th></tr></thead>
+    <tbody>
+    {% for row in f.rounds %}
+      <tr><td data-primary>{% if row.at %}{{ row.at.month }}/{{ row.at.day }} {{ '%02d:%02d'|format(row.at.hour, row.at.minute) }}{% endif %} <span class="muted small">{{ '大規模（串流）' if row.large else '兩階段' }}</span></td>
+        <td class="num" data-label="策略設定">{{ '{:,}'.format(row.candidates) }}</td>
+        <td class="num" data-label="通過初篩">{{ '{:,}'.format(row.passed) }}{% if row.candidates %} <span class="muted small">{{ '{:.0%}'.format(row.passed / row.candidates) }}</span>{% endif %}</td>
+        <td class="num" data-label="完整回測">{{ row.finalists }}</td>
+        <td class="num" data-label="整段贏 0050">{{ row.beat_full }}</td>
+        <td class="num" data-label="過門檻">{{ row.passing }}</td>
+        <td class="num" data-label="花了">{% if row.minutes %}{{ '{:,.0f}'.format(row.minutes) }} 分{% else %}—{% endif %}</td></tr>
+    {% endfor %}
+    <tr><td data-primary><b>合計</b></td><td class="num" data-label="策略設定"><b>{{ '{:,}'.format(f.total.candidates) }}</b></td><td class="num" data-label="通過初篩"><b>{{ '{:,}'.format(f.total.passed) }}</b></td><td class="num" data-label="完整回測"><b>{{ f.total.finalists }}</b></td><td class="num" data-label="整段贏 0050"><b>{{ f.total.beat_full }}</b></td><td class="num" data-label="過門檻"><b>{{ f.total.passing }}</b></td><td class="num" data-label="花了"><b>{{ '{:,}'.format(f.minutes) }} 分</b></td></tr>
+    </tbody>
+  </table>
+</div>
+<h3 class="dash-h">組合搜尋（{{ f.blends|length }} 輪）</h3>
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>哪一輪</th><th class="num">用幾個規則組</th><th class="num">組合數</th><th class="num">通過初篩</th><th class="num">完整回測</th></tr></thead>
+    <tbody>
+    {% for row in f.blends %}
+      <tr><td data-primary>{{ row.at.month }}/{{ row.at.day }} {{ '%02d:%02d'|format(row.at.hour, row.at.minute) }}</td>
+        <td class="num" data-label="用幾個規則組">{{ row.pool or '—' }}</td>
+        <td class="num" data-label="組合數">{{ '{:,}'.format(row.candidates) }}</td>
+        <td class="num" data-label="通過初篩">{{ '{:,}'.format(row.passed) }}</td>
+        <td class="num" data-label="完整回測">{{ row.finalists }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="col-help"><b>說明</b>　<b>策略設定</b>：一組訊號 × 股票池（全部或大型股）× 配置（等權或依波動）× 每天或每週決策 × 持有方式（固定天數、月線上續抱、不設最短持有）算一個。<b>通過初篩</b>：開發期贏 0050、回撤不比 0050 深 5 點以上、一年視窗至少贏一半。<b>完整回測</b>：真正的回測引擎（漲跌停、整股零股、手續費與稅、每月投入），每個都登錄成一次試驗。組合搜尋每一輪都重搜當時選手池所有兩兩、三個一組的組合，所以合計只算最大的一輪。</p>

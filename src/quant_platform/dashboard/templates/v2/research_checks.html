@@ -1,0 +1,17 @@
+{# 2026-10-26 (使用者：你現在全部都是正確的嗎、上億個策略都是用正確的方法去做訓練、去做測試的嗎): the dashboard's window of
+   every check — how it is done, its latest result and date (research/checks.py correctness). #}
+{% from "v2/_dashboard.html" import mark, state %}
+<p class="small" style="margin:0 0 8px">每一項都是程式核對，不是人看。「太久沒跑」＝每週的超過 8 天、每天的超過 6 天沒有新結果。</p>
+{% for row in checks %}
+<section class="check-detail">
+  <h3 class="dash-h">{{ mark(row.ok if not row.stale else false) }} {{ row.title }}</h3>
+  <p><b>{{ row.headline }}</b>（{{ state(row) }}，{% if row.at %}{{ row.at.year }}-{{ '%02d-%02d %02d:%02d'|format(row.at.month, row.at.day, row.at.hour, row.at.minute) }}{% else %}沒有紀錄{% endif %}）{% if row.detail %}<br><span class="small">{{ row.detail }}</span>{% endif %}</p>
+  <p class="small muted">怎麼核對：{{ row.how }}</p>
+  {% if row.parts %}
+  <details><summary class="small">每一項（{{ row.parts|length }}）</summary>
+    <ul class="small" style="margin:4px 0 0;padding-left:18px;line-height:1.7">{% for item in row.parts %}<li>{{ item }}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+</section>
+{% endfor %}
+<p class="col-help"><b>還沒有程式核對的</b>　策略能不能在未來繼續賺：這只能靠前向（從截止日隔天起每天照規則做、全部賣掉計算），串接滿 60 個交易日不輸 0050 才算 T0，最快 11/30。搜尋了上千萬個設定也代表「運氣好」的機會很高，所以名單另外用多重檢定（有效試驗次數）與 2020-10 以後的期間檢查。</p>

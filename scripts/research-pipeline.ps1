@@ -417,6 +417,10 @@ switch ($Name) {
         Invoke-Step "audit" @("-m", "quant_platform.research", "trade-audit", "--broker", "cathay")
         # 2026-10-25 (使用者：所有策略確定都合理嗎): every forward account's decisions ranked again the way a backtest does
         Invoke-Step "forward-audit" @("-m", "quant_platform.research", "forward-audit")
+        # 2026-10-26 (使用者：你現在全部都是正確的嗎): the factor truncation check (new factors too) and the search's
+        # screen against the engine, weekly; the research overview shows every check's latest result
+        Invoke-Step "leakcheck" @("-m", "quant_platform.research", "leakcheck")
+        Invoke-Step "screen-check" @("-m", "quant_platform.research", "screen-check")
     }
     "forwardaudit" { Invoke-Step "forward-audit" @("-m", "quant_platform.research", "forward-audit") }
     "forwardwhy" {
