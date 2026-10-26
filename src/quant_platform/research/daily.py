@@ -4621,7 +4621,7 @@ def _guarded(trials: tuple[int, ...], guards: list[tuple[str, dict]]) -> list:
     return output
 
 
-NO_HALF_TWINS = ("bearguard", "entryonly")   # batches whose passing rules get no half twin (variants of fixed rules)
+NO_HALF_TWINS = ("halftwins", "bearguard", "entryonly")   # batches whose passing rules get no half twin (variants of fixed rules)
 
 
 def half_twins(rules: list, registered: set[str]) -> list:
@@ -4879,6 +4879,33 @@ def leakfix_batch() -> list:
     return rules
 
 
+def all_half_twins() -> list:
+    """2026-10-27: the half-guard twin (vol_scale "taiex_half") of every latest 100%-stock rule in a passing tier that
+    has none — the twins began with the 10/25 batches and the daily batches left 高風險 out; 1,119 were missing."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = _Path("instance") / "research"
+    records = TrialRegistry(research / "trials.jsonl").records()
+    latest = newest(records, lambda record: record.kind == "candidate" and record.period == "recent")
+    rules = []
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        if tier(record.metrics or {})[0] not in PASSING_TIERS:
+            continue
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            rule = parse_spec(spec)
+        except (OSError, ValueError, KeyError):
+            continue
+        if not uses_0050(spec):
+            rules.append(rule)
+    return half_twins(rules, {record.spec_hash for record in records})
+
+
 def rerun140_batch() -> list:
     """2026-10-13 night: the same 211 rules on engine 1.4.0 (whole shares, dividends as paid, the turnover cap),
     filled the same day in the after-hours sessions. Not the next session (使用者 2026-10-14：要在 14:30 前算出
@@ -4910,6 +4937,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "leakfix": leakfix_batch,
+           "halftwins_a": lambda: all_half_twins()[0::2], "halftwins_b": lambda: all_half_twins()[1::2],
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "veto2": veto2_batch, "veto3_a": lambda: veto3_batch()[0::2],
            "veto3_b": lambda: veto3_batch()[1::2], "veto4": veto4_batch, "veto5": veto5_batch, "veto6": veto6_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "modelk": model_k_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],

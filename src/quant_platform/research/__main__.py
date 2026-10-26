@@ -322,7 +322,9 @@ def _daily(args, registry: TrialRegistry) -> int:
                 continue
             reasons = record.metrics.get("reasons") or []
             passed += not reasons
-            if not reasons:
+            # 2026-10-27: the half-guard twins for every passing tier, 高風險 too (as the searches do) — the deep falls
+            # are where the guard helps; until now only the rules with no reason at all got one
+            if daily_research.tier(record.metrics)[0] in daily_research.PASSING_TIERS:
                 passing.append(rule)
             verdict = "過門檻" if not reasons else "；".join(reasons)
             print(f"{rule.name}：2015-06 起比 0050 {report['full_period_excess']:+.1%}、"
