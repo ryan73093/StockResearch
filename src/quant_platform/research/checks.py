@@ -38,11 +38,17 @@ def _read(path: Path) -> dict | None:
         return None
 
 
-def funnel(research: str | Path) -> dict[str, object]:
-    """Each large-search round and each blend round, and the totals."""
+def funnel(research: str | Path, pool: list[dict] | None = None) -> dict[str, object]:
+    """Each large-search round and each blend round, and the totals. With ``pool`` (the pool's rows, the latest
+    engine's results), each round's finalists are counted again as they stand now: an engine fix since the round can
+    move them (``now_beat``: more money than the same money in 0050 at 2026-09; ``now_passing``)."""
     from quant_platform.research.daily import PASSING_TIERS
+    from quant_platform.research.registry import TrialRegistry
 
     research = Path(research)
+    rows_now = {row["spec_hash"]: row for row in pool or [] if row.get("spec_hash")}
+    hashes = ({record.trial_id: record.spec_hash for record in TrialRegistry(research / "trials.jsonl").records()}
+              if pool is not None and (research / "trials.jsonl").is_file() else {})
     rounds = []
     for path in sorted((research / "scans").glob("*/summary.json")) if (research / "scans").is_dir() else []:
         summary = _read(path)
@@ -50,7 +56,11 @@ def funnel(research: str | Path) -> dict[str, object]:
             continue
         results = summary.get("results") or []
         tiers = summary.get("tiers") or {}
+        now = [rows_now.get(hashes.get(row.get("trial_id"))) for row in results]
+        now = [row for row in now if row and row.get("final_value")]
         rounds.append({"at": _when(path.parent.name), "name": path.parent.name,
+                       "now_beat": sum(1 for row in now if row["final_value"] > (row.get("benchmark_final_value") or 1e30)),
+                       "now_passing": sum(1 for row in now if row.get("tier") in PASSING_TIERS), "now_found": len(now),
                        "large": path.parent.name.startswith("scan-large"),
                        "candidates": int(summary.get("candidates") or 0),
                        "passed": int(summary.get("passed_screen") or 0), "finalists": len(results),
@@ -67,10 +77,11 @@ def funnel(research: str | Path) -> dict[str, object]:
                        "passed": int(summary.get("passed") or 0), "finalists": len(summary.get("finalists") or [])})
     rounds.sort(key=lambda row: row["at"] or datetime.min)
     blends.sort(key=lambda row: row["at"])
-    total = {key: sum(row[key] for row in rounds) for key in ("candidates", "passed", "finalists", "passing", "beat_full")}
+    total = {key: sum(row[key] for row in rounds) for key in ("candidates", "passed", "finalists", "passing", "beat_full",
+                                                              "now_beat", "now_passing", "now_found")}
     biggest = max(blends, key=lambda row: row["candidates"], default=None)
     return {"rounds": rounds, "blends": blends, "total": total, "biggest_blend": biggest,
-            "blend_finalists": sum(row["finalists"] for row in blends),
+            "blend_finalists": sum(row["finalists"] for row in blends), "now": pool is not None,
             "minutes": round(sum(row["minutes"] or 0 for row in rounds))}
 
 

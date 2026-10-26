@@ -76,8 +76,13 @@
         <li><b>{{ '{:,.0f}'.format(fn.total.candidates / 10000) }} 萬</b><span>個股策略設定（訊號組合 × 股票池 × 配置 × 每天或每週決策 × 持有方式）</span></li>
         <li><b>{{ '{:,.0f}'.format(fn.total.passed / 10000) }} 萬</b><span>通過初篩（{{ '{:.0%}'.format(fn.total.passed / fn.total.candidates) }}）：2015-06～2020-09 贏 0050、回撤不比 0050 深 5 點以上、一年視窗至少贏一半</span></li>
         <li><b>{{ fn.total.finalists }} 個</b><span>每輪最好、彼此不相似的，用真正的回測引擎完整重跑</span></li>
+        {% if fn.now %}
+        <li><b>{{ fn.total.now_beat }} 個</b><span>跑到 2026-09 錢比同樣的錢買 0050 多（另外 {{ fn.total.finalists - fn.total.now_beat }} 個比 0050 少；用現在的引擎算）</span></li>
+        <li><b>{{ fn.total.now_passing }} 個</b><span>過門檻（T0 候選，含高風險；搜尋當時評的是 {{ fn.total.passing }} 個，引擎修正錯誤後重算）</span></li>
+        {% else %}
         <li><b>{{ fn.total.beat_full }} 個</b><span>整段 2015-06～2026-09 贏 0050（另外 {{ fn.total.finalists - fn.total.beat_full }} 個整段沒贏）</span></li>
         <li><b>{{ fn.total.passing }} 個</b><span>過門檻（T0 候選，搜尋當時評的等級）</span></li>
+        {% endif %}
       </ol>
       {% if fn.biggest_blend %}<p class="small muted" style="margin:6px 0 0">組合搜尋：最大一輪 {{ '{:.2f}'.format(fn.biggest_blend.candidates / 100000000) }} 億種組合（{{ fn.biggest_blend.pool }} 個規則兩兩、三個一組）→ {{ '{:,.0f}'.format(fn.biggest_blend.passed / 10000) }} 萬過初篩 → 每輪最多 20 個完整回測，{{ fn.blends|length }} 輪共 {{ fn.blend_finalists }} 個。</p>{% endif %}
       <p class="dash-link"><button type="button" class="button-link" data-searches>每一輪搜了什麼、留下多少</button></p>

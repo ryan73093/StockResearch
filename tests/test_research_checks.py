@@ -22,7 +22,9 @@ def test_funnel_adds_the_rounds_and_takes_the_biggest_blend(tmp_path):
             {"pool": 10 + number, "candidates": count, "passed": passed, "stamp": f"2026101{number}-120000",
              "finalists": [{}] * 3}), encoding="utf-8")
     found = checks.funnel(tmp_path)
-    assert found["total"] == {"candidates": 6000, "passed": 500, "finalists": 3, "passing": 1, "beat_full": 2}
+    assert {key: found["total"][key] for key in ("candidates", "passed", "finalists", "passing", "beat_full")} == {
+        "candidates": 6000, "passed": 500, "finalists": 3, "passing": 1, "beat_full": 2}
+    assert not found["now"]                                    # no pool given: the rounds' own numbers only
     assert found["biggest_blend"]["candidates"] == 900 and found["blend_finalists"] == 6 and found["minutes"] == 60
     assert [row["large"] for row in found["rounds"]] == [False, True]
     assert found["rounds"][0]["at"] == datetime(2026, 10, 10, 1, 50, 56)
@@ -77,3 +79,21 @@ def test_the_dashboard_windows_render(tmp_path):
     found = client.get("/research/searches")
     body = found.get_data(as_text=True)
     assert found.status_code == 200 and "1,000" in body and "兩階段" in body
+
+
+def test_funnel_counts_the_finalists_again_with_the_latest_engine(tmp_path):
+    from quant_platform.research.registry import TrialRegistry
+
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    first = registry.register(kind="candidate", period="recent", spec_hash="a", spec_name="a", input_hash="1",
+                              data_fingerprint="d", report_file="a.json", metrics={})
+    second = registry.register(kind="candidate", period="recent", spec_hash="b", spec_name="b", input_hash="2",
+                               data_fingerprint="d", report_file="b.json", metrics={})
+    _scan(tmp_path, "scan-1.0.0-20261010-015056", 1000, 100,
+          [{"trial_id": first.trial_id, "full_excess": 0.02}, {"trial_id": second.trial_id, "full_excess": 0.01}],
+          {"T0 候選": 2})
+    pool = [{"spec_hash": "a", "final_value": 3_000_000, "benchmark_final_value": 1_000_000, "tier": "T0 候選"},
+            {"spec_hash": "b", "final_value": 900_000, "benchmark_final_value": 1_000_000, "tier": "T3"}]
+    found = checks.funnel(tmp_path, pool)
+    assert found["now"] and found["total"]["now_beat"] == 1 and found["total"]["now_passing"] == 1
+    assert found["total"]["beat_full"] == 2 and found["total"]["passing"] == 2          # as the round saw them

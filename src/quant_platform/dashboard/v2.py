@@ -1163,9 +1163,11 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         """2026-10-26 (使用者：上億個策略訓練後的結果跟數據還有訓練狀況我完全沒有看到): the dashboard's window of every
         search round."""
         from quant_platform.research.checks import funnel
+        from quant_platform.research.pool import pool_view
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        return render_template("v2/research_searches.html", f=funnel(research_dir))
+        return render_template("v2/research_searches.html",
+                               f=funnel(research_dir, pool_view(research_dir, basis="seed")["daily"]))
 
     @blueprint.get("/research/checks")
     def research_checks():

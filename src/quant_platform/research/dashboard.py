@@ -401,7 +401,7 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
     steady = calmest(research)
     from quant_platform.research.checks import correctness, funnel
 
-    return {"checks": correctness(research), "funnel": funnel(research), "benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
+    return {"checks": correctness(research), "funnel": funnel(research, pool["daily"]), "benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
             "stress": stress, "steady": steady,
             "charts": charts(research, start, overall, ordinary, steady, benchmark, periods),
             "recent": recent_all, "forward": forward, "scale": search_scale(research),
