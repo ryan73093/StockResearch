@@ -36,15 +36,23 @@ def test_the_block_metrics_are_the_scans_and_the_excess_since_2020_10():
         theirs = np.prod(1 + bench[split:len(series)])
         by_hand = (mine / theirs) ** (365.25 / (days[-1] - days[split]).days) - 1
         assert row["recent"] == pytest.approx(by_hand, abs=2e-5)
+        early = (np.prod(1 + series[:split]) / np.prod(1 + bench[:split])) ** (365.25 / (days[split] - days[0]).days) - 1
+        assert row["early"] == pytest.approx(early, abs=2e-5)
+        assert row["score"] == pytest.approx(0.25 * row["early"] + 0.75 * row["recent"], abs=2e-5)
+        value, base = np.cumprod(1 + series), np.cumprod(1 + bench[:len(series)])
+        starts = range(split, len(series) - 245, 21)
+        wins = [value[s + 245] / value[s] - base[s + 245] / base[s] > 0 for s in starts]
+        assert row["recent_win_1y"] == pytest.approx(np.mean(wins), abs=1e-4)
 
 
-def test_a_setting_passes_only_ahead_of_0050_overall_and_since_2020_10():
-    row = {"excess": 0.02, "recent": 0.01, "drawdown": -0.40, "bench_drawdown": -0.30, "win_1y": 0.6}
-    assert scan_full.passes(row)
-    assert not scan_full.passes({**row, "recent": -0.001})            # 2015～2020 alone is not enough
-    assert not scan_full.passes({**row, "excess": -0.001})
+def test_2020_10_on_is_the_gate_and_2015_2020_only_a_quarter_of_the_score():
+    """2026-10-26 23:10 (使用者：2015 到 2020 甚至你要降低，短歷史賽道你應該要加重權重的去看)."""
+    row = {"excess": -0.02, "early": -0.08, "recent": 0.01, "recent_win_1y": 0.6, "drawdown": -0.40,
+           "bench_drawdown": -0.30, "win_1y": 0.3}
+    assert scan_full.passes(row)                                      # behind 0050 before 2020-10: no gate
+    assert not scan_full.passes({**row, "recent": -0.001})            # 2015～2020 alone is never enough
+    assert not scan_full.passes({**row, "recent_win_1y": 0.45})
     assert not scan_full.passes({**row, "drawdown": -0.46})           # more than 15 points deeper than 0050
-    assert not scan_full.passes({**row, "win_1y": 0.45})
 
 
 def test_the_signals_take_in_the_paid_tables_and_not_what_the_owner_ruled_out():
@@ -58,7 +66,7 @@ def test_the_signals_take_in_the_paid_tables_and_not_what_the_owner_ruled_out():
 
 
 def test_two_parts_screen_every_block_once_and_go_on_after_a_stop(monkeypatch, tmp_path):
-    days = sessions(600)
+    days = sessions(1100)                      # 2019-01 to 2023-03: one-year windows starting after 2020-10 exist
     arrays = type("A", (), {"days": days, "bench": np.zeros(len(days))})()
     monkeypatch.setattr(scan, "load_arrays", lambda folder: arrays)
     monkeypatch.setattr(scan_large, "SAMPLE_EVERY", 5)
@@ -101,7 +109,7 @@ def test_the_finalists_skip_near_copies_of_each_other_and_of_earlier_ones():
     def simulate(items):
         return np.array([series[tuple(item["factors"])] for item in items])
     rows = [{"factors": list(key), "universe": "all", "weighting": "equal", "check": "daily", "hold": "days",
-             "recent": recent, "excess": 0.01} for key, recent in ((("a",), 0.05), (("a", "b"), 0.04), (("c",), 0.03),
+             "recent": recent, "excess": 0.01, "score": recent} for key, recent in ((("a",), 0.05), (("a", "b"), 0.04), (("c",), 0.03),
                                                                   (("d",), 0.02))]
     chosen = scan_full.choose(arrays, rows, [], None, count=10, simulate_fn=simulate)
     assert [row["factors"] for row in chosen] == [["a"], ["c"], ["d"]]

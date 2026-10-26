@@ -9,13 +9,17 @@
   branches (their download ends about 10/30; a round of their own then).
 - Phase a: every set of 1 to 4 signals; phase b: every set of 5 of the 50 signals passing phase a most often. Each set
   × two stock pools × two weightings × daily or weekly × three holding styles: about 112 million different settings.
-- Stage 1 on the GPU over 2015-06 to the month's cutoff (the monthly list's months), in PARTS processes side by side:
-  a setting passes when it beats 0050 over the whole of it AND since 2020-10, falls at most DRAWDOWN_ROOM further than
-  0050 and wins at least half of the one-year windows (``passes``).
-- Stage 2: the passing settings by their excess since 2020-10, the best POOL simulated again, taken greedily while their
-  daily excess correlates at most CORRELATION with one already taken or with an earlier search's finalist, up to
-  FINALISTS a phase; each run in the full engine (WORKERS processes) and registered; the passing ones' half-guard
-  twins too. Then the month's list grades them, their accounts start the day after the cutoff.
+- Stage 1 on the GPU over 2015-06 to the month's cutoff (the monthly list's months), in PARTS processes side by side.
+  2026-10-26 23:10 (使用者：2015 到 2020 甚至你要降低，短歷史賽道你應該要加重權重的去看; it replaced the first rule,
+  which still required beating 0050 over the whole period, after 1.2 million settings — kept aside, not used): a
+  setting passes when it beats 0050 since 2020-10 and in at least half of the one-year windows starting from then, and
+  falls at most DRAWDOWN_ROOM further than 0050 over the whole period (the 2020 and 2022 falls count) — 2015～2020's
+  return is no gate (``passes``).
+- Stage 2: the passing settings by ``score`` (EARLY_WEIGHT × the yearly excess before 2020-10 + (1 − EARLY_WEIGHT) ×
+  the one since), the best POOL simulated again, taken greedily while their daily excess correlates at most
+  CORRELATION with one already taken or with an earlier search's finalist, up to FINALISTS a phase; each run in the
+  full engine (WORKERS processes) and registered; the passing ones' half-guard twins too. Then the month's list grades
+  them, their accounts start the day after the cutoff.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ import numpy as np
 VERSION = "scan-full-1.0.0"
 RECENT = date(2020, 10, 1)
 DRAWDOWN_ROOM = 0.15
+EARLY_WEIGHT = 0.25        # 2015-06～2020-09's share of the ranking score; 2020-10 on: 0.75
 CORRELATION = 0.9
 FINALISTS = 1500
 POOL = 60_000
@@ -87,20 +92,32 @@ def metrics_block(returns: np.ndarray, bench: np.ndarray, days: list[date], entr
     before = value[:, split - 1] if split else np.ones(count)
     bench_before = base[split - 1] if split else 1.0
     recent = ((value[:, -1] / before) / (base[-1] / bench_before)) ** (1 / recent_years) - 1
+    early_years = max((days[split] - days[0]).days / 365.25, 1e-9)
+    early = (before / bench_before) ** (1 / early_years) - 1 if split else np.zeros(count)
+    later = np.arange(split, width - 245, 21)                     # the one-year windows starting from 2020-10
+    if len(later):
+        recent_relative = value[:, later + 245] / value[:, later] - (base[later + 245] / base[later])[None, :]
+        recent_win = np.mean(recent_relative > 0, axis=1)
+    else:
+        recent_win = np.full(count, np.nan)
     annual = value[:, -1] ** (1 / years) - 1
     return [{"excess": round(float(excess[row]), 5), "annual": round(float(annual[row]), 5),
              "drawdown": round(float(drawdown[row]), 4), "bench_drawdown": round(bench_drawdown, 4),
              "win_1y": round(float(win[row]), 4) if len(starts) else None,
              "worst_1y": round(float(worst[row]), 4) if len(starts) else None,
              "first_half": round(float(first[row]), 5), "second_half": round(float(second[row]), 5),
-             "recent": round(float(recent[row]), 5), "entries_per_month": round(float(entries[row]) / (years * 12), 2)}
+             "recent": round(float(recent[row]), 5), "early": round(float(early[row]), 5),
+             "recent_win_1y": round(float(recent_win[row]), 4) if len(later) else None,
+             "score": round(float(EARLY_WEIGHT * early[row] + (1 - EARLY_WEIGHT) * recent[row]), 5),
+             "entries_per_month": round(float(entries[row]) / (years * 12), 2)}
             for row in range(count)]
 
 
 def passes(row: dict) -> bool:
-    """Beats 0050 over the whole period and since 2020-10, falls at most DRAWDOWN_ROOM further, wins half the years."""
-    return (row["excess"] > 0 and row["recent"] > 0 and row["drawdown"] >= row["bench_drawdown"] - DRAWDOWN_ROOM
-            and (row["win_1y"] or 0) >= 0.5)
+    """Beats 0050 since 2020-10 and in half the one-year windows from then; falls at most DRAWDOWN_ROOM further over
+    the whole period. 2015～2020's return is no gate (it weighs a quarter of ``score``)."""
+    return (row["recent"] > 0 and (row["recent_win_1y"] or 0) >= 0.5
+            and row["drawdown"] >= row["bench_drawdown"] - DRAWDOWN_ROOM)
 
 
 def _progress_path(out: Path, part: int, parts: int) -> Path:
@@ -174,7 +191,7 @@ def passing_rows(out: Path):
 
 
 def best_rows(out: Path, pool: int = POOL) -> tuple[list[dict], int]:
-    """(the ``pool`` passing rows with the most excess since 2020-10, then the whole period's; how many passed) —
+    """(the ``pool`` passing rows with the highest ``score``, then the most excess since 2020-10; how many passed) —
     streamed, the passing rows can be millions."""
     import heapq
 
@@ -185,7 +202,7 @@ def best_rows(out: Path, pool: int = POOL) -> tuple[list[dict], int]:
         for row in passing_rows(out):
             counted += 1
             yield row
-    best = heapq.nlargest(pool, keyed(), key=lambda row: (row["recent"], row["excess"]))
+    best = heapq.nlargest(pool, keyed(), key=lambda row: (row["score"], row["recent"]))
     return best, counted
 
 
@@ -221,11 +238,11 @@ def simulate(device, items: list[dict], costs, bench: np.ndarray) -> np.ndarray:
 
 def choose(arrays, rows: list[dict], seeds: list[dict], costs, count: int = FINALISTS, pool: int = POOL,
            device=None, simulate_fn=None) -> list[dict]:
-    """The passing rows by their excess since 2020-10 (then the whole period's), the first ``pool`` simulated again,
-    taken greedily while their daily excess correlates at most CORRELATION with any taken one or ``seeds``."""
+    """The passing rows by ``score`` (then the excess since 2020-10), the first ``pool`` simulated again, taken greedily
+    while their daily excess correlates at most CORRELATION with any taken one or ``seeds``."""
     import torch
 
-    ranked = sorted(rows, key=lambda row: (-row["recent"], -row["excess"]))[:pool]      # ``rows``: best_rows' already
+    ranked = sorted(rows, key=lambda row: (-row["score"], -row["recent"]))[:pool]       # ``rows``: best_rows' already
     run = simulate_fn or (lambda items: simulate(device, items, costs, arrays.bench))
     seeds = [seed for seed in seeds if set(seed["factors"]) <= set(arrays.names)]
 
@@ -362,7 +379,8 @@ def run_phase(base: Path, research: Path, costs, broker: str, phase: str, cutoff
     record_sources(research, rules, f"全段大搜尋 {out.name}")
     results = engine(rules, base, broker, job=job, label="全段大搜尋")
     for row, result in zip(chosen, results, strict=True):
-        result.update(screen_excess=row["excess"], screen_recent=row["recent"], hold=row.get("hold"))
+        result.update(screen_excess=row["excess"], screen_recent=row["recent"], screen_early=row["early"],
+                      screen_score=row["score"], hold=row.get("hold"))
     passing = [rule for rule, result in zip(rules, results, strict=True) if result.get("tier") in daily.PASSING_TIERS]
     registry = TrialRegistry(research / "trials.jsonl")
     twins = daily.half_twins(passing, {record.spec_hash for record in registry.records()})
@@ -372,6 +390,7 @@ def run_phase(base: Path, research: Path, costs, broker: str, phase: str, cutoff
     screened = sum(state["screened"] for state in states)
     summary = {"version": VERSION, "phase": phase, "development": [str(arrays.days[0]), cutoff.isoformat()],
                "screen": {"recent_from": RECENT.isoformat(), "drawdown_room": DRAWDOWN_ROOM, "correlation": CORRELATION,
+                          "early_weight": EARLY_WEIGHT, "gate": "2020-10 以後贏 0050、一年視窗過半；全段回撤",
                           "pool": POOL, "finalists": FINALISTS},
                "signals": names, "sizes": SIZES[phase], "candidates": screened, "passed_screen": passed,
                "effective_trials": scan.effective_trials(out, pattern="sample-*.excess.npy", screened=screened),
