@@ -20,6 +20,7 @@ session). The rows and daily excess are written as the CPU workers write them (`
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from pathlib import Path
 
@@ -49,7 +50,8 @@ class Device:
         self.torch, self.where = torch, device()
         self.arrays = arrays
         moved = np.ascontiguousarray(np.moveaxis(np.asarray(arrays.percentiles), 3, 0))
-        self.percentiles = torch.from_numpy(moved).to(self.where)
+        # 2026-10-26: float32 on the GPU once (the walk read them as float32 every session; the same values)
+        self.percentiles = torch.from_numpy(moved).to(self.where).float()
         self.next_returns = torch.from_numpy(np.ascontiguousarray(arrays.next_returns.T)).to(self.where)  # session × symbol
         self.calm = torch.from_numpy(np.ascontiguousarray(arrays.calm.T)).to(self.where)
         self.rising = (torch.from_numpy(np.ascontiguousarray(arrays.rising.T.astype(bool))).to(self.where)
@@ -88,11 +90,11 @@ def accounts(gpu: Device, items: list[dict], costs) -> tuple[np.ndarray, np.ndar
         signal[row, : len(item["factors"])] = torch.tensor([names.index(name) for name in item["factors"]])
     limit = max(1, int(INDUSTRY_SHARE * TOP))
     held = torch.zeros((count, symbols), dtype=torch.bool, device=where)
-    bought = torch.full((count, symbols), -1, dtype=torch.long, device=where)
+    bought = torch.full((count, symbols), -1, dtype=torch.int32, device=where)          # a session number
     previous_weight = torch.zeros((count, symbols), dtype=torch.float64, device=where)
     returns = torch.zeros((count, gpu.sessions - 1), dtype=torch.float64, device=where)
     entries = torch.zeros(count, dtype=torch.long, device=where)
-    places = torch.arange(symbols, device=where).expand(count, -1)
+    keep_places = min(symbols, math.ceil(TOP * KEEP))
     industry = gpu.industry
 
     def ordered(score):
@@ -111,8 +113,8 @@ def accounts(gpu: Device, items: list[dict], costs) -> tuple[np.ndarray, np.ndar
         rising = gpu.rising[t] if trend else None
         if checks[t] or (trend and bool(held.any())):
             order = ordered(score)
-            rank = torch.empty_like(order).scatter_(1, order, places)
-            zone = valid & (rank < TOP * KEEP)
+            # the first ceil(TOP × KEEP) places of the order (rank < TOP × KEEP), marked without ranking every symbol
+            zone = valid & torch.zeros_like(held).scatter_(1, order[:, :keep_places], True)
             if trend:
                 staying = zone | (valid & rising[None, :])
             else:
@@ -154,11 +156,13 @@ def accounts(gpu: Device, items: list[dict], costs) -> tuple[np.ndarray, np.ndar
             total = raw.sum(1, keepdim=True)
             weight = torch.where(total > 0, raw / torch.where(total > 0, total, 1.0), 0.0)
         else:
+            # 1 / n on the held ones: 1.0 × (1 / n) is 1.0 / n exactly (no division over every symbol)
             sizes = held.sum(1, keepdim=True)
-            weight = held.double() / sizes.clamp(min=1)
+            weight = torch.where(held, 1.0 / sizes.clamp(min=1).double(), 0.0)
         was = previous_weight > 0
         added = held & ~was
-        cost = (weight * added).sum(1) * cost_in + (previous_weight * (was & ~held)).sum(1) * cost_out
+        cost = (torch.where(added, weight, 0.0).sum(1) * cost_in
+                + torch.where(was & ~held, previous_weight, 0.0).sum(1) * cost_out)
         entries += added.sum(1)
         returns[:, t] = (weight * gpu.next_returns[t].double()[None, :]).sum(1) - cost
         previous_weight = weight
