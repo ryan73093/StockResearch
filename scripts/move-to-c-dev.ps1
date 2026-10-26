@@ -94,7 +94,8 @@ try {
   if ($envText.Contains($oldRoot)) { throw '.env still names the old folder' }
 
   $task = Get-ScheduledTask -TaskName $taskName
-  $taskBackup = $task.Actions | ForEach-Object { @{ Execute = $_.Execute; Arguments = $_.Arguments; WorkingDirectory = $_.WorkingDirectory } }
+  # an array even for one action (10/26: one hashtable came back, [0] was null and the rollback stopped there)
+  $taskBackup = @($task.Actions | ForEach-Object { @{ Execute = $_.Execute; Arguments = $_.Arguments; WorkingDirectory = $_.WorkingDirectory } })
   $action = New-ScheduledTaskAction -Execute $task.Actions[0].Execute -Argument ($task.Actions[0].Arguments.Replace($oldRoot, $newRoot))
   Set-ScheduledTask -TaskName $taskName -Action $action | Out-Null
   $changedTask = $true
@@ -119,8 +120,9 @@ try {
 
   # 5. Deploy from the new folder: pip install . rewrites the quant-* launchers to the new interpreter, then start.
   Step 'deploying from C:\Dev\StockResearch'
-  Push-Location $newRoot
-  try { & (Join-Path $newRoot 'scripts\deploy.ps1') -DuringWorkerJob } finally { Pop-Location }
+  # its own process: under this script's ErrorActionPreference=Stop pip's harmless stderr warning ended the cutover (10/26)
+  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $newRoot 'scripts\deploy.ps1') -DuringWorkerJob 2>&1 | ForEach-Object { "$_" }
+  if ($LASTEXITCODE -ne 0) { throw "deploy failed with code $LASTEXITCODE" }
 }
 catch {
   Write-Host "CUTOVER FAILED: $($_.Exception.Message)" -ForegroundColor Red

@@ -61,7 +61,9 @@ $cloudflared = @(
     'C:\Program Files (x86)\cloudflared\cloudflared.exe',
     'C:\Program Files\cloudflared\cloudflared.exe',
     (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\cloudflared.exe'),
-    (Join-Path (Split-Path -Parent $projectRoot) 'YtSummary\.tools\cloudflared\cloudflared.exe')
+    (Join-Path (Split-Path -Parent $projectRoot) 'YtSummary\.tools\cloudflared\cloudflared.exe'),
+    # 2026-10-26: moved to C:\Dev (no YtSummary beside it); the machine's shared copy, as C:\Dev\VectorDB finds it
+    (Join-Path $env:USERPROFILE 'Project\YtSummary\.tools\cloudflared\cloudflared.exe')
 ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
 if ($accessEnforced -and $cloudflared -and (Test-Path -LiteralPath $tunnelCredential)) {
     $serviceDefinitions += @{
