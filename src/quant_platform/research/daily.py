@@ -245,6 +245,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_i": "機器學習集成 I（模型 H 再加上集保股權分散的 4 個因子）",
                  "ml_deep2_holders": "深度學習第二版・前一成（特徵用模型 I 的，含集保股權分散）",
                  "ml_gbm_j": "機器學習集成 J（模型 I 再加上融資維持率、不限用途借貸、鉅額交易）",
+                 "ml_gbm_k": "機器學習集成 K（全部付費資料：再加上八大行庫、券商集中度、當沖、融資成本）",
                  "ml_gbm_ext_monthly": "機器學習集成 G・每月重訓（同模型 G，每個月只用之前結束的標籤重新訓練）",
                  "ml_deep2_riskadj": "深度學習第二版・學以波動調整的前一成（不靠挑高波動股）",
                  "ml_deep2_monthly": "深度學習第二版・前一成，每月重新訓練（每個月只用之前結束的標籤，10 個種子）",
@@ -4112,6 +4113,28 @@ def model_j_batch() -> list[DailyRule]:
                       switching="cost1")]
 
 
+def model_k_batch() -> list[DailyRule]:
+    """2026-10-26 (使用者：付費的資料你練了沒; research_method §7「模型 K」, written before the run): gbm-2.7.0 (model K:
+    every paid table) — only if its development years' top-20 gain is at least gbm-2.6.0's — alone and with the deep
+    model's top tenth, weekly, each in the three holding styles (使用者 2026-10-20: three holding styles compared)."""
+    from quant_platform.research.model_ensemble import gate
+
+    check = gate(Path("instance") / "research" / "models", "gbm-2.7.0", "gbm-2.6.0")
+    print(f"gbm-2.7.0 門檻（2016-2020 前 20 名多賺，對 gbm-2.6.0）：{check}", flush=True)
+    if not check["passed"]:
+        return []
+    output = []
+    for name, factors in (("機器學習集成（模型 K）", {"ml_gbm_k": 1.0}),
+                          ("模型 K＋深度學習前一成", {"ml_gbm_k": 1.0, "ml_deep2_top": 1.0})):
+        output += [DailyRule(name=f"{name}：前 20 名、同產業最多 3 成、每週決策、持有 20 天", factors=factors, check="weekly",
+                             industry_cap=0.3),
+                   DailyRule(name=f"{name}：前 20 名、同產業最多 3 成、每週決策、月線上續抱", factors=factors, check="weekly",
+                             industry_cap=0.3, hold="trend", min_hold=0),
+                   DailyRule(name=f"{name}：前 20 名、同產業最多 3 成、每週決策、不設最短持有", factors=factors, check="weekly",
+                             industry_cap=0.3, min_hold=0)]
+    return output
+
+
 def j_deep_batch() -> list[DailyRule]:
     """2026-10-22 (research_method §7「模型 J＋深度學習放進最強的框架」): model J with the deep model's ranking (each half)
     in the four strongest deep rules' own frames (HOLDER_FRAME_RULES: money by predicted drop, their fill time, holding
@@ -4889,7 +4912,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "leakfix": leakfix_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "veto2": veto2_batch, "veto3_a": lambda: veto3_batch()[0::2],
-           "veto3_b": lambda: veto3_batch()[1::2], "veto4": veto4_batch, "veto5": veto5_batch, "veto6": veto6_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
+           "veto3_b": lambda: veto3_batch()[1::2], "veto4": veto4_batch, "veto5": veto5_batch, "veto6": veto6_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "modelk": model_k_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],
            "split_b": lambda: split_all_batch()[1::2], "splitblend": split_blend_batch,
            "splitblends": split_blends_all_batch, "splitblends_a": lambda: split_blends_all_batch()[0::2],
            "splitblends_b": lambda: split_blends_all_batch()[1::2],

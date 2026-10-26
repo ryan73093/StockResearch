@@ -62,6 +62,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # factors too (margin maintenance, unrestricted loans, block trades); not the brokers' concentration (from
           # 2021 only) nor margin_in_profit (it ranks as margin_safe does); judged against gbm-2.5.0
           "ml_gbm_j": {"version": "gbm-2.6.0", "label": "ensemble", "features": "extended_j"},
+          # 2026-10-26 (使用者：付費的資料你練了沒): model J's ensemble with every paid table — the eight banks, the
+          # brokers' concentration (from 2021; missing before), day trading, margin cost — not the branches (their
+          # download ends about 10/30); judged against gbm-2.6.0 (J as retrained after the 10/26 leak fix)
+          "ml_gbm_k": {"version": "gbm-2.7.0", "label": "ensemble", "features": "extended_k"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -165,6 +169,9 @@ def version_features(version: str | None) -> tuple[str, ...]:
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in DISCLOSURE_FACTORS
                      and name not in PLEDGE_FACTORS and name not in INDUSTRY_FACTORS and name not in HOLDER_FACTORS
                      and name not in PAID_FACTORS)
+    if kind == "extended_k":           # 2026-10-26: every factor but the revenue, the industries and the branches
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
+                     and name != "branch_informed_20")
     if kind == "extended_j":           # 2026-10-22: I's list and the paid tables' long-history factors
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
                      and name not in ("margin_in_profit", "broker_concentration_5", "govbank_net_20", "govbank_dip_buy_20",
