@@ -838,7 +838,6 @@ def main() -> int:
         # 2026-10-26 (使用者：不要再用 2015～2020 篩、全部都測過一遍、要真的上億個、付費資料要進去、最嚴格最完整):
         # research/scan_full.py — the phase's stage 1 in parallel parts on the GPU, then the finalists in the engine
         from quant_platform.research import scan_full
-        from quant_platform.research.costs import broker_costs
         from quant_platform.research.jobs import JobLog
         from quant_platform.research.rolling import cutoff_for
 
