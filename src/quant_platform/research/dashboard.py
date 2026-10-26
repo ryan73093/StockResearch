@@ -401,7 +401,15 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
     steady = calmest(research)
     from quant_platform.research.checks import correctness, funnel
 
-    return {"checks": correctness(research), "funnel": funnel(research, pool["daily"]), "benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
+    from quant_platform.research import distribution
+
+    # 2026-10-26 (使用者：x 軸是最後的錢、y 軸是數量，投入的金額在中間；短歷史賽道加重): 2020-10 first, then 2015-06
+    spread = distribution.view(research, pool["daily"])
+    drawings = distribution.charts(spread)
+    spread = {key: {**{name: track[name] for name in ("label", "invested", "bench", "counts", "median", "best", "worst")},
+                    "svg": drawings.get(key, "")} for key, track in spread.items()}
+    return {"checks": correctness(research), "funnel": funnel(research, pool["daily"]), "spread": spread,
+            "benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
             "stress": stress, "steady": steady,
             "charts": charts(research, start, overall, ordinary, steady, benchmark, periods),
             "recent": recent_all, "forward": forward, "scale": search_scale(research),

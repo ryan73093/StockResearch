@@ -1169,6 +1169,21 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         return render_template("v2/research_searches.html",
                                f=funnel(research_dir, pool_view(research_dir, basis="seed")["daily"]))
 
+    @blueprint.get("/research/distribution")
+    def research_distribution():
+        """2026-10-26 (使用者：每個策略在 x 軸的哪一點，左邊右邊分別是哪個策略賺比較多錢): the dashboard's window of the end
+        money's spread — every rule a point, and who sits on each side."""
+        from quant_platform.research import distribution
+        from quant_platform.research.pool import pool_view
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        key = request.args.get("track") if request.args.get("track") in distribution.TRACKS else "recent"
+        found = distribution.view(research_dir, pool_view(research_dir, basis="seed")["daily"])
+        track = found.get(key)
+        svg = distribution.charts({key: track}, with_dots=True)[key] if track else ""
+        return render_template("v2/research_distribution.html", key=key, track=track, svg=svg,
+                               tracks=distribution.TRACKS, sides=distribution.SIDES)
+
     @blueprint.get("/research/checks")
     def research_checks():
         """2026-10-26 (使用者：你現在全部都是正確的嗎): the dashboard's window of every check, how it is done, its result."""

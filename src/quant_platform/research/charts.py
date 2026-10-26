@@ -197,3 +197,70 @@ def _bars(groups, series, y_text, label, value_labels, size) -> str:
             parts.append(f'<text class="lbl" x="{center:.1f}" y="{height - bottom + 31}" text-anchor="middle">{escape(group["note"])}</text>')
     parts.append("</svg>")
     return "".join(parts)
+
+
+def money_ticks(low: float, high: float) -> list[float]:
+    """1-2-5 values (萬元) inside low..high for a log axis."""
+    out, scale = [], 10 ** math.floor(math.log10(max(low, 1e-9)))
+    while scale <= high:
+        out += [value for value in (scale, 2 * scale, 5 * scale) if low <= value <= high]
+        scale *= 10
+    return out
+
+
+def histogram(bins: list[dict], refs: list[dict], label: str, dots: list[dict] | None = None,
+              count_text=lambda value: f"{value:,.0f}", sizes: tuple[str, ...] = tuple(SIZES)) -> str:
+    """2026-10-26 (使用者：x 軸是最後的錢、y 軸是數量，投入的金額在中間，每個策略在 x 軸的哪一點): counts by final money on a
+    log axis. ``bins`` = [{low, high, count, css, title}] in 萬元, ``refs`` = [{value, label}] (dashed lines: the money put
+    in, 0050's), ``dots`` = [{value, css, title}] (each rule a point under the bars; not on the phone's drawing)."""
+    return "".join(_histogram(bins, refs, label, dots, count_text, size) for size in sizes)
+
+
+def _histogram(bins, refs, label, dots, count_text, size) -> str:
+    width, base_height = SIZES[size]
+    wide = size != "narrow"
+    strip = 46 if (dots and wide) else 0
+    height = base_height + strip
+    left, right, top, bottom = (54, 12, 30, 30 + strip) if wide else (40, 8, 40, 28)
+    if not bins:
+        return ""
+    low, high = bins[0]["low"], bins[-1]["high"]
+    span = math.log(high) - math.log(low)
+
+    def sx(value: float) -> float:
+        return left + (math.log(max(value, low)) - math.log(low)) / span * (width - left - right)
+    peak = max(item["count"] for item in bins) or 1
+    y_ticks = ticks(0, peak, 4 if wide else 3)
+    ceiling = max(peak, y_ticks[-1]) * 1.06
+
+    def sy(value: float) -> float:
+        return top + (ceiling - value) / ceiling * (base_height - top - 30 if wide else height - top - bottom)
+    parts = [f'<svg class="viz viz--{size}" viewBox="0 0 {width} {height}" role="img" aria-label="{escape(label)}">']
+    for value in y_ticks:
+        parts.append(f'<line class="{"zero" if value == 0 else "grid"}" x1="{left}" x2="{width - right}" y1="{sy(value):.1f}" '
+                     f'y2="{sy(value):.1f}"/><text x="{left - 6}" y="{sy(value) + 4:.1f}" text-anchor="end">{count_text(value)}</text>')
+    axis_y = sy(0)
+    for value in money_ticks(low, high)[:: (1 if wide else 2)]:
+        text = f"{value / 10000:g} 億" if value >= 10000 else f"{value:,.0f} 萬"
+        parts.append(f'<text x="{sx(value):.1f}" y="{axis_y + 16:.1f}" text-anchor="middle">{escape(text)}</text>')
+    for item in bins:
+        x0, x1 = sx(item["low"]) + 1, sx(item["high"]) - 1
+        if item["count"]:
+            parts.append(f'<rect class="{item["css"]}" x="{x0:.1f}" y="{sy(item["count"]):.1f}" width="{max(x1 - x0, 1):.1f}" '
+                         f'height="{max(axis_y - sy(item["count"]), 1):.1f}" rx="2"><title>{escape(item["title"])}</title></rect>')
+        parts.append(f'<rect class="col" x="{x0 - 1:.1f}" y="{top}" width="{max(x1 - x0 + 2, 1):.1f}" height="{axis_y - top:.1f}">'
+                     f'<title>{escape(item["title"])}</title></rect>')
+    for number, ref in enumerate(refs):
+        x = sx(ref["value"])
+        parts.append(f'<line class="guide" x1="{x:.1f}" x2="{x:.1f}" y1="{top - 4}" y2="{axis_y:.1f}"/>')
+        anchor = "end" if x > width - right - 90 else ("start" if number else "middle")
+        parts.append(f'<text class="lbl" x="{x + (4 if anchor == "start" else -4 if anchor == "end" else 0):.1f}" '
+                     f'y="{top - 8 - (14 if number and not wide else 0)}" text-anchor="{anchor}">{escape(ref["label"])}</text>')
+    if strip:
+        base_y = axis_y + 26
+        for index, dot in enumerate(dots):
+            jitter = ((index * 2654435761) % 1000) / 1000                      # the same place on every drawing
+            parts.append(f'<circle class="{dot["css"]}" cx="{sx(dot["value"]):.1f}" cy="{base_y + jitter * (strip - 14):.1f}" '
+                         f'r="2.4"><title>{escape(dot["title"])}</title></circle>')
+    parts.append("</svg>")
+    return "".join(parts)

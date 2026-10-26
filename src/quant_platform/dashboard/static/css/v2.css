@@ -864,6 +864,8 @@ td.wrap { white-space: normal; min-width: 180px; }
 .legend .sw-band { background: var(--v1-bg); height: 10px; }
 .legend .sw-vbar { background: var(--vref); height: 10px; } .legend .sw-v1bar { background: var(--v1); height: 10px; }
 .legend .sw-v3bar { background: var(--v3); height: 10px; }
+.legend .sw-v2bar { background: var(--v2); height: 10px; } .legend .sw-vputbar { background: var(--vput); height: 10px; }
+.viz rect.vput { fill: var(--vput); }
 .viz .mark { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 3; }
 .legend .sw-mark { background: var(--text-2); width: 3px; height: 14px; }
 .fbars { display: grid; gap: 4px; margin-top: 8px; }

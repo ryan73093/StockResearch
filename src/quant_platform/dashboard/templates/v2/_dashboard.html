@@ -24,6 +24,15 @@
   </div>
 
   <div class="dash-grid">
+    {% for key in ('recent', 'full') if d.spread and d.spread[key] %}{% set sp = d.spread[key] %}
+    <figure class="dash-panel{{ ' dash-panel--full' if key == 'recent' else '' }}">
+      <figcaption><h3>每個規則最後有多少錢：{{ sp.label }}</h3><span>{{ '{:,}'.format(sp.counts.lost + sp.counts.behind + sp.counts.ahead) }} 個完整回測過的規則・橫軸是期末全部賣掉的錢（萬元），縱軸是規則個數・投入的錢在正中間，左邊賠錢、右邊賺錢</span></figcaption>
+      {{ sp.svg|safe }}
+      <div class="legend"><span><i class="sw-v2bar"></i>賠錢 {{ '{:,}'.format(sp.counts.lost) }} 個</span><span><i class="sw-vputbar"></i>賺錢但輸 0050 {{ '{:,}'.format(sp.counts.behind) }} 個</span><span><i class="sw-v1bar"></i>贏 0050 {{ '{:,}'.format(sp.counts.ahead) }} 個</span><span>虛線：投入 {{ '{:,.0f}'.format(sp.invested / 10000) }} 萬、同樣的錢買 0050 {{ '{:,.0f}'.format(sp.bench / 10000) }} 萬</span></div>
+      <p class="small muted" style="margin:4px 0 0">中位數 {{ '{:,.0f}'.format(sp.median) }} 萬；最多 #{{ sp.best.trial }} {{ '{:,.0f}'.format(sp.best.value / 10000) }} 萬（{{ sp.best.name[:30] }}）；最少 #{{ sp.worst.trial }} {{ '{:,.0f}'.format(sp.worst.value / 10000) }} 萬。滑鼠移到柱子上看那一段有幾個、錢最多的是哪些。</p>
+      <p class="dash-link"><button type="button" class="button-link" data-spread="{{ key }}">每個策略在哪一點、左右兩邊各是哪些策略</button></p>
+    </figure>
+    {% endfor %}
     {% if c.growth %}
     <figure class="dash-panel dash-panel--full">
       <figcaption><h3>錢怎麼長大的</h3><span>2015-06 起 30 萬＋每月 1 萬，每個月底帳戶值多少（萬元）・滑鼠移到圖上看每個月的數字</span></figcaption>
@@ -157,6 +166,8 @@
     open('大空頭壓力測試（2007 起）', '/research/stress')));
   document.querySelectorAll('[data-eras]').forEach((button) => button.addEventListener('click', () =>
     open('各時期還適用嗎：規則清單', '/research/eras')));
+  document.querySelectorAll('[data-spread]').forEach((button) => button.addEventListener('click', () =>
+    open('每個策略最後有多少錢', '/research/distribution?track=' + encodeURIComponent(button.dataset.spread))));
   document.querySelectorAll('[data-searches]').forEach((button) => button.addEventListener('click', () =>
     open('大搜尋：每一輪', '/research/searches')));
   document.querySelectorAll('[data-checks]').forEach((button) => button.addEventListener('click', () =>
