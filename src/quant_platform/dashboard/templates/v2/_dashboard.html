@@ -33,6 +33,14 @@
       <p class="dash-link"><button type="button" class="button-link" data-spread="{{ key }}">每個策略在哪一點、左右兩邊各是哪些策略</button></p>
     </figure>
     {% endfor %}
+    {% set ss = d.search_spread %}{% if ss and ss.recent %}{% set sr = ss.recent %}
+    <figure class="dash-panel">
+      <figcaption><h3>全段大搜尋：每個策略設定最後有多少錢（2020-10 起）</h3><span>到目前算完的約 {{ '{:,.0f}'.format(sr.estimated / 10000) }} 萬個設定（每 500 個抽 1 個、共 {{ '{:,}'.format(sr.samples) }} 個樣本）・縱軸是設定個數（估計）</span></figcaption>
+      {{ sr.svg|safe }}
+      <div class="legend"><span><i class="sw-v2bar"></i>賠錢 {{ '{:.1%}'.format(sr.share.lost) }}</span><span><i class="sw-vputbar"></i>賺錢但輸 0050 {{ '{:.1%}'.format(sr.share.behind) }}</span><span><i class="sw-v1bar"></i>贏 0050 {{ '{:.1%}'.format(sr.share.ahead) }}</span><span>虛線：投入 {{ '{:,.0f}'.format(sr.invested / 10000) }} 萬、0050 {{ '{:,.0f}'.format(sr.bench / 10000) }} 萬</span></div>
+      <p class="small muted" style="margin:4px 0 0">初篩用的是簡化帳戶（每天照比重、扣手續費與稅，但不管漲跌停買不到、整股零股），算到 {{ sr.end }}，會比完整回測好看；中位數 {{ '{:,.0f}'.format(sr.median) }} 萬。{% if ss.full %}2015-06 起：贏 0050 {{ '{:.1%}'.format(ss.full.share.ahead) }}、賠錢 {{ '{:.1%}'.format(ss.full.share.lost) }}。{% endif %}搜尋跑的時候每 15 分鐘更新。</p>
+    </figure>
+    {% endif %}
     {% if c.growth %}
     <figure class="dash-panel dash-panel--full">
       <figcaption><h3>錢怎麼長大的</h3><span>2015-06 起 30 萬＋每月 1 萬，每個月底帳戶值多少（萬元）・滑鼠移到圖上看每個月的數字</span></figcaption>

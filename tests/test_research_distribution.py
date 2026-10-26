@@ -58,3 +58,49 @@ def test_the_window_lists_both_sides(tmp_path):
     finally:
         pool.pool_view = original
     assert "錢最多的 40 個" in body and "賠錢的 1 個" in body and "規則1" in body and "趨勢動能" in body
+
+
+def test_the_search_samples_end_money_and_0050_on_the_same_flows(tmp_path):
+    """The account of a sampled setting: NT$300,000 at the start and NT$10,000 from each later month's 5th; the
+    search's samples binned with 0050's money on the same flows, counts scaled by the sampling."""
+    from datetime import date, timedelta
+
+    import numpy as np
+
+    days, day = [], date(2020, 9, 1)
+    while len(days) < 300:
+        if day.weekday() < 5:
+            days.append(day)
+        day += timedelta(days=1)
+    returns = np.full((1, len(days) - 1), 0.001)
+    end, put_in = distribution.account_ends(returns, days, 0)
+    months = len({(d.year, d.month) for d in days[1:-1] if (d.year, d.month) != (days[0].year, days[0].month)})
+    assert put_in == 300_000 + 10_000 * months
+    assert end[0] > put_in
+    flat, _ = distribution.account_ends(np.zeros((1, len(days) - 1)), days, 0)
+    assert flat[0] == put_in                                         # no returns: what was put in
+
+    out = tmp_path / "scan-full-1.0.0-2026-08-31-a"
+    (out / "arrays").mkdir(parents=True)
+    import json as _json
+
+    bench = np.append(np.full(len(days) - 1, 0.0005), 0.0)
+    np.save(out / "arrays" / "bench.npy", bench)
+    for name, value in (("next_returns", np.zeros((2, len(days)), dtype=np.float32)), ("calm", np.ones((2, len(days)), dtype=np.float32)),
+                        ("industry", np.zeros(2, dtype=np.int32)), ("weekly_days", np.ones(len(days), dtype=bool)),
+                        ("percentiles", np.zeros((2, 1, 2, len(days)), dtype=np.float16))):
+        np.save(out / "arrays" / f"{name}.npy", value)
+    (out / "arrays" / "meta.json").write_text(_json.dumps({"names": ["s"], "days": [d.isoformat() for d in days]}), encoding="utf-8")
+    # one sample a little behind 0050 every day (still making money), one ahead of it
+    np.save(out / "sample-0000000.excess.npy", np.array([np.full(len(days) - 1, -0.0004), np.full(len(days) - 1, 0.001)],
+                                                        dtype=np.float16))
+    assert distribution.update_spread(out)["samples"] == 2
+    assert distribution.update_spread(out)["samples"] == 2                          # a file is read once
+    assert distribution.search_view(tmp_path / "nothing") is None
+    scans = tmp_path / "research" / "scans"
+    scans.mkdir(parents=True)
+    out.rename(scans / out.name)
+    found = distribution.search_view(tmp_path / "research")
+    recent = found["recent"]
+    assert recent["samples"] == 2 and recent["estimated"] == 2 * 500
+    assert recent["share"]["ahead"] == 0.5 and recent["share"]["behind"] == 0.5 and recent["share"]["lost"] == 0

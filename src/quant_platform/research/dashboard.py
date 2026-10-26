@@ -114,7 +114,9 @@ def view(research: str | Path, start: str, optimizations: list[dict], gates: dic
     paths = [research / "trials.jsonl", research / "forward" / "stocks" / "log.jsonl",
              research / "forward" / "stocks" / "tracked.json", research / "rolling", research / "models",
              research / "scans", research / "blend_scan", research / "stress", research / "audit", research / "leakcheck",
-             research / "invariants.json", research / "forward" / "stocks"]
+             research / "invariants.json", research / "forward" / "stocks",
+             *sorted((research / "scans").glob("scan-full-*/spread.npz")),
+             *sorted((research / "scans").glob("scan-full-*/progress-*-of-*.json"))]
     key = (str(research.resolve()), start, len(optimizations), json.dumps(optimizations[:1], ensure_ascii=False),
            tuple((path.stat().st_mtime_ns, path.stat().st_size) if path.exists() else 0 for path in paths))
     if _VIEW.get("key") != key:
@@ -408,7 +410,13 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
     drawings = distribution.charts(spread)
     spread = {key: {**{name: track[name] for name in ("label", "invested", "bench", "counts", "median", "best", "worst")},
                     "svg": drawings.get(key, "")} for key, track in spread.items()}
+    searched = distribution.search_view(research)
+    if searched:
+        drawn = distribution.search_charts(searched)
+        searched = {key: {**{name: value for name, value in track.items() if name != "bins"}, "svg": drawn[key]}
+                    for key, track in searched.items()}
     return {"checks": correctness(research), "funnel": funnel(research, pool["daily"]), "spread": spread,
+            "search_spread": searched,
             "benchmark": benchmark, "recent_benchmark": recent_benchmark, "overall": overall, "ordinary": ordinary,
             "stress": stress, "steady": steady,
             "charts": charts(research, start, overall, ordinary, steady, benchmark, periods),

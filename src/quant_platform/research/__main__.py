@@ -340,7 +340,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "screen-check", "scan-full"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "screen-check", "scan-full", "scan-full-spread"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--sample", type=int, default=0,
@@ -834,6 +834,14 @@ def main() -> int:
         print("有差異（偷看）" if report["leak"] else "沒有發現偷看", flush=True)
         return 0 if not report["leak"] else 1
 
+    if args.command == "scan-full-spread":
+        # 2026-10-26 (使用者：你跑過所有策略的數量他的分佈): the search's sampled settings' end money, for the dashboard
+        from quant_platform.research import distribution
+
+        for folder in sorted((RESEARCH / "scans").glob("scan-full-*")):
+            if folder.is_dir() and any(folder.glob("sample-*.excess.npy")):
+                print(folder.name, distribution.update_spread(folder), flush=True)
+        return 0
     if args.command == "scan-full":
         # 2026-10-26 (使用者：不要再用 2015～2020 篩、全部都測過一遍、要真的上億個、付費資料要進去、最嚴格最完整):
         # research/scan_full.py — the phase's stage 1 in parallel parts on the GPU, then the finalists in the engine
