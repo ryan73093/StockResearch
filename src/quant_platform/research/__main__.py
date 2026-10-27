@@ -342,7 +342,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
@@ -951,6 +951,25 @@ def main() -> int:
                                           f"{counts['stale']} 個（要整個重跑）、失敗 {counts['errors']} 個")
             print(job.payload["summary"], flush=True)
         return 1 if counts["errors"] else 0
+
+    if args.command == "reproduce-check":
+        # 2026-10-28 (research_method §7「重現性」): a sample of the pool's latest results run again by the engine
+        from quant_platform.research import reproduce_check
+        from quant_platform.research.jobs import JobLog
+
+        with JobLog(RESEARCH).start("登錄的結果重算得出來：隨機抽選手池的規則用回測引擎重算、比對期末金額",
+                                    "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+            def progress(done, total, row):
+                job.update(done=done, total=total, current=row["name"][:60])
+            path = reproduce_check.run(Path(args.base), RESEARCH, args.sample or reproduce_check.SAMPLE,
+                                       broker=args.broker, progress=progress)
+            found = json.loads(path.read_text(encoding="utf-8"))
+            job.payload["summary"] = f"選手池 {found['pool']:,} 個抽 {found['compared']} 個重算，{found['differing']} 個和登錄的不一樣"
+            for row in found["rows"]:
+                if not row["same"]:
+                    print("不一樣", row["trial"], row.get("registered"), row.get("now"), row.get("error", ""), row["name"][:60])
+            print(job.payload["summary"], f"已寫入 {path}", flush=True)
+        return 1 if found["differing"] else 0
 
     if args.command == "forward-audit":
         # 2026-10-25 (使用者：你所有策略確定都是合理的嗎): every account's decisions ranked again the way a backtest does

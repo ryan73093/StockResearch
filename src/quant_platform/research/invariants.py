@@ -258,6 +258,18 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                          (f"{when:%m-%d %H:%M}：{found.get('accounts', 0)} 個帳戶、{found.get('checked_days', 0):,} 個決策日，"
                           f"不一樣的帳戶 {found.get('differing_accounts', 0)} 個") if found else "還沒有核對紀錄"))
 
+    # 2026-10-28 (research_method §7「重現性」: 222 registered results stale for a week): the latest sample of the pool's
+    # results run again by the engine, at most 8 days old, none with other money
+    from quant_platform.research import reproduce_check
+
+    path, found = reproduce_check.latest(research)
+    when = datetime.fromisoformat(found["at"]).replace(tzinfo=None) if found.get("at") else None
+    checks.append(_check("選手池的結果重算得出來（抽樣，8 天內）",
+                         "2026-10-28 事件：深度模型的檔案沒進輸入指紋，222 個登錄結果過期一週沒人發現",
+                         bool(found) and not found.get("differing") and when is not None and (datetime.now() - when).days <= 8,
+                         (f"{when:%m-%d %H:%M}：抽 {found.get('compared', 0)} 個，不一樣 {found.get('differing', 0)} 個")
+                         if found else "還沒有重算紀錄"))
+
     if backups is not None:
         files = sorted(backups.glob("*"), key=lambda path: path.stat().st_mtime) if backups.is_dir() else []
         newest = datetime.fromtimestamp(files[-1].stat().st_mtime) if files else None

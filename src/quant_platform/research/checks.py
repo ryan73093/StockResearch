@@ -7,7 +7,8 @@
   engine's own account over the same months, finalist by finalist — the same quantity, two calculations. Saved weekly
   (``audit/screen-vs-engine-*.json``) by the audit pipeline.
 - ``correctness``: the latest result of every check (factor truncation, trade rules, forward against backtest, the
-  owner's decisions, screen against engine), with its date; a check older than it should be is marked.
+  owner's decisions, the pool's results run again (2026-10-28), screen against engine), with its date; a check older
+  than it should be is marked.
 """
 
 from __future__ import annotations
@@ -199,6 +200,17 @@ def correctness(research: str | Path, now: datetime | None = None) -> list[dict[
                 "parts": [f"{'通過' if item.get('ok') else '沒過'}・{item.get('name')}" for item in checks],
                 "how": "交易日 16:00 用程式核對：前向起算日、現金流、100% 個股、沒有轉換持有方式、模型重訓到截止日、對帳、稽核、"
                        "備份、知識庫、沒有視窗等。"})
+
+    path = _newest(research / "audit", "reproduce-*.json")
+    found = _read(path) if path else None
+    at = _when(path.name) if path else None
+    out.append({"key": "reproduce", "title": "選手池的結果重算得出來", "at": at, "stale": _age(at, now, WEEKLY_DAYS),
+                "ok": (int(found.get("differing") or 0) == 0) if found else False,
+                "headline": f"{int(found.get('differing') or 0)} 個和登錄的不一樣" if found else "還沒跑過",
+                "detail": (f"選手池 {int(found.get('pool') or 0):,} 個最新結果隨機抽 {int(found.get('compared') or 0)} 個"
+                           if found else ""),
+                "how": "用回測引擎把抽到的規則從頭重算一次，期末金額要和登錄的一元不差。不一樣就表示有輸入沒算進「同樣輸入不重跑」"
+                       "的指紋（10/28 抓到深度模型的檔案沒算進去，222 個結果過期一週），或輸入改了沒重跑。"})
 
     path = _newest(research / "audit", "screen-vs-engine-*.json")
     found = _read(path) if path else None
