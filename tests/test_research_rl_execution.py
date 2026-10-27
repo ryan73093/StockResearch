@@ -62,7 +62,10 @@ def test_the_forward_test_learns_before_the_start_and_judges_the_close_buys_afte
                      "yesterday": rng.normal(0, 0.01), "volatility": 0.02, "momentum": 0.0})
     frame = pd.DataFrame(rows)
     later = frame[frame["day"] >= "2026-09-01"]
-    buys = [{"code": code, "filled": day, "price": close} for code, day, close in zip(later["code"], later["day"], later["close"])]
+    from quant_platform.research.costs import fill_price, stock_tick
+
+    buys = [{"code": code, "filled": day, "price": fill_price(close, "BUY", 20.0, stock_tick)}      # the engine's close fill
+            for code, day, close in zip(later["code"], later["day"], later["close"])]
     buys[0]["price"] = buys[0]["price"] * 1.05                 # filled at the open, not the close: left out
     found = rl_execution.forward_test(frame, buys)
     assert found["train"] == 2400 and found["test"] == 599 and found["days"] == 28

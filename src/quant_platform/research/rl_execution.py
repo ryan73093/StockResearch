@@ -168,7 +168,7 @@ FORWARD_START = "2026-09-01"     # RL v8: the forward accounts' first day; the m
 def forward_test(frame: pd.DataFrame, buys: list[dict], start: str = FORWARD_START) -> dict[str, object]:
     """2026-10-28 (research_method §7「RL 第八版」, written before the run): RL v7's buy model (13:00 or the close, decided
     at 13:00) learned on every cached stock-day before ``start``, judged on the forward accounts' buys from ``start``
-    that were filled at the close (the fill price within 0.2% of the day's last bar) — per fill and, since the same
+    that were filled at the close (the engine's fill from the day's last bar: costs.fill_price) — per fill and, since the same
     day's buys move together, per day (each day's average; the t over days)."""
     from sklearn.ensemble import HistGradientBoostingRegressor
 
@@ -179,7 +179,12 @@ def forward_test(frame: pd.DataFrame, buys: list[dict], start: str = FORWARD_STA
     train = data[data["day"] < start]
     filled = {(str(row["code"]), str(row["filled"])): row.get("price") for row in buys}
     test = data[(data["day"] >= start).to_numpy() & np.array([(code, day) in filled for code, day in zip(data["code"], data["day"])], dtype=bool)].copy()
-    test = test[np.array([filled[(code, day)] is not None and abs(float(filled[(code, day)]) / close - 1) <= 0.002
+    # 2026-10-28: a close fill is the engine's price from that close — 20 bps of slippage rounded up to the tick
+    # (costs.fill_price); the first run took "within 0.2% of the close" and missed nearly all of them (25 of 3,090)
+    from quant_platform.research.costs import DEFAULT_SLIPPAGE_BPS, fill_price, stock_tick
+
+    test = test[np.array([filled[(code, day)] is not None
+                          and abs(float(filled[(code, day)]) - fill_price(close, "BUY", DEFAULT_SLIPPAGE_BPS, stock_tick)) < 0.006
                           for code, day, close in zip(test["code"], test["day"], test["close"])], dtype=bool)]
     if len(train) < 300 or not len(test):
         return {"train": int(len(train)), "test": int(len(test)), "passed": False}
