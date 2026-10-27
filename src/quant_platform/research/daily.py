@@ -4906,6 +4906,33 @@ def all_half_twins() -> list:
     return half_twins(rules, {record.spec_hash for record in records})
 
 
+def stale_engine(research=None) -> list:
+    """2026-10-27: the latest result of every 100%-stock rule on an engine older than ENGINE_VERSION (the pool showed
+    #2189 as a T0 candidate from engine 1.2.0, 1,735萬; the October list's 1.5.0 grading has it T3) — as rules."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = _Path(research) if research else _Path("instance") / "research"
+    current = ENGINE_VERSION.split("+")[0]
+    latest = newest(TrialRegistry(research / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent")
+    rules = []
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        if str(record.metrics.get("engine") or "").split("+")[0] == current:
+            continue
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        except (OSError, ValueError, KeyError):
+            continue
+        if not uses_0050(spec):
+            rules.append(parse_spec(spec))
+    return rules
+
+
 def rerun140_batch() -> list:
     """2026-10-13 night: the same 211 rules on engine 1.4.0 (whole shares, dividends as paid, the turnover cap),
     filled the same day in the after-hours sessions. Not the next session (使用者 2026-10-14：要在 14:30 前算出
@@ -4938,6 +4965,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "leakfix": leakfix_batch,
            "halftwins_a": lambda: all_half_twins()[0::2], "halftwins_b": lambda: all_half_twins()[1::2],
+           "stale": stale_engine,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "veto2": veto2_batch, "veto3_a": lambda: veto3_batch()[0::2],
            "veto3_b": lambda: veto3_batch()[1::2], "veto4": veto4_batch, "veto5": veto5_batch, "veto6": veto6_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "modelk": model_k_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],

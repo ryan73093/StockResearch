@@ -60,6 +60,7 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
     $process = Start-Process -FilePath $python -ArgumentList $Arguments -WorkingDirectory $root -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput $out -RedirectStandardError $err
     Write-Note "步驟 $Label 結束（結束碼 $($process.ExitCode)）"
+    $script:StepExit = $process.ExitCode
     # 2026-10-24: the restart from the Start menu on 10-23 03:27 killed fmdaily_a's download step; the pipeline logged
     # the code, ran to its end and wrote "done", so it was never resumed (fmdaily_b, killed whole, was). A step ended by
     # the system (0x40010004 terminated, 0xC000013A console closed, 0xC0000142 / 0xC000026B shutdown) stops the
@@ -480,8 +481,16 @@ switch ($Name) {
         # most passing), each a stage 1 on the GPU in two processes over 2015-06..cutoff and up to 1,500 finalists in the
         # engine; then the month's list grades them, their forward accounts, the board, the leak check, the audits.
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
-        Invoke-Step "1-phase-a" @("-m", "quant_platform.research", "scan-full", "--phase", "a", "--broker", "cathay")
-        Invoke-Step "2-phase-b" @("-m", "quant_platform.research", "scan-full", "--phase", "b", "--broker", "cathay")
+        # 2026-10-27: phase a stopped on an error at 02:50 and the pipeline went on to phase b (signals from 9% of phase
+        # a) — a phase that fails stops the pipeline as "failed" (the daily check shows it) instead
+        foreach ($phase in @("a", "b")) {
+            Invoke-Step "$(if ($phase -eq 'a') { 1 } else { 2 })-phase-$phase" @("-m", "quant_platform.research", "scan-full", "--phase", $phase, "--broker", "cathay")
+            if ($script:StepExit -ne 0) {
+                Write-Note "全段大搜尋 $phase 段沒有正常結束：流程停在這裡（標成失敗），修好後重開會從進度檔接著跑"
+                Write-PipelineRecord "failed"
+                exit 1
+            }
+        }
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "4-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
         Invoke-Step "5-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")

@@ -124,6 +124,38 @@ def _progress_path(out: Path, part: int, parts: int) -> Path:
     return out / f"progress-{part}-of-{parts}.json"
 
 
+def _read_state(path: Path, tries: int = 60) -> dict:
+    """A progress file, read while its writer may be replacing it (2026-10-27 02:50: Windows refused the replace while
+    the file was open elsewhere; both parts of phase a stopped)."""
+    for attempt in range(tries):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (PermissionError, ValueError):
+            if attempt == tries - 1:
+                raise
+            time.sleep(0.5)
+    return {}
+
+
+def _replace(partial: Path, path: Path, tries: int = 120) -> None:
+    """``partial`` over ``path``; Windows refuses while another process (the parent's monitor, a reader, the virus
+    scanner) has ``path`` open — retried for up to a minute."""
+    for attempt in range(tries):
+        try:
+            partial.replace(path)
+            return
+        except PermissionError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(0.5)
+
+
+def phase_done(out: Path, parts: int = 2) -> bool:
+    """Every part of a phase's stage 1 finished."""
+    paths = [_progress_path(out, part, parts) for part in range(parts)]
+    return all(path.is_file() and _read_state(path).get("finished_at") for path in paths)
+
+
 def screen_part(arrays_folder: Path, names: list[str], sizes: list[int], costs, out: Path, part: int, parts: int,
                 job=None, accounts=None, universes=None) -> dict[str, object]:
     """Stage 1 for the blocks numbered ``part`` modulo ``parts`` (another process takes the others); passing rows to
@@ -145,7 +177,7 @@ def screen_part(arrays_folder: Path, names: list[str], sizes: list[int], costs, 
             return gpu_accounts(device, chunk, costs)
     bench = arrays.bench
     path = _progress_path(out, part, parts)
-    progress = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {
+    progress = _read_state(path) if path.is_file() else {
         "version": VERSION, "part": part, "parts": parts, "names": names, "sizes": sizes,
         "total": total(names, sizes, HOLDS, universes), "screened": 0, "passed": 0, "next_block": 0,
         "started_at": datetime.now().isoformat(timespec="seconds")}
@@ -173,13 +205,15 @@ def screen_part(arrays_folder: Path, names: list[str], sizes: list[int], costs, 
         progress["eta_hours"] = round((progress["total"] / parts - progress["screened"]) / max(rate, 1) / 60, 1)
         partial = path.with_suffix(".partial")
         partial.write_text(json.dumps(progress, ensure_ascii=False, indent=1), encoding="utf-8")
-        partial.replace(path)
+        _replace(partial, path)
         if job:
             job.update(done=progress["screened"], total=progress["total"] // parts,
                        current=f"第一階段（第 {part + 1}／{parts} 份）：{progress['screened']:,} 個，過初篩 "
                                f"{progress['passed']:,}，每分鐘 {progress['per_minute']:,} 個，約 {progress['eta_hours']} 小時")
     progress["finished_at"] = datetime.now().isoformat(timespec="seconds")
-    path.write_text(json.dumps(progress, ensure_ascii=False, indent=1), encoding="utf-8")
+    partial = path.with_suffix(".partial")
+    partial.write_text(json.dumps(progress, ensure_ascii=False, indent=1), encoding="utf-8")
+    _replace(partial, path)
     return progress
 
 
@@ -319,14 +353,14 @@ def stage_one(research: Path, cutoff: date, phase: str, broker: str, parts: int 
     """Every part of a phase's stage 1, each in its own process (``scan-full --phase X --part k/n``); waited for."""
     out = folder(research, cutoff, phase)
     done = [_progress_path(out, part, parts) for part in range(parts)]
-    if all(path.is_file() and json.loads(path.read_text(encoding="utf-8")).get("finished_at") for path in done):
-        return [json.loads(path.read_text(encoding="utf-8")) for path in done]
+    if phase_done(out, parts):
+        return [_read_state(path) for path in done]
     processes = [subprocess.Popen([sys.executable, "-m", "quant_platform.research", "scan-full", "--phase", phase,
                                    "--part", f"{part}/{parts}", "--broker", broker], env=os.environ.copy())
                  for part in range(parts)]
     while any(process.poll() is None for process in processes):
         if job:
-            states = [json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {} for path in done]
+            states = [_read_state(path) if path.is_file() else {} for path in done]
             screened = sum(state.get("screened", 0) for state in states)
             total = states[0].get("total", 0) if states and states[0] else 0
             job.update(done=screened, total=total, current=f"第一階段（{parts} 個程序）：{screened:,}／{total:,} 個，過初篩 "
@@ -336,7 +370,7 @@ def stage_one(research: Path, cutoff: date, phase: str, broker: str, parts: int 
     codes = [process.returncode for process in processes]
     if any(codes):
         raise RuntimeError(f"第一階段的程序沒有正常結束：{codes}")
-    return [json.loads(path.read_text(encoding="utf-8")) for path in done]
+    return [_read_state(path) for path in done]
 
 
 def _prepare(base: Path, costs, arrays_folder: Path) -> None:
@@ -366,6 +400,10 @@ def run_phase(base: Path, research: Path, costs, broker: str, phase: str, cutoff
     if phase == "a":
         names = [name for name in signals() if name in arrays.names]
     else:
+        # 2026-10-27: phase b's signals are the 50 most passing of the WHOLE phase a (written before the run); at 02:51 it
+        # began from 9% of phase a after phase a stopped on an error
+        if not phase_done(folder(research, cutoff, "a")):
+            raise RuntimeError("a 段第一階段還沒跑完，b 段的 50 個訊號要用完整的 a 段挑")
         names = frequent(folder(research, cutoff, "a"), TOP_SIGNALS)
     plan = {"version": VERSION, "phase": phase, "names": names, "sizes": SIZES[phase], "cutoff": cutoff.isoformat()}
     (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")

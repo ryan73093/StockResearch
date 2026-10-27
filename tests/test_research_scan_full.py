@@ -117,3 +117,29 @@ def test_the_finalists_skip_near_copies_of_each_other_and_of_earlier_ones():
     chosen = scan_full.choose(arrays, rows, [seed], None, count=10, simulate_fn=simulate)
     assert [row["factors"] for row in chosen] == [["a"], ["d"]]                     # c was searched before
     assert len(scan_full.choose(arrays, rows, [], None, count=1, simulate_fn=simulate)) == 1
+
+
+def test_a_refused_replace_is_retried_and_phase_b_waits_for_the_whole_phase_a(tmp_path, monkeypatch):
+    """2026-10-27 02:50: Windows refused replacing a progress file another process had open; both parts of phase a
+    stopped, and the pipeline went on to phase b with signals picked from 9% of phase a."""
+    from pathlib import Path
+
+    monkeypatch.setattr(scan_full.time, "sleep", lambda seconds: None)
+    original, refused = Path.replace, []
+
+    def replace(self, target):
+        if len(refused) < 2:
+            refused.append(target)
+            raise PermissionError(5, "存取被拒")
+        return original(self, target)
+    monkeypatch.setattr(Path, "replace", replace)
+    first = scan_full._progress_path(tmp_path, 0, 2)
+    partial = first.with_suffix(".partial")
+    partial.write_text(json.dumps({"screened": 5, "finished_at": "2026-10-28T10:00:00"}), encoding="utf-8")
+    scan_full._replace(partial, first)
+    assert len(refused) == 2 and json.loads(first.read_text(encoding="utf-8"))["screened"] == 5
+    assert not scan_full.phase_done(tmp_path)                                      # the other part has not finished
+    scan_full._progress_path(tmp_path, 1, 2).write_text(json.dumps({"screened": 4}), encoding="utf-8")
+    assert not scan_full.phase_done(tmp_path)
+    scan_full._progress_path(tmp_path, 1, 2).write_text(json.dumps({"screened": 4, "finished_at": "x"}), encoding="utf-8")
+    assert scan_full.phase_done(tmp_path)

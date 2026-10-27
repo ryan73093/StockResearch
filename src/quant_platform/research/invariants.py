@@ -330,10 +330,18 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                 started = started.replace(tzinfo=ZoneInfo("Asia/Taipei"))
         except ValueError:
             pass
-        if status == "interrupted" or (status == "running" and not _alive(int(record.get("pid") or 0), started)):
-            stuck.append(f"{record.get('name')}（{'中斷' if status == 'interrupted' else '程序已不在'}，{str(record.get('started_at'))[:16]} 開始）")
+        if status in ("interrupted", "failed") or (status == "running" and not _alive(int(record.get("pid") or 0), started)):
+            stuck.append(f"{record.get('name')}（{'中斷' if status == 'interrupted' else '失敗' if status == 'failed' else '程序已不在'}，{str(record.get('started_at'))[:16]} 開始）")
     checks.append(_check("研究流程沒有中斷了沒恢復的", "AGENTS.md 長時間程式：重開機或關機後要接著跑", not stuck,
                          "；".join(stuck[:4]) if stuck else "沒有"))
+    # 2026-10-27 (使用者：現在是不是全部正確): the pool shows each rule's latest result — every 100%-stock one on the
+    # current engine (#2189 stayed a T0 candidate from engine 1.2.0 while the list's 1.5.0 grading had it T3)
+    from quant_platform.research.daily import ENGINE_VERSION, stale_engine
+
+    stale = stale_engine(research) if (research / "trials.jsonl").is_file() else []
+    checks.append(_check("選手池每個 100% 個股規則的最新結果都是現行引擎", "AGENTS.md：前向帳戶和回測一定是同一個策略（使用者 2026-10-25）",
+                         not stale, f"現行 {ENGINE_VERSION}；舊引擎的 {len(stale)} 個"
+                         + (f"：{[rule.name[:30] for rule in stale[:3]]}" if stale else "")))
     # 2026-10-26 (使用者：我不要再放在這個皮咪資料夾下；向量資料庫吃 C:\\Dev\\DBQdrant)
     place = placement(research.parent.parent, research)
     checks.append(_check("專案在 C:\\Dev、知識庫向量在共用的 DBQdrant", "使用者 2026-10-26：比照其他專案搬到 C:\\Dev",

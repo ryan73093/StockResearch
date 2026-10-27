@@ -207,3 +207,22 @@ def test_placement_flags_the_user_folder_and_embedded_vectors(tmp_path):
     assert len(invariants.placement(tmp_path / "Dev" / "StockResearch", research, str(home))) == 1
     (research / "knowledge" / "vectors.json").write_text(json.dumps({"collection": "b", "server": True}), encoding="utf-8")
     assert invariants.placement(tmp_path / "Dev" / "StockResearch", research, str(home)) == []
+
+
+def test_a_rule_whose_latest_result_is_an_older_engine_is_listed(tmp_path):
+    """2026-10-27: the pool showed #2189 as a T0 candidate from engine 1.2.0 while the October list (1.5.0) had it T3."""
+    from quant_platform.research.daily import ENGINE_VERSION, stale_engine
+    from quant_platform.research.registry import TrialRegistry
+
+    (tmp_path / "reports").mkdir()
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    for number, (engine, half) in enumerate((("daily-1.2.0", False), (ENGINE_VERSION, False), ("daily-1.1.0", True))):
+        rule = DailyRule(name=f"規則{number}", factors={"trend_200": 1.0}, top=20 + number,
+                         **({"core": 0.5} if half else {}))
+        (tmp_path / "reports" / f"r{number}.json").write_text(json.dumps({"spec": rule.canonical()}), encoding="utf-8")
+        registry.register(kind="candidate", period="recent", spec_hash=rule.rule_hash, spec_name=rule.name,
+                          input_hash=f"i{number}", data_fingerprint="f", metrics={"engine": engine}, report_file=f"r{number}.json")
+    assert [rule.name for rule in stale_engine(tmp_path)] == ["規則0"]               # the 0050 half is not a strategy
+    registry.register(kind="candidate", period="recent", spec_hash=stale_engine(tmp_path)[0].rule_hash, spec_name="規則0",
+                      input_hash="i9", data_fingerprint="f", metrics={"engine": ENGINE_VERSION}, report_file="r0.json")
+    assert stale_engine(tmp_path) == []
