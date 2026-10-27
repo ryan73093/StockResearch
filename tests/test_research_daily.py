@@ -873,3 +873,35 @@ def test_a_winner_up_half_and_above_its_average_runs_on():
     assert daily_rankings(WinnerPanel(prices, falling), rule, days[0], days[-1])[days[3]] == ["B", "C", "D"]
     small = {**prices, "A": [100.0, 110.0, 120.0] + [140.0] * (len(days) - 3)}   # up only 40%
     assert daily_rankings(WinnerPanel(small, {name: always for name in "ABCDE"}), rule, days[0], days[-1])[days[3]] == ["B", "C", "D"]
+
+
+class FactorScriptedPanel(PricedPanel):
+    """A ranking per factor set: the defensive factors rank otherwise (2026-10-28)."""
+
+    def __init__(self, sessions, scripts, on):
+        super().__init__(sessions, {}, {}, on)
+        self.scripts = scripts
+
+    def ranked(self, rule, position, held=None):
+        return list(self.scripts[tuple(sorted(rule.factors))])
+
+
+def test_below_the_200_day_line_the_decision_ranks_by_the_defensive_factors():
+    """2026-10-28 (空頭防護第六版): ``bear_factors`` decide the ranking while TAIEX is below its average; part of the
+    hash only when set; their inputs count too."""
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 12))
+    on = [True, True, False, False, False, True, True, True, True, True]
+    panel = FactorScriptedPanel(days, {("momentum_3",): ["A", "B", "C", "D"], ("low_volatility_60",): ["X", "Y", "Z", "A"]}, on)
+    base = {"name": "x", "factors": {"momentum_3": 1.0}, "top": 3, "keep": 1, "min_hold": 0}
+    trace: dict = {}
+    ranks = daily_rankings(panel, DailyRule(**base, bear_factors={"low_volatility_60": 1.0}), days[0], days[-1], trace=trace)
+    assert ranks[days[1]] == ["A", "B", "C"] and ranks[days[2]] == ["X", "Y", "Z"] and ranks[days[5]] == ["A", "B", "C"]
+    assert trace["why"][days[2]]["A"].startswith("大盤在 200 日均線下，改用防禦因子排名")
+    assert "防禦因子" in trace["why"][days[2]]["X"]
+    plain = daily_rankings(panel, DailyRule(**base), days[0], days[-1])
+    assert plain[days[2]] == ["A", "B", "C"]
+    assert "bear_factors" not in DailyRule(**base).canonical()
+    assert DailyRule(**base, bear_factors={"low_volatility_60": 1.0}).rule_hash != DailyRule(**base).rule_hash
+    assert daily.rule_inputs(DailyRule(**base, bear_factors={"ml_tech_ens": 1.0})) == ["momentum_3", "ml_tech_ens"]
+    with pytest.raises(ValueError):
+        DailyRule(**base, bear_factors={"nonsense": 1.0})

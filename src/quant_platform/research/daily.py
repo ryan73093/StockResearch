@@ -440,6 +440,11 @@ class DailyRule(BaseModel):
     # (adjusted closes) and above its TREND_WINDOW-session average — the winners run, the others leave as before.
     # 0 = off, left out of the hash.
     winner_hold: float = Field(default=0.0, ge=0.0, le=5.0)
+    # 2026-10-28 (空頭防護第六版, research_method §7; 使用者：最強的空頭的策略呢): while TAIEX closes below its 200-session
+    # average, a decision day ranks by these defensive factors instead of ``factors`` — momentum crashes in the rebound
+    # out of a bear market (Daniel & Moskowitz 2016) while low-volatility and quality stocks hold up in it (Frazzini &
+    # Pedersen 2014; Asness, Frazzini & Pedersen 2019). Empty = off, left out of the hash.
+    bear_factors: dict[str, float] = Field(default_factory=dict, max_length=5)
 
     @model_validator(mode="before")
     @classmethod
@@ -448,7 +453,7 @@ class DailyRule(BaseModel):
             data = {**data, "min_hold": 0}
         return data
 
-    @field_validator("factors")
+    @field_validator("factors", "bear_factors")
     @classmethod
     def _known(cls, value: dict[str, float]) -> dict[str, float]:
         for name, weight in value.items():
@@ -506,6 +511,8 @@ class DailyRule(BaseModel):
             data.pop("trim_above", None)
         if not data.get("winner_hold"):
             data.pop("winner_hold", None)
+        if not data.get("bear_factors"):
+            data.pop("bear_factors", None)
         return data
 
     @property
@@ -1322,6 +1329,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
     cooldown = getattr(rule, "cooldown", STOP_COOLDOWN)
     entry_only = getattr(rule, "eligibility", "both") == "entry"
     banded = getattr(rule, "eligibility", "both") == "band"
+    bear_rule = (rule.model_copy(update={"factors": dict(rule.bear_factors)}) if getattr(rule, "bear_factors", None)
+                 else None)
     tracked =bool(rule.stop_loss) or exit_agent is not None
     risk_veto = getattr(rule, "risk_veto", "none")
     winners = float(getattr(rule, "winner_hold", 0.0) or 0.0)
@@ -1458,7 +1467,10 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             standing = out or risk_off or lost or pending_sells or pending_slots
             if not standing and exit_agent is None and hold != "trend":
                 continue
-        ranked = fp.ranked(rule, position, held=current) if banded else fp.ranked(rule, position)
+        # 2026-10-28 (空頭防護第六版): below TAIEX's 200-session average the decision ranks by the defensive factors
+        defensive = bear_rule is not None and not fp.risk_on(position)
+        ranking_rule = bear_rule if defensive else rule
+        ranked = fp.ranked(ranking_rule, position, held=current) if banded else fp.ranked(ranking_rule, position)
         if exit_agent is not None and current:
             left = [symbol for symbol in current if symbol not in out]
             held_for = {symbol: count - bought[symbol] for symbol in left}
@@ -1533,9 +1545,10 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             def why_in(symbol: str) -> str:
                 place = places.get(symbol)
                 where = f"（當天第 {place} 名）" if place else ""
+                bear = "；大盤在 200 日均線下，用防禦因子排名" if defensive else ""
                 if decide:
-                    return f"新進前 {rule.top} 名{where}"
-                return f"補進前一天沒買到的位置{where}"
+                    return f"新進前 {rule.top} 名{where}{bear}"
+                return f"補進前一天沒買到的位置{where}{bear}"
 
             def why_out(symbol: str) -> str:
                 if symbol in cause:
@@ -1548,6 +1561,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                     return "不再符合選股條件（股價低於門檻、成交值不足或沒有分數）"
                 place = places.get(symbol)
                 text = f"跌出前 {zone} 名（當天第 {place} 名）"
+                if defensive:
+                    text = "大盤在 200 日均線下，改用防禦因子排名：" + text
                 if hold == "trend":
                     text += "，而且跌破月線"
                 elif rule.min_hold:
@@ -2492,7 +2507,7 @@ SEED_PLAN = {"kind": "SeedPlan", "initial": SeedPlan().initial, "monthly_amount"
 def rule_inputs(rule) -> list[str]:
     """The factors a rule reads: its own and (2026-10-22) the one its exclusion vetoes by — the holder brackets or
     the paid margin table are then part of its input."""
-    names = list(rule.factors)
+    names = list(rule.factors) + [name for name in getattr(rule, "bear_factors", {}) or {} if name not in rule.factors]
     for veto in VETO_FACTORS.get(getattr(rule, "exclude", "none"), ()):
         if veto not in names:
             names.append(veto)
@@ -4757,6 +4772,22 @@ def entry_only_batch() -> list:
 BAND = ("選股條件緩衝七成", {"eligibility": "band"})
 
 
+# 2026-10-28 (空頭防護第六版, research_method §7, written before the run): below TAIEX's 200-session average, rank by
+# defensive factors — (1) quality and low volatility from the literature (low 60-session volatility, gross margin, low
+# debt); (2) the factors of the platform's steadiest rule in falls (#4547: foreign holding, 52-week-high count,
+# dividend raise, the technical model)
+BEAR_DEFENSIVE = [("大盤跌破 200 日均線改選低波動、高毛利、低負債", {"bear_factors": {"low_volatility_60": 1.0, "gross_margin": 1.0,
+                                                                         "low_debt": 1.0}}),
+                  ("大盤跌破 200 日均線改選跌市穩的股票", {"bear_factors": {"foreign_holding": 1.0, "high_52w_count_60": 1.0,
+                                                                     "dividend_raise": 1.0, "ml_tech_ens": 1.0}})]
+
+
+def bear6_batch() -> list:
+    """2026-10-28 (空頭防護第六版; 使用者：最強的空頭的策略呢): the 55 fixed rules with each defensive ranking below
+    TAIEX's 200-session line (BEAR_DEFENSIVE; a blend: every sleeve). Graded the usual way."""
+    return _guarded(BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE, BEAR_DEFENSIVE)
+
+
 def band_batch() -> list:
     """2026-10-27 (research_method §7「選股條件的緩衝」, written before the run; the next version of ENTRY_ONLY, whose low-
     turnover holdings rode to the rule's exit and sometimes fell further): the same 55 rules with eligibility "band" —
@@ -5027,7 +5058,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
-           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
