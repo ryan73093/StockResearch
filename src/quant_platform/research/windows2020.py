@@ -205,6 +205,38 @@ def backfill_registry(research: str | Path, base: str | Path, broker: str = "cat
     return counts
 
 
+def recheck_stale(research: str | Path, base: str | Path, broker: str = "cathay", workers: int = 1,
+                  progress=None) -> dict[str, int]:
+    """2026-10-28: the stale-listed results still shown (no later trial of their settings) checked again by the engine
+    on their own universe — the backfill had run the listed-plus-TPEx rules on the listed stocks: reproduced now, the
+    windows go beside them and they leave the stale list; the others stay listed to be run again."""
+    from quant_platform.research.registry import SUPPLEMENT
+
+    research = Path(research)
+    stale_path = research / STALE
+    stale = json.loads(stale_path.read_text(encoding="utf-8")) if stale_path.is_file() else []
+    listed = {row["input_hash"]: row for row in stale}
+    items = [item for item in registry_items(research) if item["key"] in listed]
+    counts = {"rows": len(items), "reproduced": 0, "stale": 0, "errors": 0}
+    cleared = set()
+    for row in _run(items, base, broker, workers, progress):
+        if row.get("error"):
+            counts["errors"] += 1
+        elif row["same"]:
+            with (research / SUPPLEMENT).open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"input_hash": row["key"], "trial": listed[row["key"]]["trial"],
+                                         "windows": row["windows"], "at": datetime.now().isoformat(timespec="seconds")},
+                                        ensure_ascii=False) + "\n")
+            cleared.add(row["key"])
+            counts["reproduced"] += 1
+        else:
+            counts["stale"] += 1
+    if cleared:
+        stale_path.write_text(json.dumps([row for row in stale if row["input_hash"] not in cleared], ensure_ascii=False,
+                                         indent=1), encoding="utf-8")
+    return counts
+
+
 def stale_rules(research: str | Path) -> list:
     """The rules whose registered result the engine no longer reproduces (``backfill_registry``), to run again —
     2026-10-28: not those already registered again since (a later trial of the same settings)."""

@@ -127,3 +127,38 @@ def test_a_tpex_rule_is_graded_again_in_full_and_a_stale_result_rerun_once(tmp_p
                           data_fingerprint="f", report_file=f"{number}.json", metrics={"final_value": 1.0})
     (tmp_path / windows2020.STALE).write_text(json.dumps([{"trial": 1}, {"trial": 2}]), encoding="utf-8")
     assert len(windows2020.stale_rules(tmp_path)) == 1           # trial 1 was registered again as trial 3
+
+
+def test_a_result_listed_stale_is_never_the_answer_and_a_reproduced_one_leaves_the_list(tmp_path, monkeypatch):
+    """2026-10-28 (research_method §7「重現性」): the registry answers a known input with its result unless the engine
+    no longer reproduces it; the stale-listed results checked again on their own universe leave the list when they do."""
+    from quant_platform.research.registry import TrialRegistry
+
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    reports = tmp_path / "reports"
+    runs = []
+
+    def build():
+        runs.append(1)
+        return {"strategy": {"final_value": 2.0}}
+    monkeypatch.setattr(daily, "report_metrics", lambda report, engine, plan: {"final_value": report["strategy"]["final_value"]})
+    payload = {"rule": {"name": "x"}, "plan": {}}
+    first, _ = daily.record_trial(registry, reports, "s", "x", payload, build, "f", "daily", "e")
+    again, _ = daily.record_trial(registry, reports, "s", "x", payload, build, "f", "daily", "e")
+    assert again.trial_id == first.trial_id and len(runs) == 1                       # the same input: not run again
+    (tmp_path / windows2020.STALE).write_text(json.dumps([{"input_hash": first.input_hash, "trial": first.trial_id}]),
+                                             encoding="utf-8")
+    fresh, _ = daily.record_trial(registry, reports, "s", "x", payload, build, "f", "daily", "e")
+    assert fresh.trial_id != first.trial_id and len(runs) == 2                       # listed stale: run again
+
+    monkeypatch.setattr(windows2020, "registry_items", lambda research: [{"key": "a", "trial": 1}, {"key": "b", "trial": 2}])
+    (tmp_path / windows2020.STALE).write_text(json.dumps([{"input_hash": "a", "trial": 1}, {"input_hash": "b", "trial": 2}]),
+                                             encoding="utf-8")
+
+    def run(items, base, broker, workers, progress=None):
+        for item in items:
+            yield {"key": item["key"], "same": item["key"] == "a", "windows": {"1y": {"count": 1}}, "final": 1.0}
+    monkeypatch.setattr(windows2020, "_run", run)
+    counts = windows2020.recheck_stale(tmp_path, tmp_path)
+    assert counts == {"rows": 2, "reproduced": 1, "stale": 1, "errors": 0}
+    assert [row["input_hash"] for row in json.loads((tmp_path / windows2020.STALE).read_text(encoding="utf-8"))] == ["b"]

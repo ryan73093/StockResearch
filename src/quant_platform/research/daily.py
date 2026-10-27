@@ -2663,6 +2663,15 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
     return payload
 
 
+def stale_inputs(research: Path) -> set[str]:
+    """The input hashes of registered results the engine no longer reproduces (research/windows2020.py STALE)."""
+    path = Path(research) / "windows_since_2020-stale.json"
+    try:
+        return {row["input_hash"] for row in json.loads(path.read_text(encoding="utf-8"))} if path.is_file() else set()
+    except (OSError, ValueError, KeyError):
+        return set()
+
+
 def record_trial(registry: TrialRegistry, reports_dir: Path, spec_hash: str, spec_name: str, payload: dict,
                  build_report, data_fingerprint: str, family: str, engine: str,
                  stamp: str | None = None) -> tuple[object, dict]:
@@ -2670,6 +2679,12 @@ def record_trial(registry: TrialRegistry, reports_dir: Path, spec_hash: str, spe
     otherwise ``build_report()`` runs it, the report is saved and the metrics registered with the gate."""
     input_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
     existing = registry.find("candidate", PERIOD, input_hash)
+    if existing is not None and input_hash in stale_inputs(reports_dir.parent):
+        # 2026-10-28 (research_method §7「重現性」): the engine no longer reproduces that result (an input its hash left
+        # out had changed), so it is not the answer — run again under a hash that says so
+        payload = {**payload, "stale_rerun": input_hash}
+        input_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+        existing = registry.find("candidate", PERIOD, input_hash)
     if existing is not None:
         return existing, json.loads((reports_dir / existing.report_file).read_text(encoding="utf-8"))
     plan = payload["plan"]

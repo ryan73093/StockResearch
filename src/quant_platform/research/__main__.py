@@ -342,7 +342,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
@@ -444,7 +444,7 @@ def main() -> int:
                         help="rolling --step select：只評這個月還沒評過的規則，加進原本的名單（2026-10-18：組合帳戶）")
     parser.add_argument("--other-universe", action="store_true",
                         help="windows2020 --target list：上市＋上櫃的規則整個重評（2026-10-28：名單曾用上市資料評它們）")
-    parser.add_argument("--target", choices=("list", "registry"),
+    parser.add_argument("--target", choices=("list", "registry", "stale"),
                         help="windows2020：補算這個月的名單（list）或選手池的最新結果（registry）")
     parser.add_argument("--phase", choices=("a", "b"),
                         help="scan-full：a＝1～4 個訊號一組，b＝a 最常過初篩的 50 個訊號 5 個一組（2026-10-26 全段大搜尋）")
@@ -944,6 +944,10 @@ def main() -> int:
                                                    progress=progress, other_universe=args.other_universe)
                 job.payload["summary"] = (f"{counts['rows']} 個規則補算（{counts['full']} 個整個重評）、等級變動 "
                                           f"{counts['changed']} 個、失敗 {counts['errors']} 個")
+            elif target == "stale":      # 2026-10-28: the stale-listed results checked again on their own universe
+                counts = windows2020.recheck_stale(RESEARCH, Path(args.base), args.broker, 1, progress=progress)
+                job.payload["summary"] = (f"{counts['rows']} 個列為過期的結果重算：{counts['reproduced']} 個其實重現得出來（補上視窗）、"
+                                          f"{counts['stale']} 個要整個重跑、失敗 {counts['errors']} 個")
             else:
                 counts = windows2020.backfill_registry(RESEARCH, Path(args.base), args.broker, min(args.workers or 2, 2),
                                                        progress=progress)
@@ -951,6 +955,19 @@ def main() -> int:
                                           f"{counts['stale']} 個（要整個重跑）、失敗 {counts['errors']} 個")
             print(job.payload["summary"], flush=True)
         return 1 if counts["errors"] else 0
+
+    if args.command == "rl-concentration":
+        # 2026-10-28 (research_method §7「RL 第四版」): the concentration bandit, offline, walk-forward by year
+        from quant_platform.research import rl_concentration
+
+        path = rl_concentration.run(Path(args.base), RESEARCH)
+        found = json.loads(path.read_text(encoding="utf-8"))
+        for label, key in (("2018～2020-10", "early"), ("2021～", "late")):
+            part = found.get(key) or {}
+            print(label, "每週平均（%）：機器人", part.get("bandit"), "去年最好的", part.get("last_best"),
+                  "固定", {arm: part.get(f"fixed_{arm}") for arm in found["arms"]}, "週數", part.get("weeks"), flush=True)
+        print("選擇次數", found["choices"], "判定", "過" if found.get("passed") else "沒過", f"已寫入 {path}")
+        return 0
 
     if args.command == "forward-forced":
         # 2026-10-28 (research_method §7「選股條件的緩衝」): each forward forced sale against the holdings kept that day
