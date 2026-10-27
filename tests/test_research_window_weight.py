@@ -48,8 +48,8 @@ def test_the_short_track_grades_a_rule_on_the_history_it_has():
     assert daily.gate(weaker) == ["1 年視窗勝率 55% < 60%"] and daily.tier(weaker)[0] == "T2"
     lost = {**base, "full_period_excess": -0.01}
     assert daily.tier(lost)[0] == "T3" and "2021-07 起輸 0050" in daily.gate(lost)[0]
-    long = {**base, "start": "2015-06-01"}                      # the main track: the 2020-10 check stays
-    assert not daily.short_track(long) and daily.tier(long)[0] == "T2"
+    long = {**base, "start": "2015-06-01"}                      # the main track: graded from 2020-10 (2026-10-27)
+    assert not daily.short_track(long) and daily.tier(long)[0] == "T3"
     assert daily.gate({**long, "windows": {**base["windows"], "1y": {"count": 40, "win_ratio": 0.55}},
                        "since_2020_excess": 0.1}) == []         # 50% is enough there
 

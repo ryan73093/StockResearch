@@ -187,15 +187,21 @@ def test_the_month_forward_test_is_read_from_the_forward_accounts_records():
 
 def test_a_hopeless_t3_rule_carries_last_months_grade_except_each_quarter(tmp_path):
     # 2026-10-21 (使用者：每個月都要跑那麼久): under 70% of 0050 last month cannot pass a month later
+    # 2026-10-27: judged on the gate's track, the account from 2020-10 (a row without its money is run again)
     def row(rule_hash, tier, value):
         return {"rule_hash": rule_hash, "tier": tier, "passed": False,
-                "metrics": {"final_value": value, "benchmark_final_value": 100.0}}
+                "metrics": {"start": "2015-06-01", "final_value": 500.0, "benchmark_final_value": 100.0,
+                            "since_2020_final_value": value, "since_2020_benchmark_final_value": 100.0}}
 
+    old = {"rule_hash": "old", "tier": "T3", "metrics": {"final_value": 10.0, "benchmark_final_value": 100.0}}
+    short = {"rule_hash": "short", "tier": "T3", "metrics": {"start": "2021-03-01", "final_value": 50.0,
+                                                             "benchmark_final_value": 100.0}}
     rolling.save(tmp_path, date(2026, 10, 31), {"cutoff": "2026-10-31", "engine": "daily-1.5.0",
                                                  "graded": [row("far", "T3", 60.0), row("near", "T3", 80.0),
-                                                            row("t2", "T2", 50.0), {"rule_hash": "bad", "error": "x"}]})
+                                                            row("t2", "T2", 50.0), {"rule_hash": "bad", "error": "x"},
+                                                            old, short]})
     found = rolling.carried(tmp_path, date(2026, 11, 30), "daily-1.5.0")
-    assert [item["rule_hash"] for item in found] == ["far"] and found[0]["carried_from"] == "2026-10-31"
+    assert [item["rule_hash"] for item in found] == ["far", "short"] and found[0]["carried_from"] == "2026-10-31"
     assert rolling.carried(tmp_path, date(2026, 12, 31), "daily-1.5.0") == []      # a quarter: every rule again
     assert rolling.carried(tmp_path, date(2026, 11, 30), "daily-1.6.0") == []      # a new engine: every rule again
     assert rolling.carried(tmp_path, date(2026, 10, 31), "daily-1.5.0") == []      # only an earlier month counts

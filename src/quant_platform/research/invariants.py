@@ -342,6 +342,14 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     checks.append(_check("選手池每個 100% 個股規則的最新結果都是現行引擎", "AGENTS.md：前向帳戶和回測一定是同一個策略（使用者 2026-10-25）",
                          not stale, f"現行 {ENGINE_VERSION}；舊引擎的 {len(stale)} 個"
                          + (f"：{[rule.name[:30] for rule in stale[:3]]}" if stale else "")))
+    # 2026-10-27 (使用者 10/26：不要再用 2015～2020 作為篩選；短歷史賽道加重; 10/27：問我幹嘛): every grade is on the
+    # 2020-10 track — the latest results and the month's rows all have their windows from 2020-11
+    from quant_platform.research.windows2020 import missing as windows_missing
+
+    lacking = windows_missing(research, cutoff_for(today))
+    checks.append(_check("每個規則都用 2020-10 以後的視窗分級", "使用者 2026-10-26／10-27：不要再用 2015～2020 作為篩選、短歷史賽道加重",
+                         not (lacking["registry"] or lacking["list"]),
+                         f"選手池缺的 {lacking['registry']} 個、本月名單缺的 {lacking['list']} 個"))
     # 2026-10-26 (使用者：我不要再放在這個皮咪資料夾下；向量資料庫吃 C:\\Dev\\DBQdrant)
     place = placement(research.parent.parent, research)
     checks.append(_check("專案在 C:\\Dev、知識庫向量在共用的 DBQdrant", "使用者 2026-10-26：比照其他專案搬到 C:\\Dev",

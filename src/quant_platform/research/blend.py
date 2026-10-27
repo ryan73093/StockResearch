@@ -173,13 +173,13 @@ class BlendAccount:
 
 
 def evaluate_blend(data, fp, blend: BlendRule, costs, benchmark_cache: dict | None = None,
-                   end: date | None = None) -> dict[str, object]:
+                   end: date | None = None, windows_from: date | None = None) -> dict[str, object]:
     """The blend from 2015-06 to ``end`` (RECENT_END; 2026-10-18: the monthly rolling selection's cutoff too)."""
     from quant_platform.research.daily import ENGINE_VERSION, RECENT_END, RECENT_START, account_report
 
     end = end or RECENT_END
     account = BlendAccount(data, fp, blend, costs, RECENT_START, end)
-    report = account_report(data, account.run, account.first, costs, benchmark_cache, end)
+    report = account_report(data, account.run, account.first, costs, benchmark_cache, end, windows_from)
     return {"engine": f"{ENGINE_VERSION}+{BLEND_VERSION}", "spec": blend.canonical(), "rule_hash": blend.rule_hash,
             "label": blend.label, **report}
 

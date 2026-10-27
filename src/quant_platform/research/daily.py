@@ -65,6 +65,9 @@ from quant_platform.research.stock_rules import (
 
 RECENT_START = date(2015, 6, 1)      # daily price limit ±10%
 REGIME_START = date(2020, 10, 26)    # continuous trading (2020-03-23) and intraday odd lots (2020-10-26)
+# 2026-10-27 (使用者 10/26：2015 到 2020 和 2020 到現在交易的風氣差很多；短歷史賽道加重; 10/27：問我幹嘛): the gate's
+# rolling windows are the ones starting inside the 2020-10-26 track — the first month start in it on
+REGIME_WINDOWS = date(2020, 11, 1)
 RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 # 1.1.0 (2026-10-05): trailing stop and market filter (R7); the data version covers the chip data and
 # only what the period covers (0050 and this year's ex-rights file are rewritten nightly).
@@ -2134,11 +2137,20 @@ def window_stats(data: LegacyData, rule: DailyRule, costs: CostModel, ranks: dic
         costs, months, start, end, cache)
 
 
+def window_summary(excesses: list[float]) -> dict[str, object]:
+    if not excesses:
+        return {"count": 0}
+    return {"count": len(excesses), "win_ratio": round(sum(value > 0 for value in excesses) / len(excesses), 4),
+            "median_excess": round(statistics.median(excesses), 6), "worst_excess": round(min(excesses), 6),
+            "best_excess": round(max(excesses), 6)}
+
+
 def account_windows(data: LegacyData, account, costs: CostModel, months: int, start: date, end: date,
                     cache: dict) -> dict[str, object]:
     """Rolling windows of ``months`` from every month start: ``account(first, last)`` (a fresh account of
-    the owner's cash flow) against the same money in 0050."""
-    excesses = []
+    the owner's cash flow) against the same money in 0050. 2026-10-27: also ``since_2020``, the same summary of the
+    windows starting from REGIME_WINDOWS (the gate's)."""
+    pairs = []
     for first in _month_starts(data.sessions, start, end, months):
         total = first.year * 12 + first.month - 1 + months
         last = date(total // 12, total % 12 + 1, 1) - timedelta(days=1)
@@ -2146,12 +2158,11 @@ def account_windows(data: LegacyData, account, costs: CostModel, months: int, st
         if (first, last) not in cache:
             cache[(first, last)] = simulate_daily(data, None, costs, first, last)
         if run.contributed:
-            excesses.append(_excess(run, cache[(first, last)]))
-    if not excesses:
-        return {"count": 0}
-    return {"count": len(excesses), "win_ratio": round(sum(value > 0 for value in excesses) / len(excesses), 4),
-            "median_excess": round(statistics.median(excesses), 6), "worst_excess": round(min(excesses), 6),
-            "best_excess": round(max(excesses), 6)}
+            pairs.append((first, _excess(run, cache[(first, last)])))
+    if not pairs:
+        return {"count": 0, "since_2020": {"count": 0}}
+    return {**window_summary([value for _first, value in pairs]),
+            "since_2020": window_summary([value for first, value in pairs if first >= REGIME_WINDOWS])}
 
 
 # 2026-10-21 (使用者：繼續做你本來就應該要做的短歷史賽道；2015 到現在其實也很久了，評估長資料跟短歷史的權重): a rule
@@ -2169,27 +2180,41 @@ def short_track(metrics: dict) -> bool:
     return str(metrics.get("start") or "") >= SHORT_TRACK_FROM.isoformat()
 
 
+def regime_windows(metrics: dict) -> dict[str, dict]:
+    """The gate's windows: those starting in the 2020-10-26 track (``since_2020`` of each); a result registered before
+    they were kept falls back to its windows from 2015-06 until the backfill (``windows2020``) supplies them."""
+    windows = metrics.get("windows") or {}
+    return {key: ((windows.get(key) or {}).get("since_2020") or windows.get(key) or {}) for key in WINDOWS}
+
+
 def gate(metrics: dict) -> list[str]:
-    """Pass: beats 0050 from 2015-06 and again from 2020-10, wins >= 60% of 3-year windows with a
-    positive median and >= 50% of 1-year windows, and the drawdown is no more than 5 points deeper. The short track
-    (``short_track``): beats 0050 from its start after the discount, wins >= 60% of 1-year windows."""
+    """2026-10-27 (使用者 10/26：2015 到 2020 和 2020 到現在交易的風氣差很多，不要再用 2015～2020 作為篩選；短歷史賽道
+    加重; 10/27：問我幹嘛): pass = beats 0050 from 2020-10 (the account opened 2020-10-26), wins >= 60% of the 3-year
+    windows starting in that track with a positive median and >= 50% of its 1-year windows, and the drawdown (the whole
+    period: every crash counts) is no more than 5 points deeper than 0050's. 2015-06..2020-09 is no gate: it is
+    reported (``full_period_excess``), not required. The short track (``short_track``, an account from after 2020-10):
+    beats 0050 from its start after the discount, wins >= 60% of 1-year windows."""
     reasons = []
     short = short_track(metrics)
-    checks = ((("full_period_excess", f"{str(metrics['start'])[:7]} 起"),) if short
-              else (("full_period_excess", "2015-06 起"), ("since_2020_excess", "2020-10 起")))
-    for key, label in checks:
-        value = metrics.get(key)
-        if short and value is not None:
-            value *= SHORT_RELIABILITY
+    if short:
+        value = metrics.get("full_period_excess")
+        value = value * SHORT_RELIABILITY if value is not None else None
         if value is None or value <= 0:
-            reasons.append(f"{label}輸 0050（{(value or 0):+.0%}）")
-    windows = metrics.get("windows") or {}
-    three, one = windows.get("3y") or {}, windows.get("1y") or {}
+            reasons.append(f"{str(metrics['start'])[:7]} 起輸 0050（{(value or 0):+.0%}）")
+        windows = metrics.get("windows") or {}
+        three, one = windows.get("3y") or {}, windows.get("1y") or {}
+    else:
+        value = metrics.get("since_2020_excess")
+        if value is None or value <= 0:
+            reasons.append(f"2020-10 起輸 0050（{(value or 0):+.0%}）")
+        found = regime_windows(metrics)
+        three, one = found["3y"], found["1y"]
+    label = "" if short else "2020-10 以後的 "
     if three.get("count") and ((three.get("win_ratio") or 0) < 0.6 or (three.get("median_excess") or 0) <= 0):
-        reasons.append(f"3 年視窗勝率 {(three.get('win_ratio') or 0):.0%}、中位 {(three.get('median_excess') or 0):+.1%}")
+        reasons.append(f"{label}3 年視窗勝率 {(three.get('win_ratio') or 0):.0%}、中位 {(three.get('median_excess') or 0):+.1%}")
     least = SHORT_ONE_YEAR if short else 0.5
     if one.get("count") and (one.get("win_ratio") or 0) < least:
-        reasons.append(f"1 年視窗勝率 {(one.get('win_ratio') or 0):.0%} < {least:.0%}")
+        reasons.append(f"{label}1 年視窗勝率 {(one.get('win_ratio') or 0):.0%} < {least:.0%}")
     strategy, benchmark = metrics.get("max_drawdown"), metrics.get("benchmark_max_drawdown")
     if strategy is not None and benchmark is not None and strategy < benchmark - 0.05:
         reasons.append(f"最大回撤 {strategy:.0%} 比 0050 {benchmark:.0%} 深超過 5 個百分點")
@@ -2206,17 +2231,17 @@ TIER_LABELS = {
     "T0（高風險）": "T0（高風險）：同 T0，但回撤比 0050 深 5～15 個百分點",
     "T0 候選": "T0 候選：全部門檻都過，等前向觀察",
     "T0 候選（高風險）": "T0 候選（高風險）：其他門檻都過，回撤比 0050 深 5～15 個百分點，等前向觀察",
-    "T1": "T1：贏 0050，但回撤比 0050 深超過 15 個百分點",
-    "T2": "T2：只有部分期間贏",
-    "T3": "T3：輸 0050",
+    "T1": "T1：2020-10 起贏 0050、視窗也過，但回撤比 0050 深超過 15 個百分點",
+    "T2": "T2：2020-10 起贏 0050，但 2020-10 以後的 3 年或 1 年視窗沒過",
+    "T3": "T3：2020-10 起輸 0050",
 }
 FORWARD_SESSIONS = 60   # about three months of forward observation before a rule can be T0
 
 
 def tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
-    """The pool's grade of a daily rule (owner 2026-10-04): T3 lost to 0050 from 2015-06; T2 won from
-    2015-06 but lost from 2020-10 or failed the rolling windows; T1 passed both periods and the windows
-    but fell more than 5 points deeper than 0050 (more volatile); T0 候選 passed every gate; T0 is a
+    """The pool's grade of a daily rule (owner 2026-10-04; 2026-10-27 on the 2020-10 track, ``gate``): T3 lost to
+    0050 from 2020-10; T2 won from 2020-10 but failed its rolling windows; T1 passed them but fell more than 5 points
+    deeper than 0050 (more volatile); T0 候選 passed every gate; T0 is a
     T0 候選 that, after at least 60 sessions of forward observation, is not behind 0050 and reconciles. 2026-10-18 (使用者):
     a rule whose only failed gate is the drawdown, within RISKY_DRAWDOWN of 0050's, is T0 候選（高風險） (T0（高風險）
     once forward observation confirms it); deeper than that, T1."""
@@ -2226,9 +2251,10 @@ def tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
 
 def _tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
     reasons = gate(metrics)
-    if (metrics.get("full_period_excess") or 0) <= 0:
-        return "T3", reasons[0] if reasons else "2015-06 起輸 0050"
-    partial = [reason for reason in reasons if "2020-10" in reason or "視窗" in reason]
+    short = short_track(metrics)
+    if (metrics.get("full_period_excess" if short else "since_2020_excess") or 0) <= 0:
+        return "T3", reasons[0] if reasons else "2020-10 起輸 0050"
+    partial = [reason for reason in reasons if "視窗" in reason]
     if partial:
         return "T2", "；".join(partial)
     risky = False
@@ -2264,7 +2290,8 @@ def free_targets(fp: FactorPanel, rule: DailyRule) -> dict[date, dict[str, float
 
 
 def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel,
-             benchmark_cache: dict | None = None, end: date | None = None) -> dict[str, object]:
+             benchmark_cache: dict | None = None, end: date | None = None,
+             windows_from: date | None = None) -> dict[str, object]:
     """The rule from 2015-06 to ``end`` (RECENT_END; 2026-10-16: any earlier day, the monthly rolling selection's
     cutoff — research/rolling.py)."""
     end = end or RECENT_END
@@ -2275,7 +2302,7 @@ def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostMode
         def free_account(start: date, end: date) -> RunResult:
             return simulate_daily(data, rule, costs, start, end, targets=targets)
 
-        report = account_report(data, free_account, first, costs, benchmark_cache, end)
+        report = account_report(data, free_account, first, costs, benchmark_cache, end, windows_from)
         report["parked_sessions"] = 0
         return {"engine": ENGINE_VERSION, "spec": rule.canonical(), "rule_hash": rule.rule_hash, "label": rule.label,
                 **report}
@@ -2288,16 +2315,18 @@ def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostMode
     def account(start: date, end: date) -> RunResult:
         return simulate_daily(data, rule, costs, start, end, ranks, weights=weights, parked=parked, exposure=exposure)
 
-    report = account_report(data, account, first, costs, benchmark_cache, end)
+    report = account_report(data, account, first, costs, benchmark_cache, end, windows_from)
     report["parked_sessions"] = len([day for day in parked or () if first <= day <= end])
     return {"engine": ENGINE_VERSION, "spec": rule.canonical(), "rule_hash": rule.rule_hash, "label": rule.label, **report}
 
 
 def account_report(data: LegacyData, account, first: date, costs: CostModel,
-                   benchmark_cache: dict | None = None, end: date | None = None) -> dict[str, object]:
+                   benchmark_cache: dict | None = None, end: date | None = None,
+                   windows_from: date | None = None) -> dict[str, object]:
     """What every account is judged by: ``account(start, end)`` runs the owner's cash flow from ``start``.
     From ``first`` and from 2020-10, the rolling windows, the monthly gaps, the activity and the curve,
-    each against the same money in 0050 — up to ``end`` (RECENT_END)."""
+    each against the same money in 0050 — up to ``end`` (RECENT_END). 2026-10-27: ``windows_from`` (the backfill of
+    a result registered before the windows had their ``since_2020`` part) runs only the windows from that day."""
     end = end or RECENT_END
     cache = benchmark_cache if benchmark_cache is not None else {}
     run = account(first, end)
@@ -2314,7 +2343,8 @@ def account_report(data: LegacyData, account, first: date, costs: CostModel,
         "full_period_excess": round(_excess(run, benchmark), 6),
         "since_2020": {"start": REGIME_START.isoformat(), "strategy": regime_run.summary(),
                        "benchmark": regime_benchmark.summary(), "excess": round(_excess(regime_run, regime_benchmark), 6)},
-        "windows": {key: account_windows(data, account, costs, months, first, end, cache.setdefault(key, {}))
+        "windows": {key: account_windows(data, account, costs, months, max(first, windows_from or first), end,
+                                         cache.setdefault(key, {}))
                     for key, months in WINDOWS.items()},
         "monthly_active_returns": active, "yearly": {year: round(value, 4) for year, value in sorted(yearly.items())},
         "activity": activity(run), "curve": curve(run, benchmark),
@@ -4933,6 +4963,14 @@ def stale_engine(research=None) -> list:
     return rules
 
 
+def windows_stale_batch() -> list:
+    """2026-10-27: the rules whose registered result the engine no longer reproduced when their 2020-10 windows were
+    backfilled (research/windows2020.py) — run again in full."""
+    from quant_platform.research.windows2020 import stale_rules
+
+    return stale_rules(Path("instance") / "research")
+
+
 def rerun140_batch() -> list:
     """2026-10-13 night: the same 211 rules on engine 1.4.0 (whole shares, dividends as paid, the turnover cap),
     filled the same day in the after-hours sessions. Not the next session (使用者 2026-10-14：要在 14:30 前算出
@@ -4966,6 +5004,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "leakfix": leakfix_batch,
            "halftwins_a": lambda: all_half_twins()[0::2], "halftwins_b": lambda: all_half_twins()[1::2],
            "stale": stale_engine,
+           "windows_stale": windows_stale_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
            "robot41": robot41_batch, "newdata": new_data_batch, "holders2": holders2_batch, "holders3": holders3_batch, "veto2": veto2_batch, "veto3_a": lambda: veto3_batch()[0::2],
            "veto3_b": lambda: veto3_batch()[1::2], "veto4": veto4_batch, "veto5": veto5_batch, "veto6": veto6_batch, "modeli": model_i_batch, "deep27": deep27_batch, "modelj": model_j_batch, "modelk": model_k_batch, "jdeep": j_deep_batch, "split": split_batch, "split_a": lambda: split_all_batch()[0::2],

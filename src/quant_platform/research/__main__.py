@@ -342,7 +342,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "screen-check", "scan-full", "scan-full-spread"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "screen-check", "scan-full", "scan-full-spread", "windows2020"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--sample", type=int, default=0,
@@ -436,6 +436,8 @@ def main() -> int:
     parser.add_argument("--cutoff", help="rolling：截止日（預設：兩個月前的月底）")
     parser.add_argument("--only-new", action="store_true",
                         help="rolling --step select：只評這個月還沒評過的規則，加進原本的名單（2026-10-18：組合帳戶）")
+    parser.add_argument("--target", choices=("list", "registry"),
+                        help="windows2020：補算這個月的名單（list）或選手池的最新結果（registry）")
     parser.add_argument("--phase", choices=("a", "b"),
                         help="scan-full：a＝1～4 個訊號一組，b＝a 最常過初篩的 50 個訊號 5 個一組（2026-10-26 全段大搜尋）")
     parser.add_argument("--part", help="scan-full：只跑第一階段的第 k／n 份（k/n，由 scan-full 自己開的程序用）")
@@ -896,6 +898,33 @@ def main() -> int:
                   f"{report['screen_median']:+.2%}、完整回測 {report['engine_median']:+.2%}（中位數）；初篩贏、完整回測輸的 "
                   f"{report['screen_only']} 個（{path.name}）", flush=True)
         return 0
+    if args.command == "windows2020":
+        # 2026-10-27 (使用者 10/26：不要再用 2015～2020 作為篩選；短歷史賽道加重; 10/27：問我幹嘛): the gate's windows
+        # (starting in the 2020-10-26 track) for results kept before them, run again by the engine and checked
+        from quant_platform.research import windows2020
+        from quant_platform.research.jobs import JobLog
+        from quant_platform.research.rolling import cutoff_for
+
+        target = args.target or "list"
+        cutoff = cutoff_for(datetime.now(TAIPEI).date())
+        label = (f"門檻改以 2020-10 以後為主：{cutoff.isoformat()} 名單每個規則補算 2020-10 以後的視窗、重新分級" if target == "list"
+                 else "門檻改以 2020-10 以後為主：選手池每個規則的最新結果補算 2020-10 以後的視窗")
+        with JobLog(RESEARCH).start(label, "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+            def progress(done, total, row):
+                job.update(done=done, total=total, current=f"{done:,}／{total:,}")
+            if target == "list":
+                counts = windows2020.backfill_list(RESEARCH, Path(args.base), cutoff, args.broker, min(args.workers or 2, 2),
+                                                   progress=progress)
+                job.payload["summary"] = (f"{counts['rows']} 個規則補算（{counts['full']} 個整個重評）、等級變動 "
+                                          f"{counts['changed']} 個、失敗 {counts['errors']} 個")
+            else:
+                counts = windows2020.backfill_registry(RESEARCH, Path(args.base), args.broker, min(args.workers or 2, 2),
+                                                       progress=progress)
+                job.payload["summary"] = (f"{counts['rows']} 個最新結果：補上 {counts['added']} 個、引擎重算和登錄的不一樣 "
+                                          f"{counts['stale']} 個（要整個重跑）、失敗 {counts['errors']} 個")
+            print(job.payload["summary"], flush=True)
+        return 1 if counts["errors"] else 0
+
     if args.command == "forward-audit":
         # 2026-10-25 (使用者：你所有策略確定都是合理的嗎): every account's decisions ranked again the way a backtest does
         from quant_platform.research.jobs import JobLog

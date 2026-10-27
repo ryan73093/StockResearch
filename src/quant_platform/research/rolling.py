@@ -75,6 +75,19 @@ def _init(base: str, broker: str) -> None:
     _worker.update(data=data, fp=fp, costs=broker_costs(broker), cache={})
 
 
+def grade_metrics(report: dict) -> dict:
+    """What the month's list keeps of a rule's report up to the cutoff (2026-10-27: with the 2020-10 track's money —
+    the gate's track)."""
+    return {"start": report.get("start"),     # 2026-10-21: an account from after 2020-10 is graded on the short track
+            "full_period_excess": report["full_period_excess"], "since_2020_excess": report["since_2020"]["excess"],
+            "since_2020_final_value": report["since_2020"]["strategy"]["final_value"],
+            "since_2020_benchmark_final_value": report["since_2020"]["benchmark"]["final_value"],
+            "windows": report["windows"], "max_drawdown": report["strategy"]["max_drawdown"],
+            "benchmark_max_drawdown": report["benchmark"]["max_drawdown"],
+            "final_value": report["strategy"]["final_value"], "benchmark_final_value": report["benchmark"]["final_value"],
+            "xirr": report["strategy"].get("xirr"), "benchmark_xirr": report["benchmark"].get("xirr")}
+
+
 def _grade(item: dict, cutoff: str) -> dict:
     from quant_platform.research.blend import BlendRule, evaluate_blend, parse_spec
     from quant_platform.research.daily import PASSING_TIERS, evaluate, gate, tier
@@ -86,12 +99,7 @@ def _grade(item: dict, cutoff: str) -> dict:
                      end=date.fromisoformat(cutoff))
     except Exception as error:  # noqa: BLE001 - one rule's failure is recorded, the month goes on
         return {"trial": item["trial"], "name": rule.name, "error": str(error)[:200]}
-    metrics = {"start": report.get("start"),     # 2026-10-21: an account from after 2020-10 is graded on the short track
-               "full_period_excess": report["full_period_excess"], "since_2020_excess": report["since_2020"]["excess"],
-               "windows": report["windows"], "max_drawdown": report["strategy"]["max_drawdown"],
-               "benchmark_max_drawdown": report["benchmark"]["max_drawdown"],
-               "final_value": report["strategy"]["final_value"], "benchmark_final_value": report["benchmark"]["final_value"],
-               "xirr": report["strategy"].get("xirr"), "benchmark_xirr": report["benchmark"].get("xirr")}
+    metrics = grade_metrics(report)
     reasons = gate(metrics)
     return {"trial": item["trial"], "name": rule.name, "rule_hash": rule.rule_hash, "spec": item["spec"],
             # 2026-10-18 (使用者：回撤上限放寬並標註高風險): T0 候選（高風險） passes too, marked by its tier
@@ -141,10 +149,14 @@ def carried(research: str | Path, cutoff: date, engine: str) -> list[dict]:
     output = []
     for row in previous.get("graded") or []:
         metrics = row.get("metrics") or {}
-        bench = metrics.get("benchmark_final_value")
-        if row.get("error") or row.get("tier") != "T3" or not bench:
+        # 2026-10-27: on the gate's track (from 2020-10; an account after it, its own) — a row graded before the
+        # 2020-10 track's money was kept is run again
+        short = str(metrics.get("start") or "") >= "2020-10-26"
+        value = metrics.get("final_value" if short else "since_2020_final_value")
+        bench = metrics.get("benchmark_final_value" if short else "since_2020_benchmark_final_value")
+        if row.get("error") or row.get("tier") != "T3" or not bench or value is None:
             continue
-        if (metrics.get("final_value") or 0) / bench < HOPELESS:
+        if value / bench < HOPELESS:
             output.append({**row, "carried_from": row.get("carried_from") or previous["cutoff"]})
     return output
 

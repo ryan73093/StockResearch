@@ -164,8 +164,11 @@ def test_tiers():
     assert tier(good, {"sessions": 60, "excess": 0.01, "problems": []})[0] == "T0"
     assert tier(good, {"sessions": 60, "excess": -0.01, "problems": []})[0] == "T0 候選"
     assert tier({**good, "max_drawdown": -0.52})[0] == "T1"                      # wins, more volatile
-    assert tier({**good, "since_2020_excess": -0.1})[0] == "T2"                  # only part of the time
-    assert tier({**good, "full_period_excess": -0.5})[0] == "T3"
+    # 2026-10-27 (使用者 10/26：不要再用 2015～2020 作為篩選；10/27：問我幹嘛): the gate is the 2020-10 track
+    assert tier({**good, "since_2020_excess": -0.1})[0] == "T3"
+    assert tier({**good, "full_period_excess": -0.5})[0] == "T0 候選"            # behind before 2020-10: no gate
+    weak = {**windows, "1y": {**windows["1y"], "since_2020": {"count": 59, "win_ratio": 0.45}}}
+    assert tier({**good, "windows": weak})[0] == "T2"                           # its windows from 2020-11
 
 
 class PricedPanel(ScriptedPanel):
@@ -731,7 +734,9 @@ def test_a_drawdown_within_fifteen_points_is_a_high_risk_t0_candidate():
     grade, why = tier({**base, "max_drawdown": -0.45})
     assert grade == "T0 候選（高風險）" and "回撤" in why and grade in PASSING_TIERS    # 11 points deeper
     assert tier({**base, "max_drawdown": -0.54})[0] == "T1"                             # 20 points deeper
-    assert tier({**base, "max_drawdown": -0.45, "since_2020_excess": -0.1})[0] == "T2"  # another gate failed
+    weak = {**base["windows"], "3y": {**base["windows"]["3y"], "since_2020": {"count": 35, "win_ratio": 0.5,
+                                                                               "median_excess": 0.1}}}
+    assert tier({**base, "max_drawdown": -0.45, "windows": weak})[0] == "T2"          # another gate failed
     forward = {"sessions": 60, "excess": 0.01}
     assert tier({**base, "max_drawdown": -0.45}, forward)[0] == "T0（高風險）"
 

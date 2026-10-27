@@ -93,7 +93,7 @@
       <ol class="funnel">
         <li><b>{{ '{:.2f}'.format(fs.planned / 100000000) }} 億</b><span>個股策略設定：89 個訊號（含付費資料）1～5 個一組 × 股票池 × 配置 × 每天或每週 × 持有方式，每個都不一樣</span></li>
         <li><b>{{ '{:,.0f}'.format(fs.screened / 10000) }} 萬</b><span>已經用 2015-06～2026-08 全段算完（{{ '{:.0%}'.format(fs.screened / fs.planned) }}）{% for ph in fs.phases if not ph.summary and ph.per_minute %}・{{ ph.phase }} 段每分鐘 {{ '{:,}'.format(ph.per_minute) }} 個，約 {{ ph.eta_hours }} 小時{% endfor %}</span></li>
-        <li><b>{{ '{:,.0f}'.format(fs.passed / 10000) }} 萬</b><span>過初篩：全段贏 0050、2020-10 以後也贏、回撤不比 0050 深 15 點以上、一年視窗至少贏一半</span></li>
+        <li><b>{{ '{:,.0f}'.format(fs.passed / 10000) }} 萬</b><span>過初篩：2020-10 以後贏 0050、那段的一年視窗至少贏一半、回撤不比 0050 深 15 點以上（2015～2020 不當門檻）</span></li>
         <li><b>{{ fs.finalists }} 個</b><span>用回測引擎完整重跑（每段最多 1,500 個、彼此不相似）{% if not fs.finalists %}：第一階段算完才開始{% endif %}</span></li>
         <li><b>{{ fs.passing }} 個</b><span>過門檻（T0 候選，含高風險）；能不能用看 9/1 起的前向</span></li>
       </ol>

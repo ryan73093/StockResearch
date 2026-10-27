@@ -28,6 +28,32 @@ def _digest(payload: dict[str, object]) -> str:
 
 
 _PARSED: dict[str, object] = {}       # the last file parsed by ``TrialRegistry.records``
+# 2026-10-27 (the gate moved to the 2020-10 track, research/daily.py gate): the windows starting in that track of a
+# result registered before the windows kept them, run again by the engine and checked against the registered result
+# (research/windows2020.py) — kept beside the registry, which stays as written (its chain is not touched)
+SUPPLEMENT = "windows_since_2020.jsonl"
+
+
+def supplements(path: Path) -> dict[str, dict]:
+    """input hash → the backfilled windows (``{"1y": summary, "3y": summary}``) of the registry at ``path``."""
+    found = Path(path).with_name(SUPPLEMENT)
+    output: dict[str, dict] = {}
+    if found.is_file():
+        for line in found.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                row = json.loads(line)
+                output[row["input_hash"]] = row["windows"]
+    return output
+
+
+def _merged(row: dict, extra: dict[str, dict]) -> dict:
+    windows = extra.get(row.get("input_hash"))
+    metrics = row.get("metrics") or {}
+    if not windows or not isinstance(metrics.get("windows"), dict):
+        return row
+    merged = {key: ({**value, "since_2020": windows[key]} if key in windows and isinstance(value, dict) else value)
+              for key, value in metrics["windows"].items()}
+    return {**row, "metrics": {**metrics, "windows": merged}}
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,13 +189,23 @@ class TrialRegistry:
         if not self._path.is_file():
             return []
         stat = self._path.stat()
-        key = (str(self._path.resolve()), stat.st_mtime_ns, stat.st_size)
+        extra_path = self._path.with_name(SUPPLEMENT)
+        extra_stat = extra_path.stat() if extra_path.is_file() else None
+        key = (str(self._path.resolve()), stat.st_mtime_ns, stat.st_size,
+               extra_stat.st_mtime_ns if extra_stat else None, extra_stat.st_size if extra_stat else None)
         if _PARSED.get("key") != key:
+            extra = supplements(self._path)
             _PARSED.update(key=key, records=[
-                TrialRecord(**json.loads(line))
+                TrialRecord(**_merged(json.loads(line), extra))
                 for line in self._path.read_text(encoding="utf-8").splitlines() if line.strip()
             ])
         return list(_PARSED["records"])
+
+    def written(self) -> list[TrialRecord]:
+        """Every record exactly as written (no backfilled windows) — what the chain covers."""
+        if not self._path.is_file():
+            return []
+        return [TrialRecord(**json.loads(line)) for line in self._path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def find(self, kind: str, period: str, input_hash: str) -> TrialRecord | None:
         return next(
@@ -228,7 +264,7 @@ class TrialRegistry:
         """Problems found in the chain; an empty list means intact."""
         problems = []
         previous = GENESIS
-        for index, record in enumerate(self.records(), 1):
+        for index, record in enumerate(self.written(), 1):
             body = {name: getattr(record, name) for name in TrialRecord.__slots__ if name != "record_hash"}
             if record.trial_id != index:
                 problems.append(f"第 {index} 筆的編號是 {record.trial_id}")
