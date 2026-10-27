@@ -162,6 +162,48 @@ def multi(frame: pd.DataFrame, first_test: int = FIRST_TEST) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+FORWARD_START = "2026-09-01"     # RL v8: the forward accounts' first day; the model learns only bars before it
+
+
+def forward_test(frame: pd.DataFrame, buys: list[dict], start: str = FORWARD_START) -> dict[str, object]:
+    """2026-10-28 (research_method §7「RL 第八版」, written before the run): RL v7's buy model (13:00 or the close, decided
+    at 13:00) learned on every cached stock-day before ``start``, judged on the forward accounts' buys from ``start``
+    that were filled at the close (the fill price within 0.2% of the day's last bar) — per fill and, since the same
+    day's buys move together, per day (each day's average; the t over days)."""
+    from sklearn.ensemble import HistGradientBoostingRegressor
+
+    data = frame.copy()
+    data["first_half"] = data["half"] / data["open"] - 1
+    data["since_open_13"] = data["thirteen"] / data["open"] - 1
+    data["buy_thirteen"] = data["close"] / data["thirteen"] - 1
+    train = data[data["day"] < start]
+    filled = {(str(row["code"]), str(row["filled"])): row.get("price") for row in buys}
+    test = data[(data["day"] >= start).to_numpy() & np.array([(code, day) in filled for code, day in zip(data["code"], data["day"])], dtype=bool)].copy()
+    test = test[np.array([filled[(code, day)] is not None and abs(float(filled[(code, day)]) / close - 1) <= 0.002
+                          for code, day, close in zip(test["code"], test["day"], test["close"])], dtype=bool)]
+    if len(train) < 300 or not len(test):
+        return {"train": int(len(train)), "test": int(len(test)), "passed": False}
+    model = HistGradientBoostingRegressor(max_iter=150, learning_rate=0.05, max_leaf_nodes=7, min_samples_leaf=40,
+                                          random_state=0).fit(train[list(BUY_FEATURES)], train["buy_thirteen"])
+    test["now"] = model.predict(test[list(BUY_FEATURES)]) > 0
+    test["robot"] = np.where(test["now"], test["buy_thirteen"], 0.0)
+
+    def stats(values):
+        values = [float(value) for value in values]
+        if len(values) < 2:
+            return {"count": len(values)}
+        mean, spread = statistics.fmean(values), statistics.stdev(values)
+        return {"count": len(values), "mean": round(mean, 6),
+                "t": round(mean / (spread / math.sqrt(len(values))), 2) if spread else None}
+    by_day = test.groupby("day")
+    found = {"train": int(len(train)), "test": int(len(test)), "days": int(test["day"].nunique()),
+             "robot": stats(test["robot"]), "always_1300": stats(test["buy_thirteen"]),
+             "robot_by_day": stats(by_day["robot"].mean()), "always_1300_by_day": stats(by_day["buy_thirteen"].mean()),
+             "share_1300": round(float(test["now"].mean()), 3)}
+    found["passed"] = bool((found["robot"].get("mean") or 0) >= WORTH and (found["robot_by_day"].get("t") or 0) >= 2)
+    return found
+
+
 def summary(choices: pd.DataFrame) -> dict[str, object]:
     def stats(values):
         values = list(values)
@@ -190,6 +232,17 @@ def run(history: str | Path, research: str | Path, at: str = "minute") -> Path:
     from quant_platform.research import daily
 
     _data, fp = daily.load(Path(history))
+    if at == "forward":                     # RL v8: the buy model judged on the forward accounts' buys
+        from quant_platform.research.intraday import forward_buys
+
+        frame = table(fp, history)
+        result = forward_test(frame, forward_buys(research, date.fromisoformat(FORWARD_START)))
+        folder = Path(research) / "rl"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"execution-forward-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+        path.write_text(json.dumps({"at": datetime.now(TAIPEI).isoformat(timespec="seconds"), **result},
+                                   ensure_ascii=False, indent=1), encoding="utf-8")
+        return path
     if at == "multi":                       # RL v7: odd lots, 09:10 / 13:00 / the close
         frame = table(fp, history)
         choices = multi(frame)

@@ -364,6 +364,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "research_mirror",
             "market_news_collection",
             "issues_refresh",
+            "forward_minutes",
             "tdcc_holding_collection",
             "weekly_test_suite",
             "invariant_checks",

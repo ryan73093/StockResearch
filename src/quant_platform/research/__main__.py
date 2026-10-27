@@ -342,7 +342,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
@@ -445,6 +445,9 @@ def main() -> int:
     parser.add_argument("--online", action="store_true", help="rl-concentration：第二版（每週線上更新、扣下跌風險）")
     parser.add_argument("--odd-lot", action="store_true", help="rl-execution：用 09:10（盤中零股第一次撮合）的價格")
     parser.add_argument("--multi", action="store_true", help="rl-execution：第七版，零股在 09:10、13:00 或收盤成交")
+    parser.add_argument("--since", help="forward-minutes：從哪一天的前向買單開始抓分 K（預設最近 7 天）")
+    parser.add_argument("--forward-test", action="store_true",
+                        help="rl-execution：第八版，買單模型（13:00 或收盤）用 9/1 起前向帳戶的收盤買單檢驗")
     parser.add_argument("--crash", action="store_true", help="rl-concentration：第三版（狀態加深度風險模型、前 10 檔回撤、融資維持率）")
     parser.add_argument("--other-universe", action="store_true",
                         help="windows2020 --target list：上市＋上櫃的規則整個重評（2026-10-28：名單曾用上市資料評它們）")
@@ -964,6 +967,13 @@ def main() -> int:
         # 2026-10-28 (research_method §7「RL 第六版：成交執行」): fill one minute after the open or at the close, offline
         from quant_platform.research import rl_execution
 
+        if args.forward_test:
+            path = rl_execution.run(Path(args.base), RESEARCH, at="forward")
+            found = json.loads(path.read_text(encoding="utf-8"))
+            print({key: found.get(key) for key in ("train", "test", "days", "robot", "robot_by_day", "always_1300",
+                                                   "always_1300_by_day", "share_1300")})
+            print("判定", "過" if found["passed"] else "沒過", "已寫入", path)
+            return 0
         path = rl_execution.run(Path(args.base), RESEARCH, at="multi" if args.multi else ("ten" if args.odd_lot else "minute"))
         found = json.loads(path.read_text(encoding="utf-8"))
         for side in ("sell", "buy", "both"):
@@ -1004,6 +1014,21 @@ def main() -> int:
             print(label, "每週平均（%）：機器人", part.get("bandit"), "去年最好的", part.get("last_best"),
                   "固定", {arm: part.get(f"fixed_{arm}") for arm in found["arms"]}, "週數", part.get("weeks"), flush=True)
         print("選擇次數", found["choices"], "判定", "過" if found.get("passed") else "沒過", f"已寫入 {path}")
+        return 0
+
+    if args.command == "forward-minutes":
+        # 2026-10-28 (S9-W37): the minute bars of the forward accounts' buys (RL v7's next version tests on them)
+        from datetime import timedelta
+
+        from quant_platform.research import intraday
+        from quant_platform.research.history.finmind import env_token
+        from quant_platform.research.jobs import JobLog
+
+        since = date.fromisoformat(args.since) if args.since else date.today() - timedelta(days=7)
+        with JobLog(RESEARCH).start(f"前向買單的分 K（{since.isoformat()} 起）", "research forward-minutes") as job:
+            found = intraday.fetch_forward(Path(args.base), RESEARCH, env_token(Path(".")), since, job)
+            job.payload["summary"] = f"{found['days']} 天、{found['wanted']} 筆、新抓 {found['asked']}、失敗 {found['errors']}"
+        print(f"前向買單的分 K：{found['days']} 天、{found['wanted']} 個股票日、新抓 {found['asked']}、失敗 {found['errors']}")
         return 0
 
     if args.command == "forward-forced":

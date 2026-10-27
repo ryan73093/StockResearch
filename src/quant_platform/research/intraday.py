@@ -154,6 +154,37 @@ def fetch(base: str | Path, rows: list[dict], token: str, job=None, per_hour: in
     return {"wanted": len(wanted), "asked": asked, "errors": errors}
 
 
+def forward_buys(research: str | Path, since: date | None = None, until: date | None = None) -> list[dict[str, object]]:
+    """2026-10-28 (S9-W37; research_method §7「RL 第七版」的下一版): every stock the forward accounts bought on a day
+    (``forward/stocks/log.jsonl``'s trades), once a stock and day, with the fill price — the out-of-sample buys whose
+    minute bars test the 13:00-or-close choice."""
+    path = Path(research) / "forward" / "stocks" / "log.jsonl"
+    found: dict[tuple[str, str], dict[str, object]] = {}
+    if not path.is_file():
+        return []
+    with path.open(encoding="utf-8") as lines:
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            day = str(record.get("date", ""))
+            if not day or (since and day < since.isoformat()) or (until and day > until.isoformat()):
+                continue
+            for trade in record.get("trades_today") or []:
+                if trade.get("side") == "BUY" and trade.get("code"):
+                    found.setdefault((str(trade["code"]), day), {"code": str(trade["code"]), "filled": day, "side": "buy",
+                                                                 "price": trade.get("price")})
+    return [found[key] for key in sorted(found)]
+
+
+def fetch_forward(base: str | Path, research: str | Path, token: str, since: date | None = None, job=None) -> dict[str, int]:
+    """The minute bars of the forward buys from ``since`` (stored ones are not asked again)."""
+    rows = forward_buys(research, since)
+    found = fetch(base, rows, token, job)
+    return {**found, "days": len({row["filled"] for row in rows})}
+
+
 def gains(rows: list[dict], prices: dict[tuple[str, str], dict[str, float]]) -> dict[str, object]:
     """Per point and side: the mean gain against the close (a buy: close / price - 1; a sell: price / close - 1), its t
     and how often it beat the close; and the verdict of the criterion written first."""

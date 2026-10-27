@@ -865,6 +865,29 @@ def refresh_issues(container: "Container", now: datetime | None = None) -> objec
     return counts
 
 
+def fetch_forward_minutes(container: "Container", now: datetime | None = None) -> object | None:
+    """2026-10-28 (S9-W37; research_method §7「RL 第七版」): trading days at 19:40, the minute bars of the last week's
+    forward buys (research/intraday.py), the out-of-sample data for the 13:00-or-close buy."""
+    from datetime import timedelta
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import intraday
+    from quant_platform.research.history.finmind import env_token
+    from quant_platform.research.jobs import JobLog
+
+    root = FilePath(_instance_dir(container.settings.database_url)).parent
+    research = _instance_dir(container.settings.database_url) / "research"
+    local = (now or datetime.now(ZoneInfo(container.settings.scheduler_timezone))).date()
+    token = env_token(root) or container.settings.finmind_token
+    if not token:
+        return None
+    with JobLog(research).start("前向買單的分 K（最近 7 天）", "scheduler fetch_forward_minutes") as job:
+        found = intraday.fetch_forward(research / "history", research, token, local - timedelta(days=7), job)
+        job.payload["summary"] = f"{found['days']} 天、{found['wanted']} 筆、新抓 {found['asked']}、失敗 {found['errors']}"
+    return found
+
+
 def check_invariants(container: "Container", now: datetime | None = None) -> object | None:
     """2026-10-20 (使用者：專案需求跟 AGENTS.md 有沒有在看): the owner's decisions checked as code on trading days at 16:00,
     after the forward records (research/invariants.py); a failure is notified."""
@@ -1142,6 +1165,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=50,
+    )
+    scheduler.add_job(
+        fetch_forward_minutes,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=19, minute=40, timezone=timezone),
+        id="forward_minutes",
+        name="前向買單的分 K（交易日 19:40：最近 7 天前向帳戶買進的股票，RL 成交時點的樣本外資料）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
         refresh_issues,

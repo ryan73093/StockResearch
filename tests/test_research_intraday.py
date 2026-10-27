@@ -43,3 +43,23 @@ def test_the_opening_auction_and_the_first_odd_lot_match_by_hand():
     assert found["close"] == 97 and found["day"] == pytest.approx(1000 * (50 * 100 + 10 * (101 + 99 + 99) / 3
                                                                           + 10 * (99 + 98 + 98.5) / 3 + 20 * 98 + 60 * 97))
     assert intraday.opening([bar("09:01:00", 1, 1, 1, 1, 1)]) is None          # no opening auction bar
+
+
+def test_the_forward_buys_are_read_once_a_stock_and_day(tmp_path):
+    """2026-10-28 (S9-W37): every BUY in the forward log's trades, once a stock and day, within the dates asked."""
+    import json as _json
+    from datetime import date as _date
+
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    records = [{"date": "2026-09-01", "trades_today": [{"code": "2330", "side": "BUY", "price": 900.0},
+                                                       {"code": "2317", "side": "SELL", "price": 150.0}]},
+               {"date": "2026-09-01", "trades_today": [{"code": "2330", "side": "BUY", "price": 900.0}]},
+               {"date": "2026-09-02", "trades_today": [{"code": "2454", "side": "BUY", "price": 1200.0}]},
+               {"date": "2026-08-29", "trades_today": [{"code": "1101", "side": "BUY", "price": 30.0}]}]
+    (folder / "log.jsonl").write_text("\n".join(_json.dumps(record) for record in records) + "\nnot json\n",
+                                      encoding="utf-8")
+    rows = intraday.forward_buys(tmp_path, since=_date(2026, 9, 1))
+    assert [(row["code"], row["filled"]) for row in rows] == [("2330", "2026-09-01"), ("2454", "2026-09-02")]
+    assert all(row["side"] == "buy" for row in rows) and rows[0]["price"] == 900.0
+    assert intraday.forward_buys(tmp_path / "nowhere") == []
