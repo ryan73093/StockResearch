@@ -139,6 +139,7 @@ CLUSTER_WINDOW = 120        # cluster_cap: sessions of daily returns the groupin
 TREND_WINDOW = 20           # hold "trend": a holding outside the keep zone stays while above this average
 SHADOW_WARMUP = 252         # sessions before the shadow account starts (the factors need a year)
 STOP_COOLDOWN = 20          # sessions a stopped-out stock may not be bought again
+ELIGIBILITY_BAND = 0.7      # eligibility "band": a holding is ineligible only under this share of the price and turnover lines
 PERIOD = "recent"
 TECHNICAL = {
     "ma_cross_20_60": "20 日均線高於 60 日均線的幅度（黃金交叉）",
@@ -418,8 +419,11 @@ class DailyRule(BaseModel):
     cooldown: int = Field(default=20, ge=1, le=250)
     # eligibility "both": a holding no longer eligible (under NT$10, thin, out of the large caps, no factor value)
     # leaves like one out of the keep zone; "entry": eligibility decides only the buys, a holding is kept or sold by
-    # the hold rule alone. Left out of the hash when "both".
-    eligibility: Literal["both", "entry"] = "both"
+    # the hold rule alone. Left out of the hash when "both". "band" (2026-10-27, research_method §7「選股條件的緩衝」): a
+    # holding stays in the day's ranking while its price and turnover are at least ELIGIBILITY_BAND of the lines (and
+    # it is within the largest large_caps / ELIGIBILITY_BAND), so it leaves by the keep zone and the hold rule like
+    # any other; a new buy needs the full lines.
+    eligibility: Literal["both", "entry", "band"] = "both"
     # 2026-10-16 (使用者：深度學習能不能用到交易裡輔助這些策略？): the deep-learning risk model (research/model_risk.py)
     # as an overlay — "dl1": no new buy among the day's top tenth by drop probability; "dl1x": also sell a holding
     # once it is in the top twentieth (every session). Left out of the hash when "none". "dl1m" (2026-10-25, 空頭防護
@@ -1046,11 +1050,12 @@ class FactorPanel:
             cache[kind] = flags
         return cache[kind]
 
-    def eligible(self, rule: DailyRule, position: int) -> np.ndarray:
-        mask = ((self.panel.close[:, position] >= rule.min_price) & (self.turnover_20[:, position] >= rule.min_turnover)
+    def eligible(self, rule: DailyRule, position: int, band: float = 1.0) -> np.ndarray:
+        mask = ((self.panel.close[:, position] >= rule.min_price * band)
+                & (self.turnover_20[:, position] >= rule.min_turnover * band)
                 & (self.age[:, position] >= rule.min_history))
         if getattr(rule, "large_caps", 0):
-            mask &= self.largest(rule.large_caps, position)
+            mask &= self.largest(math.ceil(rule.large_caps / band), position)
         return mask
 
     def largest(self, count: int, position: int) -> np.ndarray:
@@ -1154,8 +1159,14 @@ class FactorPanel:
             self._cache[key] = np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
         return self._cache[key]
 
-    def ranked(self, rule: DailyRule, position: int) -> list[str]:
+    def ranked(self, rule: DailyRule, position: int, held=None) -> list[str]:
         mask = self.eligible(rule, position)
+        if held and getattr(rule, "eligibility", "both") == "band":   # holdings within the band stay ranked
+            rows = [self.row[symbol] for symbol in held if symbol in self.row]
+            if rows:
+                kept = np.zeros_like(mask)
+                kept[rows] = True
+                mask = mask | (kept & self.eligible(rule, position, ELIGIBILITY_BAND))
         columns = {name: self.smoothed(name, getattr(rule, "smooth", 0))[:, position] for name in rule.factors}
         for values in columns.values():
             mask &= np.isfinite(values)
@@ -1310,7 +1321,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
     hold = getattr(rule, "hold", "days")
     cooldown = getattr(rule, "cooldown", STOP_COOLDOWN)
     entry_only = getattr(rule, "eligibility", "both") == "entry"
-    tracked = bool(rule.stop_loss) or exit_agent is not None
+    banded = getattr(rule, "eligibility", "both") == "band"
+    tracked =bool(rule.stop_loss) or exit_agent is not None
     risk_veto = getattr(rule, "risk_veto", "none")
     winners = float(getattr(rule, "winner_hold", 0.0) or 0.0)
     again: set[int] = set()               # decisions kept before 1.5.0 with again_after: decide in full that session
@@ -1446,7 +1458,7 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
             standing = out or risk_off or lost or pending_sells or pending_slots
             if not standing and exit_agent is None and hold != "trend":
                 continue
-        ranked = fp.ranked(rule, position)
+        ranked = fp.ranked(rule, position, held=current) if banded else fp.ranked(rule, position)
         if exit_agent is not None and current:
             left = [symbol for symbol in current if symbol not in out]
             held_for = {symbol: count - bought[symbol] for symbol in left}
@@ -1531,6 +1543,8 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
                 if risk_off:
                     return "大盤跌破 200 日均線，全部出場（大盤濾網）"
                 if symbol not in eligible:
+                    if banded:
+                        return "不再符合選股條件（股價或成交值低於門檻的七成，或沒有分數）"
                     return "不再符合選股條件（股價低於門檻、成交值不足或沒有分數）"
                 place = places.get(symbol)
                 text = f"跌出前 {zone} 名（當天第 {place} 名）"
@@ -4651,7 +4665,7 @@ def _guarded(trials: tuple[int, ...], guards: list[tuple[str, dict]]) -> list:
     return output
 
 
-NO_HALF_TWINS = ("halftwins", "bearguard", "entryonly")   # batches whose passing rules get no half twin (variants of fixed rules)
+NO_HALF_TWINS = ("halftwins", "bearguard", "entryonly", "band")   # batches whose passing rules get no half twin (variants of fixed rules)
 
 
 def half_twins(rules: list, registered: set[str]) -> list:
@@ -4733,6 +4747,17 @@ def entry_only_batch() -> list:
     the 55 fixed rules (BEAR_GUARD_ORIGINS, BEAR_HALF_WIDE) with eligibility "entry" — the price, turnover and history
     lines decide the buys only; a holding leaves by its rule's own exit. Graded the usual way."""
     return _guarded(BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE, [ENTRY_ONLY])
+
+
+BAND = ("選股條件緩衝七成", {"eligibility": "band"})
+
+
+def band_batch() -> list:
+    """2026-10-27 (research_method §7「選股條件的緩衝」, written before the run; the next version of ENTRY_ONLY, whose low-
+    turnover holdings rode to the rule's exit and sometimes fell further): the same 55 rules with eligibility "band" —
+    a holding is forced out only under 70% of the price and turnover lines, a buy needs the full lines (the buffer
+    zones of index providers; Novy-Marx & Velikov 2016's buy/hold spread). Graded the usual way."""
+    return _guarded(BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE, [BAND])
 
 
 def bear_guard3_batch() -> list:
@@ -4997,7 +5022,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
-           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "entryonly": entry_only_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

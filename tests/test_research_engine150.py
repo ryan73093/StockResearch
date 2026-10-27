@@ -127,6 +127,25 @@ def test_eligibility_entry_leaves_the_holding_to_the_hold_rule():
     assert entry[DAYS[1]] == ["A", "D", "E"]                # still rising: kept
 
 
+def test_eligibility_band_keeps_a_holding_ranked_down_to_70_percent_of_the_lines():
+    """2026-10-27: A eligible; B's turnover 15,000,000 is 75% of the 20,000,000 line, C's 10,000,000 is 50%."""
+    from types import SimpleNamespace
+
+    fp = object.__new__(daily.FactorPanel)
+    fp.symbols, fp.row = ["A", "B", "C"], {"A": 0, "B": 1, "C": 2}
+    fp.panel = SimpleNamespace(close=np.array([[50.0], [50.0], [50.0]]))
+    fp.turnover_20 = np.array([[30_000_000.0], [15_000_000.0], [10_000_000.0]])
+    fp.age = np.array([[500], [500], [500]])
+    scores = np.array([[1.0], [3.0], [2.0]], dtype=np.float32)
+    fp.smoothed = lambda name, sessions: scores
+    base = {"name": "x", "factors": {"trend_200": 1.0}, "top": 5}
+    band, both = DailyRule(**base, eligibility="band"), DailyRule(**base)
+    assert fp.ranked(band, 0) == ["A"]                              # a buy needs the full lines
+    assert fp.ranked(band, 0, held=["B", "C"]) == ["B", "A"]        # held B within 70%: still ranked, first
+    assert fp.ranked(both, 0, held=["B", "C"]) == ["A"]             # the usual rule: B is out
+    assert band.canonical()["eligibility"] == "band" and band.rule_hash != both.rule_hash
+
+
 def test_idle_cash_tops_up_the_picks_on_the_next_decision():
     days = DAYS[:10]
     data = market(days, {f"{name}.TW": {day: 10.0 for day in days} for name in "ABC"})
