@@ -56,7 +56,7 @@ SHORT = {"none": "不加", "taiex_200": "200 日均線", "taiex_10m": "10 個月
          "taiex_staged": "分段減碼", "taiex_half_wide": "減碼一半（各類前 5 個）",
          "risk_bear": "空頭時賣高風險股", "risk_bear_half": "減碼一半＋賣高風險股",
          "risk_half": "模型決定減碼一半", "entry_only": "選股條件只管買進", "band": "選股條件緩衝七成",
-         "bear_quality": "空頭改選低波動高品質", "bear_steady": "空頭改選跌市穩"}
+         "bear_quality": "空頭改選低波動高品質", "bear_steady": "空頭改選跌市穩", "bear_vol": "依大盤波動減碼"}
 RANKED = ("market_filter", "stop_loss")             # these act where the day's targets are decided: ranked again
 HELPS = 2                                            # held at least this many more scenarios (the median strategy)
 KEEPS = 0.8                                          # and keeps at least this share of its 2015-06 money
@@ -425,7 +425,7 @@ def guard_ways() -> list[tuple[str, str, dict, tuple[int, ...]]]:
     """(key, words, settings, the original rules) of every guard graded so far: the second version's three on the stress
     strategies, the third version's staged guard on them and the half guard on each family's five richest."""
     from quant_platform.research.daily import (
-        BAND, BEAR_DEFENSIVE, BEAR_GUARD_ORIGINS, BEAR_GUARDS, BEAR_HALF_WIDE, BEAR_RISK, BEAR_RISK_HALF, BEAR_STAGED,
+        BAND, BEAR_DEFENSIVE, BEAR_GUARD_ORIGINS, BEAR_VOL, BEAR_GUARDS, BEAR_HALF_WIDE, BEAR_RISK, BEAR_RISK_HALF, BEAR_STAGED,
         ENTRY_ONLY,
     )
 
@@ -440,6 +440,7 @@ def guard_ways() -> list[tuple[str, str, dict, tuple[int, ...]]]:
     ways.append(("band", BAND[0], BAND[1], BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE))   # 2026-10-27
     for key, (word, fields) in zip(("bear_quality", "bear_steady"), BEAR_DEFENSIVE):  # 2026-10-28 第六版
         ways.append((key, word, fields, BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE))
+    ways.append(("bear_vol", BEAR_VOL[0], BEAR_VOL[1], BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE))   # 2026-10-28 第七版
     return ways
 
 

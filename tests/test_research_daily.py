@@ -905,3 +905,22 @@ def test_below_the_200_day_line_the_decision_ranks_by_the_defensive_factors():
     assert daily.rule_inputs(DailyRule(**base, bear_factors={"ml_tech_ens": 1.0})) == ["momentum_3", "ml_tech_ens"]
     with pytest.raises(ValueError):
         DailyRule(**base, bear_factors={"nonsense": 1.0})
+
+
+def test_the_cut_below_the_line_follows_taiex_volatility():
+    """2026-10-28 (空頭防護第七版): above the 200-session line all held; below it, the usual 20-session volatility over
+    today's, at most 1, at least half, rounded down to a quarter."""
+    days = weekdays(date(2021, 1, 4), date(2024, 6, 28))
+    data = market(days, {"1101.TW": {day: 10.0 for day in days}})
+    rng = np.random.default_rng(5)
+    calm = 100 * np.cumprod(1 + rng.normal(0.0005, 0.005, 700))           # 700 calm sessions rising
+    slow = calm[-1] * np.cumprod(1 + rng.normal(-0.003, 0.005, 60))       # then a calm slide below the average
+    wild = slow[-1] * np.cumprod(1 + rng.normal(-0.002, 0.03, len(days) - 760))   # then six times the volatility
+    fp = FactorPanel(Panel(data), market=np.concatenate([calm, slow, wild]))
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, vol_scale="taiex_vol")
+    levels = daily.exposure_schedule(data, fp, rule, FREE)
+    assert levels[days[600]] == 1.0                                       # above the line
+    assert not fp.risk_on(755) and levels[days[755]] >= 0.75              # below it, calm: most kept
+    assert not fp.risk_on(800) and levels[days[800]] == daily.MARKET_HALF  # below it, wild: half
+    assert set(levels.values()) <= {0.5, 0.75, 1.0}
+    assert rule.canonical()["vol_scale"] == "taiex_vol"
