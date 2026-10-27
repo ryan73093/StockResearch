@@ -1177,12 +1177,22 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         from quant_platform.research.pool import pool_view
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        key = request.args.get("track") if request.args.get("track") in distribution.TRACKS else "recent"
-        found = distribution.view(research_dir, pool_view(research_dir, basis="seed")["daily"])
-        track = found.get(key)
+        key = request.args.get("track") if request.args.get("track") in (*distribution.TRACKS, "forward") else "recent"
+        rows = pool_view(research_dir, basis="seed")["daily"]
+        if key == "forward":       # 2026-10-27 (使用者：獲益的那些分佈圖我也要看): the forward accounts, all sold
+            from quant_platform.research.stock_forward import StockForwardTracker
+
+            start = forward_common_start(datetime.now(TAIPEI).date()).isoformat()
+            found = distribution.forward_view(rows, StockForwardTracker(research_dir).summary(), start)
+        else:
+            found = distribution.view(research_dir, rows)
+        whole = found.get(key)
+        # 2026-10-27 (使用者：深度學習、RL、多因子、趨勢動能這些類別的分佈在哪一個位置): one category on the same axis
+        family = request.args.get("family") or ""
+        track = distribution.focus(whole, family) if whole and family else whole
         svg = distribution.charts({key: track}, with_dots=True)[key] if track else ""
-        return render_template("v2/research_distribution.html", key=key, track=track, svg=svg,
-                               tracks=distribution.TRACKS, sides=distribution.SIDES)
+        return render_template("v2/research_distribution.html", key=key, track=track, whole=whole, family=family,
+                               svg=svg, tracks=distribution.TRACKS, sides=distribution.SIDES)
 
     @blueprint.get("/research/checks")
     def research_checks():

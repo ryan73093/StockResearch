@@ -407,9 +407,12 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
 
     # 2026-10-26 (使用者：x 軸是最後的錢、y 軸是數量，投入的金額在中間；短歷史賽道加重): 2020-10 first, then 2015-06
     spread = distribution.view(research, pool["daily"])
+    # 2026-10-27 (使用者：獲益的那些分佈圖我也要看；深度學習、RL、多因子、趨勢動能這些類別在哪一個位置): the forward accounts'
+    # money if all sold too, every drawing with a row a category
+    spread.update(distribution.forward_view(pool["daily"], list(summary.values()), start))
     drawings = distribution.charts(spread)
     spread = {key: {**{name: track[name] for name in ("label", "invested", "bench", "counts", "median", "best", "worst")},
-                    "svg": drawings.get(key, "")} for key, track in spread.items()}
+                    "start": track.get("start"), "end": track.get("end"), "svg": drawings.get(key, "")} for key, track in spread.items()}
     searched = distribution.search_view(research)
     if searched:
         drawn = distribution.search_charts(searched)

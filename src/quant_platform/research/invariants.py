@@ -350,6 +350,16 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     checks.append(_check("每個規則都用 2020-10 以後的視窗分級", "使用者 2026-10-26／10-27：不要再用 2015～2020 作為篩選、短歷史賽道加重",
                          not (lacking["registry"] or lacking["list"]),
                          f"選手池缺的 {lacking['registry']} 個、本月名單缺的 {lacking['list']} 個"))
+    # 2026-10-27 (使用者：深度學習、RL、多因子、趨勢動能這些類別你要把點標註出來，我就是要知道這些類別的分佈在哪一個位置)
+    from quant_platform.research.distribution import unmarked
+
+    try:
+        bare = unmarked(research)
+        checks.append(_check("研究總覽的分佈圖標出每一類策略", "使用者 2026-10-27：每一類策略落在分佈圖的哪裡要標出來", not bare,
+                             "；".join(bare[:4]) if bare else "每一類都有一列"))
+    except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
+        checks.append(_check("研究總覽的分佈圖標出每一類策略", "使用者 2026-10-27：每一類策略落在分佈圖的哪裡要標出來", False,
+                             f"沒辦法檢查：{str(exc)[:120]}"))
     # 2026-10-26 (使用者：我不要再放在這個皮咪資料夾下；向量資料庫吃 C:\\Dev\\DBQdrant)
     place = placement(research.parent.parent, research)
     checks.append(_check("專案在 C:\\Dev、知識庫向量在共用的 DBQdrant", "使用者 2026-10-26：比照其他專案搬到 C:\\Dev",

@@ -1,48 +1,63 @@
 {# 2026-10-26 (使用者：我要看那個分佈圖，投入的金額是在中間，左邊右邊分別是哪個策略賺比較多錢；x 軸是最後的錢、y 軸是數量；
-   每個策略在 x 軸的哪一個點): the dashboard's window of the end money's spread (research/distribution.py). #}
+   每個策略在 x 軸的哪一個點): the dashboard's window of the end money's spread (research/distribution.py).
+   2026-10-27 (使用者：獲益的那些分佈圖我也要看；深度學習、RL、多因子、趨勢動能這些類別你要把點標註出來，或者開個分佈圖，我就是
+   要知道這些類別的分佈在哪一個位置): a row a category under the bars, the forward accounts as a track, one category on its own. #}
 {% if not track %}
-<p class="muted">還沒有完整回測過的規則。</p>
+<p class="muted">{{ '這一類沒有' if family else '還沒有' }}{{ '前向帳戶' if key == 'forward' else '完整回測過的規則' }}。</p>
 {% else %}
+{% set noun = track.noun or '個規則' %}
 {% set total = track.counts.lost + track.counts.behind + track.counts.ahead %}
-<p class="small" style="margin:0 0 8px"><b>{{ track.label }}</b>：每個規則開戶 30 萬、每月 5 日再投入 1 萬，到 2026-09-30 全部賣掉（扣手續費與稅）的錢。共投入 {{ '{:,.0f}'.format(track.invested / 10000) }} 萬，同樣的錢買 0050 是 {{ '{:,.0f}'.format(track.bench / 10000) }} 萬。{{ '{:,}'.format(total) }} 個規則：賠錢 {{ track.counts.lost }} 個、賺錢但輸 0050 {{ '{:,}'.format(track.counts.behind) }} 個、贏 0050 {{ '{:,}'.format(track.counts.ahead) }} 個（{{ '{:.0%}'.format(track.counts.ahead / total) }}）。</p>
+<p class="small" style="margin:0 0 8px"><b>{{ track.label }}</b>：{% if key == 'forward' %}每個帳戶 {{ track.start[5:7]|int }}/{{ track.start[8:10]|int }} 開戶 30 萬、每月 5 日再投入 1 萬，照規則真的做到 {{ track.end[5:7]|int }}/{{ track.end[8:10]|int }}，當天收盤全部賣掉（扣手續費與稅）拿回的錢{% else %}每個規則開戶 30 萬、每月 5 日再投入 1 萬，到 2026-09-30 全部賣掉（扣手續費與稅）的錢{% endif %}。共投入 {{ '{:,.0f}'.format(track.invested / 10000) }} 萬，同樣的錢買 0050 是 {{ '{:,.1f}'.format(track.bench / 10000) if key == 'forward' else '{:,.0f}'.format(track.bench / 10000) }} 萬。{{ '{:,}'.format(total) }} {{ noun }}：賠錢 {{ '{:,}'.format(track.counts.lost) }} 個、賺錢但輸 0050 {{ '{:,}'.format(track.counts.behind) }} 個、贏 0050 {{ '{:,}'.format(track.counts.ahead) }} 個（{{ '{:.0%}'.format(track.counts.ahead / total) }}）。</p>
+{% if whole and whole.families %}
+<div class="spread-pick" role="group" aria-label="看哪一類">
+  <button type="button" class="chip{{ '' if family else ' chip--on' }}" data-spread-family="" data-spread-track="{{ key }}">全部 {{ '{:,}'.format(whole["items"]|length) }}</button>
+  {% for row in whole.families %}<button type="button" class="chip{{ ' chip--on' if row.family == family else '' }}" data-spread-family="{{ row.family }}" data-spread-track="{{ key }}">{{ row.family }} {{ '{:,}'.format(row.count) }}</button>{% endfor %}
+</div>
+{% endif %}
 <figure class="dash-panel" style="margin:0 0 10px">
   {{ svg|safe }}
-  <div class="legend">{% for name, item in sides.items() %}<span><i class="sw-{{ item[0] }}bar"></i>{{ item[1] }} {{ '{:,}'.format(track.counts[name]) }} 個</span>{% endfor %}<span>柱子下面每一點是一個規則（滑鼠移上去看名字）</span></div>
+  <div class="legend">{% for name, item in sides.items() %}<span><i class="sw-{{ item[0] }}bar"></i>{{ item[1] }} {{ '{:,}'.format(track.counts[name]) }} 個</span>{% endfor %}<span>柱子下面每一點是一個{{ noun[1:] }}（滑鼠移上去看名字）</span>{% if track.families %}<span><i class="sw-fmed"></i>這一類的中位數</span><span><i class="sw-fiqr"></i>中間一半（第 25～75 百分位）</span>{% endif %}</div>
+  {% if track.families %}<p class="small muted" style="margin:4px 0 0">最下面每一列是一類：小柱子是這一類自己的分佈（高低只在同一列裡比；60 個以下的類別直接畫每一點）。點一列或上面的按鈕，只看這一類。</p>{% endif %}
 </figure>
 {% macro rows(items, start=1) %}
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
-    <thead><tr><th class="num">名次</th><th>規則</th><th class="num">期末</th><th class="num">是 0050 的</th><th>等級</th></tr></thead>
+    <thead><tr><th class="num">名次</th><th>{{ '帳戶（規則）' if key == 'forward' else '規則' }}</th><th class="num">{{ '全部賣掉' if key == 'forward' else '期末' }}</th><th class="num">是 0050 的</th><th>等級</th></tr></thead>
     <tbody>
     {% for item in items %}
       <tr><td class="num" data-label="名次">{{ start + loop.index0 }}</td>
-        <td data-primary>{% if item.spec_hash %}<a href="/research/rules/{{ item.spec_hash }}">#{{ item.trial }} {{ item.name }}</a>{% else %}#{{ item.trial }} {{ item.name }}{% endif %} <span class="badge">{{ item.family }}</span></td>
-        <td class="num" data-label="期末">{{ '{:,.0f}'.format(item.value / 10000) }} 萬</td>
+        <td data-primary>{% set who = ('#' ~ item.trial ~ ' ') if item.trial is not none else '' %}{% if item.spec_hash and item.trial is not none %}<a href="/research/rules/{{ item.spec_hash }}">{{ who }}{{ item.name }}</a>{% else %}{{ who }}{{ item.name }}{% endif %} <span class="badge">{{ item.family }}</span></td>
+        <td class="num" data-label="{{ '全部賣掉' if key == 'forward' else '期末' }}">{{ '{:,.1f}'.format(item.value / 10000) if key == 'forward' else '{:,.0f}'.format(item.value / 10000) }} 萬</td>
         <td class="num" data-label="是 0050 的">{{ '{:.2f}'.format(item.value / track.bench) }} 倍</td>
-        <td data-label="等級">{{ item.tier }}</td></tr>
+        <td data-label="等級">{{ item.tier or '—' }}</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
 {% endmacro %}
-<h3 class="dash-h">右邊：錢最多的 40 個</h3>
-{{ rows(track["items"][:40]) }}
-{% set families = {} %}
-{% for item in track["items"] %}{% set _ = families.setdefault(item.family, {'lost': 0, 'behind': 0, 'ahead': 0, 'best': item}) %}{% set _ = families[item.family].update({item.side: families[item.family][item.side] + 1}) %}{% endfor %}
-<h3 class="dash-h">每一類策略落在哪一邊</h3>
+{% if whole and whole.families and not family %}
+<h3 class="dash-h">每一類策略落在哪裡</h3>
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
-    <thead><tr><th>類別</th><th class="num">賠錢</th><th class="num">輸 0050</th><th class="num">贏 0050</th><th class="num">這一類最多</th></tr></thead>
+    <thead><tr><th>類別</th><th class="num">個數</th><th class="num">中位數</th><th class="num">中間一半</th><th class="num">賠錢</th><th class="num">輸 0050</th><th class="num">贏 0050</th><th class="num">這一類最多</th></tr></thead>
     <tbody>
-    {% for name, item in families|dictsort(by='key') %}
-      <tr><td data-primary>{{ name }}</td><td class="num" data-label="賠錢">{{ item.lost }}</td><td class="num" data-label="輸 0050">{{ item.behind }}</td>
-        <td class="num" data-label="贏 0050">{{ item.ahead }}</td><td class="num" data-label="這一類最多">{{ '{:,.0f}'.format(item.best.value / 10000) }} 萬</td></tr>
+    {% for row in whole.families %}
+      <tr><td data-primary><button type="button" class="button-link" data-spread-family="{{ row.family }}" data-spread-track="{{ key }}">{{ row.family }}</button></td>
+        <td class="num" data-label="個數">{{ '{:,}'.format(row.count) }}</td>
+        <td class="num" data-label="中位數">{{ '{:,.1f}'.format(row.median) if key == 'forward' else '{:,.0f}'.format(row.median) }} 萬</td>
+        <td class="num" data-label="中間一半">{{ '{:,.1f}～{:,.1f}'.format(row.q1, row.q3) if key == 'forward' else '{:,.0f}～{:,.0f}'.format(row.q1, row.q3) }} 萬</td>
+        <td class="num" data-label="賠錢">{{ row.lost }}</td><td class="num" data-label="輸 0050">{{ row.behind }}</td>
+        <td class="num" data-label="贏 0050">{{ row.ahead }}（{{ '{:.0%}'.format(row.ahead / row.count) }}）</td>
+        <td class="num" data-label="這一類最多">{{ '{:,.1f}'.format(row.best.value / 10000) if key == 'forward' else '{:,.0f}'.format(row.best.value / 10000) }} 萬</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
+{% endif %}
+<h3 class="dash-h">右邊：錢最多的 40 個</h3>
+{{ rows(track["items"][:40]) }}
 {% set lost = track["items"]|selectattr('side', 'equalto', 'lost')|list %}
-<h3 class="dash-h">左邊：賠錢的 {{ lost|length }} 個（全部）</h3>
-{% if lost %}{{ rows(lost, total - lost|length + 1) }}{% else %}<p class="muted">沒有。</p>{% endif %}
-<p class="col-help"><b>說明</b>　橫軸用對數刻度：投入的錢在正中間，往右每一格是多賺同樣的倍數，往左是少同樣的倍數。這些都是回測（規則挑選用到截止日以前的資料），能不能用以 9/1 起的前向為準。</p>
+<h3 class="dash-h">左邊：賠錢的 {{ lost|length }} 個{{ '（全部）' if lost|length <= 300 else '（最少的 300 個）' }}</h3>
+{% if lost %}{{ rows(lost[-300:], total - lost[-300:]|length + 1) }}{% else %}<p class="muted">沒有。</p>{% endif %}
+<p class="col-help"><b>說明</b>　橫軸用對數刻度：投入的錢在正中間，往右每一格是多賺同樣的倍數，往左是少同樣的倍數。{% if key == 'forward' %}前向是規則挑出來以後才真的照做的紀錄（沒有用到挑選以後的資料），還很短，一兩個月的輸贏多半是運氣；第一個 T0 最快 2026-11-30。{% else %}這些都是回測（規則挑選用到截止日以前的資料），能不能用以 9/1 起的前向為準。{% endif %}</p>
 {% endif %}

@@ -868,6 +868,18 @@ td.wrap { white-space: normal; min-width: 180px; }
 .viz rect.vput { fill: var(--vput); }
 .viz .mark { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 3; }
 .legend .sw-mark { background: var(--text-2); width: 3px; height: 14px; }
+/* 2026-10-27 (使用者：深度學習、RL、多因子、趨勢動能這些類別的分佈在哪一個位置): a row a category under the end-money spread */
+.viz .frow { cursor: pointer; outline: none; }
+.viz .frow:hover .col, .viz .frow:focus-visible .col { fill: var(--accent-bg); }
+.viz .fbin { opacity: .6; }
+.viz .fiqr { fill: var(--text-2); opacity: .45; }
+.viz .fmed { stroke: var(--text); stroke-width: 2.5; stroke-linecap: round; }
+.viz text.flbl { font-size: 11px; }
+.legend .sw-fmed { background: var(--text); width: 3px; height: 14px; }
+.legend .sw-fiqr { background: var(--text-2); opacity: .45; height: 4px; }
+.spread-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.spread-pick .chip { cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
+.chip--on { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
 .fbars { display: grid; gap: 4px; margin-top: 8px; }
 .fbar { display: grid; grid-template-columns: 7.5em minmax(0, 1fr) 8.5em; column-gap: 10px; row-gap: 2px; align-items: center;
   text-align: left; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 6px 8px;

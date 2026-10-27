@@ -7,6 +7,7 @@ every line's value there, and names its series at the line ends (wide); a bar ca
 from __future__ import annotations
 
 import math
+import zlib
 from datetime import date, datetime
 from html import escape
 
@@ -200,28 +201,41 @@ def _bars(groups, series, y_text, label, value_labels, size) -> str:
 
 
 def money_ticks(low: float, high: float) -> list[float]:
-    """1-2-5 values (萬元) inside low..high for a log axis."""
+    """1-2-5 values (萬元) inside low..high for a log axis; round even steps when the range is too narrow for three of
+    them (the forward accounts: 28～37 萬)."""
     out, scale = [], 10 ** math.floor(math.log10(max(low, 1e-9)))
     while scale <= high:
         out += [value for value in (scale, 2 * scale, 5 * scale) if low <= value <= high]
         scale *= 10
-    return out
+    return out if len(out) >= 3 else [value for value in ticks(low, high, 6) if low <= value <= high]
+
+
+def _jitter(text: str) -> float:
+    """0..1 from the point's own title: the same place on every drawing, no stripes along the sorted values."""
+    return (zlib.crc32(text.encode("utf-8")) % 1000) / 1000
 
 
 def histogram(bins: list[dict], refs: list[dict], label: str, dots: list[dict] | None = None,
-              count_text=lambda value: f"{value:,.0f}", sizes: tuple[str, ...] = tuple(SIZES)) -> str:
+              count_text=lambda value: f"{value:,.0f}", sizes: tuple[str, ...] = tuple(SIZES),
+              rows: list[dict] | None = None) -> str:
     """2026-10-26 (使用者：x 軸是最後的錢、y 軸是數量，投入的金額在中間，每個策略在 x 軸的哪一點): counts by final money on a
     log axis. ``bins`` = [{low, high, count, css, title}] in 萬元, ``refs`` = [{value, label}] (dashed lines: the money put
-    in, 0050's), ``dots`` = [{value, css, title}] (each rule a point under the bars; not on the phone's drawing)."""
-    return "".join(_histogram(bins, refs, label, dots, count_text, size) for size in sizes)
+    in, 0050's), ``dots`` = [{value, css, title}] (each rule a point under the bars; not on the phone's drawing).
+    2026-10-27 (使用者：深度學習、RL、多因子、趨勢動能這些類別的分佈在哪一個位置，連標都沒標): ``rows`` = [{label, count,
+    title, q1, median, q3 (萬元), bins (counts in ``bins``' order), dots (None, or [{value, css, title}] for a small
+    category), data ({name: value} for data- attributes)}] — one row a category under the axis on the same scale: its own
+    small spread (or its rules as points), its middle half and its median, named on the left (above it on the phone)."""
+    return "".join(_histogram(bins, refs, label, dots, count_text, size, rows or []) for size in sizes)
 
 
-def _histogram(bins, refs, label, dots, count_text, size) -> str:
+def _histogram(bins, refs, label, dots, count_text, size, rows=()) -> str:
     width, base_height = SIZES[size]
     wide = size != "narrow"
     strip = 46 if (dots and wide) else 0
-    height = base_height + strip
-    left, right, top, bottom = (54, 12, 30, 30 + strip) if wide else (40, 8, 40, 28)
+    row_height = 22 if wide else 30
+    rows_height = len(rows) * row_height + 12 if rows else 0
+    height = base_height + strip + rows_height
+    left, right, top, bottom = ((150 if rows else 54), 12, 30, 30) if wide else (40, 8, 40, 28)
     if not bins:
         return ""
     low, high = bins[0]["low"], bins[-1]["high"]
@@ -234,7 +248,7 @@ def _histogram(bins, refs, label, dots, count_text, size) -> str:
     ceiling = max(peak, y_ticks[-1]) * 1.06
 
     def sy(value: float) -> float:
-        return top + (ceiling - value) / ceiling * (base_height - top - 30 if wide else height - top - bottom)
+        return top + (ceiling - value) / ceiling * (base_height - top - bottom)
     parts = [f'<svg class="viz viz--{size}" viewBox="0 0 {width} {height}" role="img" aria-label="{escape(label)}">']
     for value in y_ticks:
         parts.append(f'<line class="{"zero" if value == 0 else "grid"}" x1="{left}" x2="{width - right}" y1="{sy(value):.1f}" '
@@ -250,17 +264,53 @@ def _histogram(bins, refs, label, dots, count_text, size) -> str:
                          f'height="{max(axis_y - sy(item["count"]), 1):.1f}" rx="2"><title>{escape(item["title"])}</title></rect>')
         parts.append(f'<rect class="col" x="{x0 - 1:.1f}" y="{top}" width="{max(x1 - x0 + 2, 1):.1f}" height="{axis_y - top:.1f}">'
                      f'<title>{escape(item["title"])}</title></rect>')
-    for number, ref in enumerate(refs):
-        x = sx(ref["value"])
+    placed = sorted(((sx(ref["value"]), ref) for ref in refs), key=lambda pair: pair[0])
+    for number, (x, ref) in enumerate(placed):
         parts.append(f'<line class="guide" x1="{x:.1f}" x2="{x:.1f}" y1="{top - 4}" y2="{axis_y:.1f}"/>')
-        anchor = "end" if x > width - right - 90 else ("start" if number else "middle")
+        if rows:                                            # on through the categories, under the axis's numbers
+            parts.append(f'<line class="guide" x1="{x:.1f}" x2="{x:.1f}" y1="{base_height + strip:.1f}" y2="{height - 4:.1f}"/>')
+        if any(abs(x - other) < 110 for position, (other, _) in enumerate(placed) if position != number):
+            anchor = "start" if number else "end"           # two lines close together: the labels to either side
+        else:
+            anchor = "end" if x > width - right - 90 else ("start" if number else "middle")
         parts.append(f'<text class="lbl" x="{x + (4 if anchor == "start" else -4 if anchor == "end" else 0):.1f}" '
                      f'y="{top - 8 - (14 if number and not wide else 0)}" text-anchor="{anchor}">{escape(ref["label"])}</text>')
     if strip:
         base_y = axis_y + 26
-        for index, dot in enumerate(dots):
-            jitter = ((index * 2654435761) % 1000) / 1000                      # the same place on every drawing
+        for dot in dots:
+            jitter = _jitter(dot["title"])
             parts.append(f'<circle class="{dot["css"]}" cx="{sx(dot["value"]):.1f}" cy="{base_y + jitter * (strip - 14):.1f}" '
                          f'r="2.4"><title>{escape(dot["title"])}</title></circle>')
+    first = base_height + strip + 6
+    for number, row in enumerate(rows):
+        y0 = first + number * row_height
+        band_top, band_bottom = (y0 + 4, y0 + row_height - 4) if wide else (y0 + 15, y0 + row_height - 3)
+        data = "".join(f' data-{name}="{escape(str(value))}"' for name, value in (row.get("data") or {}).items())
+        parts.append(f'<g class="frow"{data} tabindex="0" role="button" aria-label="{escape(row["title"])}">'
+                     f'<title>{escape(row["title"])}</title>'
+                     f'<rect class="col" x="0" y="{y0}" width="{width}" height="{row_height}"/>'
+                     f'<line class="grid" x1="{left}" x2="{width - right}" y1="{band_bottom + 0.5:.1f}" y2="{band_bottom + 0.5:.1f}"/>')
+        name = f'{row["label"]}・{row["count"]:,} 個'
+        if wide:
+            parts.append(f'<text class="lbl" x="{left - 8}" y="{(band_top + band_bottom) / 2 + 4:.1f}" text-anchor="end">{escape(name)}</text>')
+        else:
+            parts.append(f'<text class="lbl flbl" x="2" y="{y0 + 11}">{escape(name)}・中位 {row["median"]:,.{1 if row["median"] < 100 else 0}f} 萬</text>')
+        if row.get("dots"):
+            for dot in row["dots"]:
+                jitter = _jitter(dot["title"])
+                parts.append(f'<circle class="{dot["css"]}" cx="{sx(dot["value"]):.1f}" '
+                             f'cy="{band_top + 2 + jitter * (band_bottom - band_top - 5):.1f}" r="2.4"><title>{escape(dot["title"])}</title></circle>')
+        else:
+            peak_row = max(row["bins"]) or 1
+            for item, count in zip(bins, row["bins"]):
+                if count:
+                    x0, x1 = sx(item["low"]) + 1, sx(item["high"]) - 1
+                    tall = max((band_bottom - band_top) * count / peak_row, 1)
+                    parts.append(f'<rect class="{item["css"]} fbin" x="{x0:.1f}" y="{band_bottom - tall:.1f}" '
+                                 f'width="{max(x1 - x0, 1):.1f}" height="{tall:.1f}" rx="1"/>')
+        q1, q3 = sx(row["q1"]), sx(row["q3"])
+        parts.append(f'<rect class="fiqr" x="{q1:.1f}" y="{band_bottom - 1:.1f}" width="{max(q3 - q1, 2):.1f}" height="3" rx="1.5"/>'
+                     f'<line class="fmed" x1="{sx(row["median"]):.1f}" x2="{sx(row["median"]):.1f}" y1="{band_top - 2:.1f}" '
+                     f'y2="{band_bottom + 2:.1f}"/></g>')
     parts.append("</svg>")
     return "".join(parts)
