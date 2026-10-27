@@ -11,6 +11,7 @@
   - 每月名單評分、名單後段、補算的工作程序只載入上市股票，9 個「上市＋上櫃」規則一直用上市資料評分（10 月名單是 T1～T3，沒有前向帳戶）。
   - 因子動能從會變多的基本因子清單裡挑，清單不在輸入裡（3 個）。
 - 修正：`model.digest` 加進 `.pt`、`.npz` 與每月重訓檔（只有 `.pkl` 的不變）；`rolling.panel` 依規則股票池載入（名單、名單後段、補算）；因子動能輸入加基本因子清單與它們的資料表；`windows2020.stale_rules` 跳過已重新登錄的；`windows2020 --other-universe`。流程 `reproduce`（10/28 00:38 起）重做。
+- 被迫賣出的前向追蹤（`forward-forced`，`research/forced_followup.py`，每週日稽核流程）：第一次 10/28，滿 20 個交易日的 1,053 筆，賣掉的比留著的少賺 1.51%（中位數）、69% 賣對。
 - 防止再發生：每週日稽核流程加 `reproduce-check`（`research/reproduce_check.py`）：隨機抽 30 個選手池最新結果、各用自己的股票池重算，期末金額要一元不差；研究總覽正確性檢查一列、每天 16:00 需求檢查「選手池的結果重算得出來（抽樣，8 天內）」。10 月名單 9 個上市＋上櫃規則重評後全部 T3（原本 T1 2、T2 3），前向沒有新過門檻的。
 - 測試：model、rolling（新 1）、gate2020（新 1）、stress（新 1）、reproduce_check（新 1）、checks、invariants、daily、factor_timing、forward、stock_forward、model_risk、model_deep2、cli，相關 139 個通過。回復方式：還原本筆 commit；`reproduce` 新登錄的結果是新的試驗編號，舊的仍在登錄檔裡。
 
