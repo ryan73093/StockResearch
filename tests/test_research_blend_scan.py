@@ -97,3 +97,36 @@ def test_the_guarded_pool_keeps_the_200_session_guards_only():
     assert guarded({"rule": DailyRule(**base, vol_scale="taiex_half")})
     assert guarded({"rule": DailyRule(**base, market_filter="taiex_200")})
     assert not guarded({"rule": DailyRule(**base)}) and not guarded({"rule": DailyRule(**base, market_filter="taiex_200s")})
+
+
+def test_the_blocks_cover_every_combination_in_order():
+    import itertools
+
+    for size in (2, 3):
+        joined = np.concatenate(list(bs.combo_blocks(7, size, block=4)))
+        assert joined.tolist() == [list(combo) for combo in itertools.combinations(range(7), size)]
+
+
+def test_the_recent_gate_and_ranking():
+    """2026-10-28 (第九輪): from the split month a blend must beat 0050 (time-weighted); the score is 1/4 the yearly
+    excess before it and 3/4 the one after — a rule that only won early is left out, one that wins after ranks first."""
+    paid = np.full(25, 100.0)
+    bench = 100 * 1.01 ** np.arange(25)                               # 0050 +1% a month
+    early_only = 100 * np.r_[1.02 ** np.arange(13), 1.02 ** 12 * 1.005 ** np.arange(1, 13)]
+    late = 100 * np.r_[1.01 ** np.arange(13), 1.01 ** 12 * 1.02 ** np.arange(1, 13)]
+    found = bs.measure(np.stack([early_only, late]), bench, paid, [], split=13)
+    assert found["recent"][0] < 0 < found["recent"][1]
+    assert found["early"][0] > 0 and abs(found["early"][1]) < 1e-9
+    assert found["recent"][1] == pytest.approx((1.02 / 1.01) ** 12 - 1)
+    months = [f"{2019 + (index + 8) // 12}-{(index + 8) % 12 + 1:02d}" for index in range(25)]
+    assert months[13] == "2020-10"
+
+    def rule(trial, values):
+        return {**member(trial, values), "bench": bench, "paid": paid, "months": months}
+    other = 100 * np.r_[1.0, np.cumprod(np.where(np.arange(24) % 2, 0.015, 0.009) + 1)]   # +1.2% a month, uneven
+    members = [rule(10, early_only), rule(12, late), rule(13, other)]
+    found = bs.search(members, sizes=(2,), recent_split=13)
+    assert found["ranking"] == "recent" and found["finalists"]
+    best = found["finalists"][0]
+    assert 12 in best["members"] and best["recent"] > 0
+    assert best["score"] == pytest.approx(0.25 * best["early"] + 0.75 * best["recent"], abs=2e-4)
