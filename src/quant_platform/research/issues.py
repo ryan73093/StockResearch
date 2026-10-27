@@ -629,7 +629,11 @@ def housing_issue(history: Path, today: date) -> dict[str, object]:
     months = [_months_back(month, back) for back in range(35, -1, -1)]
     market_rows = []
     stock_index = _indexed(sectors, ("taiex", "construction", "finance"), today)
-    by_month = {row["x"][:7]: row for row in stock_index}
+    # the combined chart starts every line at 100 in the same month (the housing months' first)
+    by_month = {row["x"][:7]: row for row in _indexed(sectors, ("taiex", "construction"), today, years=4)}
+    base_stock = by_month.get(f"{first:%Y-%m}") or {}
+    by_month = {key: {name: row[name] / base_stock[name] * 100 for name in ("taiex", "construction")
+                      if row.get(name) and base_stock.get(name)} for key, row in by_month.items()}
     base_volume = volume.get(first)
     base_loans = loans.get(first)
     for when in months:
