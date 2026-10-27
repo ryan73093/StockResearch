@@ -256,6 +256,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_deep2_riskadj": "深度學習第二版・學以波動調整的前一成（不靠挑高波動股）",
                  "ml_deep2_monthly": "深度學習第二版・前一成，每月重新訓練（每個月只用之前結束的標籤，10 個種子）",
                  "ml_tech_deep": "技術分析機器人第三版（深度學習第二版・前一成，只看價量：60 日價量序列＋20 個技術因子＋大盤狀態）",
+                 "ml_tech_deep_r": "技術分析機器人第四版（同第三版只看價量的深度學習，門檻改看 2021～2025）",
                  "ml_deep": "深度學習（GRU 讀每檔最近 40 個交易日的報酬、成交值與 12 個因子名次，逐年滾動訓練）",
                  "ml_deep2": "深度學習第二版（GRU 讀 60 個交易日的價量與籌碼 z 分數＋當天因子快照與大盤狀態；標籤 20 日超額報酬，損失 Huber＋偏重前段的 ListNet；10 個種子）",
                  "ml_deep2_top": "深度學習第二版・前一成（同上，學「之後 20 日是否在當天前 10%」；10 個種子）",
@@ -4401,6 +4402,23 @@ def tech_deep_batch() -> list[DailyRule]:
                       factors={"ml_tech_deep": 1.0}, weighting="inverse_risk", trim_above=2.0, **common)]
 
 
+def tech_deep4_batch() -> list[DailyRule]:
+    """2026-10-28 (research_method §7「技術分析機器人第四版」, written before the run): dl-2.5.1 (dl-2.5.0 as it was)
+    gated on 2021-2025 — its top-20 gain at least gbm-2.1.0's and four of five years at +0.6% or more — in the third
+    version's frame, in the three holding styles."""
+    from quant_platform.research.model_deep2 import gate
+
+    check = gate(Path("instance") / "research" / "models", "dl-2.5.1")
+    print(f"dl-2.5.1 門檻（2021-2025 前 20 名多賺，對 gbm-2.1.0）：{check}", flush=True)
+    if not check.get("passed"):
+        return []
+    common = {"check": "weekly", "keep": 3, "industry_cap": 0.3, "switching": "cost1"}
+    name = "技術分析機器人第四版（只看價量的深度學習）：前 20 名、同產業最多 3 成、每週決策、前 60 名內續抱、看成本才換股"
+    return [DailyRule(name=f"{name}、持有 20 天", factors={"ml_tech_deep_r": 1.0}, **common),
+            DailyRule(name=f"{name}、月線上續抱", factors={"ml_tech_deep_r": 1.0}, hold="trend", min_hold=0, **common),
+            DailyRule(name=f"{name}、不設最短持有", factors={"ml_tech_deep_r": 1.0}, min_hold=0, **common)]
+
+
 def model_h_batch() -> list[DailyRule]:
     """2026-10-20 (使用者：持續優化每一個策略): gbm-2.3.0 (model H: model G with the insiders' notices and the buyback
     programs) — only if its development years' top-20 gain is at least gbm-2.2.0's (registered, research_method §7) —
@@ -5198,7 +5216,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "blendrecent": blend_recent_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "blendrecent": blend_recent_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "techdeep4": tech_deep4_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
            "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,

@@ -193,3 +193,19 @@ def test_the_market_state_is_one_value_a_day_placed_in_its_own_history():
     assert 0 < market[1][0] <= 1                        # a percentile against its own past
     assert not np.allclose(block[0, :, 0], block[0, 0, 0])   # the factor still varies across stocks
     assert "market:maintenance" in model.version_features("gbm-2.9.0")
+
+
+def test_the_technical_robot_s_fourth_version_is_gated_on_2021_to_2025():
+    """2026-10-28: dl-2.5.1 is dl-2.5.0 judged on 2021-2025 against gbm-2.1.0 (four of five years at +0.6% or more)."""
+    from quant_platform.research import model_deep2
+
+    assert model_deep2.gate_years("dl-2.5.1") == (2021, 2022, 2023, 2024, 2025)
+    assert model_deep2.gate_years("dl-2.5.0") == model_deep2.GATE_YEARS
+    assert "dl-2.5.1" in model_deep2.TECHNICAL and model.VERSIONS["dl-2.5.1"]["label"] == "deep2"
+    mine = {"version": "dl-2.5.1", "years": {str(year): {"top20_gain": gain} for year, gain in
+                                             zip(range(2016, 2026), [0.0, 0.0, 0.0, 0.0, 0.0, 0.02, 0.007, 0.012, 0.009, 0.015])}}
+    theirs = {"version": "gbm-2.1.0", "years": {str(year): {"top20_gain": gain} for year, gain in
+                                                zip(range(2021, 2026), [0.019, 0.0036, 0.0063, 0.0052, 0.027])}}
+    check = model_deep2.gate_check(mine, theirs, model_deep2.gate_years("dl-2.5.1"))
+    assert check["passed"] and check["years"] == [2021, 2022, 2023, 2024, 2025] and check["years_above_floor"] == 5
+    assert not model_deep2.gate_check(mine, theirs)["passed"]           # the old years: no gain there

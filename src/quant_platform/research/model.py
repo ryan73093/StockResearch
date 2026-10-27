@@ -90,6 +90,8 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_deep2_riskadj": {"version": "dl-2.4.0", "label": "deep2"},
           # 2026-10-20 (the technical robot's third version): dl-2.1.0 on prices and volumes only (model_deep2.TECHNICAL)
           "ml_tech_deep": {"version": "dl-2.5.0", "label": "deep2"},
+          # 2026-10-28 (技術分析機器人第四版): dl-2.5.0 as it was, gated on 2021-2025 (model_deep2.RECENT_GATED)
+          "ml_tech_deep_r": {"version": "dl-2.5.1", "label": "deep2"},
           # 2026-10-17 (docs/research_dl_exits_review.md D3): dl-2.1.0 with cross-stock attention and a market gate
           "ml_deep3": {"version": "dl-3.0.0", "label": "deep2"},
           # 2026-10-18 (S9-W15): dl-2.1.0 learning from every listed and TPEx stock that trades normally

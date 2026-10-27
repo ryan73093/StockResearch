@@ -42,16 +42,16 @@ import numpy as np
 import pandas as pd
 
 LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10", "dl-2.2.0": "top10", "dl-2.4.0": "top10",
-          "dl-2.5.0": "top10", "dl-2.6.0": "top10", "dl-2.7.0": "top10"}
+          "dl-2.5.0": "top10", "dl-2.5.1": "top10", "dl-2.6.0": "top10", "dl-2.7.0": "top10"}
 # 2026-10-20 (使用者：技術分析機器人有沒有在優化？): the technical robot's third version — dl-2.1.0 seeing prices and
 # volumes only: the sequence without the chip columns and the snapshot of the robot's 20 technical factors
 # (tech_rl.TECH_FEATURES) instead of model G's; judged against the technical ensemble gbm-2.1.0 (PLAIN_AGAINST)
-TECHNICAL = {"dl-2.5.0"}
+TECHNICAL = {"dl-2.5.0", "dl-2.5.1"}
 # 2026-10-20 (使用者：持續優化每一個策略): dl-2.1.0 refitted every month instead of every year — each month's ten networks
 # learn from every label that ended before the month's first session and score that month (the forward accounts'
 # models are retrained monthly too); judged against dl-2.1.0 itself
 MONTHLY = {"dl-2.6.0"}
-PLAIN_AGAINST = {"dl-2.5.0": "gbm-2.1.0", "dl-2.6.0": "dl-2.1.0", "dl-2.7.0": "dl-2.1.0"}
+PLAIN_AGAINST = {"dl-2.5.0": "gbm-2.1.0", "dl-2.5.1": "gbm-2.1.0", "dl-2.6.0": "dl-2.1.0", "dl-2.7.0": "dl-2.1.0"}
 # 2026-10-22 (集保因子第五版; research_method §7): dl-2.1.0 whose snapshot is model I's features (gbm-2.5.0: model G's
 # and the holder brackets) instead of model G's; judged against dl-2.1.0 itself (PLAIN_AGAINST)
 SNAPSHOT_OF = {"dl-2.7.0": "gbm-2.5.0"}
@@ -95,6 +95,14 @@ TEMPERATURE = 0.5                     # the ListNet target: softmax(excess ÷ (0
 TOP_SHARE = 0.1
 CLIP = 5.0
 GATE_YEARS = (2016, 2017, 2018, 2019, 2020)
+# 2026-10-28 (使用者 10/26-27：2015～2020 不當門檻、短歷史加重，同類的地方直接照做; research_method §7「技術分析機器人
+# 第四版」): these versions are gated on 2021-2025 instead, trained first, the other years only past it
+RECENT_GATED = {"dl-2.5.1"}
+RECENT_GATE_YEARS = (2021, 2022, 2023, 2024, 2025)
+
+
+def gate_years(version: str) -> tuple[int, ...]:
+    return RECENT_GATE_YEARS if version in RECENT_GATED else GATE_YEARS
 GATE_FLOOR = 0.006
 GATE_COUNT = 4
 
@@ -354,16 +362,16 @@ def _rank_average(values: list[np.ndarray]) -> np.ndarray:
     return np.mean([pd.Series(value).rank(pct=True).to_numpy() for value in values], axis=0)
 
 
-def gate_check(meta: dict, against: dict) -> dict[str, object]:
-    """The registered gate on two metas' yearly top-20 gains (see the module text)."""
-    mine = {year: (meta.get("years") or {}).get(str(year), {}).get("top20_gain") for year in GATE_YEARS}
-    theirs = [(against.get("years") or {}).get(str(year), {}).get("top20_gain") for year in GATE_YEARS]
+def gate_check(meta: dict, against: dict, years: tuple[int, ...] = GATE_YEARS) -> dict[str, object]:
+    """The registered gate on two metas' yearly top-20 gains (see the module text); ``years`` (2026-10-28) the gate's."""
+    mine = {year: (meta.get("years") or {}).get(str(year), {}).get("top20_gain") for year in years}
+    theirs = [(against.get("years") or {}).get(str(year), {}).get("top20_gain") for year in years]
     known = [value for value in mine.values() if value is not None]
     theirs = [value for value in theirs if value is not None]
-    average = float(np.mean(known)) if len(known) == len(GATE_YEARS) else None
+    average = float(np.mean(known)) if len(known) == len(years) else None
     yardstick = float(np.mean(theirs)) if theirs else None
     above = sum(1 for value in known if value >= GATE_FLOOR)
-    return {"version": meta.get("version"), "against": against.get("version"), "years": list(GATE_YEARS),
+    return {"version": meta.get("version"), "against": against.get("version"), "years": list(years),
             "top20_gain": average, "against_top20_gain": yardstick, "years_above_floor": above,
             "floor": GATE_FLOOR, "passed": average is not None and yardstick is not None and average >= yardstick
             and above >= GATE_COUNT}
@@ -395,7 +403,7 @@ def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
     against = AGAINST_OF.get(version) or PLAIN_AGAINST.get(version, AGAINST)
     path = root / against / "meta.json"
     other = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    return gate_check_d3(meta, other) if version in AGAINST_OF else gate_check(meta, other)
+    return gate_check_d3(meta, other) if version in AGAINST_OF else gate_check(meta, other, gate_years(version))
 
 
 def gate(models_root: str | Path, version: str) -> dict[str, object]:
@@ -524,7 +532,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
     report_labels = judged[1] if judged else labels
     ranks = {column: pd.Series(report_labels[column]).rank(pct=True).to_numpy() for column in columns}
     years = years or list(range(FIRST_YEAR, fp.sessions[-1].year + 1))
-    order = [year for year in GATE_YEARS if year in years] + [year for year in years if year not in GATE_YEARS]
+    gated = gate_years(version)
+    order = [year for year in gated if year in years] + [year for year in years if year not in gated]
     meta_path = out / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
     meta.update({"version": version, "label": "deep2", "loss": kind, "architecture": architecture,
@@ -538,11 +547,11 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
     stored = _load_scores(out, fp.symbols)
     for number, year in enumerate(order):
         # 2026-10-24: gate=False — the stress test retrains a version that already passed its gate (research/stress.py)
-        if gate and year not in GATE_YEARS and all(str(item) in meta["years"] for item in GATE_YEARS if item in years):
+        if gate and year not in gated and all(str(item) in meta["years"] for item in gated if item in years):
             check = _judge(version, meta, out.parent)
             meta["gate"] = check
             if not check["passed"]:
-                meta["stopped"] = f"{GATE_YEARS[0]}～{GATE_YEARS[-1]} 沒過門檻，其他年度不訓練"
+                meta["stopped"] = f"{gated[0]}～{gated[-1]} 沒過門檻，其他年度不訓練"
                 break
         session_columns = [column for column, day in enumerate(fp.sessions) if day.year == year and column >= LENGTH]
         # the periods refitted: the year (one fit) or each month of it (MONTHLY); the last period's networks are kept
