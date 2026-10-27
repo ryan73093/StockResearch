@@ -342,7 +342,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "rl-switch", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
@@ -957,6 +957,19 @@ def main() -> int:
                                           f"{counts['stale']} 個（要整個重跑）、失敗 {counts['errors']} 個")
             print(job.payload["summary"], flush=True)
         return 1 if counts["errors"] else 0
+
+    if args.command == "rl-execution":
+        # 2026-10-28 (research_method §7「RL 第六版：成交執行」): fill one minute after the open or at the close, offline
+        from quant_platform.research import rl_execution
+
+        path = rl_execution.run(Path(args.base), RESEARCH)
+        found = json.loads(path.read_text(encoding="utf-8"))
+        for side in ("sell", "buy", "both"):
+            part = found[side]
+            print(side, "機器人", part["robot"], "固定", part["fixed"], "多賺", part["lead"], "開盤後一分鐘成交的比例",
+                  part["minute_share"], flush=True)
+        print("判定", "過" if found.get("passed") else "沒過", f"已寫入 {path}")
+        return 0
 
     if args.command == "rl-switch":
         # 2026-10-28 (research_method §7「RL 第五版：換股時機」): switch-or-keep, offline
