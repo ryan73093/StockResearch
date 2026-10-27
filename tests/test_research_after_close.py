@@ -107,3 +107,25 @@ def test_todays_decisions_are_kept_for_the_record_and_the_board(tmp_path):
     kept = DecisionStore(tmp_path).fixed(key(RULE.rule_hash, date(2026, 10, 1)))
     assert kept["through"] == today and kept["days"][date(2026, 10, 1)]           # every day since the common start
     assert len(kept["days"][today]) == 3
+
+
+
+def test_the_table_the_orders_read_is_kept_and_compared_with_the_days_data(tmp_path):
+    """2026-10-27 (forward audit: 10/27 decisions differed from the ranking on the 15:16 data; the 13:50 table had been
+    overwritten): the orders' table is kept, and the stocks whose numbers changed afterwards are listed."""
+    days = weekdays(date(2025, 1, 1), date(2026, 10, 13))
+    today = days[-1]
+    build(tmp_path / "history", days)
+    track(tmp_path)
+    early = table(today, len(days) - 1)
+    early["tables"][1]["data"][1][4] = "40,000,000,000"          # 1101's turnover at 13:50, lower than the day's data
+    del early["tables"][1]["data"][6]                               # 1106 not in the table yet
+    after_close.prepare(tmp_path / "history", tmp_path, today, early,
+                        now=datetime.combine(today, time(13, 52), tzinfo=TAIPEI), min_rows=1)
+    assert (tmp_path / after_close.FOLDER / f"{today.isoformat()}.table.json").is_file()
+    found = after_close.revisions(tmp_path, tmp_path / "history", today)
+    assert set(found) == {"1101"} and found["1101"]["orders"]["turnover"] == 40_000_000_000
+    assert found["1101"]["data"]["turnover"] == 60_000_000_000
+    assert after_close.revisions(tmp_path, tmp_path / "history", today, {"1102.TW", "1106.TW"}) == {
+        "1106": {"orders": None, "data": {"close": price(5, len(days) - 1), "volume": 3_000_000, "turnover": 60_000_000_000}}}
+    assert after_close.revisions(tmp_path, tmp_path / "history", days[-2]) is None          # no table kept that day

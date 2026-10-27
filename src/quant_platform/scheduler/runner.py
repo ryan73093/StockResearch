@@ -366,6 +366,18 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
             written = written + stocks
         except Exception:
             logger.exception("Stock-rule forward simulation failed")
+        try:                                       # 2026-10-27: what changed after the 13:50 table the orders read
+            import json as _json
+
+            from quant_platform.research.after_close import FOLDER, revisions
+
+            changed = revisions(research, research / "history", local_now.date())
+            if changed is not None:
+                (research / FOLDER / f"{local_now.date().isoformat()}.revisions.json").write_text(
+                    _json.dumps(changed, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+                logger.info("After-close table revised afterwards: %s codes", len(changed))
+        except Exception:
+            logger.exception("After-close table comparison failed")
         try:                                       # 2026-10-13: the common-start board (research/forward_board.py)
             from quant_platform.research.forward_board import build as build_board
 

@@ -375,10 +375,27 @@ class StockForwardTracker:
                           "added_at": moment})
         if restart:
             self._archive_records(restart, moment)
+            # 2026-10-27: the decisions too — an account stopped before the 10-21 refit kept its old model's decisions
+            # under the same start and replayed them when the 2020-10 gate passed it again (the audit: 27 of 27 days)
+            self._archive_decisions(restart, moment)
         if added or changed:
             self._folder.mkdir(parents=True, exist_ok=True)
             self.tracked_path.write_text(json.dumps(items + added, ensure_ascii=False, indent=1), encoding="utf-8")
         return added
+
+    def _archive_decisions(self, hashes: set[str], moment: str) -> int:
+        """Move these accounts' decisions to ``decisions-archive.json`` (kept, never deleted) and off the store, so the
+        account is decided again from its start."""
+        from quant_platform.research.decisions import DecisionStore
+
+        store = DecisionStore(self._base)
+        moved = store.drop({name for name in store._data if name.split("@")[0] in hashes})
+        if moved:
+            archive = store.path.with_name("decisions-archive.json")
+            kept = json.loads(archive.read_text(encoding="utf-8")) if archive.is_file() else {}
+            kept.update({f"{name}~{moment}": value for name, value in moved.items()})
+            archive.write_text(json.dumps(kept, ensure_ascii=False), encoding="utf-8")
+        return len(moved)
 
     def _archive_records(self, hashes: set[str], moment: str) -> int:
         """Move these accounts' records to ``log-archive.jsonl`` (appended, never deleted) and off the log."""
@@ -527,8 +544,6 @@ class StockForwardTracker:
             return self._restart_accounts(hashes, reason, now, field)
 
     def _restart_accounts(self, hashes: set[str], reason: str, now: datetime | None, field: str) -> list[str]:
-        from quant_platform.research.decisions import DecisionStore
-
         moment = (now or datetime.now(TAIPEI)).isoformat(timespec="seconds")
         items = self.tracked()
         hit = [item for item in items if item["rule_hash"] in hashes and not item.get("stopped")]
@@ -536,13 +551,7 @@ class StockForwardTracker:
             return []
         hashes = {item["rule_hash"] for item in hit}
         self._archive_records(hashes, moment)
-        store = DecisionStore(self._base)
-        moved = store.drop({name for name in store._data if name.split("@")[0] in hashes})
-        if moved:
-            archive = store.path.with_name("decisions-archive.json")
-            kept = json.loads(archive.read_text(encoding="utf-8")) if archive.is_file() else {}
-            kept.update({f"{name}~{moment}": value for name, value in moved.items()})
-            archive.write_text(json.dumps(kept, ensure_ascii=False), encoding="utf-8")
+        self._archive_decisions(hashes, moment)
         for item in hit:
             item[field] = {"at": moment, "reason": reason}
         self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -903,6 +912,7 @@ class StockForwardTracker:
         many accounts picked at random (``seed``) instead of all. Written to forward/stocks/audit-<time>.json."""
         import random
 
+        from quant_platform.research.after_close import revisions
         from quant_platform.research.blend import BlendRule
         from quant_platform.research.daily import DailyRule, daily_rankings, load
         from quant_platform.research.decisions import DecisionStore, key
@@ -935,6 +945,12 @@ class StockForwardTracker:
                         differed += 1
                         if first is None:
                             first = {"day": str(day), "kept": sorted(symbols), "again": sorted(found)}
+                            # 2026-10-27: a day the after-close orders decided at 13:50 — the stocks that moved, as
+                            # the orders' table had them and as the day's data has them
+                            moved = set(found) ^ set(symbols)
+                            changed = revisions(self._base, self._history, date.fromisoformat(str(day)), moved)
+                            if changed:
+                                first["table"] = changed
             rows.append({"rule_hash": item["rule_hash"], "name": item["name"], "days": days, "differed": differed,
                          "first": first})
         moment = datetime.now(TAIPEI)

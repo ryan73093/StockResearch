@@ -371,6 +371,8 @@ def main() -> int:
                         help="forward：讀這些因子（逗號分隔）的在跑帳戶封存後從起算日重新記錄（--reason 寫原因；2026-10-26 防偷看修正）")
     parser.add_argument("--restart-broken", action="store_true",
                         help="forward：對帳不一致的帳戶封存後從起算日重新記錄（--reason 寫原因；2026-10-22 修復用）")
+    parser.add_argument("--restart-audited", action="store_true",
+                        help="forward：最近一次前向核對（forward-audit）和重算不一樣的帳戶，紀錄和決定封存後從起算日重新記錄（--reason 寫原因）")
     parser.add_argument("--reason", help="forward --restart-from：原因")
     parser.add_argument("--stop-ai-account", action="store_true",
                         help="forward：停止追蹤「AI 研究員（整體）」帳戶（沒有合格規則時整個放 0050；紀錄保留）")
@@ -1778,6 +1780,12 @@ def main() -> int:
                    and reads_any(item["rule"], names)}
             restarted = tracker.restart_accounts(hit, args.reason or f"讀 {'、'.join(names)}，從起算日重新記錄")
             print(f"讀 {'、'.join(names)}、紀錄與決定封存後從起算日重新記錄的帳戶 {len(restarted)} 個", flush=True)
+        if args.restart_audited:                # 2026-10-27: the accounts the latest forward audit found differing
+            audits = sorted((RESEARCH / "forward" / "stocks").glob("audit-*.json"))
+            found = json.loads(audits[-1].read_text(encoding="utf-8")) if audits else {"rows": []}
+            hit = {row["rule_hash"] for row in found["rows"] if row.get("differed")}
+            names = tracker.restart_accounts(hit, args.reason or "前向核對和重算不一樣，從起算日重新記錄")
+            print(f"前向核對（{audits[-1].name if audits else '沒有'}）不一樣、從起算日重新記錄的帳戶 {len(names)} 個", flush=True)
         if args.restart_broken:                 # 2026-10-22: accounts out of step, recorded again from their start
             broken = {key for key, found in reconcile(tracker.records(), tracker.rebases()).items() if found}
             names = tracker.restart_accounts(broken, args.reason or "對帳不一致，從起算日重新記錄")

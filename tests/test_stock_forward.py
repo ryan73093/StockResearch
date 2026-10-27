@@ -508,3 +508,31 @@ def test_accounts_reading_a_retrained_model_are_recorded_again_from_their_start(
     assert set(DecisionStore(tmp_path)._data) == {f"{trend.rule_hash}@2026-09-01"}
     assert len(json.loads((folder / "decisions-archive.json").read_text(encoding="utf-8"))) == 2
     assert (folder / "log-archive.jsonl").is_file()
+
+
+def test_a_stopped_account_on_the_list_again_is_decided_again_not_replayed(tmp_path):
+    """2026-10-27 (forward audit: 27 of 27 days differed): an account stopped before a model refit came back on the
+    month's list under the same start; its old decisions must go to the archive with its records, or the account
+    replays the old model's choices."""
+    from quant_platform.research.daily import DailyRule
+    from quant_platform.research.decisions import DecisionStore
+
+    rule = DailyRule(name="掃描：外資持股增＋模型B", factors={"foreign_holding_change": 1.0, "ml_gbm_excess": 1.0})
+    folder = tmp_path / "forward" / "stocks"
+    folder.mkdir(parents=True)
+    (folder / "tracked.json").write_text(json.dumps([{
+        "rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.canonical(), "kind": "daily", "since": "2026-09-01",
+        "stopped": "2026-10-20", "stop_reason": "不在名單"}], ensure_ascii=False), encoding="utf-8")
+    (folder / "log.jsonl").write_text(json.dumps({"rule_hash": rule.rule_hash, "date": "2026-09-01"}) + "\n", encoding="utf-8")
+    old = {"through": "2026-10-17", "days": {"2026-09-01": ["1101.TW"]}}
+    (folder / "decisions.json").write_text(json.dumps({f"{rule.rule_hash}@2026-09-01": old}), encoding="utf-8")
+    (tmp_path / "rolling").mkdir()
+    (tmp_path / "rolling" / "2026-08-31.json").write_text(json.dumps({"cutoff": "2026-08-31", "graded": [
+        {"passed": True, "tier": "T0 候選", "spec": rule.canonical()}]}, ensure_ascii=False), encoding="utf-8")
+    StockForwardTracker(tmp_path, experiments=False).sync(date(2026, 10, 27))
+    item = json.loads((folder / "tracked.json").read_text(encoding="utf-8"))[0]
+    assert not item.get("stopped") and item["since"] == "2026-09-01" and item["restarted"]["month"] == "2026-08-31"
+    assert DecisionStore(tmp_path)._data == {}                                  # decided again from 9/1
+    archive = json.loads((folder / "decisions-archive.json").read_text(encoding="utf-8"))
+    assert list(archive.values()) == [old] and list(archive)[0].startswith(f"{rule.rule_hash}@2026-09-01~")
+    assert (folder / "log-archive.jsonl").is_file()

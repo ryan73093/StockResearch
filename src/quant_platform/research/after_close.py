@@ -44,6 +44,36 @@ def today_table(payload: object, day: date) -> tuple[list[dict], float | None, f
     return rows, benchmark, taiex
 
 
+def revisions(research: Path, history: Path, day: date, codes=None) -> dict[str, dict] | None:
+    """2026-10-27: the stocks whose close, volume or turnover in the day's data differ from the table the after-close
+    orders read at 13:50 (``<day>.table.json``): {code: {"orders": {...}, "data": {...}}} — only ``codes`` when given;
+    None when the table was not kept or the day's data is not in yet."""
+    from quant_platform.research.history.stocks import read_year
+
+    path = Path(research) / FOLDER / f"{day.isoformat()}.table.json"
+    if not path.is_file():
+        return None
+    kept, _benchmark, _taiex = today_table(json.loads(path.read_text(encoding="utf-8")), day)
+    data = {row["code"]: row for row in read_year(Path(history) / "stocks" / "twse" / f"{day.year}.parquet")
+            if row["date"] == day}
+    if not data:
+        return None
+    wanted = {str(code).split(".")[0] for code in codes} if codes is not None else None
+    output = {}
+    for row in kept:
+        code = row["code"]
+        if wanted is not None and code not in wanted:
+            continue
+        final = data.get(code)
+        fields = ("close", "volume", "turnover")
+        if final is None or any(float(row.get(name) or 0) != float(final.get(name) or 0) for name in fields):
+            output[code] = {"orders": {name: row.get(name) for name in fields},
+                            "data": {name: (final or {}).get(name) for name in fields}}
+    for code in sorted((wanted or set()) - {row["code"] for row in kept}):
+        output[code] = {"orders": None, "data": {name: (data.get(code) or {}).get(name) for name in ("close", "volume", "turnover")}}
+    return output
+
+
 def order_lines(entry: dict, close: float, previous: float | None, names: dict[str, str]) -> dict[str, object]:
     """One engine order as the owner places it: the round lots in the fixed-price session at the close, the odd
     lot in the odd-lot auction with a limit (close ± 1% inside the day's limits, ``costs.order_limit``)."""
@@ -88,6 +118,12 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
     rows, benchmark, taiex = today_table(payload, day)
     if len(rows) < min_rows or not benchmark or not taiex:
         return None
+    # 2026-10-27 (forward audit: 7 accounts' 10/27 decisions differed from the ranking on the 15:16 data — 2348's
+    # 20-session turnover crossed the 20M line only with the day's full turnover; the 13:50 table was overwritten by the
+    # 15:16 fetch): the table these orders read is kept beside them, and ``revisions`` compares it with the day's data
+    tables = research / FOLDER
+    tables.mkdir(parents=True, exist_ok=True)
+    (tables / f"{day.isoformat()}.table.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     started = (now or datetime.now(TAIPEI)).astimezone(TAIPEI)
     costs = costs or broker_costs("cathay")
     items = [item for item in StockForwardTracker(research).tracked()
