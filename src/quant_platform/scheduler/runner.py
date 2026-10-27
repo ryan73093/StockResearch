@@ -844,6 +844,27 @@ def collect_market_news(container: "Container", now: datetime | None = None, get
     return found
 
 
+def refresh_issues(container: "Container", now: datetime | None = None) -> object | None:
+    """2026-10-27 (使用者：再加一個議題追蹤 — AI 科技巨頭支出的風險、台灣房市跟股市；首頁做初步警示): every day at 18:20, the
+    public data the issues read (SEC filings, the central bank's tables, the real-price registrations, the margin loans)
+    and the lights (research/issues.py)."""
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import issues
+    from quant_platform.research.history.finmind import env_token
+    from quant_platform.research.jobs import JobLog
+
+    root = FilePath(_instance_dir(container.settings.database_url)).parent
+    research = _instance_dir(container.settings.database_url) / "research"
+    with JobLog(research).start("議題追蹤：抓 SEC 財報、央行房貸、實價登錄、融資餘額，重算警示燈號",
+                                "scheduler refresh_issues") as job:
+        payload = issues.refresh(research, token=env_token(root) or container.settings.finmind_token)
+        counts = payload["counts"]
+        job.payload["summary"] = f"告警 {counts['alert']}、警示 {counts['watch']}、正常 {counts['ok']}、沒有資料 {counts['none']}"
+    return counts
+
+
 def check_invariants(container: "Container", now: datetime | None = None) -> object | None:
     """2026-10-20 (使用者：專案需求跟 AGENTS.md 有沒有在看): the owner's decisions checked as code on trading days at 16:00,
     after the forward records (research/invariants.py); a failure is notified."""
@@ -1121,6 +1142,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=50,
+    )
+    scheduler.add_job(
+        refresh_issues,
+        args=[container],
+        trigger=CronTrigger(hour=18, minute=20, timezone=timezone),
+        id="issues_refresh",
+        name="議題追蹤（每天 18:20：SEC 財報、央行房貸、實價登錄、融資餘額，重算警示燈號）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
         collect_market_news,

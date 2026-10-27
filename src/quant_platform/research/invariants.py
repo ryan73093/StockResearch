@@ -350,6 +350,17 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     checks.append(_check("每個規則都用 2020-10 以後的視窗分級", "使用者 2026-10-26／10-27：不要再用 2015～2020 作為篩選、短歷史賽道加重",
                          not (lacking["registry"] or lacking["list"]),
                          f"選手池缺的 {lacking['registry']} 個、本月名單缺的 {lacking['list']} 個"))
+    # 2026-10-27 (使用者：再加一個議題追蹤 — AI 科技巨頭支出的風險、台灣房市跟股市；首頁做初步警示): the lights are
+    # rebuilt daily at 18:20; a page more than two days old is reported
+    from quant_platform.research.issues import read as issues_read
+
+    lights = issues_read(research)
+    built = date.fromisoformat(lights["built_at"][:10]) if lights else None
+    checks.append(_check("議題追蹤兩天內更新過", "使用者 2026-10-27：議題追蹤與首頁的初步警示",
+                         built is not None and (today - built).days <= 2,
+                         f"{lights['built_at'][:16]} 更新：告警 {lights['counts']['alert']}、警示 {lights['counts']['watch']}"
+                         if lights else "還沒有議題資料"))
+
     # 2026-10-27 (使用者：深度學習、RL、多因子、趨勢動能這些類別你要把點標註出來，我就是要知道這些類別的分佈在哪一個位置)
     from quant_platform.research.distribution import unmarked
 

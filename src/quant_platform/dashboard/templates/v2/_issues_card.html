@@ -1,0 +1,22 @@
+{# 2026-10-27 (使用者：在首頁的部分去做一個初步警示): the issues' lights on the home page (research/issues.py headline). #}
+{% macro issues_card(head) %}
+{% if head %}
+{% set names = {'ok': '正常', 'watch': '警示', 'alert': '告警', 'none': '沒有資料'} %}
+{% set css = {'alert': 'badge--bad', 'watch': 'badge--warn', 'ok': 'badge--ok'} %}
+<section class="card issues-card" id="issues">
+  <div class="card__head"><h2>議題警示</h2><a class="small" href="/issues">議題追蹤 {{ head.counts.alert }} 告警・{{ head.counts.watch }} 警示</a></div>
+  <div class="issues-card__grid">
+    {% for topic in head.topics %}
+    <a class="issues-card__topic" href="/issues#{{ topic.key }}">
+      <span class="issues-card__title"><span class="badge {{ css.get(topic.level, '') }}">{{ names[topic.level] }}</span> {{ topic.title }}</span>
+      {% if topic.flagged %}
+      <ul>{% for item in topic.flagged[:4] %}<li><span class="badge {{ css.get(item.level, '') }}">{{ names[item.level] }}</span> {{ item.name }}：{{ item.value_text }}</li>{% endfor %}
+        {% if topic.flagged|length > 4 %}<li class="muted">還有 {{ topic.flagged|length - 4 }} 項</li>{% endif %}</ul>
+      {% else %}<span class="small muted">{{ topic.total }} 個追蹤項目都正常</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  <p class="small muted" style="margin:6px 0 0">{{ head.built_at[:16].replace('T', ' ') }} 更新・警示＝值得注意，告警＝議題擔心的風險正在發生；只是提醒，不會改任何策略或下單。</p>
+</section>
+{% endif %}
+{% endmacro %}

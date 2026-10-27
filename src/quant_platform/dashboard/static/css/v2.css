@@ -163,7 +163,8 @@ h1, h2, h3, p, li, dd { overflow-wrap: anywhere; }
 
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  /* 2026-10-27: six main items (議題 added) */
+  display: grid; grid-template-columns: repeat(6, 1fr);
   background: color-mix(in srgb, var(--chrome) 92%, transparent);
   -webkit-backdrop-filter: saturate(1.4) blur(12px);
   backdrop-filter: saturate(1.4) blur(12px);
@@ -896,4 +897,15 @@ td.wrap { white-space: normal; min-width: 180px; }
   .fbar { grid-template-columns: minmax(0, 1fr) auto; }
   .fbar__name { grid-column: 1; grid-row: 1; } .fbar__value { grid-column: 2; grid-row: 1; }
   .fbar__track { grid-column: 1 / 3; grid-row: 2; } .fbar__sub { grid-column: 1 / 3; grid-row: 3; }
+}
+/* 2026-10-27 (使用者：在首頁做初步警示): the issues' lights */
+.issues-card__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.issues-card__topic { display: block; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; color: var(--text); text-decoration: none; }
+.issues-card__topic:hover, .issues-card__topic:focus-visible { border-color: var(--accent); background: var(--accent-bg); }
+.issues-card__title { display: block; font-weight: 600; margin-bottom: 6px; }
+.issues-card__topic ul { margin: 0; padding-left: 0; list-style: none; font-size: 13px; line-height: 1.75; }
+@media (min-width: 768px) {
+  .issues-table td:nth-child(1) { width: 4.5em; }
+  .issues-table td:nth-child(3), .issues-table td:nth-child(4) { white-space: nowrap; }
+  .issues-table th:nth-child(5), .issues-table th:nth-child(6) { min-width: 9.5em; }
 }

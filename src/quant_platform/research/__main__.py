@@ -342,9 +342,12 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "screen-check", "scan-full", "scan-full-spread", "windows2020"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
+    parser.add_argument("--full", action="store_true",
+                        help="issues：實價登錄從 2023 年第 1 季整個重抓（平常只抓沒抓過的季與最新一期）")
+    parser.add_argument("--build-only", action="store_true", help="issues：不抓資料，只用已有的資料重算燈號")
     parser.add_argument("--sample", type=int, default=0,
                         help="forward-audit：隨機抽幾個帳戶檢查（預設 0＝全部）")
     parser.add_argument("--no-half", action="store_true",
@@ -899,6 +902,25 @@ def main() -> int:
             print(f"{report['compared']} 個完整回測過的規則：排名相關 {report['rank_correlation']:.2f}；初篩每年比 0050 多 "
                   f"{report['screen_median']:+.2%}、完整回測 {report['engine_median']:+.2%}（中位數）；初篩贏、完整回測輸的 "
                   f"{report['screen_only']} 個（{path.name}）", flush=True)
+        return 0
+    if args.command == "issues":
+        # 2026-10-27 (使用者：再加一個議題追蹤 — AI 科技巨頭支出的風險、台灣房市跟股市；首頁做初步警示)
+        from quant_platform.research import issues
+        from quant_platform.research.history.finmind import env_token
+        from quant_platform.research.jobs import JobLog
+
+        with JobLog(RESEARCH).start("議題追蹤：抓 SEC 財報、央行房貸、實價登錄、融資餘額，重算警示燈號",
+                                    "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+            payload = (issues.build(RESEARCH) if args.build_only
+                       else issues.refresh(RESEARCH, full=args.full, token=env_token(Path("."))))
+            counts = payload["counts"]
+            job.payload["summary"] = f"告警 {counts['alert']}、警示 {counts['watch']}、正常 {counts['ok']}、沒有資料 {counts['none']}"
+        for name, found in (payload.get("fetched") or {}).items():
+            print(f"{name}：{found}", flush=True)
+        for topic in payload["topics"]:
+            print(f"== {topic['title']}", flush=True)
+            for item in topic["indicators"]:
+                print(f"  [{issues.LEVELS[item['level']]}] {item['name']}：{item['value_text']}（{item['as_of']}）", flush=True)
         return 0
     if args.command == "windows2020":
         # 2026-10-27 (使用者 10/26：不要再用 2015～2020 作為篩選；短歷史賽道加重; 10/27：問我幹嘛): the gate's windows

@@ -792,9 +792,17 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             rolling = rolling_test.summary(rolling_test.latest(research_dir)) or rolling_test.pending(research_dir)
         except Exception:  # noqa: BLE001
             logger.exception("Rolling forward test failed")
+        issues_head = None
+        try:                      # 2026-10-27 (使用者：在首頁的部分做一個初步警示): the issues' lights
+            from quant_platform.research import issues as issue_tracker
+
+            issues_head = issue_tracker.headline(issue_tracker.read(_instance_dir(dependencies.settings.database_url) / "research"))
+        except Exception:  # noqa: BLE001
+            logger.exception("Issue lights failed")
         return render_template(
             "v2/today.html",
             active_nav="today",
+            issues_head=issues_head,
             growth=growth,
             rolling=rolling,
             dividends_due=dividends_due,
@@ -1168,6 +1176,18 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         return render_template("v2/research_searches.html",
                                f=funnel(research_dir, pool_view(research_dir, basis="seed")["daily"]))
+
+    @blueprint.get("/issues")
+    def issues_page():
+        """2026-10-27 (使用者：左邊再加一個議題追蹤，針對現在市場上的議題進行追蹤 — AI 科技巨頭支出的風險、營收、景氣；
+        台灣房市跟股市；盡可能用圖、表格讓人理解，什麼項目可以警示、什麼項目可以告警): research/issues.py."""
+        from quant_platform.research import issues as issue_tracker
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        payload = issue_tracker.read(research_dir)
+        return render_template("v2/issues.html", active_nav="issues", payload=payload,
+                               charts=issue_tracker.charts(payload) if payload else {},
+                               changes=issue_tracker.changes(research_dir), levels=issue_tracker.LEVELS)
 
     @blueprint.get("/research/distribution")
     def research_distribution():
