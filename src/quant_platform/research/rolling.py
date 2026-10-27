@@ -216,7 +216,16 @@ def holdout(data, fp, rows: list[dict], cutoff: date, costs, end: date | None = 
     return output
 
 
+def unique_rows(rows: list[dict]) -> list[dict]:
+    """2026-10-28: one graded row a rule — the last one (the newest grading). The same rule registered twice under two
+    names (#4316 and #5037, the consensus lists) had two rows; the gate's windows reached only the later one."""
+    last = {str(row.get("rule_hash")): index for index, row in enumerate(rows) if row.get("rule_hash")}
+    return [row for index, row in enumerate(rows) if not row.get("rule_hash") or last[str(row["rule_hash"])] == index]
+
+
 def save(research: str | Path, cutoff: date, payload: dict) -> Path:
+    if payload.get("graded"):
+        payload = {**payload, "graded": unique_rows(payload["graded"])}
     target = folder(research) / f"{cutoff.isoformat()}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_suffix(".partial")

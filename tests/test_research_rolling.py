@@ -221,3 +221,21 @@ def test_a_rule_is_graded_on_its_own_universes_stocks(monkeypatch):
     assert rolling._universe({"spec": {"universe": "all"}}) == "all"
     assert rolling._universe({"spec": '{"kind": "blend", "sleeves": []}'}) == "twse"
     assert rolling._universe({"spec": {"factors": {}}}) == "twse"
+
+
+def test_a_rule_keeps_one_row_in_the_month_the_last(tmp_path):
+    """2026-10-28: the same rule graded twice (registered under two names) keeps its last, newest row when saved; the
+    gate's check reads the last row only."""
+    import json as _json
+
+    from quant_platform.research import rolling as _rolling
+    from quant_platform.research.windows2020 import list_items
+
+    rows = [{"rule_hash": "a", "spec": {"name": "舊"}, "metrics": {"windows": {}}, "tier": "T0 候選"},
+            {"rule_hash": "b", "spec": {"name": "乙"}, "metrics": {"windows": {}}},
+            {"rule_hash": "a", "spec": {"name": "新"}, "tier": "T0 候選",
+             "metrics": {"windows": {"1y": {"since_2020": {}}, "3y": {"since_2020": {}}}}}]
+    assert [row["spec"]["name"] for row in _rolling.unique_rows(rows)] == ["乙", "新"]
+    assert [item["key"] for item in list_items({"cutoff": "2026-08-31", "graded": rows})] == ["b"]
+    path = _rolling.save(tmp_path, date(2026, 8, 31), {"cutoff": "2026-08-31", "graded": rows})
+    assert [row["spec"]["name"] for row in _json.loads(path.read_text(encoding="utf-8"))["graded"]] == ["乙", "新"]

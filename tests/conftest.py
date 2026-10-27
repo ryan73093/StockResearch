@@ -7,9 +7,14 @@ is imported, so such a mistake now fails loudly instead of writing to the live d
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from quant_platform.database import engine
+
+# 2026-10-28: the knowledge base's vectors go to the shared Qdrant server (C:\Dev\DBQdrant) when the project's .env
+# names it; a test indexing its own rows there would delete the real collection's points — tests use the embedded store
+os.environ["KNOWLEDGE_QDRANT_URL"] = ""
 
 PRODUCTION_DATABASE = (Path(__file__).resolve().parents[1] / "instance" / "quant_platform.db").resolve()
 

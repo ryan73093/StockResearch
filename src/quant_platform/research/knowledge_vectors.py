@@ -128,13 +128,28 @@ def store(research: str | Path) -> Path:
     return Path(research) / "knowledge" / "qdrant"
 
 
+def _setting(name: str) -> str:
+    """2026-10-28: the environment's value when set, else the project's .env (the research command and its hourly pipeline do not
+    load .env — the index kept writing the embedded store after the owner moved it to DBQdrant on 10/26)."""
+    if name in os.environ:                # set, even empty (the tests set it empty: never the shared server)
+        return os.environ[name].strip()
+    path = Path.cwd() / ".env"
+    if not path.is_file():
+        return ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, _, found = line.strip().partition("=")
+        if key.strip() == name:
+            return found.strip().strip('"').strip("'")
+    return ""
+
+
 def server() -> tuple[str, str | None] | None:
     """(url, API key) of the shared Qdrant server (C:\\Dev\\DBQdrant) when KNOWLEDGE_QDRANT_URL is set; the key from
     KNOWLEDGE_QDRANT_KEY_FILE or .runtime/qdrant/api-key.txt (a copy of the server's, never shown)."""
-    url = os.getenv("KNOWLEDGE_QDRANT_URL", "").strip()
+    url = _setting("KNOWLEDGE_QDRANT_URL")
     if not url:
         return None
-    key_file = Path(os.getenv("KNOWLEDGE_QDRANT_KEY_FILE", "").strip() or Path.cwd() / ".runtime" / "qdrant" / "api-key.txt")
+    key_file = Path(_setting("KNOWLEDGE_QDRANT_KEY_FILE") or Path.cwd() / ".runtime" / "qdrant" / "api-key.txt")
     return url, (key_file.read_text(encoding="utf-8").strip() if key_file.is_file() else None)
 
 

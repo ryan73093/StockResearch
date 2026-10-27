@@ -183,10 +183,11 @@ def run(research: str | Path, today: date, backups: Path | None = None,
         elif factor.startswith(("rl_", "rolling")):
             from quant_platform.research import rl_timing
 
+            # 2026-10-28: each robot version by its number (ROLLING<nn>_VERSION) — RL 3.5 was missing from a fixed list
+            # and its accounts were reported as not refitted although they were
             version = {"rl_blocks": rl_timing.BLOCK_VERSION, "rl_rolling": rl_timing.ROLLING_VERSION,
-                       "rolling_equal": rl_timing.ROLLING_VERSION}.get(factor) or {
-                "32": rl_timing.ROLLING32_VERSION, "33": rl_timing.ROLLING33_VERSION,
-                "34": rl_timing.ROLLING34_VERSION}.get(factor[-2:] if factor.startswith("rl_rolling") else factor[7:9])
+                       "rolling_equal": rl_timing.ROLLING_VERSION}.get(factor) or getattr(
+                rl_timing, f"ROLLING{factor[-2:] if factor.startswith('rl_rolling') else factor[7:9]}_VERSION", None)
             meta_path = models / str(version) / "meta.json"
             try:
                 refits = json.loads(meta_path.read_text(encoding="utf-8")).get("monthly") or {}

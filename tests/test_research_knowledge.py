@@ -180,7 +180,7 @@ def test_the_vectors_go_to_the_shared_server_when_one_is_set(tmp_path, monkeypat
     collection name there; without them the embedded store as before."""
     from quant_platform.research import knowledge_vectors
 
-    monkeypatch.delenv("KNOWLEDGE_QDRANT_URL", raising=False)
+    monkeypatch.setenv("KNOWLEDGE_QDRANT_URL", "")
     assert knowledge_vectors.server() is None and knowledge_vectors.collection() == knowledge_vectors.COLLECTION
     key = tmp_path / "api-key.txt"
     key.write_text("secret-value\n", encoding="utf-8")
@@ -188,3 +188,20 @@ def test_the_vectors_go_to_the_shared_server_when_one_is_set(tmp_path, monkeypat
     monkeypatch.setenv("KNOWLEDGE_QDRANT_KEY_FILE", str(key))
     assert knowledge_vectors.server() == ("http://127.0.0.1:6333", "secret-value")
     assert knowledge_vectors.collection() == "stockresearch_knowledge_bge_m3_v1"
+
+
+def test_the_shared_server_is_read_from_the_project_env_when_the_environment_lacks_it(tmp_path, monkeypatch):
+    """2026-10-28: the research command does not load .env — the hourly index kept writing the embedded store after
+    the move to DBQdrant; the setting now comes from the project's .env when the environment has none."""
+    from quant_platform.research import knowledge_vectors
+
+    key = tmp_path / "key.txt"
+    key.write_text("from-file" + chr(10), encoding="utf-8")
+    lines = ["OTHER=1", "KNOWLEDGE_QDRANT_URL=http://127.0.0.1:6333", f"KNOWLEDGE_QDRANT_KEY_FILE={key}"]
+    (tmp_path / ".env").write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("KNOWLEDGE_QDRANT_URL", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_QDRANT_KEY_FILE", raising=False)
+    assert knowledge_vectors.server() == ("http://127.0.0.1:6333", "from-file")
+    monkeypatch.setenv("KNOWLEDGE_QDRANT_URL", "")                       # set empty: the embedded store
+    assert knowledge_vectors.server() is None

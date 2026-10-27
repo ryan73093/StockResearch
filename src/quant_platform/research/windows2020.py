@@ -77,10 +77,10 @@ def list_items(payload: dict, other_universe: bool = False) -> list[dict]:
     """The month's graded rows that lack the windows (or were carried from an earlier month: run in full).
     ``other_universe`` (2026-10-28): also every rule on another universe than the listed stocks, in full — the list had
     graded them on the listed stocks (research_method §7「重現性」)."""
-    from quant_platform.research.rolling import _universe
+    from quant_platform.research.rolling import _universe, unique_rows
 
     output = []
-    for row in payload.get("graded") or []:
+    for row in unique_rows(payload.get("graded") or []):        # 2026-10-28: a rule's last row only
         metrics = row.get("metrics") or {}
         if row.get("error") or not row.get("spec"):
             continue
