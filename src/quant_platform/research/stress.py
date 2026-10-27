@@ -516,6 +516,53 @@ def grade_guards(research: str | Path) -> Path:
     return path
 
 
+HALF_WAYS = ("taiex_half", "taiex_half_wide")
+
+
+def pair_rows(rows: list[dict], key: str, since: dict[int, float], against=HALF_WAYS) -> dict[str, object]:
+    """2026-10-28 (空頭防護第七、八版的判定): each graded version of way ``key`` against the same original rule's half-guard
+    version (rows of ``grade_guards``; ``since``: each trial's account from 2020-10, its final value) — per pair the
+    2020-10 money and the 2015-06 money as a share of the half guard's, the drawdown and the worst 0050-fall gap
+    changed (points, + = shallower / fell less); the medians and the counts either way."""
+    half = {row["origin"]: row for row in rows if row["guard"] in against}
+    pairs = []
+    for row in rows:
+        other = half.get(row["origin"])
+        if row["guard"] != key or other is None or not since.get(row["trial"]) or not since.get(other["trial"]):
+            continue
+        pairs.append({"trial": row["trial"], "half": other["trial"], "origin": row["origin"],
+                      "recent": since[row["trial"]] / since[other["trial"]], "full": row["final"] / other["final"],
+                      "drawdown": (row["dd"] - other["dd"]) * 100,
+                      "gap": ((row["gap"] or 0) - (other["gap"] or 0)) * 100, "tier": row["tier"], "half_tier": other["tier"]})
+    if not pairs:
+        return {"key": key, "pairs": []}
+
+    def middle(name):
+        return round(float(np.median([pair[name] for pair in pairs])), 4)
+    return {"key": key, "pairs": pairs, "count": len(pairs), "recent": middle("recent"), "full": middle("full"),
+            "drawdown": middle("drawdown"), "gap": middle("gap"),
+            "recent_more": sum(pair["recent"] > 1 for pair in pairs), "shallower": sum(pair["drawdown"] > 0 for pair in pairs),
+            "fell_less": sum(pair["gap"] > 0 for pair in pairs),
+            "passing": sum(pair["tier"] in ("T0 候選", "T0 候選（高風險）") for pair in pairs),
+            "half_passing": sum(pair["half_tier"] in ("T0 候選", "T0 候選（高風險）") for pair in pairs)}
+
+
+def guard_pairs(research: str | Path, key: str) -> Path:
+    """The newest ``grade_guards`` file's versions of ``key`` paired with the half guard (``pair_rows``), written next
+    to it (stress/pairs-<key>-<time>.json)."""
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path(research)
+    latest = sorted((research / "stress").glob("guards-*.json"))[-1]
+    rows = json.loads(latest.read_text(encoding="utf-8"))["rows"]
+    since = {record.trial_id: float(record.metrics.get("since_2020_final_value") or 0)
+             for record in TrialRegistry(research / "trials.jsonl").records() if record.kind == "candidate"}
+    found = pair_rows(rows, key, since)
+    path = research / "stress" / f"pairs-{key}-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path.write_text(json.dumps({"from": latest.name, **found}, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path
+
+
 FORCED = "不再符合選股條件"
 
 

@@ -153,3 +153,22 @@ def test_the_sells_forced_by_the_stock_lines_are_counted_from_the_reasons():
            date(2026, 9, 2): {"2454": "補進前一天沒買到的位置", "2603": "不再符合選股條件（股價或成交值低於門檻的七成，或沒有分數）"}}
     assert stress.count_exits(why) == {"sells": 3, "forced": 2}
     assert stress.count_exits({}) == {"sells": 0, "forced": 0}
+
+
+def test_a_way_is_paired_with_the_same_rule_s_half_guard():
+    """2026-10-28 (空頭防護第七、八版): pairs by the original rule; the 2020-10 money from the registry's accounts."""
+    import pytest
+
+    from quant_platform.research import stress
+
+    rows = [{"trial": 1, "origin": 10, "guard": "taiex_half", "final": 100.0, "dd": -0.30, "gap": 0.02, "tier": "T0 候選"},
+            {"trial": 2, "origin": 10, "guard": "bear_trend", "final": 110.0, "dd": -0.32, "gap": 0.01, "tier": "T2"},
+            {"trial": 3, "origin": 11, "guard": "taiex_half_wide", "final": 200.0, "dd": -0.40, "gap": -0.01, "tier": "T2"},
+            {"trial": 4, "origin": 11, "guard": "bear_trend", "final": 180.0, "dd": -0.35, "gap": 0.00, "tier": "T0 候選"},
+            {"trial": 5, "origin": 12, "guard": "bear_trend", "final": 50.0, "dd": -0.2, "gap": 0.0, "tier": "T2"}]
+    found = stress.pair_rows(rows, "bear_trend", {1: 50.0, 2: 55.0, 3: 80.0, 4: 76.0, 5: 9.0})
+    assert found["count"] == 2 and [pair["origin"] for pair in found["pairs"]] == [10, 11]       # #12 has no half guard
+    assert found["recent"] == pytest.approx((1.10 + 0.95) / 2)
+    assert found["drawdown"] == pytest.approx((-2.0 + 5.0) / 2) and found["gap"] == pytest.approx((-1.0 + 1.0) / 2)
+    assert found["recent_more"] == 1 and found["shallower"] == 1 and found["fell_less"] == 1
+    assert found["passing"] == 1 and found["half_passing"] == 1

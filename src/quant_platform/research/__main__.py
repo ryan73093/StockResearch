@@ -347,6 +347,7 @@ def main() -> int:
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
                         help="issues：實價登錄從 2023 年第 1 季整個重抓（平常只抓沒抓過的季與最新一期）")
+    parser.add_argument("--pair", help="stress-guards：一種做法（例如 bear_trend）和同一個規則的減碼一半版本逐一配對")
     parser.add_argument("--sells", help="stress-guards：數一種做法（例如 band）各版本因「不再符合選股條件」賣出的次數")
     parser.add_argument("--build-only", action="store_true", help="issues：不抓資料，只用已有的資料重算燈號")
     parser.add_argument("--sample", type=int, default=0,
@@ -1367,6 +1368,15 @@ def main() -> int:
         for way in json.loads(path.read_text(encoding="utf-8"))["ways"]:
             print(way["short"], f"{way['passing']}/{way['graded']}", way["kept"], way["drawdown"], way["gap"], flush=True)
         print(f"已寫入 {path}")
+        if args.pair:       # 2026-10-28: one way against the same rules' half guard (空頭防護第七、八版的判定)
+            found = json.loads(stress.guard_pairs(RESEARCH, args.pair).read_text(encoding="utf-8"))
+            if found.get("pairs"):
+                print(f"{args.pair} 對減碼一半 {found['count']} 對：2020-10 起的錢中位數 {found['recent']:.1%}"
+                      f"（多 {found['recent_more']} 個）、2015-06 起 {found['full']:.1%}、最大回撤 {found['drawdown']:+.1f} 點"
+                      f"（淺 {found['shallower']} 個）、0050 最大那次跌 {found['gap']:+.2f} 點（少跌 {found['fell_less']} 個）、"
+                      f"過門檻 {found['passing']}／減碼一半 {found['half_passing']}")
+            else:
+                print(f"{args.pair}：沒有可以配對的版本")
         return 0
 
     if args.command == "stress-protect":
