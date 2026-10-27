@@ -8,6 +8,8 @@ all describe the same state. Nothing here is written; the sources are.
 
 from __future__ import annotations
 
+import functools
+
 import json
 from datetime import date
 from pathlib import Path
@@ -139,6 +141,13 @@ def _build_sources(research_dir: Path) -> dict[str, str]:
 
 
 def _every_batch() -> dict[str, str]:
+    """2026-10-28: built once a process (every batch rebuilt from the registry takes about a minute; the tests' fresh
+    folders asked for it in every test) — a copy, since the callers add to it."""
+    return dict(_every_batch_once())
+
+
+@functools.lru_cache(maxsize=1)
+def _every_batch_once() -> dict[str, str]:
     from quant_platform.research.batches import BATCHES
     from quant_platform.research.daily import BATCHES as DAILY_BATCHES
     from quant_platform.research.stock_rules import BATCHES as STOCK_BATCHES
