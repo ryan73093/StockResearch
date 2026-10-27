@@ -426,11 +426,14 @@ switch ($Name) {
     "forwardaudit" { Invoke-Step "forward-audit" @("-m", "quant_platform.research", "forward-audit") }
     "halftwins_a" {
         # 2026-10-27 (research_method §7「全部過門檻規則補減碼一半版本」): every passing rule's half-guard twin that was
-        # never graded (1,119), half here and half in halftwins_b side by side; halftwinsend grades the list after both
+        # never graded (1,119), half here and half in halftwins_b side by side; halftwinsend grades the list after both.
+        # Which rules pass reads the 2020-10 windows, so both wait for the gate's backfill (gate2020) to finish.
+        Wait-While "等分級門檻補算跑完（gate2020）" { [bool](Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "research-pipeline\.ps1" -and $_.CommandLine -match "-Name gate2020" }) } 300
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "halftwins_a", "--broker", "cathay")
     }
     "halftwins_b" {
+        Wait-While "等分級門檻補算跑完（gate2020）" { [bool](Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "research-pipeline\.ps1" -and $_.CommandLine -match "-Name gate2020" }) } 300
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rules" @("-m", "quant_platform.research", "daily", "--name", "halftwins_b", "--broker", "cathay")
     }

@@ -5002,7 +5002,9 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "leakfix": leakfix_batch,
-           "halftwins_a": lambda: all_half_twins()[0::2], "halftwins_b": lambda: all_half_twins()[1::2],
+           # split by the twin's own hash, not its place: the other half registering first must not move a rule across
+           "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
+           "halftwins_b": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1],
            "stale": stale_engine,
            "windows_stale": windows_stale_batch,
            "robot30": robot30_batch, "robot31": robot31_batch, "robot32": robot32_batch, "robot33": robot33_batch, "worst": worst_batch, "risk": risk_batch, "timing": timing_batch, "robot40": robot40_batch,
