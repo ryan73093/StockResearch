@@ -37,7 +37,10 @@ def bars_of(path: Path) -> dict[str, float] | None:
     bars = sorted((row for row in rows if str(row.get("minute", "")) < "14:00:00"), key=lambda row: row["minute"])
     if len(bars) < 2:
         return None
-    found = {"open": float(bars[0]["open"]), "minute": float(bars[0]["close"]), "close": float(bars[-1]["close"])}
+    upto = [row for row in bars if str(row["minute"]) <= "09:10:59"]
+    # 2026-10-28: the intraday odd-lot market first matches at 09:10 — the earliest an odd-lot order can fill
+    found = {"open": float(bars[0]["open"]), "minute": float(bars[0]["close"]), "close": float(bars[-1]["close"]),
+             "ten": float(upto[-1]["close"]) if upto else float(bars[0]["close"])}
     return found if min(found.values()) > 0 else None
 
 
@@ -67,10 +70,14 @@ def table(fp, base: str | Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def gains(frame: pd.DataFrame) -> pd.DataFrame:
+def gains(frame: pd.DataFrame, at: str = "minute") -> pd.DataFrame:
     """Each stock-day's gain against the close: as a sale (price / close - 1) and as a buy (close / price - 1), at the
-    open auction and at the first minute."""
+    open auction and at ``at`` (the first minute; "ten": 09:10, the odd lots' first match, with the move since the open
+    as one more state)."""
     out = frame.copy()
+    if at == "ten":
+        out["minute"] = out["ten"]
+        out["since_open"] = out["ten"] / out["open"] - 1
     out["sell_open"] = out["open"] / out["close"] - 1
     out["sell_minute"] = out["minute"] / out["close"] - 1
     out["buy_open"] = out["close"] / out["open"] - 1
@@ -78,7 +85,7 @@ def gains(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def walk_forward(frame: pd.DataFrame, first_test: int = FIRST_TEST) -> pd.DataFrame:
+def walk_forward(frame: pd.DataFrame, first_test: int = FIRST_TEST, features=FEATURES) -> pd.DataFrame:
     """Per test year, per side: a value model of filling at the first minute (its gain against the close) learned
     from the years before; fill then when the predicted gain is positive, else at the close (gain 0)."""
     from sklearn.ensemble import HistGradientBoostingRegressor
@@ -92,8 +99,8 @@ def walk_forward(frame: pd.DataFrame, first_test: int = FIRST_TEST) -> pd.DataFr
             continue
         for side in ("sell", "buy"):
             model = HistGradientBoostingRegressor(max_iter=150, learning_rate=0.05, max_leaf_nodes=7, min_samples_leaf=40,
-                                                  random_state=0).fit(train[list(FEATURES)], train[f"{side}_minute"])
-            predicted = model.predict(test[list(FEATURES)])
+                                                  random_state=0).fit(train[list(features)], train[f"{side}_minute"])
+            predicted = model.predict(test[list(features)])
             robot = np.where(predicted > 0, test[f"{side}_minute"], 0.0)
             fixed = test["sell_open"] if side == "sell" else np.zeros(len(test))     # the rules: sell at the open, buy at the close
             for (_index, row), mine, theirs, now in zip(test.iterrows(), robot, fixed, predicted > 0):
@@ -120,16 +127,16 @@ def summary(choices: pd.DataFrame) -> dict[str, object]:
     return found
 
 
-def run(history: str | Path, research: str | Path) -> Path:
+def run(history: str | Path, research: str | Path, at: str = "minute") -> Path:
     from quant_platform.research import daily
 
     _data, fp = daily.load(Path(history))
-    frame = gains(table(fp, history))
-    choices = walk_forward(frame)
+    frame = gains(table(fp, history), at)
+    choices = walk_forward(frame, features=FEATURES + (("since_open",) if at == "ten" else ()))
     result = summary(choices)
     folder = Path(research) / "rl"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"execution-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path = folder / f"execution{'-0910' if at == 'ten' else ''}-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
     path.write_text(json.dumps({"at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "days": int(len(frame)),
                                 "years": sorted(int(year) for year in frame["year"].unique()), **result},
                                ensure_ascii=False, indent=1), encoding="utf-8")
