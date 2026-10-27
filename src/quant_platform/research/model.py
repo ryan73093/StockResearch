@@ -66,6 +66,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # brokers' concentration (from 2021; missing before), day trading, margin cost — not the branches (their
           # download ends about 10/30); judged against gbm-2.6.0 (J as retrained after the 10/26 leak fix)
           "ml_gbm_k": {"version": "gbm-2.7.0", "label": "ensemble", "features": "extended_k"},
+          # 2026-10-28 (使用者 10/26：2015 到 2020 和 2020 到現在交易的風氣差很多，短歷史要加重; research_method §7「模型 L」):
+          # model K's ensemble and features, each training week weighted by its age — half the weight every
+          # ``half_life`` sessions (about three years) before the year (or month) it scores; judged on 2021-2025
+          "ml_gbm_l": {"version": "gbm-2.8.0", "label": "ensemble", "features": "extended_k", "half_life": 750},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -406,7 +410,12 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
                 continue
             rows20 = [samples.index(column) for column in cols20]
             rows60 = [samples.index(column) for column in cols60]
-            ensemble = fit_year(x, y20, rank20, y60, rows20, rows60, PARAMS)
+            half_life = VERSIONS.get(version, {}).get("half_life")
+            ages = None
+            if half_life:                    # 2026-10-28 (gbm-2.8.0): the older weeks count less
+                now = first if first is not None else next(index for index, day in enumerate(fp.sessions) if day.year == year)
+                ages = {row: 0.5 ** ((now - samples[row]) / half_life) for row in set(rows20) | set(rows60)}
+            ensemble = fit_year(x, y20, rank20, y60, rows20, rows60, PARAMS, weights=ages)
             if month is None:
                 (out / f"{year}.pkl").write_bytes(pickle.dumps(ensemble, protocol=5))
             else:

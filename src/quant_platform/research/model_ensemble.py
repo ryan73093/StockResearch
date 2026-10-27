@@ -64,36 +64,42 @@ class Ensemble:
 
 
 def fit_year(x: np.ndarray, y20: np.ndarray, rank20: np.ndarray, y60: np.ndarray, rows20: list[int],
-             rows60: list[int], params: dict) -> Ensemble:
+             rows60: list[int], params: dict, weights: dict[int, float] | None = None) -> Ensemble:
+    """``weights`` (2026-10-28, gbm-2.8.0): a weight per training week (row), every stock of the week the same; none
+    = all equal, as before."""
     from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
     from sklearn.linear_model import Ridge
 
     def flat(rows, labels):
         features = x[rows].reshape(-1, x.shape[2])
         target = labels[rows].reshape(-1)
+        weight = np.repeat([weights[row] for row in rows], x.shape[1]) if weights else None
         keep = np.isfinite(target) & np.isfinite(features).any(axis=1)
         features = features[keep].copy()
         features[:, ~np.isfinite(features).any(axis=0)] = 0.5          # a factor with no value yet: the middle
-        return features, target[keep]
+        return features, target[keep], (weight[keep] if weight is not None else None)
 
     members: dict[str, list] = {kind: [] for kind in KINDS}
-    features, target = flat(rows20, y20)
+    features, target, weight = flat(rows20, y20)
     for seed in SEEDS["regression"]:
         members["regression"].append(HistGradientBoostingRegressor(**{**params, "random_state": seed},
-                                                                   max_features=0.5).fit(features, target))
-    ranks, ranks_target = flat(rows20, rank20)
+                                                                   max_features=0.5).fit(features, target,
+                                                                                         sample_weight=weight))
+    ranks, ranks_target, rank_weight = flat(rows20, rank20)
     members["top_fifth"].append(HistGradientBoostingClassifier(**{**params, "random_state": 0})
-                                .fit(ranks, (ranks_target >= 0.8).astype(int)))
-    members["ridge"].append(Ridge(alpha=10.0).fit(np.nan_to_num(features, nan=0.5), target))
-    long_features, long_target = flat(rows60, y60)
+                                .fit(ranks, (ranks_target >= 0.8).astype(int), sample_weight=rank_weight))
+    members["ridge"].append(Ridge(alpha=10.0).fit(np.nan_to_num(features, nan=0.5), target, sample_weight=weight))
+    long_features, long_target, long_weight = flat(rows60, y60)
     for seed in SEEDS["regression_60"]:
         members["regression_60"].append(HistGradientBoostingRegressor(**{**params, "random_state": seed},
-                                                                      max_features=0.5).fit(long_features, long_target))
+                                                                      max_features=0.5).fit(long_features, long_target,
+                                                                                            sample_weight=long_weight))
     return Ensemble(members)
 
 
-def gate(models_root, version: str = "gbm-2.0.0", against: str = "gbm-1.4.0") -> dict[str, object]:
-    """The registered gate: the development years' average top-20 gain of the ensemble against gbm-1.4.0's."""
+def gate(models_root, version: str = "gbm-2.0.0", against: str = "gbm-1.4.0", years=GATE_YEARS) -> dict[str, object]:
+    """The registered gate: the development years' average top-20 gain of the ensemble against gbm-1.4.0's
+    (``years``: 2026-10-28, gbm-2.8.0 is judged on 2021-2025)."""
     import json
     from pathlib import Path
 
@@ -101,11 +107,12 @@ def gate(models_root, version: str = "gbm-2.0.0", against: str = "gbm-1.4.0") ->
         path = Path(models_root) / name / "meta.json"
         if not path.is_file():
             return None
-        years = json.loads(path.read_text(encoding="utf-8")).get("years") or {}
-        values = [years[str(year)].get("top20_gain") for year in GATE_YEARS if str(year) in years]
+        found = json.loads(path.read_text(encoding="utf-8")).get("years") or {}
+        values = [found[str(year)].get("top20_gain") for year in wanted if str(year) in found]
         values = [value for value in values if value is not None]
         return float(np.mean(values)) if values else None
 
+    wanted = tuple(years)
     mine, theirs = average(version), average(against)
-    return {"version": version, "against": against, "years": list(GATE_YEARS), "top20_gain": mine,
+    return {"version": version, "against": against, "years": list(wanted), "top20_gain": mine,
             "against_top20_gain": theirs, "passed": mine is not None and theirs is not None and mine >= theirs}

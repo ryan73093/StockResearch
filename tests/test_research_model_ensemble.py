@@ -4,6 +4,7 @@ import json
 from datetime import date, timedelta
 
 import numpy as np
+import pandas as pd
 
 from quant_platform.research import model, model_ensemble
 from quant_platform.research.daily import FactorPanel
@@ -81,9 +82,9 @@ def test_the_monthly_version_refits_every_month_and_scores_with_the_months_model
     fitted = []
     real = model_ensemble.fit_year
 
-    def spy(x, y20, rank20, y60, rows20, rows60, params):
+    def spy(x, y20, rank20, y60, rows20, rows60, params, weights=None):
         fitted.append(max(rows20))
-        return real(x, y20, rank20, y60, rows20, rows60, params)
+        return real(x, y20, rank20, y60, rows20, rows60, params, weights=weights)
     monkeypatch.setattr(model_ensemble, "fit_year", spy)
     fp = FactorPanel(Panel(planted()))
     folder = tmp_path / "gbm-2.4.0"
@@ -98,3 +99,24 @@ def test_the_monthly_version_refits_every_month_and_scores_with_the_months_model
     assert meta["years"]["2016"]["top20_gain"] is not None
     score = model.scores(fp, folder)
     assert np.isfinite(score[len(fp.sessions) - 1]).sum() > 20 and np.isnan(score[first_june - 200]).all()
+
+
+def test_recent_weeks_weighted_more_learn_the_recent_relation():
+    """2026-10-28 (gbm-2.8.0): old weeks where a higher factor meant a higher return, recent weeks the reverse; with the
+    recent weeks weighted, the ensemble ranks the low-factor stocks first; unweighted, it is torn between the two."""
+    rng = np.random.default_rng(0)
+    weeks, stocks = 60, 80
+    x = rng.random((weeks, stocks, 1))
+    sign = np.where(np.arange(weeks) < 40, 1.0, -1.0)[:, None]
+    y = sign * (x[:, :, 0] - 0.5) * 0.1 + rng.normal(0, 0.002, (weeks, stocks))
+    rank = pd.DataFrame(y).rank(axis=1, pct=True).to_numpy()
+    rows = list(range(weeks))
+    weights = {row: (1.0 if row >= 40 else 0.01) for row in rows}
+    params = {"max_iter": 60, "learning_rate": 0.1, "max_leaf_nodes": 7, "min_samples_leaf": 20}
+    weighted = model_ensemble.fit_year(x, y, rank, y, rows, rows, params, weights=weights)
+    probe = np.linspace(0, 1, stocks)[None, :, None]
+    live = np.ones((1, stocks), dtype=bool)
+    scores = weighted.predict_days(probe, live)[0]
+    assert np.corrcoef(scores, probe[0, :, 0])[0, 1] < -0.8                      # learned the recent, reversed relation
+    plain = model_ensemble.fit_year(x, y, rank, y, rows, rows, params)
+    assert np.corrcoef(plain.predict_days(probe, live)[0], probe[0, :, 0])[0, 1] > -0.8
