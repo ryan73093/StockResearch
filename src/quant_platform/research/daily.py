@@ -5078,6 +5078,12 @@ def rerun_all_batch() -> list:
     return rules
 
 
+def rerun_half(part: int) -> list:
+    """2026-10-28 (engine 1.6.0 on 10/31): rerun_all_batch split in two by the rule's hash (its last hex digit even or
+    odd) — stable while the other half registers its results, unlike a split by position in the list."""
+    return [rule for rule in rerun_all_batch() if int(rule.rule_hash[-1], 16) % 2 == part]
+
+
 def leakfix_batch() -> list:
     """2026-10-26 (the leak check: block_volume_20 knew whether a stock would ever have a block trade; model J
     learned from it, the robot 3.5 reads model J): every latest 100%-stock rule and blend reading them, run again
@@ -5199,7 +5205,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "leakfix": leakfix_batch,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
            "halftwins_b": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1],

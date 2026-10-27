@@ -943,3 +943,14 @@ def test_the_cut_below_the_line_is_taken_back_by_the_shorter_trends():
     assert not fp.risk_on(640) and levels[days[640]] == 1.0              # both up, still under the line
     assert rule.canonical()["vol_scale"] == "taiex_trend"
     assert len(daily.BATCHES["bear8"].__doc__) > 0
+
+
+def test_the_rerun_halves_split_by_the_rule_s_hash(monkeypatch):
+    """2026-10-28: the two halves of the pool's rerun cover every rule once, whatever order the batch lists them in."""
+    rules = [DailyRule(name=f"x{top}", factors={"trend_200": 1.0}, top=top) for top in range(5, 25)]
+    monkeypatch.setattr(daily, "rerun_all_batch", lambda: list(rules))
+    first, second = daily.BATCHES["rerun_all_a"](), daily.BATCHES["rerun_all_b"]()
+    assert {rule.rule_hash for rule in first} | {rule.rule_hash for rule in second} == {rule.rule_hash for rule in rules}
+    assert not {rule.rule_hash for rule in first} & {rule.rule_hash for rule in second}
+    monkeypatch.setattr(daily, "rerun_all_batch", lambda: list(reversed(rules[3:])))   # the other half went first
+    assert {rule.rule_hash for rule in daily.BATCHES["rerun_all_a"]()} == {rule.rule_hash for rule in first if rule in rules[3:]}
