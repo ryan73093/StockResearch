@@ -209,3 +209,22 @@ def test_the_technical_robot_s_fourth_version_is_gated_on_2021_to_2025():
     check = model_deep2.gate_check(mine, theirs, model_deep2.gate_years("dl-2.5.1"))
     assert check["passed"] and check["years"] == [2021, 2022, 2023, 2024, 2025] and check["years_above_floor"] == 5
     assert not model_deep2.gate_check(mine, theirs)["passed"]           # the old years: no gain there
+
+
+def test_the_regated_versions_copy_every_setting_of_the_old_one():
+    """2026-10-28: a re-gated version is the stopped one as it was — loss, inputs, universe, architecture, yardstick —
+    only its gate years differ (2021-2025)."""
+    from quant_platform.research import model_deep2 as d
+
+    for new, old in d.REGATED.items():
+        assert d.LOSSES[new] == d.LOSSES[old] and d.gate_years(new) == d.RECENT_GATE_YEARS
+        for group in (d.TECHNICAL, d.MONTHLY, d.RISK_ADJUSTED, d.WIDE):
+            assert (new in group) == (old in group)
+        for table in (d.PLAIN_AGAINST, d.SNAPSHOT_OF, d.ARCHITECTURES, d.AGAINST_OF):
+            assert table.get(new) == table.get(old)
+        assert new in model.VERSIONS and model.VERSIONS[new].get("universe") == model.VERSIONS[old].get("universe")
+    assert d.ARCHITECTURES["dl-3.0.1"] == "attention" and "dl-2.2.1" in d.WIDE and d.AGAINST_OF["dl-2.2.1"] == "dl-2.1.0"
+    years = {str(year): {"top20_gain": 0.02} for year in range(2021, 2026)}
+    weaker = {str(year): {"top20_gain": 0.015} for year in range(2021, 2026)}
+    check = d.gate_check_d3({"years": years}, {"years": weaker}, d.gate_years("dl-3.0.1"))
+    assert check["passed"] and check["years"] == [2021, 2022, 2023, 2024, 2025]

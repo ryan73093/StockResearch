@@ -42,16 +42,16 @@ import numpy as np
 import pandas as pd
 
 LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10", "dl-2.2.0": "top10", "dl-2.4.0": "top10",
-          "dl-2.5.0": "top10", "dl-2.5.1": "top10", "dl-2.6.0": "top10", "dl-2.7.0": "top10"}
+          "dl-2.5.0": "top10", "dl-2.6.0": "top10", "dl-2.7.0": "top10"}
 # 2026-10-20 (使用者：技術分析機器人有沒有在優化？): the technical robot's third version — dl-2.1.0 seeing prices and
 # volumes only: the sequence without the chip columns and the snapshot of the robot's 20 technical factors
 # (tech_rl.TECH_FEATURES) instead of model G's; judged against the technical ensemble gbm-2.1.0 (PLAIN_AGAINST)
-TECHNICAL = {"dl-2.5.0", "dl-2.5.1"}
+TECHNICAL = {"dl-2.5.0"}
 # 2026-10-20 (使用者：持續優化每一個策略): dl-2.1.0 refitted every month instead of every year — each month's ten networks
 # learn from every label that ended before the month's first session and score that month (the forward accounts'
 # models are retrained monthly too); judged against dl-2.1.0 itself
 MONTHLY = {"dl-2.6.0"}
-PLAIN_AGAINST = {"dl-2.5.0": "gbm-2.1.0", "dl-2.5.1": "gbm-2.1.0", "dl-2.6.0": "dl-2.1.0", "dl-2.7.0": "dl-2.1.0"}
+PLAIN_AGAINST = {"dl-2.5.0": "gbm-2.1.0", "dl-2.6.0": "dl-2.1.0", "dl-2.7.0": "dl-2.1.0"}
 # 2026-10-22 (集保因子第五版; research_method §7): dl-2.1.0 whose snapshot is model I's features (gbm-2.5.0: model G's
 # and the holder brackets) instead of model G's; judged against dl-2.1.0 itself (PLAIN_AGAINST)
 SNAPSHOT_OF = {"dl-2.7.0": "gbm-2.5.0"}
@@ -96,9 +96,20 @@ TOP_SHARE = 0.1
 CLIP = 5.0
 GATE_YEARS = (2016, 2017, 2018, 2019, 2020)
 # 2026-10-28 (使用者 10/26-27：2015～2020 不當門檻、短歷史加重，同類的地方直接照做; research_method §7「技術分析機器人
-# 第四版」): these versions are gated on 2021-2025 instead, trained first, the other years only past it
-RECENT_GATED = {"dl-2.5.1"}
+# 第四版」「深度學習舊版本用 2021～2025 重判」): every version the 2016-2020 gate stopped, again as a new version with
+# all of the old one's settings (REGATED: new -> old), gated on 2021-2025 instead — trained first, the rest only past it
+REGATED = {"dl-2.5.1": "dl-2.5.0", "dl-2.0.1": "dl-2.0.0", "dl-2.2.1": "dl-2.2.0", "dl-2.4.1": "dl-2.4.0",
+           "dl-2.7.1": "dl-2.7.0", "dl-3.0.1": "dl-3.0.0"}
+RECENT_GATED = set(REGATED)
 RECENT_GATE_YEARS = (2021, 2022, 2023, 2024, 2025)
+for _new, _old in REGATED.items():
+    LOSSES[_new] = LOSSES[_old]
+    for _group in (TECHNICAL, MONTHLY, RISK_ADJUSTED, WIDE):
+        if _old in _group:
+            _group.add(_new)
+    for _table in (PLAIN_AGAINST, SNAPSHOT_OF, ARCHITECTURES, AGAINST_OF):
+        if _old in _table:
+            _table[_new] = _table[_old]
 
 
 def gate_years(version: str) -> tuple[int, ...]:
@@ -383,16 +394,16 @@ def wide_mask(fp) -> np.ndarray:
         return (fp.panel.close >= WIDE_PRICE) & (fp.turnover_20 >= WIDE_TURNOVER) & (fp.age >= WIDE_AGE)
 
 
-def gate_check_d3(meta: dict, against: dict) -> dict[str, object]:
-    """D3's registered gate: over 2016–2020 the average top-20 gain at least D3_MARGIN above dl-2.1.0's, and better
-    than it in at least D3_COUNT of the five years."""
-    mine = [(meta.get("years") or {}).get(str(year), {}).get("top20_gain") for year in GATE_YEARS]
-    theirs = [(against.get("years") or {}).get(str(year), {}).get("top20_gain") for year in GATE_YEARS]
+def gate_check_d3(meta: dict, against: dict, years: tuple[int, ...] = GATE_YEARS) -> dict[str, object]:
+    """D3's registered gate: over 2016–2020 (``years``) the average top-20 gain at least D3_MARGIN above dl-2.1.0's,
+    and better than it in at least D3_COUNT of the five years."""
+    mine = [(meta.get("years") or {}).get(str(year), {}).get("top20_gain") for year in years]
+    theirs = [(against.get("years") or {}).get(str(year), {}).get("top20_gain") for year in years]
     complete = all(value is not None for value in mine + theirs)
     average = float(np.mean(mine)) if complete else None
     yardstick = float(np.mean(theirs)) if complete else None
     better = sum(1 for a, b in zip(mine, theirs, strict=True) if a is not None and b is not None and a > b)
-    return {"version": meta.get("version"), "against": against.get("version"), "years": list(GATE_YEARS),
+    return {"version": meta.get("version"), "against": against.get("version"), "years": list(years),
             "top20_gain": average, "against_top20_gain": yardstick, "years_better": better, "margin": D3_MARGIN,
             "passed": complete and average >= yardstick + D3_MARGIN and better >= D3_COUNT}
 
@@ -403,7 +414,8 @@ def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
     against = AGAINST_OF.get(version) or PLAIN_AGAINST.get(version, AGAINST)
     path = root / against / "meta.json"
     other = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    return gate_check_d3(meta, other) if version in AGAINST_OF else gate_check(meta, other, gate_years(version))
+    years = gate_years(version)
+    return gate_check_d3(meta, other, years) if version in AGAINST_OF else gate_check(meta, other, years)
 
 
 def gate(models_root: str | Path, version: str) -> dict[str, object]:

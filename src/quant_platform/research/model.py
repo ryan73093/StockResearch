@@ -92,6 +92,12 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_tech_deep": {"version": "dl-2.5.0", "label": "deep2"},
           # 2026-10-28 (技術分析機器人第四版): dl-2.5.0 as it was, gated on 2021-2025 (model_deep2.RECENT_GATED)
           "ml_tech_deep_r": {"version": "dl-2.5.1", "label": "deep2"},
+          # 2026-10-28 (深度學習舊版本用 2021～2025 重判): the other versions the 2016-2020 gate stopped, as they were
+          "ml_deep2_r": {"version": "dl-2.0.1", "label": "deep2"},
+          "ml_deep2_wide_r": {"version": "dl-2.2.1", "label": "deep2", "universe": "all"},
+          "ml_deep2_riskadj_r": {"version": "dl-2.4.1", "label": "deep2"},
+          "ml_deep2_holders_r": {"version": "dl-2.7.1", "label": "deep2"},
+          "ml_deep3_r": {"version": "dl-3.0.1", "label": "deep2"},
           # 2026-10-17 (docs/research_dl_exits_review.md D3): dl-2.1.0 with cross-stock attention and a market gate
           "ml_deep3": {"version": "dl-3.0.0", "label": "deep2"},
           # 2026-10-18 (S9-W15): dl-2.1.0 learning from every listed and TPEx stock that trades normally
