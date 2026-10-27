@@ -924,3 +924,22 @@ def test_the_cut_below_the_line_follows_taiex_volatility():
     assert not fp.risk_on(800) and levels[days[800]] == daily.MARKET_HALF  # below it, wild: half
     assert set(levels.values()) <= {0.5, 0.75, 1.0}
     assert rule.canonical()["vol_scale"] == "taiex_vol"
+
+
+def test_the_cut_below_the_line_is_taken_back_by_the_shorter_trends():
+    """2026-10-28 (空頭防護第八版): above the 200-session line all held; below it half, plus a quarter for each of
+    TAIEX's 20- and 60-session returns that is positive."""
+    days = weekdays(date(2021, 1, 4), date(2023, 12, 29))
+    data = market(days, {"1101.TW": {day: 10.0 for day in days}})
+    rise = list(np.linspace(100, 200, 400))
+    fall = list(np.linspace(200, 120, 150))                              # a long slide below the 200-session line
+    back = list(np.linspace(120, 140, len(days) - 550))                  # then a rebound still under the line
+    fp = FactorPanel(Panel(data), market=np.array(rise + fall + back))
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, vol_scale="taiex_trend")
+    levels = daily.exposure_schedule(data, fp, rule, FREE)
+    assert levels[days[300]] == 1.0                                      # above the line
+    assert not fp.risk_on(540) and levels[days[540]] == daily.MARKET_HALF  # falling: 20 and 60 sessions both down
+    assert not fp.risk_on(580) and levels[days[580]] == 0.75             # 20 sessions up, 60 still down
+    assert not fp.risk_on(640) and levels[days[640]] == 1.0              # both up, still under the line
+    assert rule.canonical()["vol_scale"] == "taiex_trend"
+    assert len(daily.BATCHES["bear8"].__doc__) > 0
