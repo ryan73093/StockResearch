@@ -2524,6 +2524,11 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
     """The files besides prices a run reads, as part of its input: statements, the exit models, the
     trained factor models."""
     payload: dict[str, object] = {}
+    if "factor_momentum" in factor_names:      # 2026-10-28: it picks among every base factor, which reads their tables
+        from quant_platform.research.factor_timing import base_factors
+
+        payload["factor_momentum"] = base_factors()
+        factor_names = list(dict.fromkeys([*factor_names, *payload["factor_momentum"]]))
     if any(name in ZERO_FILLED for name in factor_names):
         payload["paid_fill"] = ZERO_FILL_VERSION
     if any(name in STATEMENT_FACTORS for name in factor_names):  # the statements are part of the input

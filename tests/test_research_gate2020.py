@@ -103,3 +103,27 @@ def test_the_months_list_is_graded_again_on_the_2020_windows(tmp_path, monkeypat
     assert graded["a"]["metrics"]["since_2020_final_value"] == 380.0
     assert graded["b"]["tier"] == "T3" and graded["c"]["tier"] == "T3" and "carried_from" not in graded["c"]
     assert saved["gate"] == "2020-10" and windows2020.list_items(saved) == []
+
+
+def test_a_tpex_rule_is_graded_again_in_full_and_a_stale_result_rerun_once(tmp_path):
+    """2026-10-28 (research_method §7「重現性」): the list's listed-plus-TPEx rules are graded again in full when asked;
+    a stale registered result is run again only while no later trial of the same settings exists."""
+    from quant_platform.research.registry import TrialRegistry
+
+    windows = {key: {"count": 1, "since_2020": {"count": 1}} for key in ("1y", "3y")}
+    listed = daily.DailyRule(name="a", factors={"trend_200": 1.0})
+    wide = daily.DailyRule(name="b", factors={"trend_200": 1.0}, universe="all")
+    payload = {"cutoff": "2026-08-31", "graded": [
+        {"rule_hash": "a", "spec": listed.canonical(), "metrics": {"windows": windows}},
+        {"rule_hash": "b", "spec": wide.canonical(), "metrics": {"windows": windows}}]}
+    assert windows2020.list_items(payload) == []
+    assert [(item["key"], item.get("full")) for item in windows2020.list_items(payload, other_universe=True)] == [("b", True)]
+
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    (tmp_path / "reports").mkdir()
+    for number, (spec_hash, input_hash) in enumerate((("s", "i"), ("t", "j"), ("s", "k")), start=1):
+        (tmp_path / "reports" / f"{number}.json").write_text(json.dumps({"spec": listed.canonical()}), encoding="utf-8")
+        registry.register(kind="candidate", period="recent", spec_hash=spec_hash, spec_name="x", input_hash=input_hash,
+                          data_fingerprint="f", report_file=f"{number}.json", metrics={"final_value": 1.0})
+    (tmp_path / windows2020.STALE).write_text(json.dumps([{"trial": 1}, {"trial": 2}]), encoding="utf-8")
+    assert len(windows2020.stale_rules(tmp_path)) == 1           # trial 1 was registered again as trial 3

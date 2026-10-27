@@ -545,6 +545,15 @@ def digest(out_dir: str | Path) -> str:
     for path in (sorted(folder.glob("*.pkl")) if folder.is_dir() else []) + monthly:
         output.update(path.name.encode())
         output.update(hashlib.sha256(path.read_bytes()).digest())
+    # 2026-10-28: the deep models keep networks and scores (.pt, .npz, and their monthly refits), not pickles — they
+    # had been left out, so the risk model's refit to 8/31 changed September's scores under an unchanged input hash
+    # and the registry kept answering with the old result (research_method §7「重現性」). A folder of pickles only
+    # hashes as before.
+    deep = [path for pattern in ("*.pt", "*.npz") for place in (folder, folder / MONTHLY) if place.is_dir()
+            for path in place.glob(pattern)]
+    for path in sorted(deep, key=lambda path: path.relative_to(folder).as_posix()):
+        output.update(path.relative_to(folder).as_posix().encode())
+        output.update(hashlib.sha256(path.read_bytes()).digest())
     return output.hexdigest()
 
 

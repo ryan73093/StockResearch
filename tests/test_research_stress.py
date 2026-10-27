@@ -144,3 +144,12 @@ def test_the_graded_guards_are_summed_up_per_way():
     assert half["graded"] == 2 and half["passing"] == 1 and half["kept"] == 0.7 and half["frontier"] == [1]
     assert half["drawdown"] == 1.5 and half["gap"] == 3.0 and half["less"] == 1 and half["best"]["trial"] == 1
     assert found["taiex_200s"]["gap"] == -5.0 and "taiex_200" not in found
+
+
+def test_the_sells_forced_by_the_stock_lines_are_counted_from_the_reasons():
+    """2026-10-28 (research_method §7「選股條件的緩衝」): buys are not sells; a sell forced by the lines is counted."""
+    why = {date(2026, 9, 1): {"2330": "新進前 20 名（當天第 3 名）", "2317": "跌出前 40 名（當天第 55 名）",
+                              "1101": "不再符合選股條件（股價低於門檻、成交值不足或沒有分數）"},
+           date(2026, 9, 2): {"2454": "補進前一天沒買到的位置", "2603": "不再符合選股條件（股價或成交值低於門檻的七成，或沒有分數）"}}
+    assert stress.count_exits(why) == {"sells": 3, "forced": 2}
+    assert stress.count_exits({}) == {"sells": 0, "forced": 0}

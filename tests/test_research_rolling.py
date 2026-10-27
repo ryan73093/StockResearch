@@ -205,3 +205,19 @@ def test_a_hopeless_t3_rule_carries_last_months_grade_except_each_quarter(tmp_pa
     assert rolling.carried(tmp_path, date(2026, 12, 31), "daily-1.5.0") == []      # a quarter: every rule again
     assert rolling.carried(tmp_path, date(2026, 11, 30), "daily-1.6.0") == []      # a new engine: every rule again
     assert rolling.carried(tmp_path, date(2026, 10, 31), "daily-1.5.0") == []      # only an earlier month counts
+
+
+def test_a_rule_is_graded_on_its_own_universes_stocks(monkeypatch):
+    """2026-10-28 (research_method §7「重現性」): the list and the gate's backfill had graded the listed-plus-TPEx rules
+    on the listed stocks; each worker now loads a universe once, when a rule needs it."""
+    from quant_platform.research import daily
+
+    loads = []
+    monkeypatch.setattr(daily, "load", lambda base, universe="twse": loads.append(universe) or (universe, f"fp-{universe}"))
+    worker = {"base": "history", "panels": {"twse": ("twse", "fp-twse")}}
+    assert rolling.panel(worker, "twse") == ("twse", "fp-twse") and loads == []
+    assert rolling.panel(worker, "all") == ("all", "fp-all") and loads == ["all"]
+    assert rolling.panel(worker, "all") == ("all", "fp-all") and loads == ["all"]
+    assert rolling._universe({"spec": {"universe": "all"}}) == "all"
+    assert rolling._universe({"spec": '{"kind": "blend", "sleeves": []}'}) == "twse"
+    assert rolling._universe({"spec": {"factors": {}}}) == "twse"

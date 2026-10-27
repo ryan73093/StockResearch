@@ -28,7 +28,7 @@ def _init(base: str, broker: str) -> None:
     from quant_platform.research.costs import broker_costs
 
     data, fp = daily.load(Path(base))
-    _worker.update(data=data, fp=fp, costs=broker_costs(broker), cache={})
+    _worker.update(base=str(base), panels={"twse": (data, fp)}, costs=broker_costs(broker), cache={})
 
 
 def same(value: float, expected: float) -> bool:
@@ -40,16 +40,17 @@ def _windows(item: dict) -> dict:
     (``item["full"]``) the whole report's metrics as the month's list grades them."""
     from quant_platform.research.blend import BlendRule, evaluate_blend, parse_spec
     from quant_platform.research.daily import REGIME_WINDOWS, evaluate
+    from quant_platform.research.rolling import panel
 
     rule = parse_spec(item["spec"])
     run = evaluate_blend if isinstance(rule, BlendRule) else evaluate
     end = date.fromisoformat(item["end"])
     try:
+        data, fp = panel(_worker, rule.universe)      # 2026-10-28: its own universe (TPEx rules had read the listed)
         if item.get("full"):
-            report = run(_worker["data"], _worker["fp"], rule, _worker["costs"], _worker["cache"], end=end)
+            report = run(data, fp, rule, _worker["costs"], _worker["cache"], end=end)
         else:
-            report = run(_worker["data"], _worker["fp"], rule, _worker["costs"], _worker["cache"], end=end,
-                         windows_from=REGIME_WINDOWS)
+            report = run(data, fp, rule, _worker["costs"], _worker["cache"], end=end, windows_from=REGIME_WINDOWS)
     except Exception as error:  # noqa: BLE001 - one rule's failure is recorded, the rest go on
         return {"key": item["key"], "error": str(error)[:200]}
     final = report["strategy"]["final_value"]
@@ -72,8 +73,12 @@ def _run(items: list[dict], base: str | Path, broker: str, workers: int, progres
             yield row
 
 
-def list_items(payload: dict) -> list[dict]:
-    """The month's graded rows that lack the windows (or were carried from an earlier month: run in full)."""
+def list_items(payload: dict, other_universe: bool = False) -> list[dict]:
+    """The month's graded rows that lack the windows (or were carried from an earlier month: run in full).
+    ``other_universe`` (2026-10-28): also every rule on another universe than the listed stocks, in full — the list had
+    graded them on the listed stocks (research_method §7「重現性」)."""
+    from quant_platform.research.rolling import _universe
+
     output = []
     for row in payload.get("graded") or []:
         metrics = row.get("metrics") or {}
@@ -81,7 +86,7 @@ def list_items(payload: dict) -> list[dict]:
             continue
         windows = metrics.get("windows") or {}
         has = all(isinstance(windows.get(key), dict) and "since_2020" in windows[key] for key in ("1y", "3y"))
-        if row.get("carried_from"):
+        if row.get("carried_from") or (other_universe and _universe(row) != "twse"):
             output.append({"key": row["rule_hash"], "spec": row["spec"], "end": payload["cutoff"], "full": True})
         elif not has:
             output.append({"key": row["rule_hash"], "spec": row["spec"], "end": payload["cutoff"],
@@ -109,13 +114,14 @@ def apply_to_row(row: dict, found: dict) -> dict:
 
 
 def backfill_list(research: str | Path, base: str | Path, cutoff: date, broker: str = "cathay", workers: int = 2,
-                  progress=None) -> dict[str, int]:
-    """The month's list: every graded row with the windows of the 2020-10-26 track, graded again."""
+                  progress=None, other_universe: bool = False) -> dict[str, int]:
+    """The month's list: every graded row with the windows of the 2020-10-26 track, graded again (``other_universe``:
+    see list_items)."""
     from quant_platform.research.rolling import folder, save
 
     path = folder(research) / f"{cutoff.isoformat()}.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
-    items = list_items(payload)
+    items = list_items(payload, other_universe)
     by_key = {row.get("rule_hash"): index for index, row in enumerate(payload["graded"])}
     rerun = [item for item in items if not item.get("full")]
     found = {row["key"]: row for row in _run(items, base, broker, workers, progress)}
@@ -200,7 +206,8 @@ def backfill_registry(research: str | Path, base: str | Path, broker: str = "cat
 
 
 def stale_rules(research: str | Path) -> list:
-    """The rules whose registered result the engine no longer reproduces (``backfill_registry``), to run again."""
+    """The rules whose registered result the engine no longer reproduces (``backfill_registry``), to run again —
+    2026-10-28: not those already registered again since (a later trial of the same settings)."""
     from quant_platform.research.blend import parse_spec
     from quant_platform.research.registry import TrialRegistry
 
@@ -209,9 +216,13 @@ def stale_rules(research: str | Path) -> list:
     if not path.is_file():
         return []
     wanted = {row["trial"] for row in json.loads(path.read_text(encoding="utf-8"))}
+    records = TrialRegistry(research / "trials.jsonl").records()
+    last = {}
+    for record in records:
+        last[record.spec_hash] = max(last.get(record.spec_hash, 0), record.trial_id)
     output = []
-    for record in TrialRegistry(research / "trials.jsonl").records():
-        if record.trial_id in wanted:
+    for record in records:
+        if record.trial_id in wanted and last[record.spec_hash] == record.trial_id:
             spec = json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
             output.append(parse_spec(spec))
     return output

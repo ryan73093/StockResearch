@@ -72,7 +72,18 @@ def _init(base: str, broker: str) -> None:
     from quant_platform.research.costs import broker_costs
 
     data, fp = daily.load(Path(base))
-    _worker.update(data=data, fp=fp, costs=broker_costs(broker), cache={})
+    _worker.update(base=str(base), panels={"twse": (data, fp)}, data=data, fp=fp, costs=broker_costs(broker), cache={})
+
+
+def panel(worker: dict, universe: str):
+    """(data, panel) of a rule's universe, loaded once per worker. 2026-10-28: the list had graded the listed-plus-TPEx
+    rules on the listed stocks only (research_method §7「重現性」)."""
+    from quant_platform.research import daily
+
+    panels = worker.setdefault("panels", {})
+    if universe not in panels:
+        panels[universe] = daily.load(Path(worker["base"]), universe=universe)
+    return panels[universe]
 
 
 def grade_metrics(report: dict) -> dict:
@@ -95,8 +106,8 @@ def _grade(item: dict, cutoff: str) -> dict:
     rule = parse_spec(item["spec"])
     run = evaluate_blend if isinstance(rule, BlendRule) else evaluate
     try:
-        report = run(_worker["data"], _worker["fp"], rule, _worker["costs"], _worker["cache"],
-                     end=date.fromisoformat(cutoff))
+        data, fp = panel(_worker, rule.universe)
+        report = run(data, fp, rule, _worker["costs"], _worker["cache"], end=date.fromisoformat(cutoff))
     except Exception as error:  # noqa: BLE001 - one rule's failure is recorded, the month goes on
         return {"trial": item["trial"], "name": rule.name, "error": str(error)[:200]}
     metrics = grade_metrics(report)
@@ -266,9 +277,15 @@ def from_records(records: list[dict], rows: list[dict], cutoff: date) -> tuple[l
     return output, missing
 
 
+def _universe(row: dict) -> str:
+    spec = row["spec"] if isinstance(row["spec"], dict) else json.loads(row["spec"])
+    return "twse" if spec.get("kind") == "blend" else spec.get("universe", "twse")
+
+
 def refresh(research: str | Path, load, costs, cutoff: date | None = None, records: list[dict] | None = None) -> dict | None:
     """The holdout of the month's passing rules again, through the latest session: 2026-10-21, read from the forward
-    accounts' records where they are up to date (``from_records``); only the others are run (``load`` → data, fp)."""
+    accounts' records where they are up to date (``from_records``); only the others are run (``load(universe)`` →
+    data, fp; 2026-10-28: each on its own universe's stocks)."""
     path = folder(research) / f"{cutoff.isoformat()}.json" if cutoff else None
     payload = json.loads(path.read_text(encoding="utf-8")) if path and path.is_file() else latest(research)
     if not payload:
@@ -277,9 +294,9 @@ def refresh(research: str | Path, load, costs, cutoff: date | None = None, recor
     passed = [row for row in payload["graded"] if row.get("passed")]
     rows, missing = from_records(records or [], passed, month_cutoff)
     through = max((row["end"] for row in rows), default=None)
-    if missing:
-        data, fp = load()
-        rows += holdout(data, fp, missing, month_cutoff, costs)
+    for universe in sorted({_universe(row) for row in missing}):
+        data, fp = load(universe)
+        rows += holdout(data, fp, [row for row in missing if _universe(row) == universe], month_cutoff, costs)
         through = fp.sessions[-1].isoformat()
     rows.sort(key=lambda item: -(item["excess"] or -9))
     payload["holdout"] = rows

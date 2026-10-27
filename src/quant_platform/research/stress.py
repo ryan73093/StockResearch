@@ -509,6 +509,57 @@ def grade_guards(research: str | Path) -> Path:
     return path
 
 
+FORCED = "不再符合選股條件"
+
+
+def count_exits(why: dict) -> dict[str, int]:
+    """The sells in a rankings trace (``trace["why"]``: per session, why each stock came in or left): all of them and
+    those forced by the stock lines (price, turnover, history; 「不再符合選股條件」)."""
+    outs = [text for notes in why.values() for text in notes.values()
+            if not text.startswith("新進") and not text.startswith("補進")]
+    return {"sells": len(outs), "forced": sum(FORCED in text for text in outs)}
+
+
+def guard_sells(history: str | Path, research: str | Path, key: str = "band") -> Path:
+    """2026-10-28 (research_method §7「選股條件的緩衝」): how many holdings the rules of a graded way (guard_ways) left
+    because they stopped meeting the stock lines, against the same rules as they are and the first version
+    (entry_only), from the rankings' reasons (daily_rankings trace, RECENT_START to RECENT_END) — single rules and
+    every blend's sleeves, each distinct sleeve once."""
+    from quant_platform.research import daily
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path(research)
+    ways = {name: fields for name, _word, fields, _trials in guard_ways()}
+    trials = next(trials for name, _word, _fields, trials in guard_ways() if name == key)
+    by_trial = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    _data, fp = daily.load(history)
+    variants = {"original": {"eligibility": "both"}, "entry_only": ways["entry_only"], key: ways[key]}
+    seen, rows = set(), []
+    for trial in trials:
+        spec = json.loads((research / "reports" / by_trial[trial].report_file).read_text(encoding="utf-8"))["spec"]
+        for rule_spec in ([sleeve["rule"] for sleeve in spec["sleeves"]] if spec.get("kind") == "blend" else [spec]):
+            base = daily.DailyRule.model_validate({**rule_spec, "eligibility": "both"})
+            if base.rule_hash in seen:
+                continue
+            seen.add(base.rule_hash)
+            row = {"trial": trial, "name": base.name, "check": base.check}
+            for name, fields in variants.items():
+                trace: dict = {}
+                rule = daily.DailyRule.model_validate({**rule_spec, **fields})
+                daily.daily_rankings(fp, rule, daily.RECENT_START, daily.RECENT_END, trace=trace)
+                row[name] = count_exits(trace.get("why") or {})
+            rows.append(row)
+            print(len(rows), trial, base.name[:40], {name: row[name] for name in variants}, flush=True)
+    total = {name: {field: sum(row[name][field] for row in rows) for field in ("sells", "forced")} for name in variants}
+    folder = research / "stress"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"guard-sells-{key}-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path.write_text(json.dumps({"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "key": key,
+                                "start": daily.RECENT_START.isoformat(), "end": daily.RECENT_END.isoformat(),
+                                "total": total, "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path
+
+
 def protect(history: str | Path, research: str | Path, job=None) -> Path:
     """2026-10-24 (research_method §7「空頭減碼檢驗」): each strategy again with each way of holding fewer stocks in a
     bear (OVERLAYS), from START through the same scenarios and from 2015-06, against the strategy as it is."""

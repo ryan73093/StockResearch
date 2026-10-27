@@ -347,6 +347,7 @@ def main() -> int:
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
                         help="issues：實價登錄從 2023 年第 1 季整個重抓（平常只抓沒抓過的季與最新一期）")
+    parser.add_argument("--sells", help="stress-guards：數一種做法（例如 band）各版本因「不再符合選股條件」賣出的次數")
     parser.add_argument("--build-only", action="store_true", help="issues：不抓資料，只用已有的資料重算燈號")
     parser.add_argument("--sample", type=int, default=0,
                         help="forward-audit：隨機抽幾個帳戶檢查（預設 0＝全部）")
@@ -441,6 +442,8 @@ def main() -> int:
     parser.add_argument("--cutoff", help="rolling：截止日（預設：兩個月前的月底）")
     parser.add_argument("--only-new", action="store_true",
                         help="rolling --step select：只評這個月還沒評過的規則，加進原本的名單（2026-10-18：組合帳戶）")
+    parser.add_argument("--other-universe", action="store_true",
+                        help="windows2020 --target list：上市＋上櫃的規則整個重評（2026-10-28：名單曾用上市資料評它們）")
     parser.add_argument("--target", choices=("list", "registry"),
                         help="windows2020：補算這個月的名單（list）或選手池的最新結果（registry）")
     parser.add_argument("--phase", choices=("a", "b"),
@@ -938,7 +941,7 @@ def main() -> int:
                 job.update(done=done, total=total, current=f"{done:,}／{total:,}")
             if target == "list":
                 counts = windows2020.backfill_list(RESEARCH, Path(args.base), cutoff, args.broker, min(args.workers or 2, 2),
-                                                   progress=progress)
+                                                   progress=progress, other_universe=args.other_universe)
                 job.payload["summary"] = (f"{counts['rows']} 個規則補算（{counts['full']} 個整個重評）、等級變動 "
                                           f"{counts['changed']} 個、失敗 {counts['errors']} 個")
             else:
@@ -1170,7 +1173,8 @@ def main() -> int:
             from quant_platform.research.stock_forward import StockForwardTracker
 
             # 2026-10-21: the forward accounts already ran these rules to the day at 15:30 — read, don't run again
-            refreshed = rolling.refresh(RESEARCH, lambda: daily_research.load(Path(args.base)), broker_costs(args.broker),
+            refreshed = rolling.refresh(RESEARCH, lambda universe: daily_research.load(Path(args.base), universe),
+                                        broker_costs(args.broker),
                                         cutoff, records=StockForwardTracker(RESEARCH).records())
             usable = [row for row in (refreshed or {}).get("holdout") or [] if row["usable"]]
             job.payload["summary"] = (f"{len((refreshed or {}).get('holdout') or [])} 個策略前向測試、{len(usable)} 個贏 0050"
@@ -1241,6 +1245,12 @@ def main() -> int:
         # 2026-10-25 (research_method §7「空頭減碼第二版」): the graded guarded versions against their originals
         from quant_platform.research import stress
 
+        if args.sells:      # 2026-10-28: the sells forced by the stock lines, per version of one way
+            path = stress.guard_sells(Path(args.base), RESEARCH, args.sells)
+            for name, value in json.loads(path.read_text(encoding="utf-8"))["total"].items():
+                print(name, f"賣出 {value['sells']:,} 次、不再符合選股條件 {value['forced']:,} 次", flush=True)
+            print(f"已寫入 {path}")
+            return 0
         path = stress.grade_guards(RESEARCH)
         for way in json.loads(path.read_text(encoding="utf-8"))["ways"]:
             print(way["short"], f"{way['passing']}/{way['graded']}", way["kept"], way["drawdown"], way["gap"], flush=True)

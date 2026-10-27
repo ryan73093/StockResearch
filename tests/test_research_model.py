@@ -88,6 +88,28 @@ def test_the_model_digest_follows_the_files(tmp_path):
     assert model.digest(tmp_path) != before
 
 
+def test_the_deep_models_networks_and_monthly_scores_are_part_of_the_digest(tmp_path):
+    """2026-10-28 (research_method §7「重現性」): the risk model's refit to 8/31 (monthly/<cutoff>.npz, .pt) changed
+    September's scores while the digest, hashing pickles only, stayed the same."""
+    (tmp_path / "2016-0.pt").write_bytes(b"network")
+    before = model.digest(tmp_path)
+    assert before != model.digest(tmp_path / "missing")
+    (tmp_path / "monthly").mkdir()
+    (tmp_path / "monthly" / "2026-08-31.npz").write_bytes(b"scores")
+    after = model.digest(tmp_path)
+    assert after != before
+    (tmp_path / "monthly" / "2026-08-31.npz").write_bytes(b"other scores")
+    assert model.digest(tmp_path) not in (before, after)
+    pickles = tmp_path / "pickles"
+    pickles.mkdir()
+    (pickles / "2016.pkl").write_bytes(b"model")
+    import hashlib
+    expected = hashlib.sha256()
+    expected.update(b"2016.pkl")
+    expected.update(hashlib.sha256(b"model").digest())
+    assert model.digest(pickles) == expected.hexdigest()          # a folder of pickles hashes as before
+
+
 def test_excess_label_by_hand_and_the_second_model():
     from quant_platform.research.daily import MODEL_FACTORS
 
