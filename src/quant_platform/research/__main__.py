@@ -444,6 +444,7 @@ def main() -> int:
                         help="rolling --step select：只評這個月還沒評過的規則，加進原本的名單（2026-10-18：組合帳戶）")
     parser.add_argument("--online", action="store_true", help="rl-concentration：第二版（每週線上更新、扣下跌風險）")
     parser.add_argument("--odd-lot", action="store_true", help="rl-execution：用 09:10（盤中零股第一次撮合）的價格")
+    parser.add_argument("--multi", action="store_true", help="rl-execution：第七版，零股在 09:10、13:00 或收盤成交")
     parser.add_argument("--crash", action="store_true", help="rl-concentration：第三版（狀態加深度風險模型、前 10 檔回撤、融資維持率）")
     parser.add_argument("--other-universe", action="store_true",
                         help="windows2020 --target list：上市＋上櫃的規則整個重評（2026-10-28：名單曾用上市資料評它們）")
@@ -963,7 +964,7 @@ def main() -> int:
         # 2026-10-28 (research_method §7「RL 第六版：成交執行」): fill one minute after the open or at the close, offline
         from quant_platform.research import rl_execution
 
-        path = rl_execution.run(Path(args.base), RESEARCH, at="ten" if args.odd_lot else "minute")
+        path = rl_execution.run(Path(args.base), RESEARCH, at="multi" if args.multi else ("ten" if args.odd_lot else "minute"))
         found = json.loads(path.read_text(encoding="utf-8"))
         for side in ("sell", "buy", "both"):
             part = found[side]
