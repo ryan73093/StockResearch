@@ -57,6 +57,7 @@ def table(fp, factor: str = "ml_deep2_top", arms=ARMS, step: int = STEP) -> pd.D
             previous[arm] = set(chosen.tolist())
             row[f"reward_{arm}"] = gained - COST * turned
             row[f"gross_{arm}"] = gained
+            row[f"ret_{arm}"] = float(np.nanmean(ahead[chosen])) - COST * turned       # the account's own week
         window = market[position - 199: position + 1]
         row["taiex_trend"] = float(market[position] / np.nanmean(window) - 1)
         row["taiex_vol"] = float(np.nanstd(np.diff(market[position - 20: position + 1]) / market[position - 20: position]))
@@ -120,18 +121,80 @@ def summary(choices: pd.DataFrame, arms=ARMS) -> dict[str, object]:
     return found
 
 
-def run(history: str | Path, research: str | Path) -> Path:
+def run(history: str | Path, research: str | Path, online: bool = False) -> Path:
     from quant_platform.research import daily
 
     _data, fp = daily.load(Path(history))
     frame = table(fp)
-    choices = walk_forward(frame)
-    result = summary(choices)
+    choices = linucb(frame) if online else walk_forward(frame)
+    result = online_summary(choices) if online else summary(choices)
     folder = Path(research) / "rl"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"concentration-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path = folder / f"concentration{'-online' if online else ''}-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
     path.write_text(json.dumps({"at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "arms": list(ARMS), "step": STEP,
                                 "cost": COST, "features": list(FEATURES), **result,
                                 "weeks": choices.to_dict("records")}, ensure_ascii=False, indent=1, default=float),
                     encoding="utf-8")
     return path
+
+
+# --- the second version: online, downside-penalised (2026-10-28, written before the run) ---------------------------------
+ALPHA = 0.5               # LinUCB's exploration bonus
+PENALTY = 5.0             # a week's fall squared, times this, taken from the learning reward (a 10% fall: 5 points)
+
+
+def linucb(frame: pd.DataFrame, arms=ARMS, alpha: float = ALPHA, penalty: float = PENALTY) -> pd.DataFrame:
+    """Every week from the first: each arm's linear value on the state (standardised by the weeks before), plus the
+    uncertainty bonus, the highest chosen; the chosen arm's penalised reward updates it once known (the next week's
+    decision comes after the week's close)."""
+    names = list(FEATURES)
+    width = len(names) + 1
+    matrices = {arm: np.eye(width) for arm in arms}
+    vectors = {arm: np.zeros(width) for arm in arms}
+    history: list[np.ndarray] = []
+    rows = []
+    for _index, row in frame.iterrows():
+        raw = row[names].to_numpy(dtype=float)
+        if history:
+            seen = np.vstack(history)
+            mean, spread = np.nanmean(seen, axis=0), np.nanstd(seen, axis=0)
+        else:
+            mean, spread = np.zeros(len(names)), np.ones(len(names))
+        state = np.nan_to_num((raw - mean) / np.where(spread > 0, spread, 1.0))
+        state = np.append(np.clip(state, -4, 4), 1.0)
+        history.append(raw)
+        scores = {}
+        for arm in arms:
+            inverse = np.linalg.inv(matrices[arm])
+            theta = inverse @ vectors[arm]
+            scores[arm] = float(theta @ state + alpha * np.sqrt(state @ inverse @ state))
+        choice = max(arms, key=lambda arm: scores[arm])
+        fall = min(float(row[f"ret_{choice}"]), 0.0)
+        learned = 100 * (float(row[f"reward_{choice}"]) - penalty * fall * fall)     # in points: the bonus is on that scale
+        matrices[choice] += np.outer(state, state)
+        vectors[choice] += learned * state
+        out = {"date": row["date"], "year": int(row["year"]), "choice": choice,
+               "bandit": float(row[f"ret_{choice}"]), "bandit_excess": float(row[f"reward_{choice}"])}
+        out.update({f"fixed_{arm}": float(row[f"ret_{arm}"]) for arm in arms})
+        rows.append(out)
+    return pd.DataFrame(rows)
+
+
+def account(returns: pd.Series) -> dict[str, float]:
+    """Weekly returns compounded: the end multiple and the deepest fall from a high."""
+    curve = (1 + returns.fillna(0)).cumprod()
+    return {"multiple": round(float(curve.iloc[-1]), 4) if len(curve) else None,
+            "max_drawdown": round(float((curve / curve.cummax() - 1).min()), 4) if len(curve) else None}
+
+
+def online_summary(choices: pd.DataFrame, arms=ARMS) -> dict[str, object]:
+    def period(part):
+        return {column: account(part[column]) for column in ["bandit", *[f"fixed_{arm}" for arm in arms]]} | {
+            "weeks": int(len(part)), "choices": {str(arm): int((part["choice"] == arm).sum()) for arm in arms}}
+
+    early = choices[(choices["date"] >= "2018-01-01") & (choices["date"] < "2020-10-26")]
+    late = choices[choices["date"] >= "2021-01-01"]
+    found = {"early": period(early), "late": period(late)}
+    mine, ten = found["late"]["bandit"], found["late"][f"fixed_{arms[0]}"]
+    found["passed"] = bool(mine["multiple"] >= 0.95 * ten["multiple"] and mine["max_drawdown"] >= ten["max_drawdown"] + 0.03)
+    return found

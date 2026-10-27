@@ -442,6 +442,7 @@ def main() -> int:
     parser.add_argument("--cutoff", help="rolling：截止日（預設：兩個月前的月底）")
     parser.add_argument("--only-new", action="store_true",
                         help="rolling --step select：只評這個月還沒評過的規則，加進原本的名單（2026-10-18：組合帳戶）")
+    parser.add_argument("--online", action="store_true", help="rl-concentration：第二版（每週線上更新、扣下跌風險）")
     parser.add_argument("--other-universe", action="store_true",
                         help="windows2020 --target list：上市＋上櫃的規則整個重評（2026-10-28：名單曾用上市資料評它們）")
     parser.add_argument("--target", choices=("list", "registry", "stale"),
@@ -960,8 +961,15 @@ def main() -> int:
         # 2026-10-28 (research_method §7「RL 第四版」): the concentration bandit, offline, walk-forward by year
         from quant_platform.research import rl_concentration
 
-        path = rl_concentration.run(Path(args.base), RESEARCH)
+        path = rl_concentration.run(Path(args.base), RESEARCH, online=args.online)
         found = json.loads(path.read_text(encoding="utf-8"))
+        if args.online:           # the second version: the account's multiple and deepest fall
+            for label, key in (("2018～2020-10", "early"), ("2021～", "late")):
+                part = found[key]
+                print(label, {name: (value["multiple"], value["max_drawdown"]) for name, value in part.items()
+                              if isinstance(value, dict) and "multiple" in value}, "選擇", part["choices"], flush=True)
+            print("判定", "過" if found.get("passed") else "沒過", f"已寫入 {path}")
+            return 0
         for label, key in (("2018～2020-10", "early"), ("2021～", "late")):
             part = found.get(key) or {}
             print(label, "每週平均（%）：機器人", part.get("bandit"), "去年最好的", part.get("last_best"),

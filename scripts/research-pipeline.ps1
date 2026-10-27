@@ -982,6 +982,7 @@ switch ($Name) {
         # 2026-10-28 research_method §7「RL 第四版」: the concentration bandit offline, walk-forward by year
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-offline" @("-m", "quant_platform.research", "rl-concentration")
+        Invoke-Step "2-online" @("-m", "quant_platform.research", "rl-concentration", "--online")
     }
     "stalefix" {
         # 2026-10-28 research_method §7「重現性」: the stale-listed results checked again on their own universe (the TPEx
