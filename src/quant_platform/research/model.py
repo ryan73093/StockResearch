@@ -70,6 +70,11 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # model K's ensemble and features, each training week weighted by its age — half the weight every
           # ``half_life`` sessions (about three years) before the year (or month) it scores; judged on 2021-2025
           "ml_gbm_l": {"version": "gbm-2.8.0", "label": "ensemble", "features": "extended_k", "half_life": 750},
+          # 2026-10-28 (research_method §7「模型 M」; model L failed: older weeks still carry signal): model K's features
+          # and the market's state beside them (Gu, Kelly & Xiu 2020 interact stock characteristics with macro
+          # predictors; trees find the interactions) - the same value for every stock of a day, as its percentile in
+          # the market's own last three years; judged on 2021-2025 against model K
+          "ml_gbm_m": {"version": "gbm-2.9.0", "label": "ensemble", "features": "extended_m"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -173,6 +178,9 @@ def version_features(version: str | None) -> tuple[str, ...]:
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in DISCLOSURE_FACTORS
                      and name not in PLEDGE_FACTORS and name not in INDUSTRY_FACTORS and name not in HOLDER_FACTORS
                      and name not in PAID_FACTORS)
+    if kind == "extended_m":           # 2026-10-28: K's list and the market's state
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
+                     and name != "branch_informed_20") + MARKET_FEATURES
     if kind == "extended_k":           # 2026-10-26: every factor but the revenue, the industries and the branches
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
                      and name != "branch_informed_20")
@@ -211,12 +219,56 @@ def trained_features(folder: str | Path, version: str | None = None) -> tuple[st
     return version_features(version)
 
 
+MARKET_FEATURES = ("market:trend", "market:volatility", "market:breadth", "market:dispersion", "market:maintenance")
+MARKET_WINDOW = 750         # sessions a market reading is placed against
+
+
+def market_state(fp, name: str) -> np.ndarray:
+    """2026-10-28 (gbm-2.9.0): one market reading per session, as its percentile among the last MARKET_WINDOW sessions'
+    (known that day): TAIEX against its 200-session average, its 20-session volatility, the share of stocks up over 20
+    sessions, the spread of the stocks' 20-session returns, the market's margin maintenance ratio (from 2018)."""
+    import pandas as pd
+
+    cache = fp.__dict__.setdefault("_market_state", {})
+    if name in cache:
+        return cache[name]
+    market = pd.Series(np.asarray(fp.market, dtype=float))
+    prices = fp.panel.filled
+    with np.errstate(all="ignore"):
+        moved = prices / np.roll(prices, 20, axis=1) - 1
+    moved[:, :20] = np.nan
+    if name == "market:trend":
+        raw = market / market.rolling(200, min_periods=200).mean() - 1
+    elif name == "market:volatility":
+        raw = market.pct_change(fill_method=None).rolling(20).std()
+    elif name == "market:breadth":
+        with np.errstate(all="ignore"):
+            raw = pd.Series(np.nanmean(np.where(np.isfinite(moved), moved > 0, np.nan), axis=0))
+    elif name == "market:dispersion":
+        with np.errstate(all="ignore"):
+            raw = pd.Series(np.nanstd(moved, axis=0))
+    else:                               # market:maintenance
+        raw = pd.Series(np.nan, index=range(len(fp.sessions)))
+        path = Path(fp.models).parent / "issues" / "maintenance.parquet" if getattr(fp, "models", None) else None
+        if path is not None and path.is_file():
+            table = pd.read_parquet(path)
+            by_day = {str(day)[:10]: float(value) for day, value in zip(table["date"], table["ratio"])}
+            raw = pd.Series([by_day.get(day.isoformat(), np.nan) for day in fp.sessions]).ffill(limit=5)
+    output = raw.rolling(MARKET_WINDOW, min_periods=120).rank(pct=True).to_numpy(dtype=np.float32)
+    cache[name] = output
+    return output
+
+
 def feature_block(fp, columns: list[int], eligible: np.ndarray, names: tuple[str, ...] | None = None) -> np.ndarray:
-    """len(columns) × symbols × features (the given names, or every factor now)."""
+    """len(columns) × symbols × features (the given names, or every factor now); a market reading (MARKET_FEATURES)
+    is the same for every eligible stock of the day."""
     names = names or features()
     block = np.empty((len(columns), len(fp.symbols), len(names)), dtype=np.float32)
     mask = eligible[:, columns].T
     for index, name in enumerate(names):
+        if name.startswith("market:"):
+            block[:, :, index] = np.where(mask, market_state(fp, name)[columns][:, None], np.nan)
+            continue
         values = np.where(mask, fp.matrix(name)[:, columns].T, np.nan)
         block[:, :, index] = _rank(values)
     return block

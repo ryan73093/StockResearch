@@ -178,3 +178,18 @@ def test_label_and_training_windows_follow_the_horizon():
     assert model.training_columns(fp, samples, 2024, 60) == []          # no label window ends before 2024
     later = model.training_columns(fp, samples, 2025, 60)
     assert later and max(later) + 60 < len(days)
+
+
+def test_the_market_state_is_one_value_a_day_placed_in_its_own_history():
+    """2026-10-28 (gbm-2.9.0, research_method §7「模型 M」): a market reading is the same for every eligible stock of a
+    day, as its percentile among the past sessions' readings; the other features stay cross-sectional percentiles."""
+    data, _drifts = planted(stocks=30)
+    fp = FactorPanel(Panel(data), market=np.linspace(100, 200, len(Panel(data).sessions)))
+    eligible = np.ones((len(fp.symbols), len(fp.sessions)), dtype=bool)
+    columns = [len(fp.sessions) - 100, len(fp.sessions) - 10]           # past the 200-session average and 120 readings
+    block = model.feature_block(fp, columns, eligible, ("momentum_3", "market:trend"))
+    market = block[:, :, 1]
+    assert np.allclose(market[0], market[0][0]) and np.allclose(market[1], market[1][0])
+    assert 0 < market[1][0] <= 1                        # a percentile against its own past
+    assert not np.allclose(block[0, :, 0], block[0, 0, 0])   # the factor still varies across stocks
+    assert "market:maintenance" in model.version_features("gbm-2.9.0")
