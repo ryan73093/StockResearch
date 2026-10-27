@@ -1,0 +1,131 @@
+{# 2026-10-28 (使用者：每個議題弄成一個專案去追蹤，你現在全部混在一起我要怎麼看): one issue project — the question, its
+   lights and the reading (research/issue_notes.py), its drawings, its details, what it tracks and the lines, its changes. #}
+{% extends "v2/base.html" %}
+{% from "v2/_issues_macros.html" import light, wan_usd, pct, indicator_rows, panel, topic_level %}
+{% block title %}{{ topic.title }} · 議題追蹤{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>{{ topic.title }}</h1>
+    <p class="page-head__sub">{{ topic.question }}・{{ payload.built_at[:16].replace('T', ' ') }} 更新</p>
+  </div>
+  <div class="page-head__meta"><a href="/issues">全部議題</a>{% for other in payload.topics if other.key != topic.key %}・<a href="/issues/{{ other.key }}">{{ other.short }}</a>{% endfor %}</div>
+</header>
+{% endblock %}
+{% block content %}
+{% set level = topic_level(topic)|trim %}
+<div class="kpis kpis--page kpis--four">
+  <div class="kpi"><div class="kpi__label">{{ topic.group_title }}</div><div class="kpi__value">{{ light(level) }}</div><div class="kpi__note">{{ topic.indicators|length }} 個追蹤項目</div></div>
+  <div class="kpi"><div class="kpi__label">告警</div><div class="kpi__value">{{ topic.indicators|selectattr('level', 'equalto', 'alert')|list|length }}<small> 項</small></div><div class="kpi__note">議題擔心的風險正在發生</div></div>
+  <div class="kpi"><div class="kpi__label">警示</div><div class="kpi__value">{{ topic.indicators|selectattr('level', 'equalto', 'watch')|list|length }}<small> 項</small></div><div class="kpi__note">值得注意</div></div>
+  <div class="kpi"><div class="kpi__label">判讀</div><div class="kpi__value small">{{ note.written if note else '還沒寫' }}</div><div class="kpi__note">{% if note and (note.moved or note.added) %}之後燈號變了，判讀待更新{% else %}燈號和寫的時候一樣{% endif %}</div></div>
+</div>
+
+<section class="card" data-tab="現況與判讀" id="now">
+  <div class="card__head"><h2>現在怎麼看</h2>{% if note %}<span class="small muted">{{ note.written }} 寫，根據當天的燈號與數字</span>{% endif %}</div>
+  {% if note %}
+  {% if note.moved or note.added %}<p class="small" style="margin:0 0 8px"><span class="badge badge--warn">待更新</span> 寫完之後燈號變了：{{ (note.moved + note.added)|join('、') }}。下面的判讀是舊的。</p>{% endif %}
+  {% for paragraph in note.reading %}<p style="margin:0 0 8px;line-height:1.75">{{ paragraph }}</p>{% endfor %}
+  <h3 class="dash-h">什麼會改變看法</h3>
+  <ul style="margin:0;padding-left:18px;line-height:1.75">{% for row in note.change %}<li>{{ row }}</li>{% endfor %}</ul>
+  <h3 class="dash-h">接下來看什麼</h3>
+  <ul style="margin:0;padding-left:18px;line-height:1.75">{% for row in note.next %}<li>{{ row }}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">還沒有判讀。</p>{% endif %}
+  <h3 class="dash-h">每一個追蹤項目</h3>
+  {{ indicator_rows(topic.indicators|sort(attribute='rank', reverse=True)) }}
+</section>
+
+<section class="card dash" data-tab="圖表" id="charts">
+  <div class="card__head"><h2>圖</h2><span class="small muted">滑鼠移上去看數字；告警線、警示線畫在圖上</span></div>
+  {% if topic.reported and topic.reported.count < topic.reported.total %}
+  <p class="small" style="margin:0 0 8px">{{ topic.reported.quarter }} 已公布 {{ topic.reported.count }}／{{ topic.reported.total }} 家（{{ topic.reported.names|join('、') }}），合計 {{ wan_usd(topic.reported.capex) }} 美元；五家都公布後才算進合計。</p>
+  {% endif %}
+  {% if topic.complete_month %}<p class="small muted" style="margin:0 0 8px">實價登錄的月圖只畫到 {{ topic.complete_month }}：之後簽約的還在補登記。</p>{% endif %}
+  <div class="dash-grid">
+    {% for item in topic.panels %}{{ panel(charts, item) }}{% endfor %}
+  </div>
+</section>
+
+{% if topic.companies or topic.cities %}
+<section class="card" data-tab="明細" id="detail">
+  {% if topic.companies %}
+  <div class="card__head"><h2>每一家（最新一季，美元）</h2></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>公司</th><th>季</th><th class="num">資本支出</th><th class="num">年增</th><th class="num">營收</th><th class="num">營收年增</th><th class="num">占營收</th><th class="num">自由現金流</th></tr></thead>
+      <tbody>
+      {% for row in topic.companies %}
+        <tr><td data-primary><b>{{ row.name }}</b> <span class="small muted">{{ row.ticker }}・{{ row.role }}</span></td>
+          <td data-label="季">{{ row.quarter }}</td>
+          <td class="num" data-label="資本支出">{{ wan_usd(row.capex) }}</td>
+          <td class="num" data-label="年增">{{ pct(row.capex_growth) }}</td>
+          <td class="num" data-label="營收">{{ wan_usd(row.revenue) }}</td>
+          <td class="num" data-label="營收年增">{{ pct(row.revenue_growth) }}</td>
+          <td class="num" data-label="占營收">{{ '{:.0%}'.format(row.intensity) if row.intensity is not none else '—' }}</td>
+          <td class="num" data-label="自由現金流">{% if row.free_cash is none %}—{% else %}<span class="{{ 'down' if row.free_cash < 0 else '' }}">{{ wan_usd(row.free_cash) }}</span>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if topic.cities %}
+  <div class="card__head"><h2>六都（{{ topic.season }}，和去年同季比）</h2></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>城市</th><th class="num">成屋成交筆數</th><th class="num">年增</th><th class="num">單價中位數</th><th class="num">年增</th></tr></thead>
+      <tbody>
+      {% for row in topic.cities %}
+        <tr><td data-primary>{{ row.city }}</td><td class="num" data-label="成交筆數">{{ '{:,}'.format(row.count) }} 筆</td>
+          <td class="num" data-label="年增">{{ pct(row.count_growth) }}</td><td class="num" data-label="單價中位數">{{ '{:,.1f}'.format(row.price) }} 萬元／坪</td>
+          <td class="num" data-label="年增">{{ pct(row.price_growth, 1) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card" data-tab="追蹤項目與門檻" id="rules">
+  <div class="card__head"><h2>追蹤什麼、為什麼、什麼時候亮燈</h2><span class="small muted">門檻在看到數字之前寫好（例外會寫在門檻旁邊）；改門檻記在開發歷程</span></div>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>項目</th><th>追蹤什麼</th><th>為什麼重要</th><th>警示</th><th>告警</th><th>資料來源與更新</th></tr></thead>
+      <tbody>
+      {% for item in topic.indicators %}
+        <tr><td data-primary><b>{{ item.name }}</b></td><td data-label="追蹤什麼" class="small">{{ item.what }}</td>
+          <td data-label="為什麼重要" class="small">{{ item.why }}</td><td data-label="警示" class="small">{{ item.watch }}</td>
+          <td data-label="告警" class="small">{{ item.alert }}</td><td data-label="資料來源" class="small">{{ item.source }}・{{ item.frequency }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <details class="dash-how"><summary>這些數字怎麼算的</summary><ul>
+    {% if topic.key == 'ai' %}
+    <li><b>五巨頭</b>：微軟、Alphabet、亞馬遜、Meta、甲骨文；<b>資本支出</b>＝現金流量表的購買不動產及設備（不含融資租賃）。</li>
+    <li>財報的現金流是「年初到當季」累計，這裡相減換成單季；各家會計年度不同（甲骨文 5 月、輝達 1 月底結帳），放進大部分月份所在的日曆季。資料來自 SEC 申報（XBRL），每天檢查一次。</li>
+    {% elif topic.key == 'housing_market' %}
+    <li><b>實價登錄</b>：內政部每季整包加上最新一期；只算住宅，排除親友、特殊關係、瑕疵等非市場交易，預售屋扣掉解約。單價＝（總價－車位價）÷（面積－車位面積）。燈號用整季和去年同季比（月份還在補登記）。</li>
+    {% elif topic.key == 'housing_credit' %}
+    <li>央行每月下旬公布上個月的五大銀行新承做放款，以及全體銀行購置住宅貸款與建築貸款餘額（央行 ODS 檔）。新聞則數要收滿 14 天才比較（新聞從 10/20 開始收）。</li>
+    {% elif topic.key == 'property_stocks' %}
+    <li>證交所建材營造類、金融保險類指數（價格指數，不含股利）；營建業營收是建材營造類公司的月營收合計（前後都有公布的才算）。</li>
+    {% elif topic.key == 'leverage' %}
+    <li>上市融資餘額（金額）與大盤融資維持率來自 FinMind（證交所信用交易統計）；加權指數來自證交所每日收盤表。</li>
+    {% endif %}
+  </ul></details>
+</section>
+
+<section class="card" data-tab="燈號變化與新聞" id="log">
+  <div class="card__head"><h2>這個議題的燈號變化</h2></div>
+  {% if changes %}
+  <ul class="small" style="margin:0;padding-left:18px;line-height:1.8">
+    {% for row in changes %}<li>{{ row.at[:16].replace('T', ' ') }}　{{ row.name }}：{{ light(row['from']) if row['from'] else '新項目' }} → {{ light(row.to) }}（{{ row.value }}）</li>{% endfor %}
+  </ul>
+  {% else %}<p class="muted small">還沒有變化。</p>{% endif %}
+  {% if topic.news %}
+  <h3 class="dash-h">近 7 天相關新聞</h3>
+  <ul class="small" style="margin:0;padding-left:18px;line-height:1.8">{% for item in topic.news %}<li><a href="{{ item.link }}" rel="noopener" target="_blank">{{ item.title }}</a> <span class="muted">{{ item.source }}・{{ item.published.replace('T', ' ') }}</span></li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% endblock %}

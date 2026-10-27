@@ -368,6 +368,7 @@ def fetch_lvr(history: Path, today: date, get=_get, full: bool = False) -> dict[
 
 # --- the market's margin loans ------------------------------------------------------------------------------------------
 MARGIN_DATASET = "TaiwanStockTotalMarginPurchaseShortSale"
+MAINTENANCE_DATASET = "TaiwanTotalExchangeMarginMaintenance"     # the market's margin maintenance ratio (%)
 
 
 def fetch_margin(history: Path, token: str, today: date, get=None) -> int:
@@ -396,6 +397,20 @@ def fetch_margin(history: Path, token: str, today: date, get=None) -> int:
     path = Path(history).parent / "issues" / "margin.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).drop_duplicates("date").sort_values("date").to_parquet(path, index=False)
+    # 2026-10-28 (the leverage project): the market's margin maintenance ratio (%), the same way
+    query = urllib.parse.urlencode({"dataset": MAINTENANCE_DATASET, "start_date": "2018-01-01", "end_date": today.isoformat()})
+    if get is None:
+        request = urllib.request.Request(f"{URL}?{query}", headers={"Authorization": f"Bearer {token}",
+                                                                     "User-Agent": "StockResearch/1.0"})
+        with urllib.request.urlopen(request, timeout=120) as response:   # noqa: S310
+            payload = json.loads(response.read().decode("utf-8"))
+    else:
+        payload = get(query)
+    ratios = [{"date": row["date"], "ratio": float(row["TotalExchangeMarginMaintenance"])} for row in payload.get("data") or []
+              if row.get("TotalExchangeMarginMaintenance")]
+    if ratios:
+        pd.DataFrame(ratios).drop_duplicates("date").sort_values("date").to_parquet(path.with_name("maintenance.parquet"),
+                                                                                     index=False)
     return len(rows)
 
 

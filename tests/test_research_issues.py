@@ -186,15 +186,43 @@ def test_the_page_and_the_home_card(tmp_path):
     item = {"id": "ai_tsmc", "name": "台積電月營收（近 3 個月合計）年增率", "value": -0.02, "value_text": "-2.0%",
             "as_of": "2026-09", "level": "alert", "rank": 3, "detail": "", "what": "台積電每月營收", "why": "AI 需求溫度計",
             "watch": "低於 +15%", "alert": "轉負", "source": "月營收", "frequency": "每月"}
-    topic = {"key": "ai", "title": "AI 科技巨頭資本支出", "short": "AI 資本支出", "summary": "巨頭的錢", "indicators": [item],
-             "companies": [], "debt": [], "reported": {}, "news": [], "series": {"quarters": [], "taiwan": [], "stocks": []}}
+    topic = issues._project({"key": "ai", "indicators": [item], "companies": [], "debt": [], "reported": {}, "news": [],
+                             "series": {"quarters": [], "taiwan": [], "stocks": []}})
     payload = {"built_at": "2026-10-27T18:20:00+08:00", "today": "2026-10-27", "topics": [topic],
                "counts": {"ok": 0, "watch": 0, "alert": 1, "none": 0}}
     (research / "issues" / "latest.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     client = create_app(build_container(Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}",
                                                  scheduler_in_web=False))).test_client()
     page = client.get("/issues").get_data(as_text=True)
-    assert "議題追蹤" in page and "台積電月營收" in page and "告警" in page and "追蹤什麼、為什麼" in page
+    # 2026-10-28 (使用者：每個議題弄成一個專案；還有什麼議題值得追蹤，我是叫你列): the index lists projects and proposals
+    assert "議題追蹤" in page and 'href="/issues/ai"' in page and "台積電月營收" in page and "告警" in page
+    assert "還值得追蹤、討論的議題" in page and "台積電與大盤集中度" in page
     assert '<a href="/issues" aria-current="page">' in page                                  # in the main navigation
+    project = client.get("/issues/ai").get_data(as_text=True)
+    assert "巨頭蓋 AI 資料中心的錢會不會燒過頭" in project and "現在怎麼看" in project and "追蹤什麼、為什麼" in project
+    assert "借錢蓋" in project                                                                  # the written reading
+    assert client.get("/issues/nothing").status_code == 404
     home = client.get("/").get_data(as_text=True)
-    assert "議題警示" in home and "台積電月營收（近 3 個月合計）年增率：-2.0%" in home
+    assert "議題警示" in home and "台積電月營收（近 3 個月合計）年增率：-2.0%" in home and 'href="/issues/ai"' in home
+
+
+def test_the_housing_issue_is_four_projects_and_a_changed_light_marks_the_reading_old():
+    """2026-10-28 (使用者：每個議題弄成一個專案，你現在全部混在一起我要怎麼看): the housing-and-stocks issue split into its
+    questions, each with only its own indicators; a reading written before a light changed says so."""
+    from quant_platform.research.issue_notes import CANDIDATES, NOTES
+
+    ids = [name for key in ("housing_market", "housing_credit", "property_stocks") for name in issues.PROJECTS[key]["ids"]]
+    housing = {"indicators": [{"id": name, "level": "ok"} for name in ids], "series": {}, "news": [{"title": "x"}],
+               "cities": [], "season": "2026 年第 3 季", "complete_month": "2026-06"}
+    split = [issues._project(found) for found in issues.split_housing(housing)]
+    assert [topic["key"] for topic in split] == ["housing_market", "housing_credit", "property_stocks"]
+    assert sorted(item["id"] for topic in split for item in topic["indicators"]) == sorted(ids)      # each once
+    assert split[1]["news"] and not split[0]["news"] and split[0]["cities"] == [] and split[0]["group"] == "housing"
+    assert all(topic["question"] and topic["panels"] for topic in split)
+    assert set(issues.PROJECTS) == set(NOTES)                                     # every project has a reading
+    leverage = {"key": "leverage", "indicators": [{"id": "stock_margin", "name": "上市融資餘額年增率", "level": "watch"},
+                                                  {"id": "margin_vs_index", "name": "x", "level": "alert"},
+                                                  {"id": "margin_maintenance", "name": "y", "level": "ok"}]}
+    found = issues.note(leverage)
+    assert found["moved"] == ["上市融資餘額年增率"] and found["added"] == []      # written on alert, now watch
+    assert len({item["key"] for item in CANDIDATES}) == len(CANDIDATES) and all(item["why"] and item["track"] for item in CANDIDATES)

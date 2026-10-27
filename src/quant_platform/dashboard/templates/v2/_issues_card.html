@@ -7,8 +7,9 @@
   <div class="card__head"><h2>議題警示</h2><a class="small" href="/issues">議題追蹤 {{ head.counts.alert }} 告警・{{ head.counts.watch }} 警示</a></div>
   <div class="issues-card__grid">
     {% for topic in head.topics %}
-    <a class="issues-card__topic" href="/issues#{{ topic.key }}">
+    <a class="issues-card__topic" href="/issues/{{ topic.key }}">
       <span class="issues-card__title"><span class="badge {{ css.get(topic.level, '') }}">{{ names[topic.level] }}</span> {{ topic.title }}</span>
+      {% if topic.group_title and topic.group_title != topic.title %}<span class="small muted">{{ topic.group_title }}</span>{% endif %}
       {% if topic.flagged %}
       <ul>{% for item in topic.flagged[:4] %}<li><span class="badge {{ css.get(item.level, '') }}">{{ names[item.level] }}</span> {{ item.name }}：{{ item.value_text }}</li>{% endfor %}
         {% if topic.flagged|length > 4 %}<li class="muted">還有 {{ topic.flagged|length - 4 }} 項</li>{% endif %}</ul>

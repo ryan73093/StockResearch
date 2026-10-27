@@ -2,7 +2,12 @@
 AI 科技巨頭支出可能帶來的風險、營收、任何分析市場景氣的，目前相關的資本支出是什麼，盡可能用圖、表格讓人理解，可以追蹤
 什麼項目、什麼項目可以警示、什麼項目可以告警；第二個議題是台灣房市跟股市之間，幫我想幾個重點議題去追蹤；首頁做初步警示).
 
-Each issue is a list of indicators. An indicator says what it tracks and why, reads its numbers from the public data
+2026-10-28 (使用者：每個議題弄成一個專案去追蹤，你現在全部混在一起我要怎麼看): each issue is a project with its own
+page (``PROJECTS``: the question it answers, its indicators, drawings and a written reading, research/issue_notes.py);
+the housing-and-stocks issue is the four questions it is made of (volume and prices, mortgage credit, the construction
+and financial stocks, the margin loans).
+
+Each project is a list of indicators. An indicator says what it tracks and why, reads its numbers from the public data
 (research/history/issues_data.py) and the research data already kept (monthly revenue, the exchange's sector
 indices), and is graded: 正常, 警示 (watch: worth a look) or 告警 (alert: the risk the issue is about is showing).
 The thresholds are written here, before the numbers come in, and shown on the page; they are not fitted to the past.
@@ -585,28 +590,6 @@ def housing_issue(history: Path, today: date) -> dict[str, object]:
         "why": "建商的營收在交屋時認列，反映 2～3 年前預售的成果與現在的交屋進度；大減會傷到營建股獲利與股利。",
         "watch": "年減超過 20%", "alert": "年減超過 40%", "source": "公開資訊觀測站月營收（FinMind）", "frequency": "每月 10 日前"})
 
-    margin = _margin(history)
-    margin_growth = margin_change = None
-    margin_day = None
-    if margin is not None and len(margin) > 250:
-        last_row = margin.iloc[-1]
-        margin_day = str(last_row["date"])
-        target = (date.fromisoformat(margin_day) - timedelta(days=365)).isoformat()
-        earlier = margin[margin["date"] <= target]
-        if len(earlier):
-            margin_growth = float(last_row["balance"] / earlier.iloc[-1]["balance"] - 1)
-        margin_change = float(last_row["balance"] / margin.iloc[-61]["balance"] - 1)
-    indicators.append({
-        "id": "stock_margin", "name": "上市融資餘額年增率",
-        "value": margin_growth, "value_text": _pct(margin_growth), "as_of": margin_day,
-        "level": worst(grade(margin_growth, watch=0.40, alert=0.60, below=False),
-                       grade(margin_change, watch=0.25, alert=0.40, below=False)),
-        "detail": (f"{margin.iloc[-1]['balance'] / 1e8:,.0f} 億元；近 60 個交易日 {_pct(margin_change)}" if margin_day else ""),
-        "what": "投資人借錢買股票的總額（上市），和一年前、60 個交易日前比。",
-        "why": "股市槓桿：融資快速堆高時，回檔容易引發斷頭賣壓；股市賺的錢流向房市（或反過來）也會在這裡與房貸一起看到。",
-        "watch": "年增超過 40%，或 60 個交易日增加超過 25%", "alert": "年增超過 60%，或 60 個交易日增加超過 40%",
-        "source": "證交所信用交易統計（FinMind）", "frequency": "每個交易日"})
-
     news = news_count(history, today, HOUSING_NEWS)
     news_level, news_text = news_indicator(news, today)
     indicators.append({
@@ -625,30 +608,13 @@ def housing_issue(history: Path, today: date) -> dict[str, object]:
         cities.append({"city": city, "count": now_row[0], "count_growth": now_row[0] / then_row[0] - 1 if then_row[0] else None,
                        "price": now_row[1], "price_growth": now_row[1] / then_row[1] - 1 if then_row[1] else None})
 
-    first = _months_back(month, 35)
     months = [_months_back(month, back) for back in range(35, -1, -1)]
-    market_rows = []
     stock_index = _indexed(sectors, ("taiex", "construction", "finance"), today)
-    # the combined chart starts every line at 100 in the same month (the housing months' first)
-    by_month = {row["x"][:7]: row for row in _indexed(sectors, ("taiex", "construction"), today, years=4)}
-    base_stock = by_month.get(f"{first:%Y-%m}") or {}
-    by_month = {key: {name: row[name] / base_stock[name] * 100 for name in ("taiex", "construction")
-                      if row.get(name) and base_stock.get(name)} for key, row in by_month.items()}
-    base_volume = volume.get(first)
-    base_loans = loans.get(first)
-    for when in months:
-        row = {"x": when.isoformat()}
-        stock = by_month.get(f"{when:%Y-%m}")
-        if stock:
-            row.update(taiex=stock.get("taiex"), construction=stock.get("construction"))
-        if base_volume and volume.get(when):
-            row["volume"] = volume[when] / base_volume * 100
-        if base_loans and loans.get(when):
-            row["loans"] = loans[when] / base_loans * 100
-        market_rows.append(row)
+    builders_growth = [{"x": when.isoformat(), "growth": _yoy_window(builder_revenue, when)}
+                       for when in sorted(builder_revenue) if when >= _months_back(builder_last, 35)
+                       and _yoy_window(builder_revenue, when) is not None] if builder_last else []
     return {
         "key": "housing", "title": "台灣房市與股市", "short": "房市與股市",
-        "summary": "房市的量、價、錢（房貸與建築貸款），和股市裡跟房市連動的營建股、金融股與融資槓桿。",
         "indicators": indicators, "cities": cities, "news": news["latest"], "complete_month": f"{month:%Y-%m}",
         "season": latest and season_label(latest),
         "series": {
@@ -665,11 +631,179 @@ def housing_issue(history: Path, today: date) -> dict[str, object]:
                           "construction": _yoy(({key: row["construction_balance"] for key, row in balances.items()}), when)}
                          for when in sorted(balances) if balance_last and when >= _months_back(balance_last, 47)],
             "stocks": stock_index,
-            "together": [row for row in market_rows if len(row) > 1],
+            "builders": builders_growth,
+        }}
+
+
+# --- the leverage project ----------------------------------------------------------------------------------------------------
+def _maintenance(history: Path):
+    import pandas as pd
+
+    path = Path(history).parent / "issues" / "maintenance.parquet"
+    return pd.read_parquet(path).sort_values("date") if path.is_file() else None
+
+
+def _year_before(frame, column: str, day: str):
+    """``column`` on the last row at least 365 days before ``day``."""
+    target = (date.fromisoformat(day) - timedelta(days=365)).isoformat()
+    earlier = frame[frame["date"] <= target]
+    return float(earlier.iloc[-1][column]) if len(earlier) else None
+
+
+def leverage_issue(history: Path, today: date) -> dict[str, object]:
+    """2026-10-28 (使用者：每個議題弄成一個專案): the listed market's margin loans — how much, how fast against the index,
+    how close to forced selling."""
+    indicators = []
+    margin, sectors, maintenance = _margin(history), _sectors(history), _maintenance(history)
+    margin_growth = margin_change = taiex_growth = None
+    margin_day = None
+    if margin is not None and len(margin) > 250:
+        last_row = margin.iloc[-1]
+        margin_day = str(last_row["date"])
+        before = _year_before(margin, "balance", margin_day)
+        margin_growth = float(last_row["balance"] / before - 1) if before else None
+        margin_change = float(last_row["balance"] / margin.iloc[-61]["balance"] - 1)
+    if sectors is not None and len(sectors) > 250:
+        before = _year_before(sectors, "taiex", str(sectors["date"].iloc[-1]))
+        taiex_growth = float(sectors["taiex"].iloc[-1] / before - 1) if before else None
+    record = (float(margin[margin["date"] < f"{date.fromisoformat(margin_day).year}"]["balance"].max())
+              if margin_day else None)
+    indicators.append({
+        "id": "stock_margin", "name": "上市融資餘額年增率",
+        "value": margin_growth, "value_text": _pct(margin_growth), "as_of": margin_day,
+        "level": worst(grade(margin_growth, watch=0.40, alert=0.60, below=False),
+                       grade(margin_change, watch=0.25, alert=0.40, below=False)),
+        "detail": (f"{margin.iloc[-1]['balance'] / 1e8:,.0f} 億元（今年以前最高 {record / 1e8:,.0f} 億元）；"
+                   f"近 60 個交易日 {_pct(margin_change)}" if margin_day and record else ""),
+        "what": "投資人借錢買股票的總額（上市），和一年前、60 個交易日前比。",
+        "why": "融資快速堆高時，一回檔就容易引發斷頭賣壓，跌勢比平常急。",
+        "watch": "年增超過 40%，或 60 個交易日增加超過 25%", "alert": "年增超過 60%，或 60 個交易日增加超過 40%",
+        "source": "證交所信用交易統計（FinMind）", "frequency": "每個交易日"})
+    gap = margin_growth - taiex_growth if margin_growth is not None and taiex_growth is not None else None
+    indicators.append({
+        "id": "margin_vs_index", "name": "融資成長減加權指數漲幅（一年）",
+        "value": gap, "value_text": "—" if gap is None else f"{gap * 100:+.1f} 個百分點", "as_of": margin_day,
+        "level": grade(gap, watch=0.20, alert=0.40, below=False),
+        "detail": f"融資 {_pct(margin_growth)}、加權指數 {_pct(taiex_growth)}" if gap is not None else "",
+        "what": "融資餘額一年的成長率，減掉加權指數一年的漲幅。",
+        "why": "股價上漲本身就會讓融資金額變大；融資長得比指數快很多，才代表借錢買股票的人真的變多、槓桿在堆高。",
+        "watch": "高 20 個百分點以上", "alert": "高 40 個百分點以上（門檻 2026-10-28 訂，訂的時候已經看過現在的數字）",
+        "source": "FinMind、證交所類股指數", "frequency": "每個交易日"})
+    ratio = ratio_day = None
+    if maintenance is not None and len(maintenance):
+        ratio, ratio_day = float(maintenance["ratio"].iloc[-1]), str(maintenance["date"].iloc[-1])
+        low = maintenance.loc[maintenance["ratio"].idxmin()]
+    indicators.append({
+        "id": "margin_maintenance", "name": "大盤融資維持率",
+        "value": ratio, "value_text": "—" if ratio is None else f"{ratio:.0f}%", "as_of": ratio_day,
+        "level": grade(ratio, watch=160, alert=145),
+        "detail": f"2018 年以來最低 {low['ratio']:.0f}%（{low['date']}）" if ratio is not None else "",
+        "what": "全部融資買進股票的市值 ÷ 融資借的錢；個人低於 130% 會被追繳、賣不出來就斷頭。",
+        "why": "大盤維持率跌到 140% 上下時，追繳與斷頭會變成連環賣壓（2025 年 4 月、2020 年 3 月、2022 年 10 月）。",
+        "watch": "低於 160%", "alert": "低於 145%", "source": "FinMind 大盤融資維持率", "frequency": "每個交易日"})
+    growth_rows = []
+    if margin is not None and sectors is not None:
+        merged = margin.merge(sectors[["date", "taiex"]], on="date")
+        merged["month"] = merged["date"].str[:7]
+        ends = merged.groupby("month").tail(1)
+        for _index, row in ends.iterrows():
+            if row["date"] < f"{today.year - 3}":
+                continue
+            margin_before = _year_before(merged, "balance", row["date"])
+            taiex_before = _year_before(merged, "taiex", row["date"])
+            if margin_before and taiex_before:
+                growth_rows.append({"x": row["date"], "margin": row["balance"] / margin_before - 1,
+                                    "taiex": row["taiex"] / taiex_before - 1})
+    return {
+        "key": "leverage", "indicators": indicators, "news": [],
+        "series": {
             "margin": ([{"x": str(row["date"]), "balance": float(row["balance"]) / 1e8}
                         for _index, row in margin.iloc[::5].iterrows() if str(row["date"]) >= f"{today.year - 3}"]
                        if margin is not None else []),
+            "growth": growth_rows,
+            "maintenance": ([{"x": str(row["date"]), "ratio": float(row["ratio"])}
+                             for _index, row in maintenance.iloc[::5].iterrows() if str(row["date"]) >= f"{today.year - 3}"]
+                            if maintenance is not None else []),
         }}
+
+
+# --- the projects: each issue on its own page ---------------------------------------------------------------------------------
+# 2026-10-28 (使用者：每個議題弄成一個專案去追蹤，你現在全部混在一起我要怎麼看): the owner's two issues as projects — the AI
+# spending one, and the housing-and-stocks one split into the four questions it is made of — each with its own question,
+# indicators, drawings and reading (research/issue_notes.py). (panel key, title, note, legend, full width)
+GROUPS = {"ai": "AI 科技巨頭資本支出", "housing": "台灣房市與股市"}
+PROJECTS: dict[str, dict] = {
+    "ai": {"group": "ai", "title": "AI 科技巨頭資本支出", "short": "AI 資本支出",
+           "question": "巨頭蓋 AI 資料中心的錢會不會燒過頭？這筆錢還在流進台灣的供應鏈嗎？",
+           "panels": [("ai_cash", "資本支出追上賺進的現金", "五巨頭合計，每季，億美元：資本支出逼近營業現金流時，本業賺的錢幾乎全部拿去蓋 AI",
+                       [("v1", "資本支出"), ("v3", "營業現金流")], True),
+                      ("ai_ratio", "支出負擔", "占營收超過 35%、占營業現金流超過 95% 是告警線", [("v1", "占營收"), ("v2", "占營業現金流")], False),
+                      ("ai_growth", "資本支出還在加速嗎", "合計年增率；低於 +20% 警示、轉負告警", [("v1", "年增率")], False),
+                      ("ai_companies", "每一家最新一季", "資本支出占營業現金流、占營收；超過 100% 表示自由現金流為負",
+                       [("v1", "占營業現金流"), ("v2", "占營收")], True),
+                      ("ai_taiwan", "錢流到台灣了嗎", "台積電與 17 家 AI 伺服器供應鏈月營收，近 3 個月合計年增率",
+                       [("v1", "台積電"), ("v2", "AI 伺服器供應鏈")], False),
+                      ("ai_stocks", "股市怎麼看", "類股指數，三年前＝100", [("v1", "電腦及週邊設備"), ("v2", "半導體"), ("vref", "加權指數")], False)]},
+    "housing_market": {"group": "housing", "title": "房市量價", "short": "房市量價",
+                       "ids": ("house_volume", "house_presale", "house_price"),
+                       "question": "台灣房市在降溫還是回溫？成交量和房價各往哪走？",
+                       "panels": [("house_seasons", "每季登記的住宅成交筆數", "實價登錄，一季整包（完整）；燈號拿最新一季和去年同季比",
+                                   [("v1", "成屋"), ("v2", "預售屋")], True),
+                                  ("house_volume", "每月成交筆數（依簽約月份）", "只畫到登記完的月份", [("v1", "成屋"), ("v2", "預售屋")], False),
+                                  ("house_price", "六都單價中位數", "萬元／坪，扣掉車位", [("v1", "成屋"), ("v2", "預售屋")], False)]},
+    "housing_credit": {"group": "housing", "title": "房貸與信用管制", "short": "房貸與信用",
+                       "ids": ("house_new_loans", "house_rate", "house_mortgage_balance", "house_construction_loans", "house_news"),
+                       "question": "錢還在流進房市嗎？央行信用管制的效果到哪裡了？",
+                       "panels": [("house_loans", "五大銀行新承做購屋貸款", "每月，億元", [("v1", "新承做購屋貸款")], False),
+                                  ("house_rate", "購屋貸款利率", "五大銀行新承做，%", [("v2", "購屋貸款利率")], False),
+                                  ("house_balances", "銀行的房地產曝險", "全體銀行餘額年增率；房貸超過 11% 告警（央行曾因此加碼管制），建築貸款轉負警示",
+                                   [("v1", "購置住宅貸款"), ("v2", "建築貸款")], True)]},
+    "property_stocks": {"group": "housing", "title": "營建股與金融股", "short": "營建與金融股",
+                        "ids": ("house_construction_stocks", "house_finance_stocks", "house_builders_revenue"),
+                        "question": "股市怎麼看房市？營建股、金融股有沒有在反映房市的風險？",
+                        "panels": [("house_stocks", "營建、金融和大盤", "類股指數，三年前＝100",
+                                    [("v1", "建材營造"), ("v2", "金融保險"), ("vref", "加權指數")], True),
+                                   ("house_builders", "營建業營收", "近 3 個月合計年增率；年減超過 20% 警示", [("v1", "營建業營收")], False)]},
+    "leverage": {"group": "housing", "title": "股市融資槓桿", "short": "融資槓桿",
+                 "question": "借錢買股票的人是不是太多了？回檔時會不會引發斷頭賣壓？",
+                 "panels": [("lev_margin", "上市融資餘額", "億元，每週", [("v1", "融資餘額")], True),
+                            ("lev_growth", "融資長得比股價快嗎", "一年成長率：融資比加權指數高 40 個百分點以上告警",
+                             [("v1", "融資餘額"), ("vref", "加權指數")], False),
+                            ("lev_maintenance", "大盤融資維持率", "%；低於 160% 警示、145% 告警", [("v1", "融資維持率")], False)]},
+}
+
+
+def split_housing(housing: dict) -> list[dict]:
+    """The housing issue's indicators, series and tables shared among its projects."""
+    by_id = {item["id"]: item for item in housing["indicators"]}
+    output = []
+    for key in ("housing_market", "housing_credit", "property_stocks"):
+        project = {"key": key, "indicators": [by_id[name] for name in PROJECTS[key]["ids"] if name in by_id],
+                   "series": housing["series"], "news": housing["news"] if key == "housing_credit" else []}
+        if key == "housing_market":
+            project.update(cities=housing["cities"], season=housing["season"], complete_month=housing["complete_month"])
+        output.append(project)
+    return output
+
+
+def _project(found: dict) -> dict:
+    meta = PROJECTS[found["key"]]
+    return {**found, "group": meta["group"], "group_title": GROUPS[meta["group"]], "title": meta["title"],
+            "short": meta["short"], "question": meta["question"],
+            "panels": [{"key": key, "title": title, "note": note, "legend": legend, "full": full}
+                       for key, title, note, legend, full in meta["panels"]]}
+
+
+def note(project: dict) -> dict | None:
+    """The project's written reading (research/issue_notes.py) and the indicators whose light changed since."""
+    from quant_platform.research.issue_notes import NOTES
+
+    found = NOTES.get(project["key"])
+    if not found:
+        return None
+    moved = [item["name"] for item in project["indicators"] if found["levels"].get(item["id"]) not in (None, item["level"])]
+    added = [item["name"] for item in project["indicators"] if item["id"] not in found["levels"]]
+    return {**found, "moved": moved, "added": added}
 
 
 def _builders_revenue(history: Path, codes: list[str]) -> tuple[dict[date, float], date | None]:
@@ -698,7 +832,8 @@ def build(research: str | Path, today: date | None = None, now: datetime | None 
     history = research / "history"
     today = today or datetime.now(TAIPEI).date()
     now = (now or datetime.now(TAIPEI)).astimezone(TAIPEI)
-    topics = [ai_issue(history, today), housing_issue(history, today)]
+    topics = [_project(found) for found in (ai_issue(history, today), *split_housing(housing_issue(history, today)),
+                                             leverage_issue(history, today))]
     for topic in topics:
         for item in topic["indicators"]:
             item["rank"] = RANK[item["level"]]
@@ -746,6 +881,7 @@ def headline(payload: dict | None) -> dict[str, object] | None:
         flagged = sorted((item for item in topic["indicators"] if item["level"] in ("watch", "alert")),
                          key=lambda item: -RANK[item["level"]])
         topics.append({"key": topic["key"], "title": topic["title"], "short": topic["short"],
+                       "group_title": topic.get("group_title", ""), "question": topic.get("question", ""),
                        "level": worst("ok", *(item["level"] for item in topic["indicators"])),
                        "flagged": flagged, "total": len(topic["indicators"])})
     return {"built_at": payload["built_at"], "counts": payload["counts"], "topics": topics}
@@ -839,7 +975,7 @@ def charts(payload: dict) -> dict[str, str]:
                  for row in spenders],
                 [{"key": "cash", "label": "占營業現金流", "css": "v1"}, {"key": "revenue", "label": "占營收", "css": "v2"}],
                 _pct_text, "每家最新一季：資本支出占營業現金流、占營收（%）")
-    housing = topics.get("housing")
+    housing = topics.get("housing_market")
     if housing:
         series = housing["series"]
         if series["volume"]:
@@ -875,13 +1011,32 @@ def charts(payload: dict) -> dict[str, str]:
                 {"key": "construction", "label": "建材營造", "css": "v1"}, {"key": "finance", "label": "金融保險", "css": "v2"},
                 {"key": "taiex", "label": "加權指數", "css": "vref"}],
                 lambda value: f"{value:,.0f}", _month_text, "類股指數（三年前＝100）")
-        together = [row for row in series["together"] if len(row) > 2]
-        if together:
-            output["house_together"] = svg.line(together, [
-                {"key": "taiex", "label": "加權指數", "css": "vref"}, {"key": "construction", "label": "營建股", "css": "v1"},
-                {"key": "volume", "label": "住宅成交筆數", "css": "v2"}, {"key": "loans", "label": "新承做房貸", "css": "v3"}],
-                lambda value: f"{value:,.0f}", _month_text, "股市與房市同一張圖（三年前＝100）")
+        if series.get("builders"):
+            output["house_builders"] = svg.line(series["builders"], [{"key": "growth", "label": "營建業營收", "css": "v1"}],
+                                                _pct_text, _month_text, "營建業月營收，近 3 個月合計年增率（%）",
+                                                guides=[(-0.20, "警示 −20%"), (0.0, "0%")])
+    leverage = topics.get("leverage")
+    if leverage:
+        series = leverage["series"]
         if series["margin"]:
-            output["house_margin"] = svg.line(series["margin"], [{"key": "balance", "label": "上市融資餘額", "css": "v1"}],
-                                              lambda value: f"{value:,.0f} 億", _month_text, "上市融資餘額（億元）")
+            output["lev_margin"] = svg.line(series["margin"], [{"key": "balance", "label": "上市融資餘額", "css": "v1"}],
+                                            lambda value: f"{value:,.0f} 億", _month_text, "上市融資餘額（億元）")
+        if series["growth"]:
+            output["lev_growth"] = svg.line(series["growth"], [
+                {"key": "margin", "label": "融資餘額", "css": "v1"}, {"key": "taiex", "label": "加權指數", "css": "vref"}],
+                _pct_text, _month_text, "一年成長率：融資餘額與加權指數（%）", guides=[(0.0, "0%")])
+        if series["maintenance"]:
+            output["lev_maintenance"] = svg.line(series["maintenance"], [{"key": "ratio", "label": "融資維持率", "css": "v1"}],
+                                                 lambda value: f"{value:.0f}%", _month_text, "大盤融資維持率（%）",
+                                                 guides=[(160, "警示 160%"), (145, "告警 145%")])
     return output
+
+
+def project(payload: dict | None, key: str) -> dict | None:
+    return next((topic for topic in (payload or {}).get("topics") or [] if topic["key"] == key), None)
+
+
+def project_changes(research: str | Path, topic: dict, limit: int = 30) -> list[dict]:
+    """The light changes of one project's indicators."""
+    ids = {item["id"] for item in topic["indicators"]}
+    return [row for row in changes(research, limit=1000) if row["id"] in ids][:limit]

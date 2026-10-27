@@ -1182,12 +1182,31 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         """2026-10-27 (使用者：左邊再加一個議題追蹤，針對現在市場上的議題進行追蹤 — AI 科技巨頭支出的風險、營收、景氣；
         台灣房市跟股市；盡可能用圖、表格讓人理解，什麼項目可以警示、什麼項目可以告警): research/issues.py."""
         from quant_platform.research import issues as issue_tracker
+        from quant_platform.research.issue_notes import CANDIDATES
+
+        # 2026-10-28 (使用者：每個議題弄成一個專案去追蹤；還有什麼議題值得追蹤，我是叫你列): the projects and the proposals
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        payload = issue_tracker.read(research_dir)
+        topics = (payload or {}).get("topics") or []
+        return render_template("v2/issues.html", active_nav="issues", payload=payload, groups=issue_tracker.GROUPS,
+                               candidates=sorted(CANDIDATES, key=lambda item: item["priority"]),
+                               notes={topic["key"]: issue_tracker.note(topic) for topic in topics if issue_tracker.note(topic)},
+                               owners={item["id"]: topic for topic in topics for item in topic["indicators"]},
+                               changes=issue_tracker.changes(research_dir))
+
+    @blueprint.get("/issues/<key>")
+    def issue_project_page(key: str):
+        """2026-10-28 (使用者：每個議題弄成一個專案去追蹤，你現在全部混在一起我要怎麼看): one project's page."""
+        from quant_platform.research import issues as issue_tracker
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         payload = issue_tracker.read(research_dir)
-        return render_template("v2/issues.html", active_nav="issues", payload=payload,
-                               charts=issue_tracker.charts(payload) if payload else {},
-                               changes=issue_tracker.changes(research_dir), levels=issue_tracker.LEVELS)
+        topic = issue_tracker.project(payload, key)
+        if topic is None:
+            abort(404)
+        return render_template("v2/issue_project.html", active_nav="issues", payload=payload, topic=topic,
+                               note=issue_tracker.note(topic), charts=issue_tracker.charts(payload),
+                               changes=issue_tracker.project_changes(research_dir, topic))
 
     @blueprint.get("/research/distribution")
     def research_distribution():

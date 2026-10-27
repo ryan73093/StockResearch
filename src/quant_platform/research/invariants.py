@@ -372,6 +372,27 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                          built is not None and (today - built).days <= 2,
                          f"{lights['built_at'][:16]} 更新：告警 {lights['counts']['alert']}、警示 {lights['counts']['watch']}"
                          if lights else "還沒有議題資料"))
+    # 2026-10-28 (使用者：每個議題弄成一個專案去追蹤): every project has its written reading, rewritten within 7 days of a
+    # light changing
+    from quant_platform.research.issues import changes as issue_changes
+    from quant_platform.research.issues import note as issue_note
+
+    missing, old = [], []
+    logged = issue_changes(research, limit=100000)
+    for topic in (lights or {}).get("topics") or []:
+        found = issue_note(topic)
+        if not found:
+            missing.append(topic["title"])
+            continue
+        moved = {item["id"] for item in topic["indicators"]
+                 if found["levels"].get(item["id"]) not in (None, item["level"])}
+        since = [row["at"][:10] for row in logged if row["id"] in moved and row["at"][:10] >= found["written"]]
+        if since and (today - date.fromisoformat(min(since))).days > 7:
+            old.append(topic["title"])
+    checks.append(_check("每個議題專案都有判讀，燈號變了 7 天內重寫", "使用者 2026-10-28：每個議題弄成一個專案去追蹤",
+                         bool(lights) and not missing and not old,
+                         ("沒有判讀：" + "、".join(missing) if missing else "") + ("；判讀過期：" + "、".join(old) if old else "")
+                         or f"{len((lights or {}).get('topics') or [])} 個專案都有判讀"))
 
     # 2026-10-27 (使用者：深度學習、RL、多因子、趨勢動能這些類別你要把點標註出來，我就是要知道這些類別的分佈在哪一個位置)
     from quant_platform.research.distribution import unmarked

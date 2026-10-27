@@ -1,0 +1,29 @@
+{# 2026-10-28: what the issues index and each issue project's page share (research/issues.py). #}
+{% macro light(level) %}{% set names = {'ok': '正常', 'watch': '警示', 'alert': '告警', 'none': '沒有資料'} %}<span class="badge {{ {'alert': 'badge--bad', 'watch': 'badge--warn', 'ok': 'badge--ok'}.get(level, '') }}">{{ names[level] }}</span>{% endmacro %}
+{% macro wan_usd(value) %}{% if value is none %}—{% else %}{{ '{:,.0f}'.format(value / 1e8) }} 億{% endif %}{% endmacro %}
+{% macro pct(value, digits=0) %}{% if value is none %}—{% else %}<span class="{{ 'up' if value > 0 else ('down' if value < 0 else '') }}">{{ ('{:+.%df}%%' % digits).format(value * 100) }}</span>{% endif %}{% endmacro %}
+{% macro indicator_rows(items) %}
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack issues-table">
+    <thead><tr><th>燈號</th><th>追蹤項目</th><th class="num">目前</th><th>截至</th><th>警示</th><th>告警</th></tr></thead>
+    <tbody>
+    {% for item in items %}
+      <tr><td data-label="燈號">{{ light(item.level) }}</td>
+        <td data-primary><b>{{ item.name }}</b>{% if item.detail %}<br><span class="small muted">{{ item.detail }}</span>{% endif %}</td>
+        <td class="num" data-label="目前">{{ item.value_text }}</td>
+        <td data-label="截至">{{ item.as_of or '—' }}</td>
+        <td data-label="警示" class="small">{{ item.watch }}</td>
+        <td data-label="告警" class="small">{{ item.alert }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+{% macro panel(charts, item) %}{% if charts[item.key] %}
+<figure class="dash-panel{{ ' dash-panel--full' if item.full else '' }}">
+  <figcaption><h3>{{ item.title }}</h3><span>{{ item.note }}</span></figcaption>
+  {{ charts[item.key]|safe }}
+  {% if item.legend %}<div class="legend">{% for css, text in item.legend %}<span><i class="sw-{{ css }}"></i>{{ text }}</span>{% endfor %}</div>{% endif %}
+</figure>
+{% endif %}{% endmacro %}
+{% macro topic_level(topic) %}{{ 'alert' if topic.indicators|selectattr('level', 'equalto', 'alert')|list else ('watch' if topic.indicators|selectattr('level', 'equalto', 'watch')|list else 'ok') }}{% endmacro %}
