@@ -28,6 +28,9 @@ ARMS = (10, 20, 30)
 STEP = 5                  # sessions between decisions (a week)
 COST = 0.005              # a whole set turned over: about a round trip's fees and tax
 FEATURES = ("taiex_trend", "taiex_vol", "spread", "lead", "breadth")
+# 2026-10-28 (the third version): states about crashes — the deep risk model's market-wide reading against its last
+# three years, the top 10's own fall from their 20-session high, the market's margin maintenance ratio
+CRASH_FEATURES = FEATURES + ("market_risk", "top_drawdown", "maintenance")
 FIRST_TEST = 2018
 
 
@@ -40,6 +43,11 @@ def table(fp, factor: str = "ml_deep2_top", arms=ARMS, step: int = STEP) -> pd.D
     prices = fp.panel.filled
     market = np.asarray(fp.market, dtype=float)
     previous: dict[int, set] = {arm: set() for arm in arms}
+    risk = fp.matrix("dl_risk")
+    with np.errstate(all="ignore"):
+        median = pd.Series([float(np.nanmedian(column)) if np.isfinite(column).any() else np.nan for column in risk.T])
+    reading = ((median - median.rolling(750, min_periods=250).mean()) / median.rolling(750, min_periods=250).std()).to_numpy()
+    maintenance = _maintenance_by_day(fp)
     rows = []
     sessions = fp.sessions
     for position in range(250, len(sessions) - step, step):
@@ -66,6 +74,11 @@ def table(fp, factor: str = "ml_deep2_top", arms=ARMS, step: int = STEP) -> pd.D
         row["spread"] = float(ranked[:10].mean() - ranked[20:30].mean())
         past = prices[alive, position] / prices[alive, position - 20] - 1
         row["breadth"] = float(np.nanmean(past > 0))
+        top = order[:arms[0]]
+        highs = np.nanmax(prices[top, position - 20: position + 1], axis=1)
+        row["top_drawdown"] = float(np.nanmean(prices[top, position] / highs - 1))
+        row["market_risk"] = float(reading[position])
+        row["maintenance"] = maintenance.get(sessions[position], np.nan)
         rows.append(row)
     frame = pd.DataFrame(rows)
     # the top 10's lead over the top 30 in the last 12 weeks whose rewards were known at the decision
@@ -121,16 +134,26 @@ def summary(choices: pd.DataFrame, arms=ARMS) -> dict[str, object]:
     return found
 
 
-def run(history: str | Path, research: str | Path, online: bool = False) -> Path:
+def _maintenance_by_day(fp) -> dict:
+    from datetime import date as _date
+
+    path = Path(fp.models).parent / "issues" / "maintenance.parquet" if getattr(fp, "models", None) else None
+    if path is None or not path.is_file():
+        return {}
+    frame = pd.read_parquet(path)
+    return {_date.fromisoformat(str(day)[:10]): float(value) for day, value in zip(frame["date"], frame["ratio"])}
+
+
+def run(history: str | Path, research: str | Path, online: bool = False, crash: bool = False) -> Path:
     from quant_platform.research import daily
 
     _data, fp = daily.load(Path(history))
     frame = table(fp)
-    choices = linucb(frame) if online else walk_forward(frame)
-    result = online_summary(choices) if online else summary(choices)
+    choices = (linucb(frame, features=CRASH_FEATURES if crash else FEATURES) if online or crash else walk_forward(frame))
+    result = online_summary(choices) if online or crash else summary(choices)
     folder = Path(research) / "rl"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"concentration{'-online' if online else ''}-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path = folder / f"concentration{'-crash' if crash else ('-online' if online else '')}-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
     path.write_text(json.dumps({"at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "arms": list(ARMS), "step": STEP,
                                 "cost": COST, "features": list(FEATURES), **result,
                                 "weeks": choices.to_dict("records")}, ensure_ascii=False, indent=1, default=float),
@@ -143,11 +166,12 @@ ALPHA = 0.5               # LinUCB's exploration bonus
 PENALTY = 5.0             # a week's fall squared, times this, taken from the learning reward (a 10% fall: 5 points)
 
 
-def linucb(frame: pd.DataFrame, arms=ARMS, alpha: float = ALPHA, penalty: float = PENALTY) -> pd.DataFrame:
+def linucb(frame: pd.DataFrame, arms=ARMS, alpha: float = ALPHA, penalty: float = PENALTY,
+           features=FEATURES) -> pd.DataFrame:
     """Every week from the first: each arm's linear value on the state (standardised by the weeks before), plus the
     uncertainty bonus, the highest chosen; the chosen arm's penalised reward updates it once known (the next week's
     decision comes after the week's close)."""
-    names = list(FEATURES)
+    names = list(features)
     width = len(names) + 1
     matrices = {arm: np.eye(width) for arm in arms}
     vectors = {arm: np.zeros(width) for arm in arms}
