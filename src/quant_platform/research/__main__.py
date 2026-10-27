@@ -342,7 +342,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "rl-switch", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
@@ -957,6 +957,19 @@ def main() -> int:
                                           f"{counts['stale']} 個（要整個重跑）、失敗 {counts['errors']} 個")
             print(job.payload["summary"], flush=True)
         return 1 if counts["errors"] else 0
+
+    if args.command == "rl-switch":
+        # 2026-10-28 (research_method §7「RL 第五版：換股時機」): switch-or-keep, offline
+        from quant_platform.research import rl_switch
+
+        path = rl_switch.run(Path(args.base), RESEARCH)
+        found = json.loads(path.read_text(encoding="utf-8"))
+        for label, key in (("2018～2020-10", "early"), ("2021～", "late")):
+            part = found[key]
+            print(label, {name: (value["multiple"], value["max_drawdown"]) for name, value in part.items()
+                          if isinstance(value, dict)}, "換股的週比例", part["switch_share"], flush=True)
+        print("判定", "過" if found.get("passed") else "沒過", f"已寫入 {path}")
+        return 0
 
     if args.command == "rl-concentration":
         # 2026-10-28 (research_method §7「RL 第四版」): the concentration bandit, offline, walk-forward by year
