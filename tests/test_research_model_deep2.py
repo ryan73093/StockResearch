@@ -430,3 +430,72 @@ def test_a_monthly_cutoff_refit_scores_every_session_after_it(monkeypatch, tmp_p
     assert np.array_equal(np.nan_to_num(after[:past + 1]), np.nan_to_num(before[:past + 1]))   # up to it: as before
     assert not np.array_equal(np.nan_to_num(after[past + 1:]), np.nan_to_num(before[past + 1:]))  # after: refitted
     assert np.isfinite(after[-1]).sum() >= 50
+
+
+def test_the_residual_labels_and_the_zone_check_by_hand():
+    """2026-10-29 (技術分析機器人第七版): the label less its fit on dl-2.1.0's rank; inside dl-2.1.0's top 30, the new
+    scores' top 15 over their bottom 15."""
+    rng = np.random.default_rng(3)
+    prior = np.tile(np.arange(60, dtype=float)[:, None], (1, 2))           # symbol × session: stock n ranks n
+    noise = rng.normal(0, 0.01, 60)
+    labels = {0: (0.002 * np.arange(60) + noise).astype(np.float32), 1: np.full(60, 0.01, dtype=np.float32)}
+    rows = {0: np.arange(60), 1: np.arange(40)}                              # day 1: fewer than 50 known
+    output = model_deep2.residual_labels(prior, labels, rows)
+    rank = (np.arange(60) + 1) / 60
+    assert abs(np.corrcoef(output[0], rank)[0, 1]) < 1e-6                    # nothing left of the prior's rank
+    assert np.allclose(output[0], noise - np.polyval(np.polyfit(rank, noise, 1), rank), atol=1e-6)
+    assert np.isnan(output[1]).all()
+    gains = {0: np.zeros(60)}
+    gains[0][[59, 57, 55]] = 0.06                                            # three of the prior's top 30 gain
+    scores = {0: -np.arange(60, dtype=float)}                               # opposite order to the prior
+    scores[0][[59, 57, 55]] = 100.0                                          # but those three first
+    check = model_deep2.residual_check(scores, prior, gains, np.ones((60, 2), dtype=bool))
+    assert check["weeks"] == 1 and check["zone_spread"] == round(0.06 * 3 / 15, 5)
+    assert check["correlations"][0] < 0
+
+
+def test_the_residual_gate_needs_both_unlike_and_useful():
+    years = (2021, 2022, 2023, 2024, 2025)
+
+    def meta(spreads, correlation):
+        return {"version": "dl-2.5.2", "years": {str(year): {"residual": {"zone_spread": spread,
+                                                                           "correlations": [correlation] * 3}}
+                                                  for year, spread in zip(years, spreads)}}
+    assert model_deep2.gate_check_residual(meta([0.01, 0.01, 0.01, 0.01, -0.01], 0.3), years)["passed"]
+    assert not model_deep2.gate_check_residual(meta([0.01, 0.01, 0.01, 0.01, -0.01], 0.6), years)["passed"]
+    assert not model_deep2.gate_check_residual(meta([0.01, 0.01, 0.01, -0.01, -0.01], 0.3), years)["passed"]
+    assert not model_deep2.gate_check_residual(meta([0.005, 0.005, 0.005, 0.005, 0.005], 0.3), years)["passed"]
+    assert not model_deep2.gate_check_residual(meta([0.01, 0.01, 0.01, 0.01, None], 0.3), years)["passed"]
+
+
+def test_the_residual_version_learns_the_residual_and_trains(monkeypatch, tmp_path):
+    """dl-2.5.2: the technical inputs plus dl-2.1.0's score, the residual learned and the epoch chosen on it, the year
+    reported on the plain excess with the residual check."""
+    from quant_platform.research.tech_rl import TECH_FEATURES
+
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "RECENT_GATE_YEARS", (2017,))
+    _data, fp = _panel()
+    real = fp.matrix
+    monkeypatch.setattr(fp, "matrix", lambda name: real("momentum_3") if name == "ml_deep2_top" else real(name))
+    seen = {}
+    real_fit = model_deep2._fit
+
+    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None):
+        seen.setdefault("labels", labels)
+        seen.setdefault("judged", judged)
+        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+    monkeypatch.setattr(model_deep2, "_fit", spy)
+    meta = model.train(fp, tmp_path / "dl-2.5.2", years=[2017], label="deep2", version="dl-2.5.2")
+    assert meta["features"] == [*TECH_FEATURES, "ml_deep2_top"] and seen["judged"] is None
+    year = meta["years"]["2017"]
+    assert year["top20_gain"] is not None and year["residual"]["weeks"] > 0
+    assert len(year["residual"]["correlations"]) == year["residual"]["weeks"]
+    column = next(column for column, label in seen["labels"].items() if np.isfinite(label).sum() >= 50)
+    prior = real("momentum_3")[:, column]
+    known = np.isfinite(seen["labels"][column]) & np.isfinite(prior)
+    rank = __import__("pandas").Series(prior[known]).rank(pct=True).to_numpy()
+    assert abs(np.corrcoef(seen["labels"][column][known], rank)[0, 1]) < 1e-4  # learned: the residual
+    assert meta["gate"]["against"] == "dl-2.1.0" and "zone_spread" in meta["gate"]

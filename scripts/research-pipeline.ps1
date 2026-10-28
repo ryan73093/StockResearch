@@ -1,4 +1,4 @@
-﻿param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "robustfront", "exec_a", "exec_b", "llmreplay", "monthmodels", "next10blend", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind", "finmind-paid", "finmind-paid-b", "finmind-paid-c", "paid-factors", "newdata", "intraday", "limitscheck", "finmind-paid-c2", "newdata-now", "finmind-paid-rest", "holders2", "holders3", "liveflow", "modeli", "monthfill", "deep27", "modelj", "jdeep", "split", "split_a", "split_b", "splitblend", "splitblends", "splitblends_a", "splitblends_b", "bigscan3", "fmdaily_a", "fmdaily_b", "openfeas", "opentight", "govbank", "engine160", "veto2", "knowledge", "veto3_a", "veto3_b", "vetoblends_a", "vetoblends_b", "veto4", "veto5", "forwardrepair", "veto6", "blendroll", "bigscanroll", "govbank2", "branches", "robot35", "paidveto", "robot35s", "deephalf", "blendsteady", "stress", "protect", "bearguard_a", "bearguard_b", "bearguardpost", "bearguard", "bearguard3", "bearguard4", "bearguard5", "blendguard", "forwardfix", "forwardaudit", "forwardwhy", "entryonly", "leakfix", "fullscan", "modelk", "leakfixend", "spreadwatch", "halftwins_a", "halftwins_b", "halftwinsend", "gate2020", "band", "issues", "bandsells", "reproduce", "reproducecheck", "bear6", "modell", "stalefix", "rl4", "bear7", "modelm", "bear8", "blendrecent", "fwdminutes", "rebuild160_a", "rebuild160_b", "rebuild160end", "forwardaudit2", "techdeep4", "deepregate", "t2half_a", "t2half_b", "t2halfend", "blendfrontier", "bear9", "earnings", "surpriseswap", "blendfour", "bear10", "modelo", "deepdirect", "regate221", "blendsize", "techsecond", "bear11", "techveto")][string]$Name = "daily")
+﻿param([ValidateSet("data-a", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "robustfront", "exec_a", "exec_b", "llmreplay", "monthmodels", "next10blend", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind", "finmind-paid", "finmind-paid-b", "finmind-paid-c", "paid-factors", "newdata", "intraday", "limitscheck", "finmind-paid-c2", "newdata-now", "finmind-paid-rest", "holders2", "holders3", "liveflow", "modeli", "monthfill", "deep27", "modelj", "jdeep", "split", "split_a", "split_b", "splitblend", "splitblends", "splitblends_a", "splitblends_b", "bigscan3", "fmdaily_a", "fmdaily_b", "openfeas", "opentight", "govbank", "engine160", "veto2", "knowledge", "veto3_a", "veto3_b", "vetoblends_a", "vetoblends_b", "veto4", "veto5", "forwardrepair", "veto6", "blendroll", "bigscanroll", "govbank2", "branches", "robot35", "paidveto", "robot35s", "deephalf", "blendsteady", "stress", "protect", "bearguard_a", "bearguard_b", "bearguardpost", "bearguard", "bearguard3", "bearguard4", "bearguard5", "blendguard", "forwardfix", "forwardaudit", "forwardwhy", "entryonly", "leakfix", "fullscan", "modelk", "leakfixend", "spreadwatch", "halftwins_a", "halftwins_b", "halftwinsend", "gate2020", "band", "issues", "bandsells", "reproduce", "reproducecheck", "bear6", "modell", "stalefix", "rl4", "bear7", "modelm", "bear8", "blendrecent", "fwdminutes", "rebuild160_a", "rebuild160_b", "rebuild160end", "forwardaudit2", "techdeep4", "deepregate", "t2half_a", "t2half_b", "t2halfend", "blendfrontier", "bear9", "earnings", "surpriseswap", "blendfour", "bear10", "modelo", "deepdirect", "regate221", "blendsize", "techsecond", "bear11", "techveto", "techresid", "bear12")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -49,7 +49,11 @@ Write-PipelineRecord "running"
 # the engine's processes (8-12 GB each); a forward, two boards, a training and the full search died, and other programs
 # on the machine with them. A research step starts only with enough memory free to commit: a deep model's training
 # DeepTrainingGB and no other training running; any other step StepGB and no deep training running (it grows for minutes).
-$DeepTrainingGB = 40
+# 2026-10-29 05:5x: by what each training was measured to take — the listed-stock ones 18-22 GB (dl-4.0.0 21.7 GB),
+# the ones that also learn from TPEx (dl-2.2.x, the "all" panel) 39 GB — instead of 40 GB for every one: with the other
+# projects' builds on the machine the commit free stayed at 9-20 GB and every training waited.
+$DeepTrainingGB = 24
+$WideTrainingGB = 40
 $StepGB = 16
 function Get-CommitFreeGB { [math]::Round((Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory / 1MB, 1) }
 function Test-DeepTraining {
@@ -59,7 +63,8 @@ function Test-DeepTraining {
 function Wait-ForMemory([string[]]$Arguments) {
     if ($Arguments.Count -lt 2 -or $Arguments[1] -ne "quant_platform.research") { return }
     $deep = ($Arguments -join " ") -like "*--model-version dl-*"
-    $need = if ($deep) { $DeepTrainingGB } else { $StepGB }
+    $wide = ($Arguments -join " ") -like "*--model-version dl-2.2.*"
+    $need = if ($wide) { $WideTrainingGB } elseif ($deep) { $DeepTrainingGB } else { $StepGB }
     $other = if ($deep) { "另一個深度學習訓練" } else { "深度學習訓練" }
     Wait-While "等記憶體：這一步要約 $need GB 可用，而且沒有$($other)在跑（10/28 記憶體用完七次）" {
         (Get-CommitFreeGB) -lt $need -or (Test-DeepTraining) } 60
@@ -1091,6 +1096,27 @@ switch ($Name) {
         Invoke-Step "4-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
         Invoke-Step "5-forward" @("-m", "quant_platform.research", "forward")
         Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "bear12" {
+        # 2026-10-29 (research_method §7「空頭防護第十二版」, written before the run): one attacker with one or two
+        # defenders, shares by the loss in 0050's falling months, each finalist with its volatility-shared twin
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-blends" @("-m", "quant_platform.research", "daily", "--name", "bear12", "--broker", "cathay")
+        Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "3-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
+        Invoke-Step "4-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "5-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
+    }
+    "techresid" {
+        # 2026-10-29 (research_method §7「技術分析機器人第七版」第二步, written before the run): dl-2.5.2, the technical
+        # robot learning the excess dl-2.1.0 does not explain; its rules are written after its gate. The GPU: not while
+        # the full search's stage one runs on it (its two processes hold 10-15 of the 16 GB, 2026-10-29 05:4x: 1 GB free);
+        # the memory gate keeps a second training out
+        Wait-While "等顯示卡空出來（全段大搜尋第一階段在用，顯示卡記憶體 10～15 GB）" {
+            Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*scan-full*--part*" } } 300
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.5.2")
     }
     "techveto" {
         # 2026-10-29 (research_method §7 技術分析機器人第六版, written before the run): #7339's frame on dl-2.1.0, not

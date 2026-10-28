@@ -42,6 +42,8 @@ RECENT_MONTH = "2020-10"      # 2026-10-28 (第九輪): the recent track's first
 KEEP_BEST = 300_000           # 2026-10-28: the best passing blends kept while the search runs (memory)
 FRONTIER_COPY = 0.95          # 2026-10-28 (第十輪): near copies at 0.95 (0.9 made 14 families of 1,576 rules)
 FRONTIER_ROOM = 0.15          # 第十輪: the drawdown at most this much deeper than 0050's (the high-risk tier's room)
+ATTACK_SHARE = 0.05           # 2026-10-29 (空頭防護第十二版): the attackers, the pool's top 5% by money at the cutoff
+BEAR_FINALISTS = 12           # 空頭防護第十二版: finalists (each with its volatility-shared twin)
 
 
 def label(name: str) -> str:
@@ -97,6 +99,24 @@ def month_returns(values: np.ndarray, paid: np.ndarray) -> np.ndarray:
     return (values[..., 1:] - flow) / values[..., :-1] - 1
 
 
+def downside_risk(returns: np.ndarray, bench_returns: np.ndarray) -> np.ndarray:
+    """2026-10-29 (空頭防護第十二版): each row's root-mean-square loss in the months 0050 fell (Estrada 2006's downside
+    deviation, on 0050's falling months) — floored, so a member that never lost in them does not take everything."""
+    down = bench_returns < 0
+    losses = np.minimum(returns[:, down], 0.0)
+    return np.maximum(np.sqrt((losses ** 2).mean(axis=1)), 1e-3) if down.any() else np.full(len(returns), 1e-3)
+
+
+def role_blocks(attack: np.ndarray, defense: np.ndarray, size: int):
+    """2026-10-29 (空頭防護第十二版): one attacker with ``size`` - 1 defenders, each set once, members in ascending order."""
+    rest = np.array(list(itertools.combinations(sorted(int(item) for item in defense), size - 1)), dtype=int)
+    if not len(rest) or not len(attack):
+        return
+    rest = rest.reshape(-1, size - 1)
+    for one in attack:
+        yield np.sort(np.column_stack([np.full(len(rest), int(one)), rest]), axis=1)
+
+
 def falls(bench_returns: np.ndarray) -> list[tuple[int, int]]:
     from quant_platform.research.downside import FALL, falls as found
 
@@ -144,7 +164,8 @@ def combo_blocks(count: int, size: int, block: int = 2_000_000):
 
 def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set[str] | None = None,
            recent_split: int | None = None, near_copy: float = NEAR_COPY, frontier: bool = False,
-           extend: bool = False, per_size: int | None = None) -> dict:
+           extend: bool = False, per_size: int | None = None, weighting: str = "volatility", roles=None,
+           calm_floor: float | None = None, room: float | None = None) -> dict:
     """Stage 1 over every pair and triple of ``members``: the counts and the finalists (members, shares, development
     measures), best development excess first. ``taken``: blend hashes already registered (left out). ``recent_split``
     (2026-10-28, 第九輪: the index of RECENT_MONTH): the gate is beating 0050 from that month (time-weighted), the
@@ -155,7 +176,10 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
     fourth member (one numbered after its three, so each set once), judged the same way. ``per_size`` (第十二輪): each
     size kept, ranked and chosen apart, up to ``per_size`` finalists of each (a finalist skipped only for sharing two
     families with one of its own size) — round eleven's four-member blends shared three with the triple they grew from
-    and were always skipped. ``sizes`` in the result: per size, how many were tried, passed and the best score."""
+    and were always skipped. ``sizes`` in the result: per size, how many were tried, passed and the best score.
+    2026-10-29 (空頭防護第十二版): ``weighting`` "downside" shares by 1 / downside_risk instead of 1 / the volatility;
+    ``roles`` (attackers, defenders: member indices) one attacker with the rest defenders (role_blocks); ``calm_floor``
+    also at most this much further than 0050 in each of its falls; ``room`` the frontier's drawdown room instead."""
     from quant_platform.research.scan_full import EARLY_WEIGHT
 
     if not members:
@@ -164,6 +188,7 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
     values = np.stack([member["values"] for member in members])
     returns = month_returns(values, paid)
     volatility = returns.std(axis=1, ddof=1)
+    risk = downside_risk(returns, month_returns(bench, paid)) if weighting == "downside" else volatility
     correlation = np.corrcoef(returns)
     stretches = falls(month_returns(bench, paid))
     family = list(range(len(members)))                    # near copies joined (union-find)
@@ -213,7 +238,7 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
         combos = combos[apart]
         for begin in range(0, len(combos), 20_000):                  # a block at a time (memory)
             block = combos[begin:begin + 20_000]
-            weights = 1 / volatility[block]
+            weights = 1 / risk[block]
             shares = weights / weights.sum(axis=1, keepdims=True)
             blended = np.einsum("km,kmt->kt", shares, values[block])
             found = measure(blended, bench, paid, stretches, recent_split)
@@ -222,10 +247,13 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
                 end, gap = blended[:, -1][:, None], found["gap"][:, None]
                 dominated = ((front_money[None, :] >= end) & (front_gap[None, :] >= gap)
                              & ((front_money[None, :] > end) | (front_gap[None, :] > gap))).any(axis=1)
-                keep = (beat > 0) & (found["drawdown"] >= found["bench_drawdown"] - FRONTIER_ROOM) & ~dominated
+                keep = ((beat > 0) & (found["drawdown"] >= found["bench_drawdown"] - (FRONTIER_ROOM if room is None else room))
+                        & ~dominated)
             else:
                 keep = ((beat > 0) & (found["drawdown"] >= found["bench_drawdown"] - DRAWDOWN_ROOM)
                         & (found["gap"] >= -CALM_GAP))
+            if calm_floor is not None:
+                keep &= found["gap"] >= calm_floor
             if not keep.any():
                 continue
             passed += int(keep.sum())
@@ -247,7 +275,7 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
             prune(KEEP_BEST, store)
 
     for size in sizes:
-        for combos in combo_blocks(len(members), size):
+        for combos in (role_blocks(*roles, size) if roles is not None else combo_blocks(len(members), size)):
             if len(combos):
                 consider(combos, size)
     for store in (list(stores.values()) if per_size else [kept]):
@@ -279,17 +307,28 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
         chosen = pick(members, rows_of(kept), root, count, taken)
     return {"version": SCAN_VERSION, "pool": len(members), "families": len({root(index) for index in range(len(members))}),
             "ranking": "recent" if recent_split is not None else "excess", "candidates": counted, "passed": passed,
+            "weighting": weighting, **({"roles": {"attack": len(roles[0]), "defense": len(roles[1])}} if roles is not None else {}),
             "bench_drawdown": round(float(measure(values[:1], bench, paid, stretches)["bench_drawdown"]), 4),
             "sizes": {str(size): {key: (round(value, 4) if isinstance(value, float) else value)
                                   for key, value in counts.items()} for size, counts in sorted(tally.items())},
             "finalists": chosen}
 
 
+def make_blend(parts: list[dict], shares, prefix: str = "組合搜尋："):
+    """The blend of ``parts`` (pool members) at ``shares`` rounded to 0.1% (the last takes the rest), and those shares."""
+    from quant_platform.research.blend import BlendRule, Sleeve
+
+    rounded = [round(float(share), 3) for share in list(shares)[:-1]]
+    rounded.append(round(1 - sum(rounded), 3))
+    blend = BlendRule(name=(prefix + "＋".join(f"{label(part['name'])}#{part['trial']} {share:.0%}"
+                                               for part, share in zip(parts, rounded)))[:80],
+                      sleeves=tuple(Sleeve(rule=part["rule"], share=share) for part, share in zip(parts, rounded)))
+    return blend, rounded
+
+
 def pick(members: list[dict], rows: list, root, count: int, taken: set[str] | None) -> list[dict]:
     """The finalists from ``rows`` (best score first): a family in at most MEMBER_LIMIT of them, none sharing two
     families with one already taken, none registered before."""
-    from quant_platform.research.blend import BlendRule, Sleeve
-
     used: dict[int, int] = {}
     chosen: list[dict] = []
     for score, combo, shares, drawdown, gap, excess, recent, early in rows:
@@ -300,12 +339,8 @@ def pick(members: list[dict], rows: list, root, count: int, taken: set[str] | No
             continue
         if any(len(groups & item["groups"]) >= min(2, len(groups)) for item in chosen):
             continue
-        rounded = [round(share, 3) for share in shares[:-1]]
-        rounded.append(round(1 - sum(rounded), 3))
         parts = [members[member] for member in combo]
-        blend = BlendRule(name=("組合搜尋：" + "＋".join(f"{label(part['name'])}#{part['trial']} {share:.0%}"
-                                                    for part, share in zip(parts, rounded)))[:80],
-                          sleeves=tuple(Sleeve(rule=part["rule"], share=share) for part, share in zip(parts, rounded)))
+        blend, rounded = make_blend(parts, shares)
         if blend.rule_hash in (taken or set()):
             continue
         for group in groups:
@@ -525,11 +560,34 @@ def rolling_batch(research: str | Path = Path("instance") / "research", today=No
         DEV_END = kept
 
 
+def bear_roles(members: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+    """2026-10-29 (空頭防護第十二版): the attackers — the top ATTACK_SHARE by money at the cutoff — and the defenders: no
+    further than 0050 in any of its 10% falls and a month-end drawdown no deeper than 0050's, not attackers."""
+    paid, bench = members[0]["paid"], members[0]["bench"]
+    values = np.stack([member["values"] for member in members])
+    own = measure(values, bench, paid, falls(month_returns(bench, paid)))
+    money = values[:, -1]
+    attack = np.flatnonzero(money >= np.quantile(money, 1 - ATTACK_SHARE))
+    calm = (own["gap"] >= 0) & (own["drawdown"] >= own["bench_drawdown"])
+    return attack, np.setdiff1d(np.flatnonzero(calm), attack)
+
+
+def volatility_twin(members: list[dict], item: dict):
+    """2026-10-29 (空頭防護第十二版): a finalist's members at the usual shares (1 / the volatility of the month returns)."""
+    paid = members[0]["paid"]
+    parts = [members[index] for index in item["combo"]]
+    volatility = month_returns(np.stack([part["values"] for part in parts]), paid).std(axis=1, ddof=1)
+    weights = 1 / volatility
+    return make_blend(parts, weights / weights.sum(), "組合搜尋（份額照波動）：")
+
+
 def batch(research: str | Path = Path("instance") / "research", keep=None, recent: bool = False,
           near_copy: float = NEAR_COPY, frontier: bool = False, extend: bool = False,
-          per_size: int | None = None) -> list:
+          per_size: int | None = None, weighting: str = "volatility", roles=None, calm_floor: float | None = None,
+          room: float | None = None, count: int = FINALISTS, twins: bool = False) -> list:
     """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json.
-    ``keep``: which pool members to search over (all by default)."""
+    ``keep``: which pool members to search over (all by default). 2026-10-29 (空頭防護第十二版): ``roles`` a function of
+    the members giving (attackers, defenders); ``twins`` each finalist also at the usual shares (volatility_twin)."""
     from quant_platform.research.registry import TrialRegistry
 
     research = Path(research)
@@ -538,8 +596,17 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     if keep is not None:
         members = [member for member in members if keep(member)]
     split = members[0]["months"].index(RECENT_MONTH) if recent and members else None
-    found = search(members, taken=taken, recent_split=split, near_copy=near_copy, frontier=frontier, extend=extend,
-                   per_size=per_size)
+    found = search(members, count=count, taken=taken, recent_split=split, near_copy=near_copy, frontier=frontier,
+                   extend=extend, per_size=per_size, weighting=weighting,
+                   roles=roles(members) if roles is not None and members else None, calm_floor=calm_floor, room=room)
+    pairs = []
+    if twins:
+        known = taken | {item["blend"].rule_hash for item in found["finalists"]}
+        for item in found["finalists"]:
+            twin, shares = volatility_twin(members, item)
+            if twin.rule_hash not in known:
+                known.add(twin.rule_hash)
+                pairs.append({"of": item["blend"].rule_hash, "blend": twin, "shares": shares})
     folder = research / "blend_scan"
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -549,7 +616,9 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     target = folder / f"finalists-{digest}.json"
     summary = {**{key: value for key, value in found.items() if key != "finalists"}, "stamp": stamp,
                "dev_end": DEV_END, "calm_gap": CALM_GAP, "drawdown_room": DRAWDOWN_ROOM, "near_copy": near_copy,
-               "frontier": frontier, "extend": extend, "per_size": per_size,
+               "frontier": frontier, "extend": extend, "per_size": per_size, "calm_floor": calm_floor, "room": room,
+               "twins": [{"of": pair["of"], "name": pair["blend"].name, "rule_hash": pair["blend"].rule_hash,
+                          "shares": pair["shares"]} for pair in pairs],
                "finalists": [{key: value for key, value in item.items() if key not in ("blend", "combo", "groups")}
                              | {"name": item["blend"].name, "rule_hash": item["blend"].rule_hash}
                              for item in found["finalists"]]}
@@ -561,4 +630,27 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     for size, counts in found.get("sizes", {}).items():
         print(f"  {size} 檔：算了 {counts['candidates']:,} 個、過第一階段 {counts['passed']:,} 個、最好的分數 {counts['best']}、"
               f"進引擎 {sum(1 for item in found['finalists'] if len(item['members']) == int(size))} 個", flush=True)
-    return [item["blend"] for item in found["finalists"]]
+    if roles is not None:
+        print(f"  進攻 {found.get('roles', {}).get('attack')} 個、防守 {found.get('roles', {}).get('defense')} 個；"
+              f"份額：{'跌市虧損' if weighting == 'downside' else '平常波動'}；另跑 {len(pairs)} 個份額照平常波動的對照",
+              flush=True)
+    return [item["blend"] for item in found["finalists"]] + [pair["blend"] for pair in pairs]
+
+
+def bear_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+    """2026-10-29 (research_method §7「空頭防護第十二版」; written before the run): one attacker with one or two defenders
+    (bear_roles), shares by the loss in 0050's falling months, gated on beating 0050 from 2020-10, a drawdown at most
+    DRAWDOWN_ROOM deeper, never further than 0050 in its falls and beyond the pool's frontier; BEAR_FINALISTS of them,
+    each with its volatility-shared twin."""
+    from datetime import date
+
+    from quant_platform.research.rolling import cutoff_for
+
+    global DEV_END
+    kept = DEV_END
+    DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
+    try:
+        return batch(research, recent=True, near_copy=FRONTIER_COPY, frontier=True, weighting="downside",
+                     roles=bear_roles, calm_floor=0.0, room=DRAWDOWN_ROOM, count=BEAR_FINALISTS, twins=True)
+    finally:
+        DEV_END = kept

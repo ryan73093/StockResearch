@@ -180,3 +180,45 @@ def test_each_size_is_counted_and_chosen_apart():
     assert all(len(items) <= 2 for items in by_size.values())
     for size, counts in found["sizes"].items():                      # every size that passed has a finalist
         assert (counts["passed"] > 0) == (int(size) in by_size)
+
+
+def test_the_downside_risk_and_the_role_blocks_by_hand():
+    """2026-10-29 (空頭防護第十二版): the loss in 0050's falling months only; one attacker with the rest defenders."""
+    bench = bs.month_returns(BENCH, PAID)                         # falls in months 2 and 3 (index 1, 2)
+    returns = np.array([[0.05, -0.10, -0.20, 0.0, 0.1, 0.1, 0.1],
+                        [-0.30, 0.02, -0.04, 0.0, 0.1, 0.1, 0.1],
+                        [0.0, 0.01, 0.02, -0.5, 0.1, 0.1, 0.1]])
+    risk = bs.downside_risk(returns, bench)
+    assert risk[0] == pytest.approx(np.sqrt((0.10 ** 2 + 0.20 ** 2) / 2))
+    assert risk[1] == pytest.approx(np.sqrt((0.0 + 0.04 ** 2) / 2))          # its −30% came while 0050 rose
+    assert risk[2] == pytest.approx(1e-3)                                     # never lost while 0050 fell: the floor
+    pairs = np.concatenate(list(bs.role_blocks(np.array([5, 0]), np.array([1, 3, 2]), 2)))
+    assert sorted(map(tuple, pairs.tolist())) == [(0, 1), (0, 2), (0, 3), (1, 5), (2, 5), (3, 5)]
+    triples = np.concatenate(list(bs.role_blocks(np.array([0]), np.array([1, 2, 3]), 3)))
+    assert sorted(map(tuple, triples.tolist())) == [(0, 1, 2), (0, 1, 3), (0, 2, 3)]
+    assert list(bs.role_blocks(np.array([0]), np.array([1]), 3)) == []
+
+
+def test_the_bear_search_pairs_attackers_with_calm_defenders_at_downside_shares():
+    """An attacker with defenders only, shares by 1 / the loss in 0050's falls, never further than 0050 in a fall; each
+    finalist's twin at the usual shares."""
+    wild = [100, 118, 106, 90, 102, 120, 150, 190.0]               # the attacker: falls 24% when 0050 falls 19%
+    calm = [100, 103, 108, 104, 109, 112, 118, 134.0]               # up while 0050 falls
+    steady = [100, 104, 101, 98, 104, 110, 117, 128.0]              # down 6% while 0050 falls 19%
+    members = [member(10, wild), member(12, calm), member(13, steady)]
+    attack, defense = bs.bear_roles(members)
+    assert attack.tolist() == [0] and defense.tolist() == [1, 2]
+    found = bs.search(members, sizes=(2, 3), roles=(attack, defense), weighting="downside", calm_floor=0.0,
+                      frontier=True, room=bs.DRAWDOWN_ROOM)
+    assert found["roles"] == {"attack": 1, "defense": 2} and found["weighting"] == "downside"
+    assert found["candidates"] == 2 + 1                               # (wild, calm), (wild, steady), (wild, calm, steady)
+    assert found["finalists"]
+    values = np.stack([np.array(m["values"]) for m in members])
+    risk = bs.downside_risk(bs.month_returns(values, PAID), bs.month_returns(BENCH, PAID))
+    for item in found["finalists"]:
+        assert 10 in item["members"] and item["dev_gap"] >= 0
+        weights = [1 / risk[[m["trial"] for m in members].index(t)] for t in item["members"]]
+        assert item["shares"] == pytest.approx([w / sum(weights) for w in weights], abs=1e-3)
+        twin, shares = bs.volatility_twin(members, item)
+        assert twin.name.startswith("組合搜尋（份額照波動）") and twin.rule_hash != item["blend"].rule_hash
+        assert sum(shares) == pytest.approx(1.0, abs=1e-9)

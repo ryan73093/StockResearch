@@ -127,6 +127,21 @@ DIRECT_BETTER = 3                       # years of five better than dl-2.1.0 aft
 LOSSES["dl-4.0.0"] = "direct"
 RECENT_GATED.add("dl-4.0.0")
 
+# 2026-10-29 (research_method §7「技術分析機器人第七版」第二步, written before the run): dl-2.5.2 is the technical robot
+# (dl-2.5.1) learning what dl-2.1.0 does not already say — each day's excess less its cross-sectional fit on dl-2.1.0's
+# score rank (the residual: Friedman 2001's boosting, Numerai's neutralised targets), the top tenth of that as the label,
+# the epoch chosen on it too; dl-2.1.0's score (walk-forward, known on the day) joins the snapshot. The yearly figures
+# stay on the plain excess. Its gate (gate_check_residual): the weekly rank correlation with dl-2.1.0 below
+# RESIDUAL_CORRELATION and, inside dl-2.1.0's top RESIDUAL_ZONE, its top half over its bottom half by GATE_FLOOR on
+# average with GATE_COUNT of the five years above zero.
+RESIDUAL_OF = {"dl-2.5.2": "ml_deep2_top"}
+RESIDUAL_ZONE = 30
+RESIDUAL_CORRELATION = 0.5
+LOSSES["dl-2.5.2"] = "top10"
+TECHNICAL.add("dl-2.5.2")
+RECENT_GATED.add("dl-2.5.2")
+PLAIN_AGAINST["dl-2.5.2"] = "dl-2.1.0"
+
 
 def gate_years(version: str) -> tuple[int, ...]:
     return RECENT_GATE_YEARS if version in RECENT_GATED else GATE_YEARS
@@ -498,9 +513,62 @@ def gate_check_direct(meta: dict, against: dict, mine: dict, theirs: dict,
             "years_better": better, "passed": bool(complete and np.mean(own) >= np.mean(other) and better >= DIRECT_BETTER)}
 
 
+def residual_labels(prior: np.ndarray, labels: dict, rows: dict) -> dict:
+    """Each day's labels less their least-squares fit on ``prior``'s rank among the day's stocks (symbol × session);
+    NaN for a stock without a prior score, a day with fewer than 50 all NaN."""
+    output = {}
+    for column, label in labels.items():
+        value = np.full(label.shape, np.nan, dtype=np.float32)
+        picked = rows[column]
+        known = picked[np.isfinite(prior[picked, column]) & np.isfinite(label[picked])]
+        if known.size >= 50:
+            rank = pd.Series(prior[known, column]).rank(pct=True).to_numpy()
+            slope, intercept = np.polyfit(rank, label[known].astype(float), 1)
+            value[known] = label[known] - (intercept + slope * rank)
+        output[column] = value
+    return output
+
+
+def residual_check(scores: dict, prior: np.ndarray, gains: dict, eligible: np.ndarray) -> dict[str, object]:
+    """For the days in ``scores`` (column -> symbol scores): the rank correlation with ``prior`` each day, and inside
+    ``prior``'s top RESIDUAL_ZONE the scores' top half over their bottom half in the day's ``gains``."""
+    correlations, spreads = [], []
+    half = RESIDUAL_ZONE // 2
+    for column, values in scores.items():
+        gain = gains[column]
+        both = np.isfinite(values) & np.isfinite(prior[:, column]) & np.isfinite(gain) & eligible[:, column]
+        if both.sum() < 50:
+            continue
+        mine = pd.Series(values[both]).rank(pct=True).to_numpy()
+        theirs = pd.Series(prior[both, column]).rank(pct=True).to_numpy()
+        correlations.append(float(np.corrcoef(mine, theirs)[0, 1]))
+        zone = np.argsort(-theirs, kind="stable")[:RESIDUAL_ZONE]
+        order = zone[np.argsort(-mine[zone], kind="stable")]
+        spreads.append(float(gain[both][order[:half]].mean() - gain[both][order[half:]].mean()))
+    return {"weeks": len(spreads), "correlations": [round(value, 3) for value in correlations],
+            "zone_spread": round(float(np.mean(spreads)), 5) if spreads else None}
+
+
+def gate_check_residual(meta: dict, years: tuple[int, ...]) -> dict[str, object]:
+    """dl-2.5.2's registered gate (RESIDUAL_OF; the module's 2026-10-29 note)."""
+    items = [((meta.get("years") or {}).get(str(year)) or {}).get("residual") or {} for year in years]
+    spreads = [item.get("zone_spread") for item in items]
+    weekly = [value for item in items for value in item.get("correlations") or []]
+    average = float(np.mean(spreads)) if all(value is not None for value in spreads) else None
+    correlation = float(np.median(weekly)) if weekly else None
+    positive = sum(1 for value in spreads if value is not None and value > 0)
+    return {"version": meta.get("version"), "against": "dl-2.1.0", "years": list(years), "zone": RESIDUAL_ZONE,
+            "zone_spread": average, "years_positive": positive, "correlation": correlation,
+            "correlation_below": RESIDUAL_CORRELATION, "floor": GATE_FLOOR,
+            "passed": bool(average is not None and correlation is not None and correlation < RESIDUAL_CORRELATION
+                           and average >= GATE_FLOOR and positive >= GATE_COUNT)}
+
+
 def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
     """The version's registered gate on its meta (dl-3.0.0 against dl-2.1.0; dl-2.5.0 against gbm-2.1.0; dl-4.0.0
-    against dl-2.1.0 after cost; the others against gbm-2.2.0)."""
+    against dl-2.1.0 after cost; dl-2.5.2 on its own rows; the others against gbm-2.2.0)."""
+    if version in RESIDUAL_OF:
+        return gate_check_residual(meta, gate_years(version))
     if LOSSES.get(version) == "direct":
         path = root / DIRECT_AGAINST / "meta.json"
         other = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
@@ -537,7 +605,7 @@ def _prepare(fp, out: Path, version: str):
     if version in TECHNICAL:
         from quant_platform.research.tech_rl import TECH_FEATURES
 
-        names = tuple(TECH_FEATURES)
+        names = tuple(TECH_FEATURES) + ((RESIDUAL_OF[version],) if version in RESIDUAL_OF else ())
     else:
         snapshot = SNAPSHOT_OF.get(version, SNAPSHOT_VERSION)
         names = trained_features(out.parent / snapshot, snapshot)
@@ -560,6 +628,10 @@ def _prepare(fp, out: Path, version: str):
         judged = (rows, labels)
         labels = {column: wide[slot] for slot, column in enumerate(columns)}
         rows = {column: np.flatnonzero(np.isfinite(labels[column]) & learned[:, column]) for column in columns}
+    if version in RESIDUAL_OF:           # learns (and picks its epoch on) the residual; the years reported on the excess
+        judged = (rows, labels)
+        labels = residual_labels(fp.matrix(RESIDUAL_OF[version]), labels, rows)
+        rows = {column: np.flatnonzero(np.isfinite(labels[column]) & eligible[:, column]) for column in columns}
     return kind, architecture, names, eligible, inputs, columns, labels, rows, judged
 
 
@@ -681,7 +753,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
             train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]   # purged
             networks, curves = [], []
             for seed in SEEDS:
-                state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+                state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture,
+                                    None if version in RESIDUAL_OF else judged)
                 network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
                 network.load_state_dict(state)
                 networks.append(network)
@@ -710,6 +783,11 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                                     "ic": round(float(np.mean(ics)), 4) if ics else None,
                                     "top20_gain": round(float(np.mean(top20)), 5) if top20 else None,
                                     "held_curves": curves}
+        if version in RESIDUAL_OF:
+            weeks = [column for column in session_columns if column in weekly and column in report_labels]
+            meta["years"][str(year)]["residual"] = residual_check(
+                {column: stored[fp.sessions[column].isoformat()] for column in weeks}, fp.matrix(RESIDUAL_OF[version]),
+                report_labels, eligible)
         _save_scores(out, stored, fp.symbols)
         meta["trained_at"] = datetime.now(UTC).isoformat(timespec="seconds")
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -717,7 +795,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
             item = meta["years"][str(year)]
             job.update(done=number + 1, total=len(order),
                        current=f"{year}：樣本外 IC {item['ic']}、前 20 名多 {item['top20_gain']}")
-    if all(str(year) in meta["years"] for year in GATE_YEARS):
+    if all(str(year) in meta["years"] for year in gate_years(version)):      # 2026-10-29: its own gate's years
         meta["gate"] = _judge(version, meta, out.parent)
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     return meta

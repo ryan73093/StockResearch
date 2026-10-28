@@ -68,7 +68,7 @@ ROBOT_FACTORS = ("rl_blocks", "block_equal", "rl_rolling", "rolling_equal", "rl_
 def _family(factor: str, weight: float) -> str:
     if factor == "rl_worst" or (weight < 0 and (factor.startswith("ml_") or factor in ROBOT_FACTORS)):
         return "反向（學著賠）"
-    if factor in ("ml_tech_deep", "ml_tech_deep_r"):             # 2026-10-20: the technical robot's third version (and 4th)
+    if factor in ("ml_tech_deep", "ml_tech_deep_r", "ml_tech_resid"):             # 2026-10-20: the technical robot's third version (and 4th)
         return "技術分析機器人"
     if factor.startswith("ml_deep"):
         return "深度學習"
