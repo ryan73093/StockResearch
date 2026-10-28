@@ -160,3 +160,23 @@ def test_the_fourth_member_goes_only_on_the_triples_that_stayed():
     assert found["candidates"] >= plain["candidates"]
     assert all(len(item["members"]) <= 4 for item in found["finalists"])
     assert all(len(set(item["members"])) == len(item["members"]) for item in found["finalists"])
+
+
+def test_each_size_is_counted_and_chosen_apart():
+    """2026-10-29 (第十二輪): round eleven had no four-member finalist — a four grew from a kept triple and shared three
+    families with it, so it was always skipped once the triple was taken. With ``per_size`` each size has its own
+    finalists and counts."""
+    rng = np.random.default_rng(5)
+    members = []
+    for number in range(8):
+        steps = 1 + rng.normal(0.03, 0.05, 7)
+        members.append(member(10 + number, list(100 * np.r_[1.0, np.cumprod(steps)])))
+    found = bs.search(members, sizes=(2, 3), frontier=True, extend=True, per_size=2)
+    assert set(found["sizes"]) <= {"2", "3", "4"} and found["sizes"]["2"]["candidates"] == 28
+    assert sum(item["passed"] for item in found["sizes"].values()) == found["passed"]
+    by_size = {}
+    for item in found["finalists"]:
+        by_size.setdefault(len(item["members"]), []).append(item)
+    assert all(len(items) <= 2 for items in by_size.values())
+    for size, counts in found["sizes"].items():                      # every size that passed has a finalist
+        assert (counts["passed"] > 0) == (int(size) in by_size)

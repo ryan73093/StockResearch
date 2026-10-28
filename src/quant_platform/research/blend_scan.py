@@ -144,7 +144,7 @@ def combo_blocks(count: int, size: int, block: int = 2_000_000):
 
 def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set[str] | None = None,
            recent_split: int | None = None, near_copy: float = NEAR_COPY, frontier: bool = False,
-           extend: bool = False) -> dict:
+           extend: bool = False, per_size: int | None = None) -> dict:
     """Stage 1 over every pair and triple of ``members``: the counts and the finalists (members, shares, development
     measures), best development excess first. ``taken``: blend hashes already registered (left out). ``recent_split``
     (2026-10-28, 第九輪: the index of RECENT_MONTH): the gate is beating 0050 from that month (time-weighted), the
@@ -152,8 +152,10 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
     instead of "at most CALM_GAP further in 0050's falls", a blend stays only if no member of the pool beats it on both
     the money at the end and the worst gap in 0050's falls (the frontier's two measures, in the same months), with the
     drawdown at most FRONTIER_ROOM deeper than 0050's. ``extend`` (第十一輪): then every triple that stayed again with a
-    fourth member (one numbered after its three, so each set once), judged the same way."""
-    from quant_platform.research.blend import BlendRule, Sleeve
+    fourth member (one numbered after its three, so each set once), judged the same way. ``per_size`` (第十二輪): each
+    size kept, ranked and chosen apart, up to ``per_size`` finalists of each (a finalist skipped only for sharing two
+    families with one of its own size) — round eleven's four-member blends shared three with the triple they grew from
+    and were always skipped. ``sizes`` in the result: per size, how many were tried, passed and the best score."""
     from quant_platform.research.scan_full import EARLY_WEIGHT
 
     if not members:
@@ -182,18 +184,29 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
         front_money, front_gap = money[top], gaps[top]
     counted, passed = 0, 0
     width = 4 if extend else max(sizes)
-    kept: dict[str, list] = {name: [] for name in ("score", "excess", "drawdown", "gap", "recent", "early", "combo", "shares")}
 
-    def prune(limit: int) -> None:
-        joined = {name: np.concatenate(parts) for name, parts in kept.items() if parts}
+    def fresh() -> dict[str, list]:
+        return {name: [] for name in ("score", "excess", "drawdown", "gap", "recent", "early", "combo", "shares")}
+    kept = fresh()
+    stores: dict[int, dict[str, list]] = {}
+    tally: dict[int, dict[str, object]] = {}
+
+    def store_of(size: int) -> dict[str, list]:
+        return stores.setdefault(size, fresh()) if per_size else kept
+
+    def prune(limit: int, store: dict[str, list]) -> None:
+        joined = {name: np.concatenate(parts) for name, parts in store.items() if parts}
         if not joined:
             return
         order = np.argsort(-joined["score"], kind="stable")[:limit]
-        for name in kept:
-            kept[name] = [joined[name][order]]
+        for name in store:
+            store[name] = [joined[name][order]]
     def consider(combos: np.ndarray, size: int) -> None:
         nonlocal counted, passed
         counted += len(combos)
+        store = store_of(size)
+        count_of = tally.setdefault(size, {"candidates": 0, "passed": 0, "best": None})
+        count_of["candidates"] += len(combos)
         apart = np.ones(len(combos), dtype=bool)
         for left, right in itertools.combinations(range(size), 2):
             apart &= correlation[combos[:, left], combos[:, right]] <= near_copy
@@ -218,39 +231,65 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
             passed += int(keep.sum())
             score = (EARLY_WEIGHT * found["early"] + (1 - EARLY_WEIGHT) * found["recent"]
                      if recent_split is not None else found["excess"])
+            count_of["passed"] += int(keep.sum())
+            best = float(score[keep].max())
+            count_of["best"] = best if count_of["best"] is None else max(count_of["best"], best)
             pad = width - size
-            kept["score"].append(score[keep])
-            kept["excess"].append(found["excess"][keep])
-            kept["drawdown"].append(found["drawdown"][keep])
-            kept["gap"].append(found["gap"][keep])
-            kept["recent"].append(found["recent"][keep] if recent_split is not None else np.full(int(keep.sum()), np.nan))
-            kept["early"].append(found["early"][keep] if recent_split is not None else np.full(int(keep.sum()), np.nan))
-            kept["combo"].append(np.pad(block[keep], ((0, 0), (0, pad)), constant_values=-1))
-            kept["shares"].append(np.pad(shares[keep], ((0, 0), (0, pad))))
-        if sum(len(part) for part in kept["score"]) > 2 * KEEP_BEST:
-            prune(KEEP_BEST)
+            store["score"].append(score[keep])
+            store["excess"].append(found["excess"][keep])
+            store["drawdown"].append(found["drawdown"][keep])
+            store["gap"].append(found["gap"][keep])
+            store["recent"].append(found["recent"][keep] if recent_split is not None else np.full(int(keep.sum()), np.nan))
+            store["early"].append(found["early"][keep] if recent_split is not None else np.full(int(keep.sum()), np.nan))
+            store["combo"].append(np.pad(block[keep], ((0, 0), (0, pad)), constant_values=-1))
+            store["shares"].append(np.pad(shares[keep], ((0, 0), (0, pad))))
+        if sum(len(part) for part in store["score"]) > 2 * KEEP_BEST:
+            prune(KEEP_BEST, store)
 
     for size in sizes:
         for combos in combo_blocks(len(members), size):
             if len(combos):
                 consider(combos, size)
-    prune(KEEP_BEST)
-    if extend and kept["combo"]:                          # 第十一輪: a fourth member on the triples that stayed
-        triples = kept["combo"][0][(kept["combo"][0] >= 0).sum(axis=1) == 3][:, :3]
+    for store in (list(stores.values()) if per_size else [kept]):
+        prune(KEEP_BEST, store)
+    source = store_of(3)
+    if extend and source["combo"]:                        # 第十一輪: a fourth member on the triples that stayed
+        triples = source["combo"][0][(source["combo"][0] >= 0).sum(axis=1) == 3][:, :3]
         others = np.arange(len(members))
         for begin in range(0, len(triples), 1_000):
             part = triples[begin:begin + 1_000]
             rows_at, added = np.nonzero(others[None, :] > part.max(axis=1)[:, None])
             if len(rows_at):
                 consider(np.column_stack([part[rows_at], others[added]]), 4)
-        prune(KEEP_BEST)
-    rows = []
-    if kept["score"]:
-        for index in range(len(kept["score"][0])):
-            combo = [int(member) for member in kept["combo"][0][index] if member >= 0]
-            rows.append((float(kept["score"][0][index]), combo, kept["shares"][0][index][:len(combo)].tolist(),
-                         float(kept["drawdown"][0][index]), float(kept["gap"][0][index]),
-                         float(kept["excess"][0][index]), float(kept["recent"][0][index]), float(kept["early"][0][index])))
+        prune(KEEP_BEST, store_of(4))
+
+    def rows_of(store: dict[str, list]) -> list:
+        rows = []
+        if store["score"]:
+            for index in range(len(store["score"][0])):
+                combo = [int(member) for member in store["combo"][0][index] if member >= 0]
+                rows.append((float(store["score"][0][index]), combo, store["shares"][0][index][:len(combo)].tolist(),
+                             float(store["drawdown"][0][index]), float(store["gap"][0][index]),
+                             float(store["excess"][0][index]), float(store["recent"][0][index]),
+                             float(store["early"][0][index])))
+        return rows
+    if per_size:
+        chosen = [item for size in sorted(stores) for item in pick(members, rows_of(stores[size]), root, per_size, taken)]
+    else:
+        chosen = pick(members, rows_of(kept), root, count, taken)
+    return {"version": SCAN_VERSION, "pool": len(members), "families": len({root(index) for index in range(len(members))}),
+            "ranking": "recent" if recent_split is not None else "excess", "candidates": counted, "passed": passed,
+            "bench_drawdown": round(float(measure(values[:1], bench, paid, stretches)["bench_drawdown"]), 4),
+            "sizes": {str(size): {key: (round(value, 4) if isinstance(value, float) else value)
+                                  for key, value in counts.items()} for size, counts in sorted(tally.items())},
+            "finalists": chosen}
+
+
+def pick(members: list[dict], rows: list, root, count: int, taken: set[str] | None) -> list[dict]:
+    """The finalists from ``rows`` (best score first): a family in at most MEMBER_LIMIT of them, none sharing two
+    families with one already taken, none registered before."""
+    from quant_platform.research.blend import BlendRule, Sleeve
+
     used: dict[int, int] = {}
     chosen: list[dict] = []
     for score, combo, shares, drawdown, gap, excess, recent, early in rows:
@@ -274,11 +313,8 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
         chosen.append({"combo": combo, "groups": groups, "blend": blend, "members": [part["trial"] for part in parts], "shares": rounded,
                        "dev_excess": round(excess, 4), "dev_drawdown": round(drawdown, 4), "dev_gap": round(gap, 4),
                        **({"recent": round(recent, 4), "early": round(early, 4), "score": round(score, 4)}
-                          if recent_split is not None else {})})
-    return {"version": SCAN_VERSION, "pool": len(members), "families": len({root(index) for index in range(len(members))}),
-            "ranking": "recent" if recent_split is not None else "excess", "candidates": counted, "passed": passed,
-            "bench_drawdown": round(float(measure(values[:1], bench, paid, stretches)["bench_drawdown"]), 4),
-            "finalists": chosen}
+                          if np.isfinite(recent) else {})})
+    return chosen
 
 
 ROLE_SPLITS = (
@@ -421,6 +457,25 @@ def recent_batch(research: str | Path = Path("instance") / "research", today=Non
         DEV_END = kept
 
 
+SIZE_FINALISTS = 7            # 第十二輪: finalists of each size (two, three, four members)
+
+
+def size_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+    """2026-10-29 (research_method §7 組合搜尋第十二輪; written before the run): round eleven with each size kept, counted
+    and chosen apart, SIZE_FINALISTS of each (search's ``per_size``)."""
+    from datetime import date
+
+    from quant_platform.research.rolling import cutoff_for
+
+    global DEV_END
+    kept = DEV_END
+    DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
+    try:
+        return batch(research, recent=True, near_copy=FRONTIER_COPY, frontier=True, extend=True, per_size=SIZE_FINALISTS)
+    finally:
+        DEV_END = kept
+
+
 def four_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
     """2026-10-28 (research_method §7 組合搜尋第十一輪; written before the run): round ten, and every triple it keeps
     again with a fourth member (search's ``extend``)."""
@@ -471,7 +526,8 @@ def rolling_batch(research: str | Path = Path("instance") / "research", today=No
 
 
 def batch(research: str | Path = Path("instance") / "research", keep=None, recent: bool = False,
-          near_copy: float = NEAR_COPY, frontier: bool = False, extend: bool = False) -> list:
+          near_copy: float = NEAR_COPY, frontier: bool = False, extend: bool = False,
+          per_size: int | None = None) -> list:
     """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json.
     ``keep``: which pool members to search over (all by default)."""
     from quant_platform.research.registry import TrialRegistry
@@ -482,7 +538,8 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     if keep is not None:
         members = [member for member in members if keep(member)]
     split = members[0]["months"].index(RECENT_MONTH) if recent and members else None
-    found = search(members, taken=taken, recent_split=split, near_copy=near_copy, frontier=frontier, extend=extend)
+    found = search(members, taken=taken, recent_split=split, near_copy=near_copy, frontier=frontier, extend=extend,
+                   per_size=per_size)
     folder = research / "blend_scan"
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -492,7 +549,7 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     target = folder / f"finalists-{digest}.json"
     summary = {**{key: value for key, value in found.items() if key != "finalists"}, "stamp": stamp,
                "dev_end": DEV_END, "calm_gap": CALM_GAP, "drawdown_room": DRAWDOWN_ROOM, "near_copy": near_copy,
-               "frontier": frontier, "extend": extend,
+               "frontier": frontier, "extend": extend, "per_size": per_size,
                "finalists": [{key: value for key, value in item.items() if key not in ("blend", "combo", "groups")}
                              | {"name": item["blend"].name, "rule_hash": item["blend"].rule_hash}
                              for item in found["finalists"]]}
@@ -501,4 +558,7 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     print(f"組合搜尋第一階段：{found['pool']} 個規則、{found['candidates']} 個兩檔／三檔{'／四檔' if extend else ''}組合、"
           f"{found['passed']} 個{'2020-10 起' if recent else '開發期'}贏 0050 且跌市不多跌、{len(found['finalists'])} 個進引擎",
           flush=True)
+    for size, counts in found.get("sizes", {}).items():
+        print(f"  {size} 檔：算了 {counts['candidates']:,} 個、過第一階段 {counts['passed']:,} 個、最好的分數 {counts['best']}、"
+              f"進引擎 {sum(1 for item in found['finalists'] if len(item['members']) == int(size))} 個", flush=True)
     return [item["blend"] for item in found["finalists"]]
