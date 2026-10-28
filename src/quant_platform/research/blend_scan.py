@@ -40,6 +40,8 @@ MEMBER_LIMIT = 5              # a family (rules whose development months move to
 FINALISTS = 20
 RECENT_MONTH = "2020-10"      # 2026-10-28 (第九輪): the recent track's first month — the gate, and 3/4 of the ranking
 KEEP_BEST = 300_000           # 2026-10-28: the best passing blends kept while the search runs (memory)
+FRONTIER_COPY = 0.95          # 2026-10-28 (第十輪): near copies at 0.95 (0.9 made 14 families of 1,576 rules)
+FRONTIER_ROOM = 0.15          # 第十輪: the drawdown at most this much deeper than 0050's (the high-risk tier's room)
 
 
 def label(name: str) -> str:
@@ -141,11 +143,14 @@ def combo_blocks(count: int, size: int, block: int = 2_000_000):
 
 
 def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set[str] | None = None,
-           recent_split: int | None = None) -> dict:
+           recent_split: int | None = None, near_copy: float = NEAR_COPY, frontier: bool = False) -> dict:
     """Stage 1 over every pair and triple of ``members``: the counts and the finalists (members, shares, development
     measures), best development excess first. ``taken``: blend hashes already registered (left out). ``recent_split``
     (2026-10-28, 第九輪: the index of RECENT_MONTH): the gate is beating 0050 from that month (time-weighted), the
-    ranking EARLY_WEIGHT x the yearly excess before it + the rest x the one after (scan_full's)."""
+    ranking EARLY_WEIGHT x the yearly excess before it + the rest x the one after (scan_full's). ``frontier`` (第十輪):
+    instead of "at most CALM_GAP further in 0050's falls", a blend stays only if no member of the pool beats it on both
+    the money at the end and the worst gap in 0050's falls (the frontier's two measures, in the same months), with the
+    drawdown at most FRONTIER_ROOM deeper than 0050's."""
     from quant_platform.research.blend import BlendRule, Sleeve
     from quant_platform.research.scan_full import EARLY_WEIGHT
 
@@ -164,8 +169,15 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
             family[index] = family[family[index]]
             index = family[index]
         return index
-    for left, right in zip(*np.nonzero(np.triu(correlation > NEAR_COPY, 1))):
+    for left, right in zip(*np.nonzero(np.triu(correlation > near_copy, 1))):
         family[root(int(left))] = root(int(right))
+    if frontier:                                          # the pool's own frontier: money at the end, worst fall gap
+        own = measure(values, bench, paid, stretches)
+        money, gaps = values[:, -1], own["gap"]
+        beaten = [(money >= money[index]) & (gaps >= gaps[index]) & ((money > money[index]) | (gaps > gaps[index]))
+                  for index in range(len(members))]
+        top = np.array([not row.any() for row in beaten])
+        front_money, front_gap = money[top], gaps[top]
     counted, passed = 0, 0
     width = max(sizes)
     kept: dict[str, list] = {name: [] for name in ("score", "excess", "drawdown", "gap", "recent", "early", "combo", "shares")}
@@ -184,7 +196,7 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
             counted += len(combos)
             apart = np.ones(len(combos), dtype=bool)
             for left, right in itertools.combinations(range(size), 2):
-                apart &= correlation[combos[:, left], combos[:, right]] <= NEAR_COPY
+                apart &= correlation[combos[:, left], combos[:, right]] <= near_copy
             combos = combos[apart]
             for begin in range(0, len(combos), 20_000):                  # a block at a time (memory)
                 block = combos[begin:begin + 20_000]
@@ -193,8 +205,14 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
                 blended = np.einsum("km,kmt->kt", shares, values[block])
                 found = measure(blended, bench, paid, stretches, recent_split)
                 beat = found["recent"] if recent_split is not None else found["excess"]
-                keep = ((beat > 0) & (found["drawdown"] >= found["bench_drawdown"] - DRAWDOWN_ROOM)
-                        & (found["gap"] >= -CALM_GAP))
+                if frontier:
+                    end, gap = blended[:, -1][:, None], found["gap"][:, None]
+                    dominated = ((front_money[None, :] >= end) & (front_gap[None, :] >= gap)
+                                 & ((front_money[None, :] > end) | (front_gap[None, :] > gap))).any(axis=1)
+                    keep = (beat > 0) & (found["drawdown"] >= found["bench_drawdown"] - FRONTIER_ROOM) & ~dominated
+                else:
+                    keep = ((beat > 0) & (found["drawdown"] >= found["bench_drawdown"] - DRAWDOWN_ROOM)
+                            & (found["gap"] >= -CALM_GAP))
                 if not keep.any():
                     continue
                 passed += int(keep.sum())
@@ -389,6 +407,22 @@ def recent_batch(research: str | Path = Path("instance") / "research", today=Non
         DEV_END = kept
 
 
+def frontier_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+    """2026-10-28 (research_method §7 組合搜尋第十輪; written before the run): round nine's months, gate and ranking, the
+    near copies at FRONTIER_COPY, and only the blends the pool's own frontier does not beat (search's ``frontier``)."""
+    from datetime import date
+
+    from quant_platform.research.rolling import cutoff_for
+
+    global DEV_END
+    kept = DEV_END
+    DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
+    try:
+        return batch(research, recent=True, near_copy=FRONTIER_COPY, frontier=True)
+    finally:
+        DEV_END = kept
+
+
 def rolling_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
     """2026-10-22 (research_method §7 組合搜尋第六輪; written before the run): the same search with the development months
     up to the month's cutoff (the end of the month two months back) instead of 2020-09 — how the monthly list grades
@@ -406,7 +440,8 @@ def rolling_batch(research: str | Path = Path("instance") / "research", today=No
         DEV_END = kept
 
 
-def batch(research: str | Path = Path("instance") / "research", keep=None, recent: bool = False) -> list:
+def batch(research: str | Path = Path("instance") / "research", keep=None, recent: bool = False,
+          near_copy: float = NEAR_COPY, frontier: bool = False) -> list:
     """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json.
     ``keep``: which pool members to search over (all by default)."""
     from quant_platform.research.registry import TrialRegistry
@@ -417,7 +452,7 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     if keep is not None:
         members = [member for member in members if keep(member)]
     split = members[0]["months"].index(RECENT_MONTH) if recent and members else None
-    found = search(members, taken=taken, recent_split=split)
+    found = search(members, taken=taken, recent_split=split, near_copy=near_copy, frontier=frontier)
     folder = research / "blend_scan"
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -426,7 +461,8 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     digest = hashlib.sha256(json.dumps(sorted(item["blend"].rule_hash for item in found["finalists"])).encode()).hexdigest()[:12]
     target = folder / f"finalists-{digest}.json"
     summary = {**{key: value for key, value in found.items() if key != "finalists"}, "stamp": stamp,
-               "dev_end": DEV_END, "calm_gap": CALM_GAP, "drawdown_room": DRAWDOWN_ROOM, "near_copy": NEAR_COPY,
+               "dev_end": DEV_END, "calm_gap": CALM_GAP, "drawdown_room": DRAWDOWN_ROOM, "near_copy": near_copy,
+               "frontier": frontier,
                "finalists": [{key: value for key, value in item.items() if key not in ("blend", "combo", "groups")}
                              | {"name": item["blend"].name, "rule_hash": item["blend"].rule_hash}
                              for item in found["finalists"]]}

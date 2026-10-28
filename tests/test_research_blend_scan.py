@@ -130,3 +130,17 @@ def test_the_recent_gate_and_ranking():
     best = found["finalists"][0]
     assert 12 in best["members"] and best["recent"] > 0
     assert best["score"] == pytest.approx(0.25 * best["early"] + 0.75 * best["recent"], abs=2e-4)
+
+
+def test_the_frontier_search_keeps_only_blends_no_member_beats_on_both():
+    """2026-10-28 (第十輪): a member that makes more and falls less than a blend knocks it out; a blend between a rich
+    rule and a calm one that neither beats on both stays."""
+    wild = [100, 118, 106, 90, 102, 120, 150, 190.0]               # the most money, falls 24% when 0050 falls 19%
+    calm = [100, 103, 108, 104, 109, 112, 118, 134.0]               # little money, up while 0050 falls
+    best = [100, 104, 109, 106, 111, 125, 150, 200.0]               # more money than the wild one and calm in the fall
+    members = [member(10, wild), member(12, calm)]
+    found = bs.search(members, sizes=(2,), frontier=True)
+    assert [item["members"] for item in found["finalists"]] == [[10, 12]]      # neither beats the blend on both
+    members.append(member(14, best))
+    found = bs.search(members, sizes=(2,), frontier=True)
+    assert found["passed"] == 0 and not found["finalists"]                    # #14 alone beats every blend on both
