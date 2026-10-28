@@ -17,7 +17,8 @@ $serviceExecutables = @('quant-web.exe', 'quant-api.exe', 'quant-worker.exe') |
     ForEach-Object { Join-Path $projectRoot ".venv\Scripts\$_" }
 
 $supervisors = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
-    $_.CommandLine -and $_.CommandLine.Contains($supervisorScript)
+    # 2026-10-28: the supervisor itself (-Headless), not a launcher that hung before starting it
+    $_.CommandLine -and $_.CommandLine.Contains($supervisorScript) -and $_.CommandLine.Contains('-Headless')
 })
 if ($supervisors.Count -gt 0) {
     Write-Host "Supervisor already running (PID $($supervisors[0].ProcessId))." -ForegroundColor Cyan
@@ -31,10 +32,38 @@ if ($orphans.Count -gt 0) {
 }
 Remove-Item -LiteralPath (Join-Path $runtimeRoot 'stop.flag') -Force -ErrorAction SilentlyContinue
 
+function Start-HeadlessSupervisor {
+    # The supervisor without any window, created through WMI so it is outside this session (as the task's launcher does).
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+    $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine = "conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$supervisorScript`" -Headless"
+        CurrentDirectory = $projectRoot; ProcessStartupInformation = $startup }
+    if ($created.ReturnValue -ne 0) { throw "Win32_Process.Create failed with code $($created.ReturnValue)" }
+    Write-Host "Started the supervisor directly (PID $($created.ProcessId))."
+}
+
 $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($task) {
     Start-ScheduledTask -TaskName $taskName
     Write-Host "Started scheduled task $taskName."
+    # 2026-10-28: twice that day the task's launcher hung before it started the supervisor (the services stayed down
+    # after a deploy); when no supervisor is up within 60 seconds, end the launcher and start the supervisor directly
+    $launched = $false
+    $waitUntil = (Get-Date).AddSeconds(60)
+    while ((Get-Date) -lt $waitUntil) {
+        Start-Sleep -Seconds 3
+        $headless = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
+            $_.CommandLine -and $_.CommandLine.Contains($supervisorScript) -and $_.CommandLine.Contains('-Headless') })
+        if ($headless.Count -gt 0) { $launched = $true; break }
+    }
+    if (-not $launched) {
+        Write-Host "The scheduled task did not start the supervisor within 60 seconds; starting it directly." -ForegroundColor Yellow
+        Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
+            $_.CommandLine -and $_.CommandLine.Contains($supervisorScript) -and -not $_.CommandLine.Contains('-Headless')
+        } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Start-HeadlessSupervisor
+    }
 }
 else {
     $commandLine = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$supervisorScript`""
