@@ -363,6 +363,7 @@ def main() -> int:
                         help="limits-check：這次用引擎 1.6.0 的交易所漲跌停價（開關 10/31 才正式打開；驗證用）")
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
     parser.add_argument("--events", help="factors：事件因子分析，逗號分隔（例如 low_insider_sell_60,buyback_60）")
+    parser.add_argument("--novelty", help="factors：新穎性閘門（和既有訊號每週排序相關 < 0.7，不看報酬），逗號分隔")
     parser.add_argument("--explain", action="store_true",
                         help="forward：替 2026-10-19 以前的決定補上買賣原因（重算排名，和當時一樣的才補）")
     parser.add_argument("--trend-from", help="forward：（2026-10-20 停用）平台不替規則轉換持有方式")
@@ -586,6 +587,23 @@ def main() -> int:
             for family in report["families"]:
                 print("、".join(family["labels"]), flush=True)
             print(f"{report['factors']} 個因子、{len(report['families'])} 群；已寫入 {path}")
+            return 0
+        if args.novelty:                         # 2026-10-28: the novelty gate alone, for a family the full search takes up
+            from quant_platform.research import daily as daily_research
+            from quant_platform.research import scan
+
+            names = [name.strip() for name in args.novelty.split(",") if name.strip()]
+            with JobLog(RESEARCH).start(f"新穎性閘門（{len(names)} 個新因子，和既有訊號的排序相關）",
+                                        "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
+                _data, novelty_fp = daily_research.load(Path(args.base))
+                gate = scan.novelty(novelty_fp, names)
+                path = RESEARCH / "scans" / f"novelty-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(gate, ensure_ascii=False, indent=1), encoding="utf-8")
+                job.payload["summary"] = f"{sum(item['kept'] for item in gate.values())}／{len(gate)} 個通過"
+            for name, item in gate.items():
+                print(f"{name}：最高相關 {item['max_correlation']}（{item['with']}）{'通過' if item['kept'] else '擋下'}", flush=True)
+            print(f"已寫入 {path}")
             return 0
         if args.events:                          # 2026-10-19: event factors, the stocks with an event against all
             names = [name.strip() for name in args.events.split(",") if name.strip()]
@@ -1732,7 +1750,8 @@ def main() -> int:
         from quant_platform.research.jobs import JobLog
 
         data, fp = daily_research.load(Path(args.base))
-        factors = [*daily_research.FACTOR_LABELS, *daily_research.MODEL_FACTORS, *daily_research.CONSENSUS_FACTORS]
+        factors = [*daily_research.FACTOR_LABELS, *daily_research.MODEL_FACTORS, *daily_research.CONSENSUS_FACTORS,
+                   *daily_research.EARNINGS_FACTORS]
         days = leakcheck.sample_days(fp.sessions, 5, daily_research.RECENT_START)
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         with JobLog(RESEARCH).start(f"防偷看檢查：{len(days)} 個日期截斷重算 {len(factors)} 個因子", command,

@@ -282,7 +282,8 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None, names: list[s
         growth *= data.factors.get(BENCHMARK, {}).get(day, 1.0)
         benchmark[day] = data.closes[BENCHMARK][day] * growth
     eligibility = daily.DailyRule(name="資格", factors={"momentum_3": 1.0})
-    factors = [name for name in (names or daily.FACTOR_LABELS) if name in daily.FACTOR_LABELS]
+    labels = {**daily.FACTOR_LABELS, **daily.EARNINGS_FACTORS}       # 2026-10-28: the earnings family by name
+    factors = [name for name in (names or daily.FACTOR_LABELS) if name in labels]
     sessions = fp.sessions
     positions = [index for index, day in enumerate(sessions)
                  if daily.RECENT_START <= day <= daily.RECENT_END and index + HORIZON < len(sessions)][::STEP]
@@ -291,7 +292,7 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None, names: list[s
     rows = []
     for count, factor in enumerate(factors):
         if job:
-            job.update(done=count, current=daily.FACTOR_LABELS[factor])
+            job.update(done=count, current=labels[factor])
         matrix = fp.matrix(factor)
         for position in positions:
             day, later = sessions[position], sessions[position + HORIZON]
@@ -340,7 +341,7 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None, names: list[s
         for row in mine:
             if row["top_excess"] is not None:
                 by_year.setdefault(row["date"][:4], []).append(row["top_excess"])
-        summary[factor] = {"label": daily.FACTOR_LABELS[factor], "periods": periods,
+        summary[factor] = {"label": labels[factor], "periods": periods,
                            "verdict": short_verdict(periods) if short and mine else recent_verdict(periods),
                            "spread_by_year": {year: round(statistics.fmean(values) * scale, 4)
                                               for year, values in sorted(by_year.items())}}

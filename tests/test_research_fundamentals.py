@@ -44,6 +44,28 @@ def test_the_five_factors_by_hand():
     assert np.isnan(gapped.loc[date(2025, 4, 1), "roe_ttm"])                # a missing quarter breaks the four
 
 
+def test_the_earnings_surprise_and_streak_by_hand():
+    """2026-10-28 (季報盈餘驚喜): the seasonal EPS change less the average of the earlier changes, over their spread
+    (at least 4 earlier); and how many quarters in a row the EPS beat the same quarter a year before."""
+    eps = [1.0, 1.0, 1.0, 1.0, 1.2, 1.1, 1.3, 0.9, 1.5, 1.4, 1.6, 1.0, 2.5, 1.2]
+    quarters = [date(2022 + number // 4, 3 * (number % 4) + 1, 1) for number in range(len(eps))]
+    rows = [{"code": "1101", "quarter": (pd.Timestamp(day) + pd.offsets.QuarterEnd(0)).date(), "available": None,
+             "revenue": 100.0, "gross_profit": 30.0, "operating_income": 10.0, "net_income": 8.0, "eps": value,
+             "assets": 1000.0, "liabilities": 400.0, "equity": 200.0} for day, value in zip(quarters, eps)]
+    for row in rows:
+        row["available"] = deadline(row["quarter"])
+    table = factor_table(pd.DataFrame(rows)).reset_index(drop=True)
+    change = [eps[number] - eps[number - 4] for number in range(4, len(eps))]      # from the fifth quarter
+    assert np.isnan(table.loc[7, "eps_surprise"])                                   # three earlier changes only
+    earlier = np.array(change[:4])                                                  # quarters 5-8 for the ninth
+    expected = (change[4] - earlier.mean()) / earlier.std(ddof=1)
+    assert table.loc[8, "eps_surprise"] == pytest.approx(expected)
+    assert table.loc[8, "eps_accel"] == pytest.approx((change[4] - change[3]) / earlier.std(ddof=1))
+    # beat three times, missed (0.9 against 1.0), beat five times (1.0 against 0.9 too), missed: a miss starts again
+    assert table["eps_streak"].tolist()[4:] == [1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 0.0]
+    assert np.isnan(table.loc[3, "eps_streak"])                                     # no quarter a year before
+
+
 def test_the_store_shows_a_quarter_only_from_its_deadline(tmp_path):
     raw = tmp_path / "raw" / "finmind"
     income, balance = raw / "TaiwanStockFinancialStatements", raw / "TaiwanStockBalanceSheet"

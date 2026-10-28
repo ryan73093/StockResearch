@@ -90,6 +90,7 @@ SHORT = {
     "dividend_raise": "股利調升", "no_cash_issue": "沒有現增", "low_issuance_250": "股本沒膨脹",
     "dealer_buy_20": "自營商自行買超", "dealer_hedge_20": "自營商避險買超",
     "low_attention_20": "不過熱", "low_disposition_60": "未被處置",
+    "eps_surprise": "盈餘驚喜", "eps_accel": "盈餘加速", "eps_streak": "盈餘連續成長",
 }
 
 

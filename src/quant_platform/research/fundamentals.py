@@ -17,6 +17,14 @@ roe_ttm (the last four quarters' net income to owners ÷ equity), gross_margin (
 ÷ revenue), operating_margin_change (the quarter's operating margin minus the same quarter a year before),
 eps_growth (EPS against the same quarter a year before, ÷ its absolute value, clipped to ±5) and low_debt
 (−liabilities ÷ assets). Banks and insurers have no gross profit: those stay empty.
+
+2026-10-28 (research_method §7「季報盈餘驚喜」): the earnings-news family, EARNINGS_FACTORS — eps_surprise, the
+standardized unexpected earnings of a seasonal random walk with drift (Foster, Olsen & Shevlin 1984; Bernard & Thomas
+1989): the EPS change against the same quarter a year before, less the average of the SURPRISE_QUARTERS changes before
+it, ÷ their standard deviation; eps_accel, that change less the previous quarter's, ÷ the same spread (He &
+Narayanamoorthy 2020: earnings acceleration predicts returns beyond the surprise); and eps_streak, how many quarters in a
+row the EPS has beaten the same quarter a year before (Loh & Warachka 2012: streaks of surprises drift further). Kept out of STATEMENT_FACTORS, so the factor lists
+the models, robots and searches build from daily.FACTOR_LABELS do not change under them.
 """
 
 from __future__ import annotations
@@ -39,6 +47,14 @@ STATEMENT_FACTORS = {
     "eps_growth": "每股盈餘比去年同季成長",
     "low_debt": "負債比低",
 }
+EARNINGS_FACTORS = {
+    "eps_surprise": "季報盈餘驚喜（每股盈餘比去年同季的增減，扣掉過去 8 季增減的平均，÷ 它們的標準差）",
+    "eps_accel": "盈餘加速（這季比去年同季的增減，減上一季的增減，÷ 過去 8 季增減的標準差）",
+    "eps_streak": "盈餘連續成長（每股盈餘連續幾季比去年同季高，最多 8 季）",
+}
+SURPRISE_QUARTERS = 8        # eps_surprise: the earlier seasonal changes its expectation and spread come from
+SURPRISE_LEAST = 4           # at least this many of them
+STREAK_MOST = 8
 INCOME = {"Revenue": "revenue", "GrossProfit": "gross_profit", "OperatingIncome": "operating_income",
           "EquityAttributableToOwnersOfParent": "net_income", "EPS": "eps"}
 BALANCE = {"TotalAssets": "assets", "Liabilities": "liabilities", "EquityAttributableToOwnersOfParent": "equity"}
@@ -116,16 +132,25 @@ def factor_table(frame: pd.DataFrame) -> pd.DataFrame:
             revenue4 = four("revenue").where(four("revenue") > 0)
             margin = full["operating_income"] / full["revenue"].where(full["revenue"] > 0)
             previous_eps = full["eps"].shift(4)
+            change = full["eps"] - previous_eps                      # the seasonal change (NaN across a gap)
+            earlier = change.shift(1).rolling(SURPRISE_QUARTERS, min_periods=SURPRISE_LEAST)
+            spread = earlier.std()
+            beat = (change > 0).astype(float).where(change.notna())
+            run = beat.fillna(0).groupby((beat.fillna(0) == 0).cumsum()).cumsum()
             factors = pd.DataFrame({
                 "roe_ttm": four("net_income") / equity,
                 "gross_margin": four("gross_profit") / revenue4,
                 "operating_margin_change": margin - margin.shift(4),
                 "eps_growth": ((full["eps"] - previous_eps) / previous_eps.abs().where(previous_eps != 0)).clip(-5, 5),
                 "low_debt": -(full["liabilities"] / full["assets"].where(full["assets"] > 0)),
+                "eps_surprise": ((change - earlier.mean()) / spread.where(spread > 0)).clip(-10, 10),
+                "eps_accel": ((change - change.shift(1)) / spread.where(spread > 0)).clip(-10, 10),
+                "eps_streak": run.clip(upper=STREAK_MOST).where(change.notna()),
             }, index=full.index)
         factors["code"], factors["available"] = full["code"], full["available"]
         output.append(factors[full["code"].notna()])
-    return pd.concat(output) if output else pd.DataFrame(columns=["code", "available", *STATEMENT_FACTORS])
+    return (pd.concat(output) if output
+            else pd.DataFrame(columns=["code", "available", *STATEMENT_FACTORS, *EARNINGS_FACTORS]))
 
 
 class FundamentalStore:
