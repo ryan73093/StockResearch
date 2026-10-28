@@ -972,6 +972,30 @@ def test_own_drawdown_holds_less_the_further_the_account_is_below_its_high():
     assert len(daily.BATCHES["bear9"].__doc__) > 0
 
 
+def test_own_trend_halves_again_while_the_account_is_below_where_it_was_a_year_before():
+    """2026-10-28 (空頭防護第十版): the half guard times a half while the account is below its value 250 sessions
+    before (known at the close before); a quarter when TAIEX is below its line too."""
+    days = weekdays(date(2019, 1, 1), date(2023, 12, 29))
+    up = [20 * 1.0015 ** n for n in range(500)]
+    down = list(np.linspace(up[-1], up[-1] * 0.7, 150))                   # a 30% fall, then back above
+    back = list(np.linspace(up[-1] * 0.7, up[-1] * 1.6, len(days) - 650))
+    path = up + down + back
+    data = market(days, {f"{1101 + n}.TW": dict(zip(days, path)) for n in range(4)})
+    rising = np.linspace(100, 300, len(days))
+    fp = FactorPanel(Panel(data), market=np.concatenate([rising[:-60], np.full(60, 50.0)]))   # TAIEX breaks at the end
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=4, vol_scale="own_trend")
+    levels = daily.exposure_schedule(data, fp, rule, FREE)
+    for position in (450, 600, 640, 700, 900, 1100):
+        before = path[position - 1] / path[position - 1 - daily.OWN_TREND]
+        if abs(before - 1) > 0.02 and days[position] in levels and position < len(days) - 61:
+            assert levels[days[position]] == (daily.OWN_TREND_CUT if before < 1 else 1.0), (position, before)
+    assert levels[days[640]] == daily.OWN_TREND_CUT                       # 30% down, below a year before
+    assert levels[days[-5]] == daily.MARKET_HALF                         # above a year before, TAIEX below its line
+    assert set(levels.values()) <= {0.25, 0.5, 1.0}
+    assert rule.canonical()["vol_scale"] == "own_trend"
+    assert len(daily.BATCHES["bear10"].__doc__) > 0
+
+
 def test_a_swapped_factor_keeps_the_rest_and_maps_back_to_the_original():
     """2026-10-28 (季報盈餘驚喜): eps_growth read as eps_surprise at the same weight, in a rule and in a blend's sleeves;
     swapping back gives the original's hash (the name is not part of it); a rule without it is left alone."""

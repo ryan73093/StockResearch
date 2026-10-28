@@ -390,8 +390,10 @@ class DailyRule(BaseModel):
     # "own_drawdown" (2026-10-28, 空頭防護第九版): the half guard, and at most 1 - the account's own fall from its high /
     # OWN_DRAWDOWN, rounded up to a quarter (Grossman & Zhou 1993: the share held shrinks with the room left above the
     # floor; the account is the rule with the half guard, replayed from SHADOW_WARMUP)
+    # "own_trend" (2026-10-28, 空頭防護第十版): the half guard, times OWN_TREND_CUT while that same account is below where it
+    # was OWN_TREND sessions before (Gupta & Kelly 2019, Ehsani & Linnainmaa 2022: a factor's own past year predicts it)
     vol_scale: Literal["none", "v1", "taiex_half", "taiex_staged", "risk_half", "taiex_vol", "taiex_trend",
-                       "own_drawdown"] = "none"
+                       "own_drawdown", "own_trend"] = "none"
     # 2026-10-09 (使用者：只在大型股裡挑，但不要照 0050 的比例買台積電): only the ``large_caps`` largest listed
     # stocks by market value (the previous close times shares issued, chips.py ``market_cap``) can be picked;
     # the picks still get equal amounts, so no stock is held at its market-value share. 0 = no limit, left
@@ -2057,6 +2059,8 @@ MARKET_SLOPE = 20                    # taiex_200s: the 200-session average again
 MARKET_HALF = 0.5                    # vol_scale "taiex_half": the stock part held while TAIEX is below its average
 OWN_DRAWDOWN = 0.30                  # vol_scale "own_drawdown" (第九版): no stocks once the account is 30% below its high —
                                      # 0050's deepest fall since 2020-10 (the gate's period; -29.5% for the owner's cash flow), fixed before the run
+OWN_TREND = 250                      # vol_scale "own_trend" (第十版): the account against itself a year (250 sessions) before
+OWN_TREND_CUT = 0.5                  # and the share kept while it is below it
 MARKET_BEAR = 0.2                    # "taiex_staged": nothing held below the average and this far below the high
 MARKET_HIGH = 250                    # the high: the highest close of this many sessions
 RISK_WINDOW = 750                    # "risk_half": the market's predicted drop risk against this many sessions
@@ -2118,7 +2122,7 @@ def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs:
             later = dict(zip(fp.sessions, fp.sessions[1:]))
             output = {later[day]: value for day, value in output.items() if day in later}
         return output
-    if rule.vol_scale == "own_drawdown":          # 2026-10-28 (空頭防護第九版): the half guard and the account's own fall
+    if rule.vol_scale in ("own_drawdown", "own_trend"):   # 2026-10-28 (第九、十版): the half guard and the account itself
         guarded = rule.model_copy(update={"vol_scale": "taiex_half"})
         half = exposure_schedule(data, fp, guarded, costs)
         shadow = guarded.model_copy(update={"core": 0.0, "account_filter": "none"})
@@ -2128,12 +2132,19 @@ def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs:
         run = simulate_daily(data, shadow, costs, start, end, ranks, weights=daily_weights(fp, shadow, ranks),
                              exposure=half)
         units = pd.Series(unit_values(run.values, run.flows))
-        fall = (1 - units / units.cummax()).to_numpy()
-        own = {day: float(np.clip(np.ceil(round((1 - value / OWN_DRAWDOWN) / VOL_STEP, 9)) * VOL_STEP, 0.0, 1.0))
-               if np.isfinite(value) else 1.0 for day, value in zip(run.days, fall, strict=True)}
+        if rule.vol_scale == "own_trend":          # 第十版: below where it was a year before → OWN_TREND_CUT of the half guard
+            year = (units / units.shift(OWN_TREND)).to_numpy()
+            own = {day: OWN_TREND_CUT if np.isfinite(value) and value < 1 else 1.0
+                   for day, value in zip(run.days, year, strict=True)}
+        else:
+            fall = (1 - units / units.cummax()).to_numpy()
+            own = {day: float(np.clip(np.ceil(round((1 - value / OWN_DRAWDOWN) / VOL_STEP, 9)) * VOL_STEP, 0.0, 1.0))
+                   if np.isfinite(value) else 1.0 for day, value in zip(run.days, fall, strict=True)}
         if lag_of(rule):                                      # known at the close, acted on at the next session
             later = dict(zip(run.days, run.days[1:]))
             own = {later[day]: level for day, level in own.items() if day in later}
+        if rule.vol_scale == "own_trend":
+            return {day: level * own.get(day, 1.0) for day, level in half.items()}
         return {day: min(level, own.get(day, 1.0)) for day, level in half.items()}
     if rule.vol_scale == "risk_half":             # 2026-10-25: the deep risk model's market-wide reading decides
         risk = fp.matrix("dl_risk")
@@ -4982,7 +4993,15 @@ BEAR_VOL = ("大盤跌破 200 日均線依大盤波動減碼（最多一半）",
 
 BEAR_TREND = ("大盤跌破 200 日均線減碼一半、1 個月與 3 個月趨勢轉正就回補", {"vol_scale": "taiex_trend"})
 BEAR_DRAWDOWN = ("大盤跌破 200 日均線減碼一半＋帳戶離高點越遠持股越少（跌 30% 不持股）", {"vol_scale": "own_drawdown"})
+BEAR_OWN_TREND = ("大盤跌破 200 日均線減碼一半＋規則自己比一年前賠錢再減一半", {"vol_scale": "own_trend"})
 TREND_SPANS = (20, 60)          # sessions: TAIEX's 1- and 3-month trends (the 12-month one is the 200-session line)
+
+
+def bear10_batch() -> list:
+    """2026-10-28 (空頭防護第十版, written before the run): the 55 fixed rules with the half guard and half again while
+    the rule's own half-guarded account is below where it was a year before (BEAR_OWN_TREND). Graded the usual way;
+    compared with the half guard of the same rules."""
+    return _guarded(BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE, [BEAR_OWN_TREND])
 
 
 def bear9_batch() -> list:
@@ -5434,7 +5453,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "blendrecent": blend_recent_batch, "blendfrontier": blend_frontier_batch, "blendfour": blend_four_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "techdeep4": tech_deep4_batch, "deepregate": deep_regate_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
-           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear9": bear9_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear9": bear9_batch, "bear10": bear10_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
