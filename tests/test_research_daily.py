@@ -972,6 +972,25 @@ def test_own_drawdown_holds_less_the_further_the_account_is_below_its_high():
     assert len(daily.BATCHES["bear9"].__doc__) > 0
 
 
+def test_a_swapped_factor_keeps_the_rest_and_maps_back_to_the_original():
+    """2026-10-28 (季報盈餘驚喜): eps_growth read as eps_surprise at the same weight, in a rule and in a blend's sleeves;
+    swapping back gives the original's hash (the name is not part of it); a rule without it is left alone."""
+    from quant_platform.research.blend import BlendRule, Sleeve
+
+    rule = DailyRule(name="近 52 週高＋EPS 成長｜持有：月線上續抱", factors={"high_52w": 1.0, "eps_growth": 0.5},
+                     hold="trend")
+    twin = daily.swap_factor(rule, "eps_growth", "eps_surprise", "盈餘成長換成盈餘驚喜")
+    assert twin.factors == {"high_52w": 1.0, "eps_surprise": 0.5} and twin.hold == "trend"
+    assert twin.name.endswith("・盈餘成長換成盈餘驚喜｜持有：月線上續抱")
+    assert daily.swap_factor(twin, "eps_surprise", "eps_growth", "x").rule_hash == rule.rule_hash
+    assert daily.swap_factor(DailyRule(name="y", factors={"trend_200": 1.0}), "eps_growth", "eps_surprise", "w") is None
+    blend = BlendRule(name="組合", sleeves=[Sleeve(rule=rule, share=0.5),
+                                           Sleeve(rule=DailyRule(name="z", factors={"trend_200": 1.0}), share=0.5)])
+    mixed = daily.swap_factor(blend, "eps_growth", "eps_surprise", "盈餘成長換成盈餘驚喜")
+    assert [sleeve.rule.factors for sleeve in mixed.sleeves] == [{"high_52w": 1.0, "eps_surprise": 0.5}, {"trend_200": 1.0}]
+    assert daily.swap_factor(mixed, "eps_surprise", "eps_growth", "x").rule_hash == blend.rule_hash
+
+
 def test_the_rerun_halves_split_by_the_rule_s_hash(monkeypatch):
     """2026-10-28: the two halves of the pool's rerun cover every rule once, whatever order the batch lists them in."""
     rules = [DailyRule(name=f"x{top}", factors={"trend_200": 1.0}, top=top) for top in range(5, 25)]

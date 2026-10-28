@@ -5227,6 +5227,117 @@ def all_half_twins() -> list:
     return half_twins(rules, {record.spec_hash for record in records})
 
 
+SURPRISE_SWAP = ("eps_growth", "eps_surprise", "盈餘成長換成盈餘驚喜")
+
+
+def swap_factor(rule, old: str, new: str, word: str):
+    """``rule`` (a daily rule or a blend: every sleeve) with factor ``old`` read as ``new`` at the same weight, named
+    with ``word``; None when it does not read ``old``."""
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.holding import style_of
+
+    spec = rule.canonical()
+    blend = spec.get("kind") == "blend"
+    inner = [sleeve.get("rule") or {} for sleeve in spec.get("sleeves") or []] if blend else [spec]
+    if not any(old in (item.get("factors") or {}) for item in inner):
+        return None
+
+    def swapped(item: dict) -> dict:
+        return {**item, "factors": {(new if name == old else name): weight for name, weight in item["factors"].items()}}
+
+    tail = f"・{word}" + ("" if blend else f"｜持有：{style_of(spec) or '固定持有 20 天'}")
+    stem = rule.name.split("｜")[0]
+    name = stem[:max(4, 80 - len(tail) - 1)] + ("…" if len(stem) > 80 - len(tail) - 1 else "") + tail
+    if blend:
+        return parse_spec({**spec, "name": name,
+                           "sleeves": [{**sleeve, "rule": swapped(sleeve["rule"])} for sleeve in spec["sleeves"]]})
+    return DailyRule.model_validate({**swapped(spec), "name": name})
+
+
+def surprise_swaps(research=None) -> list:
+    """2026-10-28 (research_method §7「季報盈餘驚喜家族」, written before the run): every latest passing 100%-stock rule
+    reading eps_growth (a blend: each sleeve that reads it) again with eps_surprise in its place — the surprise ranks
+    stocks much as eps_growth does (0.78; the novelty gate stopped it as a new signal) but predicted the next 20
+    sessions better since 2020-10 (rank correlation 0.019, t 3.5, against 0.006, t 1.1)."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = _Path(research) if research else _Path("instance") / "research"
+    records = TrialRegistry(research / "trials.jsonl").records()
+    latest = newest(records, lambda record: record.kind == "candidate" and record.period == "recent")
+    seen, rules = {record.spec_hash for record in records}, []
+    old, new, word = SURPRISE_SWAP
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        if tier(record.metrics or {})[0] not in PASSING_TIERS:
+            continue
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            rule = parse_spec(spec)
+        except (OSError, ValueError, KeyError):
+            continue
+        twin = None if uses_0050(spec) else swap_factor(rule, old, new, word)
+        if twin is not None and twin.rule_hash not in seen:
+            seen.add(twin.rule_hash)
+            rules.append(twin)
+    return rules
+
+
+def swap_pairs(research, old: str, new: str) -> dict[str, object]:
+    """Every latest result reading ``new`` whose rule with ``new`` read as ``old`` has a latest result too: the pairs'
+    money (end, from 2020-10), drawdown and worst gap to 0050 in its falls, and the medians (research_method §7)."""
+    import json as _json
+    import statistics as _statistics
+    from pathlib import Path as _Path
+
+    from quant_platform.research import downside
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = _Path(research)
+    latest = newest(TrialRegistry(research / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent")
+    by_hash = {record.spec_hash: record for record in latest.values()}
+
+    def report(record) -> dict:
+        return _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))
+
+    def gap(found: dict) -> float:
+        return float(((downside.profile(found.get("curve") or {}) or {}).get("worst_fall") or {}).get("gap", 0.0))
+
+    pairs = []
+    for record in latest.values():
+        try:
+            found = report(record)
+            rule = parse_spec(found["spec"])
+        except (OSError, ValueError, KeyError):
+            continue
+        back = swap_factor(rule, new, old, "x")
+        mate = by_hash.get(back.rule_hash) if back is not None else None
+        if mate is None:
+            continue
+        mine, theirs = record.metrics, mate.metrics
+        pairs.append({"trial": record.trial_id, "original": mate.trial_id, "name": record.spec_name,
+                      "tier": tier(mine)[0], "original_tier": tier(theirs)[0],
+                      "final": mine["final_value"] / theirs["final_value"],
+                      "recent": (mine.get("since_2020_final_value") or 0) / (theirs.get("since_2020_final_value") or 1),
+                      "drawdown": (mine["max_drawdown"] - theirs["max_drawdown"]) * 100,
+                      "gap": (gap(found) - gap(report(mate))) * 100})
+    if not pairs:
+        return {"count": 0, "pairs": []}
+    median = lambda key: round(_statistics.median(pair[key] for pair in pairs), 4)      # noqa: E731
+    return {"count": len(pairs), "final": median("final"), "recent": median("recent"),
+            "recent_more": sum(pair["recent"] > 1 for pair in pairs), "drawdown": median("drawdown"),
+            "shallower": sum(pair["drawdown"] > 0 for pair in pairs), "gap": median("gap"),
+            "fell_less": sum(pair["gap"] > 0 for pair in pairs),
+            "passing": sum(pair["tier"] in PASSING_TIERS for pair in pairs),
+            "original_passing": sum(pair["original_tier"] in PASSING_TIERS for pair in pairs),
+            "pairs": sorted(pairs, key=lambda pair: -pair["recent"])}
+
+
 def t2_half_twins() -> list:
     """2026-10-28 (research_method §7「T2 規則補減碼一半版本」, written before the run): the half-guard twin of every
     latest 100%-stock T2 rule (beating 0050 from 2020-10 but short on the windows or the drawdown) that has none —
@@ -5322,6 +5433,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
+           "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
            "halftwins_b": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1],
            "stale": stale_engine,
