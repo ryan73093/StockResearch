@@ -90,6 +90,8 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_deep2_monthly": {"version": "dl-2.6.0", "label": "deep2"},
           # 2026-10-22 (集保因子第五版): dl-2.1.0 seeing model I's features (the holder brackets too)
           "ml_deep2_holders": {"version": "dl-2.7.0", "label": "deep2"},
+          # 2026-10-28 (RL 第九版：直接強化學習): dl-2.1.0 learning the portfolio after turnover (model_deep2 "direct")
+          "ml_deep_direct": {"version": "dl-4.0.0", "label": "deep2"},
           # 2026-10-20: dl-2.1.0 learning the top tenth of the volatility-adjusted excess (model_deep2.RISK_ADJUSTED)
           "ml_deep2_riskadj": {"version": "dl-2.4.0", "label": "deep2"},
           # 2026-10-20 (the technical robot's third version): dl-2.1.0 on prices and volumes only (model_deep2.TECHNICAL)

@@ -112,6 +112,22 @@ for _new, _old in REGATED.items():
             _table[_new] = _table[_old]
 
 
+# 2026-10-28 (research_method §7「RL 第九版：直接強化學習」, written before the run): dl-4.0.0 is dl-2.1.0 learning the
+# portfolio itself instead of a ranking — Moody & Saffell (2001) direct reinforcement (the trading objective after costs
+# is the training signal), Zhang, Zohren & Roberts (2020) on portfolios, AlphaStock (Wang et al. 2019) on a
+# cross-section: each day's weights are the softmax of the scores over the day's stocks; the loss is minus their
+# 20-session excess over DIRECT_WEEKS, less DIRECT_COST for each unit of turnover against the same stocks' weights a week
+# (model.STEP sessions) later, plus a penalty once the weights hold fewer than DIRECT_SPREAD stocks' worth (1 / Σw²).
+# The epoch kept is the best held-out top 20 after the same cost; its gate (2021-2025) is against dl-2.1.0 after cost.
+DIRECT_COST = 0.005                     # a full swap of the list, sold and bought (RL 第四、五版 the same)
+DIRECT_WEEKS = 4                        # the label's 20 sessions are four weekly decisions
+DIRECT_SPREAD = 20                      # the weights hold at least 20 stocks' worth (the rules hold 10 to 20)
+DIRECT_AGAINST = "dl-2.1.0"
+DIRECT_BETTER = 3                       # years of five better than dl-2.1.0 after cost
+LOSSES["dl-4.0.0"] = "direct"
+RECENT_GATED.add("dl-4.0.0")
+
+
 def gate_years(version: str) -> tuple[int, ...]:
     return RECENT_GATE_YEARS if version in RECENT_GATED else GATE_YEARS
 GATE_FLOOR = 0.006
@@ -292,11 +308,24 @@ class Inputs:
         return np.concatenate(output) if output else np.zeros(0, dtype=np.float32)
 
 
-def _loss(kind: str, predicted, target, groups: list[tuple[int, int]]):
-    """The registered losses: ``listnet`` Huber + ListNet per day (top-weighted), ``top10`` the day's top tenth."""
+def _loss(kind: str, predicted, target, groups: list[tuple[int, int]], symbols: np.ndarray | None = None):
+    """The registered losses: ``listnet`` Huber + ListNet per day (top-weighted), ``top10`` the day's top tenth,
+    ``direct`` (dl-4.0.0) the portfolio's excess after turnover — the groups come in pairs, a day and the day a week
+    later, and ``symbols`` (one per row) lines the two days' weights up."""
     import torch
 
     functional = torch.nn.functional
+    if kind == "direct":
+        index = torch.as_tensor(symbols, device=predicted.device)
+        size = int(symbols.max()) + 1
+        gains, spread, held = [], [], []
+        for start, end in groups:
+            weight = torch.softmax(predicted[start:end], 0)
+            gains.append((weight * target[start:end]).sum())
+            spread.append(torch.relu((weight * weight).sum() - 1 / DIRECT_SPREAD))
+            held.append(torch.zeros(size, device=predicted.device, dtype=weight.dtype).index_add(0, index[start:end], weight))
+        turnover = torch.stack([0.5 * (held[number + 1] - held[number]).abs().sum() for number in range(0, len(held) - 1, 2)])
+        return 100 * (-(torch.stack(gains).mean() / DIRECT_WEEKS - DIRECT_COST * turnover.mean()) + torch.stack(spread).mean())
     if kind == "top10":
         positive = torch.zeros_like(target)
         for start, end in groups:
@@ -326,8 +355,12 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
     stocks and labels the held-out days are judged on, when not the ones learned from (dl-2.2.0)."""
     import torch
 
+    from quant_platform.research.model import STEP
+
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
+    learned = set(train_days)
+    anchors = [day for day in train_days if day + STEP in learned] if kind == "direct" else None   # dl-4.0.0's pairs
     network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
     optimiser = torch.optim.AdamW(network.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     held_rows, held_labels = judged or (rows, labels)
@@ -335,9 +368,16 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
                                  for day in held_days])
     best, curve, waited = (-np.inf, None), [], 0
     for _epoch in range(EPOCHS):
-        order = rng.permutation(len(train_days))
-        for start in range(0, len(order), DAYS_PER_BATCH):
-            chosen = [train_days[index] for index in order[start:start + DAYS_PER_BATCH]]
+        if anchors is not None:          # half the anchors an epoch, each with its day a week later: as many days
+            order = rng.permutation(len(anchors))[:len(anchors) // 2]
+            half = DAYS_PER_BATCH // 2
+            batches = [[day for index in order[start:start + half] for day in (anchors[index], anchors[index] + STEP)]
+                       for start in range(0, len(order), half)]
+        else:
+            order = rng.permutation(len(train_days))
+            batches = [[train_days[index] for index in order[start:start + DAYS_PER_BATCH]]
+                       for start in range(0, len(order), DAYS_PER_BATCH)]
+        for chosen in batches:
             groups, pairs, target, at = [], [], [], 0
             for day in chosen:
                 count = rows[day].size
@@ -345,20 +385,26 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
                 at += count
                 pairs.append(np.stack([np.full(count, day), rows[day]], axis=1))
                 target.append(labels[day][rows[day]])
-            loss = _loss(kind, network(*inputs.batch(np.concatenate(pairs)), groups),
-                         torch.from_numpy(np.concatenate(target).astype(np.float32)).to(inputs.on), groups)
+            stacked = np.concatenate(pairs)
+            loss = _loss(kind, network(*inputs.batch(stacked), groups),
+                         torch.from_numpy(np.concatenate(target).astype(np.float32)).to(inputs.on), groups, stacked[:, 1])
             optimiser.zero_grad()
             loss.backward()
             optimiser.step()
         predicted = inputs.score(network, held_pairs)
-        gains, at = [], 0
+        gains, tops, at = [], {}, 0
         for day in held_days:
             count = held_rows[day].size
             value = _gain(predicted[at:at + count], held_labels[day][held_rows[day]])
+            if kind == "direct" and value is not None:
+                tops[day] = set(held_rows[day][np.argsort(-predicted[at:at + count])[:20]].tolist())
             at += count
             if value is not None:
                 gains.append(value)
         held = float(np.mean(gains)) if gains else -np.inf
+        turns = [1 - len(tops[day] & tops[day + STEP]) / 20 for day in tops if day + STEP in tops]
+        if turns:                        # dl-4.0.0: the held-out top 20 after the same cost
+            held -= DIRECT_COST * DIRECT_WEEKS * float(np.mean(turns))
         curve.append(round(held, 5))
         if held > best[0]:
             best, waited = (held, {key: value.clone() for key, value in network.state_dict().items()}), 0
@@ -408,9 +454,59 @@ def gate_check_d3(meta: dict, against: dict, years: tuple[int, ...] = GATE_YEARS
             "passed": complete and average >= yardstick + D3_MARGIN and better >= D3_COUNT}
 
 
+def turnover_by_year(folder: Path, years) -> dict[int, float]:
+    """dl-4.0.0's gate: each year's average share of the kept scores' top 20 replaced from one session to the session
+    model.STEP later (weekly), from deep.npz."""
+    from quant_platform.research.model import STEP
+
+    path = Path(folder) / "deep.npz"
+    if not path.is_file():
+        return {}
+    stored = np.load(path, allow_pickle=False)
+    days, values = stored["days"].tolist(), stored["scores"]
+    output = {}
+    for year in years:
+        tops = []
+        for position in [index for index, day in enumerate(days) if day.startswith(str(year))][::STEP]:
+            row = values[position].astype(np.float32)
+            live = np.flatnonzero(np.isfinite(row))
+            tops.append(set(live[np.argsort(-row[live])[:20]].tolist()) if live.size >= 50 else None)
+        turns = [1 - len(first & second) / 20 for first, second in zip(tops, tops[1:]) if first and second]
+        if turns:
+            output[year] = float(np.mean(turns))
+    return output
+
+
+def gate_check_direct(meta: dict, against: dict, mine: dict, theirs: dict,
+                      years: tuple[int, ...] = RECENT_GATE_YEARS) -> dict[str, object]:
+    """dl-4.0.0's registered gate: each year's top-20 gain less DIRECT_COST × DIRECT_WEEKS × its weekly top-20 turnover
+    (``mine``, ``theirs``: turnover_by_year); over ``years`` the average at least dl-2.1.0's, and better than it in at
+    least DIRECT_BETTER of them."""
+    def net(item: dict, turnover: dict) -> list[float | None]:
+        gains = [(item.get("years") or {}).get(str(year), {}).get("top20_gain") for year in years]
+        return [None if gain is None or year not in turnover else gain - DIRECT_COST * DIRECT_WEEKS * turnover[year]
+                for gain, year in zip(gains, years, strict=True)]
+
+    own, other = net(meta, mine), net(against, theirs)
+    complete = all(value is not None for value in own + other)
+    better = sum(1 for a, b in zip(own, other, strict=True) if a is not None and b is not None and a > b)
+    return {"version": meta.get("version"), "against": against.get("version"), "years": list(years),
+            "net_gain": float(np.mean(own)) if complete else None,
+            "against_net_gain": float(np.mean(other)) if complete else None,
+            "turnover": {str(year): round(mine[year], 4) for year in years if year in mine},
+            "against_turnover": {str(year): round(theirs[year], 4) for year in years if year in theirs},
+            "years_better": better, "passed": complete and np.mean(own) >= np.mean(other) and better >= DIRECT_BETTER}
+
+
 def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
-    """The version's registered gate on its meta (dl-3.0.0 against dl-2.1.0; dl-2.5.0 against gbm-2.1.0; the others
-    against gbm-2.2.0)."""
+    """The version's registered gate on its meta (dl-3.0.0 against dl-2.1.0; dl-2.5.0 against gbm-2.1.0; dl-4.0.0
+    against dl-2.1.0 after cost; the others against gbm-2.2.0)."""
+    if LOSSES.get(version) == "direct":
+        path = root / DIRECT_AGAINST / "meta.json"
+        other = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        years = gate_years(version)
+        return gate_check_direct(meta, other, turnover_by_year(root / version, years),
+                                 turnover_by_year(root / DIRECT_AGAINST, years), years)
     against = AGAINST_OF.get(version) or PLAIN_AGAINST.get(version, AGAINST)
     path = root / against / "meta.json"
     other = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
@@ -420,7 +516,8 @@ def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
 
 def gate(models_root: str | Path, version: str) -> dict[str, object]:
     root = Path(models_root)
-    against = AGAINST_OF.get(version) or PLAIN_AGAINST.get(version, AGAINST)
+    against = DIRECT_AGAINST if LOSSES.get(version) == "direct" else (AGAINST_OF.get(version)
+                                                                      or PLAIN_AGAINST.get(version, AGAINST))
     paths = root / version / "meta.json", root / against / "meta.json"
     if not all(path.is_file() for path in paths):
         return {"version": version, "passed": False, "reason": "not trained"}

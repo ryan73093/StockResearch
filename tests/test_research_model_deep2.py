@@ -55,6 +55,59 @@ def test_the_losses_aim_at_the_top():
     assert model_deep2._loss("top10", first, target, groups) < model_deep2._loss("top10", last, target, groups)
 
 
+def test_the_direct_loss_pays_for_turnover_and_crowding_by_hand(tmp_path):
+    """2026-10-28 (dl-4.0.0, RL 第九版): equal scores hold each day's stocks equally; the loss is minus the excess over
+    four weeks, plus the cost of the turnover to the next week's weights and the penalty for holding under 20 stocks."""
+    import torch
+
+    target = torch.tensor([0.04, 0.0, -0.01, 0.02, 0.01, 0.0])
+    groups = [(0, 3), (3, 6)]                                  # a day and the day a week later
+    same = np.array([0, 1, 2, 0, 1, 2])
+    flat = torch.zeros(6)
+    gains = (0.01 + 0.01) / 2                                  # each day's average
+    crowd = 1 / 3 - 1 / model_deep2.DIRECT_SPREAD              # three stocks' worth
+    expected = 100 * (-(gains / model_deep2.DIRECT_WEEKS) + crowd)
+    assert float(model_deep2._loss("direct", flat, target, groups, same)) == pytest.approx(expected, rel=1e-5)
+    moved = np.array([0, 1, 2, 3, 4, 5])                       # all new stocks a week later: turnover 1
+    assert float(model_deep2._loss("direct", flat, target, groups, moved)) == pytest.approx(
+        expected + 100 * model_deep2.DIRECT_COST, rel=1e-5)
+    leaning = torch.tensor([2.0, 0.0, -2.0, 2.0, 0.0, -2.0])   # toward the better stock on both days
+    assert model_deep2._loss("direct", leaning, target, groups, same) < model_deep2._loss("direct", -leaning, target, groups, same)
+
+    # the gate: the top-20 gain less 0.5% × 4 × the weekly turnover, against dl-2.1.0's; three of five years better
+    years = (2021, 2022, 2023, 2024, 2025)
+    meta = {"version": "dl-4.0.0", "years": {str(year): {"top20_gain": 0.012} for year in years}}
+    other = {"version": "dl-2.1.0", "years": {str(year): {"top20_gain": 0.015} for year in years}}
+    low = {year: 0.2 for year in years}                        # 0.012 - 0.004 = 0.008
+    high = {year: 0.5 for year in years}                       # 0.015 - 0.010 = 0.005
+    check = model_deep2.gate_check_direct(meta, other, low, high, years)
+    assert check["passed"] and check["net_gain"] == pytest.approx(0.008) and check["against_net_gain"] == pytest.approx(0.005)
+    assert not model_deep2.gate_check_direct(meta, other, high, low, years)["passed"]
+    assert not model_deep2.gate_check_direct(meta, other, {2021: 0.2}, high, years)["passed"]   # years missing
+
+    # the turnover: the top 20 of 60 stocks moving by five places a week
+    days = [day.isoformat() for day in weekdays(date(2021, 1, 4), date(2021, 3, 31))]
+    scores = np.stack([np.roll(np.arange(60.0), number) for number in range(len(days))]).astype(np.float16)
+    with open(tmp_path / "deep.npz", "wb") as handle:
+        np.savez_compressed(handle, days=np.array(days), symbols=np.array([str(n) for n in range(60)]), scores=scores)
+    turnover = model_deep2.turnover_by_year(tmp_path, (2021,))
+    assert turnover[2021] == pytest.approx(5 / 20)
+    assert model_deep2.LOSSES["dl-4.0.0"] == "direct" and model_deep2.gate_years("dl-4.0.0") == years
+
+
+def test_the_direct_version_trains_on_pairs_a_week_apart(monkeypatch, tmp_path):
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "RECENT_GATE_YEARS", (2017,))
+    snapshot = tmp_path / "gbm-2.2.0"
+    snapshot.mkdir()
+    (snapshot / "meta.json").write_text(json.dumps({"version": "gbm-2.2.0", "features": ["momentum_3"]}), encoding="utf-8")
+    _data, fp = _panel()
+    meta = model.train(fp, tmp_path / "dl-4.0.0", years=[2017], label="deep2", version="dl-4.0.0")
+    assert meta["loss"] == "direct" and meta["years"]["2017"]["top20_gain"] is not None
+
+
 def _panel():
     days = weekdays(date(2015, 1, 1), date(2018, 12, 31))
     rng = np.random.default_rng(7)

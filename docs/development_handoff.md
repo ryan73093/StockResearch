@@ -43,6 +43,7 @@
   - `blendfrontier`：組合搜尋第十輪（只留前緣壓不過的組合）；判定：最後名單有 T0 候選在引擎裡站上前緣。
   - 顯示卡（全段大搜尋第一階段跑完後）：`techdeep4`（技術分析機器人第四版 dl-2.5.1，門檻 2021～2025 對 gbm-2.1.0 1.22%）→ `deepregate`（dl-2.0.1／2.2.1／2.4.1／2.7.1／3.0.1，各自原本的門檻改看 2021～2025）。
   - `bear9`：空頭防護第九版**沒過**（錢只剩減碼一半的 55.8%，回撤淺 3.5 點；§7）。`bear10`：第十版（減碼一半＋規則自己比一年前賠錢再減一半，Gupta & Kelly 2019；判定寫在 §7）排隊，等 `bear9`、`surpriseswap`、`blendfour` 跑完；判定看 `stress-guards --pair bear_own_trend`。worker 要認得 `own_trend` 才記得了前向帳戶：部署要在 `bear10` 的 6-forward 之前（避開 13:30～14:40、15:14～15:50）。
+  - `deepdirect`：RL 第九版（直接強化學習，dl-4.0.0；判定在 §7），排在 `deepregate` 之後用顯示卡。過門檻的話，worker 要認得 `ml_deep_direct`：部署在 7-forward 之前。
   - `modelo`：模型 O（模型 M＋盈餘驚喜家族，gbm-2.10.0；判定在 §7），14:40 起訓練，規則等 `bear9`、`surpriseswap`。過門檻的話，worker 要認得 `ml_gbm_o` 才記得了前向帳戶：部署在 7-forward 之前。
   - `blendfour`：組合搜尋第十一輪（第十輪留下的三檔組合各加一檔；判定在 §7），等 `blendfrontier`（已跑完）與 `bear9` 跑完。第十輪過了（#9768 站上前緣）。
   - 模型 N：分點資料（約 10/30）先照 §7「分點」看因子強弱，再決定要不要進模型。
