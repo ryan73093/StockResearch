@@ -143,3 +143,22 @@ def test_a_refused_replace_is_retried_and_phase_b_waits_for_the_whole_phase_a(tm
     assert not scan_full.phase_done(tmp_path)
     scan_full._progress_path(tmp_path, 1, 2).write_text(json.dumps({"screened": 4, "finished_at": "x"}), encoding="utf-8")
     assert scan_full.phase_done(tmp_path)
+
+
+def test_a_phase_picks_up_the_finalists_and_twins_it_recorded(tmp_path):
+    """2026-10-28 21:29: the half twins' engine lost a process after the 1,500 finalists ran; chosen again, the phase's
+    own registered finalists would have been the earlier ones to stay apart from and a new 1,500 would have run."""
+    from quant_platform.research.pool import record_sources
+
+    rows = [{"factors": list(key), "universe": "all", "weighting": "equal", "check": "daily", "hold": "days",
+             "recent": 0.05, "excess": 0.01, "score": 0.05} for key in (("momentum_6",), ("momentum_3",), ("low_volatility_60",))]
+    label = "全段大搜尋 scan-full-1.0.0-2026-08-31-a"
+    assert scan_full.recorded_finalists(tmp_path, label, rows) is None              # nothing chosen yet: choose
+    picked = [rows[2], rows[0]]
+    record_sources(tmp_path, [scan.to_rule({**row, "named_hold": True}) for row in picked], label)
+    record_sources(tmp_path, [scan.to_rule({**rows[1], "named_hold": True})], label + "（減碼一半版本）")
+    assert scan_full.recorded_finalists(tmp_path, label, rows) == picked             # the recorded order
+    assert scan_full.recorded_hashes(tmp_path, label + "（減碼一半版本）") == [
+        scan.to_rule({**rows[1], "named_hold": True}).rule_hash]
+    assert scan_full.recorded_finalists(tmp_path, label, rows[:1]) is None          # a recorded one is not a row
+    assert scan_full.recorded_finalists(tmp_path, "全段大搜尋 scan-full-1.0.0-2026-08-31-b", rows) is None

@@ -1267,6 +1267,7 @@ def check_days(sessions: list[date], check: str) -> set[date]:
 
 ROUND_TRIP = 2 * 0.001425 + 0.003 + 2 * 0.002          # fee both ways, the sell tax, slippage both ways
 DEVELOPMENT_END = date(2020, 9, 30)
+SWITCH_KEEP = 16                                       # rules whose ``switch_mapping`` stays in memory
 
 
 def switch_mapping(fp: FactorPanel, rule: DailyRule):
@@ -1278,7 +1279,14 @@ def switch_mapping(fp: FactorPanel, rule: DailyRule):
 
     key = f"__switch__{rule.rule_hash}"
     if key in fp._cache:
+        fp._cache[key] = fp._cache.pop(key)              # the most recently used last
         return fp._cache[key]
+    # 2026-10-29: one rule's percentiles are symbols × sessions (15-30 MB); kept for every rule, a run over the 3,391
+    # forward accounts grew to 35-40 GB and the machine ran out of memory seven times on 10-28 — the last SWITCH_KEEP
+    # rules' are kept (a blend's sleeves use theirs side by side)
+    kept = [name for name in fp._cache if name.startswith("__switch__")]
+    for stale in kept[:max(0, len(kept) - (SWITCH_KEEP - 1))]:
+        del fp._cache[stale]
     percentiles = member_percentiles(fp, rule.model_copy(update={"switching": "none"}))
     prices = fp.panel.filled
     sums, counts = np.zeros(10), np.zeros(10)

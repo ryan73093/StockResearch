@@ -240,6 +240,37 @@ def best_rows(out: Path, pool: int = POOL) -> tuple[list[dict], int]:
     return best, counted
 
 
+def recorded_hashes(research: Path, label: str) -> list[str]:
+    """The rule hashes a batch recorded under ``label`` (research/pool.py ``record_sources``), in order, once each."""
+    from quant_platform.research.pool import SOURCES_LOG
+
+    path = Path(research) / SOURCES_LOG
+    if not path.is_file():
+        return []
+    output: dict[str, None] = {}
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if label in line:
+                entry = json.loads(line)
+                if entry.get("source") == label:
+                    output.setdefault(entry["spec_hash"], None)
+    return list(output)
+
+
+def recorded_finalists(research: Path, label: str, rows: list[dict]) -> list[dict] | None:
+    """The finalists a phase already chose (its recorded rules found among ``rows``, in the recorded order); None
+    when it chose none yet or a recorded one is not among the rows (then it chooses again)."""
+    from quant_platform.research import scan
+
+    hashes = recorded_hashes(research, label)
+    if not hashes:
+        return None
+    by_hash = {scan.to_rule({**row, "named_hold": True}).rule_hash: row for row in rows}
+    if any(key not in by_hash for key in hashes):
+        return None
+    return [by_hash[key] for key in hashes]
+
+
 def frequent(out: Path, count: int) -> list[str]:
     """The ``count`` signals in the most passing settings (phase b's signals, from phase a)."""
     seen: Counter = Counter()
@@ -411,19 +442,31 @@ def run_phase(base: Path, research: Path, costs, broker: str, phase: str, cutoff
     rows, passed = best_rows(out)
     if job:
         job.update(current=f"挑出彼此不相似的（{passed:,} 個過初篩，先看 2020-10 以後最好的 {len(rows):,} 個）", force=True)
-    device = Device(arrays)
-    chosen = choose(arrays, rows, scan.earlier_finalists(research), costs, device=device)
-    rules = [scan.to_rule({**row, "named_hold": True}) for row in chosen]
-    record_sources(research, rules, f"全段大搜尋 {out.name}")
+    label = f"全段大搜尋 {out.name}"
+    # 2026-10-29: on 10-28 21:29 the half twins' engine lost a process (the machine ran out of memory) after the 1,500
+    # finalists and 406 of 483 twins were registered; chosen again, this phase's own finalists (registered 掃描：…) were
+    # the "earlier finalists" to stay apart from and a new 1,500 would have run — a phase picks up the finalists it
+    # recorded and the engine finds each registered result instead of running it again
+    chosen = recorded_finalists(research, label, rows)
+    if chosen is None:
+        chosen = choose(arrays, rows, scan.earlier_finalists(research), costs, device=Device(arrays))
+        rules = [scan.to_rule({**row, "named_hold": True}) for row in chosen]
+        record_sources(research, rules, label)
+    else:
+        rules = [scan.to_rule({**row, "named_hold": True}) for row in chosen]
+        if job:
+            job.update(current=f"接著跑：沿用這一段已挑好的 {len(chosen):,} 個最後名單（已登錄的直接取結果）", force=True)
     results = engine(rules, base, broker, job=job, label="全段大搜尋")
     for row, result in zip(chosen, results, strict=True):
         result.update(screen_excess=row["excess"], screen_recent=row["recent"], screen_early=row["early"],
                       screen_score=row["score"], hold=row.get("hold"))
     passing = [rule for rule, result in zip(rules, results, strict=True) if result.get("tier") in daily.PASSING_TIERS]
     registry = TrialRegistry(research / "trials.jsonl")
-    twins = daily.half_twins(passing, {record.spec_hash for record in registry.records()})
-    if twins:
-        record_sources(research, twins, f"全段大搜尋 {out.name}（減碼一半版本）")
+    twin_label = f"{label}（減碼一半版本）"
+    mine = set(recorded_hashes(research, twin_label))             # this phase's own twins are run (found) again
+    twins = daily.half_twins(passing, {record.spec_hash for record in registry.records()} - mine)
+    if twins and not mine:
+        record_sources(research, twins, twin_label)
     twin_results = engine(twins, base, broker, job=job, label="減碼一半版本") if twins else []
     screened = sum(state["screened"] for state in states)
     summary = {"version": VERSION, "phase": phase, "development": [str(arrays.days[0]), cutoff.isoformat()],

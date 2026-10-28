@@ -145,6 +145,21 @@ def test_the_switch_mapping_uses_the_development_period_and_never_expects_less_f
         daily.switch_mapping(market(stocks=30), rule)
 
 
+def test_only_the_last_rules_switch_mappings_stay_in_memory(monkeypatch):
+    """2026-10-28: every rule's percentiles (15-30 MB) stayed cached; replaying 3,391 forward accounts grew to 35-40 GB
+    and the machine ran out of memory seven times."""
+    fp = market(stocks=30, first=date(2015, 1, 5), last=date(2021, 3, 31))
+    monkeypatch.setattr(daily, "SWITCH_KEEP", 3)
+    rules = [DailyRule(name=str(top), factors={"momentum_3": 1.0}, top=top) for top in (5, 6, 7, 8)]
+    first = daily.switch_mapping(fp, rules[0])
+    for rule in rules[1:3]:
+        daily.switch_mapping(fp, rule)
+    assert daily.switch_mapping(fp, rules[0]) is first                # used again: the most recent now
+    daily.switch_mapping(fp, rules[3])
+    kept = [name for name in fp._cache if name.startswith("__switch__")]
+    assert kept == [f"__switch__{rules[index].rule_hash}" for index in (2, 0, 3)]   # rules[1] the oldest, let go
+
+
 def test_the_minimum_holding_comparison_changes_only_the_holding():
     rules = daily.BATCHES["minhold"]()
     assert len(rules) == 4 and all(rule.min_hold == 0 and rule.name.endswith("不設最短持有") for rule in rules)

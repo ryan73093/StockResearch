@@ -263,3 +263,12 @@ def test_the_research_pages_are_opened_and_timed(monkeypatch):
     assert invariants.research_pages("http://127.0.0.1:5000", "h") == []
     assert invariants.research_pages("http://127.0.0.1:5000", "h", limit=-1.0)[0].startswith("研究總覽 ")
 
+
+
+def test_a_day_the_machine_ran_out_of_memory_is_caught(tmp_path):
+    """2026-10-28: seven times; a forward, two boards, a training and the full search died."""
+    name = "過去 24 小時記憶體沒有用完"
+    events = [{"time": "10/28 21:28", "program": "python.exe", "pid": 32120, "gb": 36.0}]
+    found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 29), windows=[], memory=events)}[name]
+    assert not found["ok"] and "PID 32120" in found["detail"] and "36.0 GB" in found["detail"]
+    assert {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 29), windows=[], memory=[])}[name]["ok"]

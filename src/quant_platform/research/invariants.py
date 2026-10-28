@@ -77,12 +77,41 @@ def own_windows(windows: list[dict[str, object]], root: Path) -> list[dict[str, 
     return output
 
 
+def memory_events(hours: int = 24) -> list[dict[str, object]]:
+    """2026-10-29: the times Windows ran out of memory to commit in the last ``hours`` (Resource-Exhaustion-Detector,
+    event 2004), each with the program that held the most (Taipei time; Windows only, read with no window)."""
+    import re
+    import subprocess
+    import sys
+
+    if sys.platform != "win32":
+        return []
+    query = ("*[System[Provider[@Name='Microsoft-Windows-Resource-Exhaustion-Detector'] and (EventID=2004) and "
+             f"TimeCreated[timediff(@SystemTime) <= {hours * 3_600_000}]]]")
+    done = subprocess.run(["wevtutil", "qe", "System", f"/q:{query}", "/f:xml", "/c:50"], capture_output=True,
+                          creationflags=0x08000000, timeout=60)                  # CREATE_NO_WINDOW
+    if done.returncode != 0:
+        raise RuntimeError(done.stderr.decode("utf-8", errors="replace")[:120] or f"wevtutil {done.returncode}")
+    output = []
+    for event in done.stdout.decode("utf-8", errors="replace").split("</Event>"):
+        when = re.search(r"SystemTime='(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)", event)
+        if not when:
+            continue
+        top = re.search(r"<Process_1><Name>([^<]*)</Name><ID>(\d+)</ID>.*?<CommitCharge>(\d+)</CommitCharge>", event)
+        local = datetime.fromisoformat(when.group(1)) + timedelta(hours=8)
+        output.append({"time": local.strftime("%m/%d %H:%M"), "program": top.group(1) if top else "",
+                       "pid": int(top.group(2)) if top else 0,
+                       "gb": round(int(top.group(3)) / 2**30, 1) if top else 0.0})
+    return output
+
+
 def _check(name: str, source: str, ok: bool, detail: str) -> dict[str, object]:
     return {"name": name, "source": source, "ok": bool(ok), "detail": detail}
 
 
 def run(research: str | Path, today: date, backups: Path | None = None,
-        windows: list[dict[str, object]] | None = None, site: str | None = None) -> list[dict[str, object]]:
+        windows: list[dict[str, object]] | None = None, site: str | None = None,
+        memory: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
     from quant_platform.research.categories import uses_0050
     from quant_platform.research.forward_board import common_start
     from quant_platform.research.rolling import cutoff_for, folder as rolling_folder
@@ -431,6 +460,16 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
         checks.append(_check("桌面沒有本專案開出的視窗", "AGENTS.md：背景程式不開視窗（使用者 2026-10-20）", False,
                              f"沒辦法檢查：{str(exc)[:120]}"))
+    # 2026-10-29: on 10-28 the machine ran out of memory seven times (a deep training and the forward accounts' replays
+    # beside the engine); a forward, two boards, a training and the full search died, other programs with them
+    name, source = "過去 24 小時記憶體沒有用完", "開發歷程 2026-10-29：記憶體用完七次，研究與其他程式被終止"
+    try:
+        events = memory_events() if memory is None else memory
+        checks.append(_check(name, source, not events, (f"{len(events)} 次：" + "；".join(
+            f"{item['time']} 最大的是 {item['program']}（PID {item['pid']}，{item['gb']} GB）" for item in events[:3]))
+            if events else "沒有"))
+    except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
+        checks.append(_check(name, source, False, f"沒辦法檢查：{str(exc)[:120]}"))
     return checks
 
 

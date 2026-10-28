@@ -33,14 +33,18 @@ SESSIONS_PER_MONTH = 21
 RECENT_SESSIONS = 63                      # 2026-10-13 (使用者：近三個月它會做什麼買賣、成效如何): about three months
 
 
-def expectation(research: Path, rule_hash: str) -> dict[str, float] | None:
-    """The backtest's mean and standard deviation of the monthly excess over 0050 (its report)."""
+def latest_candidates(research: Path) -> dict[str, object]:
+    """rule hash -> its latest candidate record, the registry read once (2026-10-29: read again for each of the 3,391
+    forward accounts, 20 MB each time)."""
     from quant_platform.research.registry import TrialRegistry
 
-    latest = None
-    for record in TrialRegistry(research / "trials.jsonl").records():
-        if record.spec_hash == rule_hash and record.kind == "candidate":
-            latest = record
+    return {record.spec_hash: record for record in TrialRegistry(research / "trials.jsonl").records()
+            if record.kind == "candidate"}
+
+
+def expectation(research: Path, rule_hash: str, latest_by_hash: dict | None = None) -> dict[str, float] | None:
+    """The backtest's mean and standard deviation of the monthly excess over 0050 (its report)."""
+    latest = (latest_candidates(research) if latest_by_hash is None else latest_by_hash).get(rule_hash)
     if latest is None:
         return None
     try:
@@ -127,6 +131,7 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
     bench = simulate_daily(data, None, costs, first, last, plan=plan)
     bench_units = np.array(unit_values(bench.values, bench.flows))
     months = len(days) / SESSIONS_PER_MONTH
+    latest_by_hash = latest_candidates(research)
     rows = []
     for item in items:
         ledger: list = []
@@ -147,7 +152,7 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
             continue
         units = np.array(unit_values(run.values, run.flows))
         excess = float(units[-1] / bench_units[-1] - 1)
-        expected = expectation(research, item["rule_hash"])
+        expected = expectation(research, item["rule_hash"], latest_by_hash)
         label, centre, low, high = state(excess, months, expected)
         drawdown, _peak, _trough = max_drawdown(list(units))
         rows.append({
