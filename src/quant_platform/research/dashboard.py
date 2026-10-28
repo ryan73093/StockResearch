@@ -11,7 +11,7 @@ import statistics
 from datetime import date
 from pathlib import Path
 
-from quant_platform.research.numbers import label
+from quant_platform.research.numbers import label as number_label
 
 _MODEL_META: dict[str, dict] = {}
 _VIEW: dict[str, object] = {}
@@ -199,7 +199,7 @@ def charts(research: Path, start: str, overall: dict | None, ordinary: dict | No
                 value = found.get(point["x"].strftime("%Y-%m"))
                 point[f"s{number}"] = value[0] if value else None
             # 2026-10-28: the strategy's number (research/numbers.py), the same on every page
-            lines.append({"key": f"s{number}", "label": f"{short} {label(research, key_of(row)) or '#' + str(row.get('trial_id') or row.get('trial'))}", "css": css,
+            lines.append({"key": f"s{number}", "label": f"{short} {number_label(research, key_of(row)) or '#' + str(row.get('trial_id') or row.get('trial'))}", "css": css,
                           "short": short})
         lines += [{"key": "bench", "label": "0050（同樣的錢）", "css": "vref", "dashed": True, "short": "0050"},
                   {"key": "paid", "label": "投入的錢", "css": "vput", "dashed": True, "short": "投入"}]
@@ -282,7 +282,7 @@ def family_charts(research: Path, family: dict, periods: dict) -> dict[str, str]
         points = [{"x": date(int(key[:4]), int(key[5:7]), 1), "rule": value[0], "bench": value[1], "paid": value[2]}
                   for key, value in sorted(found.items())]
         output["growth"] = svg.line(points, [
-            {"key": "rule", "label": f"最好的 {label(research, key_of(best)) or '#' + str(best.get('trial_id'))}", "css": "v1", "short": "最好的"},
+            {"key": "rule", "label": f"最好的 {number_label(research, key_of(best)) or '#' + str(best.get('trial_id'))}", "css": "v1", "short": "最好的"},
             {"key": "bench", "label": "0050（同樣的錢）", "css": "vref", "dashed": True, "short": "0050"},
             {"key": "paid", "label": "投入的錢", "css": "vput", "dashed": True, "short": "投入"}],
             wan, lambda x, full: x.strftime("%Y-%m") if full else str(x.year), "這一類最好的規則與 0050")
