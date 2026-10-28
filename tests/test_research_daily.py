@@ -996,6 +996,23 @@ def test_own_trend_halves_again_while_the_account_is_below_where_it_was_a_year_b
     assert len(daily.BATCHES["bear10"].__doc__) > 0
 
 
+def test_own_excess_halves_again_while_the_account_falls_behind_0050_over_a_year():
+    """2026-10-29 (空頭防護第十一版): the account against 0050 with the same money, not against itself — a rule that keeps
+    rising while 0050 rises faster is cut; the same rule is not cut by 第十版 (its own year is a gain)."""
+    days = weekdays(date(2019, 1, 1), date(2023, 12, 29))
+    stocks = [20 * 1.0015 ** n for n in range(len(days))]                 # always up 0.15% a day
+    etf = [100.0] * 600 + [100 * 1.004 ** n for n in range(1, len(days) - 599)]   # flat, then up 0.4% a day
+    data = market(days, {**{f"{1101 + n}.TW": dict(zip(days, stocks)) for n in range(4)}, "0050.TW": dict(zip(days, etf))})
+    fp = FactorPanel(Panel(data), market=np.linspace(100, 300, len(days)))         # TAIEX never below its line
+    excess = DailyRule(name="x", factors={"momentum_3": 1.0}, top=4, vol_scale="own_excess")
+    levels = daily.exposure_schedule(data, fp, excess, FREE)
+    own = daily.exposure_schedule(data, fp, excess.model_copy(update={"vol_scale": "own_trend"}), FREE)
+    assert levels[days[560]] == 1.0                                       # ahead of 0050 and more so than a year before
+    assert levels[days[950]] == daily.OWN_TREND_CUT and own[days[950]] == 1.0   # behind 0050's pace, its own year a gain
+    assert set(levels.values()) <= {0.25, 0.5, 1.0}
+    assert excess.canonical()["vol_scale"] == "own_excess" and len(daily.BATCHES["bear11"].__doc__) > 0
+
+
 def test_a_swapped_factor_keeps_the_rest_and_maps_back_to_the_original():
     """2026-10-28 (季報盈餘驚喜): eps_growth read as eps_surprise at the same weight, in a rule and in a blend's sleeves;
     swapping back gives the original's hash (the name is not part of it); a rule without it is left alone."""

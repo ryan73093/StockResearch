@@ -58,7 +58,7 @@ SHORT = {"none": "不加", "taiex_200": "200 日均線", "taiex_10m": "10 個月
          "risk_half": "模型決定減碼一半", "entry_only": "選股條件只管買進", "band": "選股條件緩衝七成",
          "bear_quality": "空頭改選低波動高品質", "bear_steady": "空頭改選跌市穩", "bear_vol": "依大盤波動減碼",
          "bear_trend": "依短期趨勢回補", "bear_drawdown": "帳戶回撤控制",
-         "bear_own_trend": "規則自己一年動能"}
+         "bear_own_trend": "規則自己一年動能", "bear_own_excess": "規則比 0050 的一年動能"}
 RANKED = ("market_filter", "stop_loss")             # these act where the day's targets are decided: ranked again
 HELPS = 2                                            # held at least this many more scenarios (the median strategy)
 KEEPS = 0.8                                          # and keeps at least this share of its 2015-06 money
@@ -427,7 +427,7 @@ def guard_ways() -> list[tuple[str, str, dict, tuple[int, ...]]]:
     """(key, words, settings, the original rules) of every guard graded so far: the second version's three on the stress
     strategies, the third version's staged guard on them and the half guard on each family's five richest."""
     from quant_platform.research.daily import (
-        BAND, BEAR_DEFENSIVE, BEAR_GUARD_ORIGINS, BEAR_DRAWDOWN, BEAR_OWN_TREND, BEAR_TREND, BEAR_VOL, BEAR_GUARDS, BEAR_HALF_WIDE, BEAR_RISK, BEAR_RISK_HALF, BEAR_STAGED,
+        BAND, BEAR_DEFENSIVE, BEAR_GUARD_ORIGINS, BEAR_DRAWDOWN, BEAR_OWN_EXCESS, BEAR_OWN_TREND, BEAR_TREND, BEAR_VOL, BEAR_GUARDS, BEAR_HALF_WIDE, BEAR_RISK, BEAR_RISK_HALF, BEAR_STAGED,
         ENTRY_ONLY,
     )
 
@@ -446,6 +446,7 @@ def guard_ways() -> list[tuple[str, str, dict, tuple[int, ...]]]:
     ways.append(("bear_trend", BEAR_TREND[0], BEAR_TREND[1], BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE))   # 2026-10-28 第八版
     ways.append(("bear_drawdown", BEAR_DRAWDOWN[0], BEAR_DRAWDOWN[1], BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE))   # 第九版
     ways.append(("bear_own_trend", BEAR_OWN_TREND[0], BEAR_OWN_TREND[1], BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE))   # 第十版
+    ways.append(("bear_own_excess", BEAR_OWN_EXCESS[0], BEAR_OWN_EXCESS[1], BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE))   # 第十一版
     return ways
 
 
