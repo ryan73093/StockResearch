@@ -945,6 +945,33 @@ def test_the_cut_below_the_line_is_taken_back_by_the_shorter_trends():
     assert len(daily.BATCHES["bear8"].__doc__) > 0
 
 
+def test_own_drawdown_holds_less_the_further_the_account_is_below_its_high():
+    """2026-10-28 (空頭防護第九版): with TAIEX above its line, the share held is 1 - the account's fall from its high /
+    30%, rounded up to a quarter; below the line at most half."""
+    days = weekdays(date(2019, 1, 1), date(2023, 12, 29))
+    up = [20 * 1.0015 ** n for n in range(500)]
+    down = list(np.linspace(up[-1], up[-1] * 0.55, 200))                  # the account falls 45%
+    back = list(np.linspace(up[-1] * 0.55, up[-1] * 1.2, len(days) - 700))
+    path = up + down + back
+    data = market(days, {f"{1101 + n}.TW": dict(zip(days, path)) for n in range(4)})
+    rising = np.linspace(100, 300, len(days))
+    fp = FactorPanel(Panel(data), market=np.concatenate([rising[:-60], np.full(60, 50.0)]))   # TAIEX breaks at the end
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=4, vol_scale="own_drawdown")
+    levels = daily.exposure_schedule(data, fp, rule, FREE)
+    high = np.maximum.accumulate(np.array(path))
+    for position in (450, 520, 560, 600, 640, 690, 760):
+        fall = 1 - path[position - 1] / high[position - 1]                # known at the close before
+        expected = float(np.clip(np.ceil((1 - fall / daily.OWN_DRAWDOWN) * 4) / 4, 0, 1))
+        bounds = [abs(fall - edge) for edge in (0.075, 0.15, 0.225, 0.30)]
+        if min(bounds) > 0.01:
+            assert levels[days[position]] == expected, (position, fall)
+    assert levels[days[450]] == 1.0 and levels[days[690]] == 0.0       # at the high; 44% down
+    assert levels[days[-5]] <= daily.MARKET_HALF                          # TAIEX below its line
+    assert set(levels.values()) <= {0.0, 0.25, 0.5, 0.75, 1.0}
+    assert rule.canonical()["vol_scale"] == "own_drawdown"
+    assert len(daily.BATCHES["bear9"].__doc__) > 0
+
+
 def test_the_rerun_halves_split_by_the_rule_s_hash(monkeypatch):
     """2026-10-28: the two halves of the pool's rerun cover every rule once, whatever order the batch lists them in."""
     rules = [DailyRule(name=f"x{top}", factors={"trend_200": 1.0}, top=top) for top in range(5, 25)]
