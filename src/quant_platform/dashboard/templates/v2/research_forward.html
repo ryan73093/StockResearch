@@ -116,7 +116,7 @@
   {% endif %}
   {% if forward.trades %}
   {# 2026-10-28 (使用者：每一筆交易的紀錄都要顯示買入的價格跟賣出的價格，我怎麼驗證你買賣的正確性) #}
-  <p class="small muted" style="margin:0 0 8px">每一筆都列買進價與賣出價：賣出那筆的買進價是賣掉的那些股數當初的平均買進價（不含手續費；賺賠已扣手續費與稅）；買進那筆的賣出價是之後全部賣掉的那天的價格。對照「當天開盤／收盤」驗證：引擎的成交價＝收盤（隔天開盤成交的規則用開盤）買進加 0.2%、賣出減 0.2%，再取到升降單位，不超出漲跌停（<a href="/project/trading">交易需知</a>第 5 節）。</p>
+  <p class="small muted" style="margin:0 0 8px">每一筆都列買進價與賣出價：賣出那筆的買進價是賣掉的那些股數當初的平均買進價（不含手續費；賺賠已扣手續費與稅）；買進那筆的賣出價是之後全部賣掉的那天的價格。對照「當天開盤／收盤」驗證——<b>這個策略的成交方式：{{ execution }}</b>，再取到升降單位（買進往上、賣出往下），不超出漲跌停（<a href="/project/trading">交易需知</a>第 5 節）。</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th>日期</th><th>操作</th><th>股票</th><th class="num">股數</th><th class="num">買進價</th><th class="num">賣出價</th><th class="num">當天開盤／收盤</th><th class="num">金額</th><th class="num">手續費＋稅</th><th class="num">賺賠</th><th>原因</th></tr></thead>

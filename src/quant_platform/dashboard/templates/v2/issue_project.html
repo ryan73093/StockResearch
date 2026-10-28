@@ -130,3 +130,10 @@
   {% endif %}
 </section>
 {% endblock %}
+{% block scripts %}
+<script>
+/* 2026-10-28: the switcher starts at the project open */
+(() => { const here = document.querySelector('.app-switcher [aria-current="page"]');
+  if (here) here.scrollIntoView({ inline: 'center', block: 'nearest' }); })();
+</script>
+{% endblock %}

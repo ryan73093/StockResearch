@@ -3060,7 +3060,9 @@ def _keep_research_warm(dependencies) -> None:
                     warm(name, research_dir, compute)
                 except Exception:  # noqa: BLE001 — a warm-up failure must not stop the site; the page computes it itself
                     log.exception("Research pages warm-up failed: %s", name)
-            time.sleep(60)
+            # 2026-10-28: every 5 minutes, not every minute — while a research batch writes trials.jsonl all day each
+            # round recomputes the pool and the dashboard (a minute of CPU in this process), and the pages waited on it
+            time.sleep(300)
 
     threading.Thread(target=loop, name="research-warm", daemon=True).start()
 

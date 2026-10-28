@@ -535,6 +535,26 @@ def market_session(now: datetime, calendar) -> dict[str, str]:
     }
 
 
+EXECUTION_TEXT = {
+    "same": "收盤後決定、當天盤後成交：買進＝當天收盤 +0.2%、賣出＝當天收盤 −0.2%",
+    "next": "收盤後決定、隔天收盤成交：買進＝隔天收盤 +0.2%、賣出＝隔天收盤 −0.2%",
+    "open": "收盤後決定、隔天開盤成交：買進＝隔天開盤 +0.2%、賣出＝隔天開盤 −0.2%",
+    "split": "收盤後決定，賣出在隔天開盤（開盤 −0.2%）、買進在隔天收盤（收盤 +0.2%）",
+}
+
+
+def execution_text(spec: dict) -> str:
+    """2026-10-28 (使用者：我怎麼驗證你買賣的正確性): how this strategy's fills are priced, beside its trades."""
+    if spec.get("kind") == "blend":
+        modes = {(sleeve.get("rule") or {}).get("execution", "same") for sleeve in spec.get("sleeves") or []}
+        if len(modes) > 1:
+            return "組合：各子策略照自己的方式成交（" + "；".join(EXECUTION_TEXT.get(mode, mode) for mode in sorted(modes)) + "）"
+        mode = next(iter(modes), "same")
+    else:
+        mode = spec.get("execution", "same")
+    return EXECUTION_TEXT.get(mode, mode)
+
+
 def create_v2_blueprint(dependencies) -> Blueprint:
     blueprint = Blueprint("v2", __name__)
 
@@ -1360,6 +1380,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                                trades_chart=trades_chart, board=board, board_row=board_row, research_tab="forward",
                                family=rule_family((detail["item"].get("rule") if detail["item"].get("kind") in ("daily", "blend")
                                                    else None)),
+                               execution=execution_text(detail["item"].get("rule") or {}),
                                jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/roles")
