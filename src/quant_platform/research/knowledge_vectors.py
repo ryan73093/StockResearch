@@ -37,6 +37,11 @@ NAMESPACE = uuid.UUID("6f1c2f5e-2f53-4e43-9a1d-6d1f6d2b0a11")
 DOC_TOKENS = 2048                 # an entry is at most MAX_TEXT characters (about this many tokens)
 QUERY_TOKENS = 256
 CANDIDATES = 60                   # each of dense and sparse before Qdrant fuses them
+# 2026-10-29: the shared server answered in 2～8 s and now and then past 30 s while this machine was loaded (other
+# projects' builds, the research runs); every hourly rebuild from 01:45 timed out on an upsert. The rebuild waits
+# longer and tries again; a page's search keeps the short wait.
+INDEX_TIMEOUT = 120
+INDEX_TRIES = 3
 
 
 def model_path(root: str | Path | None = None) -> Path | None:
@@ -157,7 +162,7 @@ def collection() -> str:
     return SERVER_COLLECTION if server() else COLLECTION
 
 
-def _open(research: str | Path, tries: int = 40):
+def _open(research: str | Path, tries: int = 40, timeout: int = 30):
     """The server's client, or the embedded collection's (another process holding it is waited for; closed after each
     use)."""
     from qdrant_client import QdrantClient
@@ -166,7 +171,7 @@ def _open(research: str | Path, tries: int = 40):
     if found:
         with warnings.catch_warnings():   # plain http to this machine's own server (127.0.0.1), as VectorDB uses it
             warnings.filterwarnings("ignore", message="Api key is used with an insecure connection")
-            return QdrantClient(url=found[0], api_key=found[1], timeout=30)
+            return QdrantClient(url=found[0], api_key=found[1], timeout=timeout)
     path = store(research)
     path.mkdir(parents=True, exist_ok=True)
     for attempt in range(tries):
@@ -196,18 +201,32 @@ def _ensure_collection(client) -> None:
                                  sparse_vectors_config={"sparse": models.SparseVectorParams()})
 
 
+def _patient(call, tries: int = INDEX_TRIES, pause: float = 10.0):
+    """``call()``, tried again after a pause when the server times out or drops the connection."""
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
+    for attempt in range(tries):
+        try:
+            return call()
+        except ResponseHandlingException:
+            if attempt == tries - 1:
+                raise
+            time.sleep(pause * (attempt + 1))
+
+
 def index(research: str | Path, entries: list[dict[str, object]], model, batch: int = 8, job=None) -> dict[str, object]:
     """The entries whose text changed encoded and stored; the ones gone deleted; what was done."""
     from qdrant_client import models
 
     started = time.time()
-    client = _open(research)
+    client = _open(research, timeout=INDEX_TIMEOUT)
     try:
         _ensure_collection(client)
         stored: dict[str, str] = {}
         offset = None
         while True:
-            points, offset = client.scroll(collection(), limit=1000, offset=offset, with_payload=["hash"], with_vectors=False)
+            points, offset = _patient(lambda: client.scroll(collection(), limit=1000, offset=offset, with_payload=["hash"],
+                                                            with_vectors=False))
             stored.update({str(point.id): str((point.payload or {}).get("hash")) for point in points})
             if offset is None:
                 break
@@ -218,14 +237,15 @@ def index(research: str | Path, entries: list[dict[str, object]], model, batch: 
             if job:
                 job.update(done=start, total=len(changed), current=f"編碼 {start:,}／{len(changed):,} 筆")
             dense, sparse = model.encode([f"{entry['title']}\n{entry['text']}" for entry in part], DOC_TOKENS, batch)
-            client.upsert(collection(), points=[
+            points = [
                 models.PointStruct(id=_point_id(str(entry["id"])),
                                    vector={"dense": dense[number].tolist(),
                                            "sparse": models.SparseVector(indices=list(sparse[number]),
                                                                          values=list(sparse[number].values()))},
                                    payload={"entry": entry["id"], "hash": _hash(entry), "kind": entry["kind"],
                                             "verdict": entry["verdict"]})
-                for number, entry in enumerate(part)])
+                for number, entry in enumerate(part)]
+            _patient(lambda: client.upsert(collection(), points=points))
         gone = [point for point in stored if point not in wanted]
         if gone:
             client.delete(collection(), points_selector=models.PointIdsList(points=gone))

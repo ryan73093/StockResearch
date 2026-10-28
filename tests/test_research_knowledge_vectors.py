@@ -89,3 +89,25 @@ def test_a_relative_project_folder_still_finds_the_sibling_model(tmp_path, monke
     (tmp_path / "StockResearch").mkdir()
     monkeypatch.chdir(tmp_path / "StockResearch")
     assert knowledge_vectors.model_path(".") == folder
+
+
+def test_a_slow_server_is_tried_again(monkeypatch):
+    """2026-10-29: the shared server timed out now and then under load; the rebuild pauses and tries again."""
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
+    monkeypatch.setattr(knowledge_vectors.time, "sleep", lambda seconds: None)
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise ResponseHandlingException(TimeoutError("timed out"))
+        return "stored"
+
+    assert knowledge_vectors._patient(flaky) == "stored" and len(calls) == 3
+
+    def down():
+        raise ResponseHandlingException(TimeoutError("timed out"))
+
+    with pytest.raises(ResponseHandlingException):          # still down after the last try: the rebuild fails as before
+        knowledge_vectors._patient(down)
