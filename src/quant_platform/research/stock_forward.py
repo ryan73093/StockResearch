@@ -61,6 +61,7 @@ META_STOPPED = ("2026-10-15：AI 研究員還沒有合格的規則，這個帳�
 
 _SUMMARY: dict[str, object] = {}
 _CHAINED: dict[str, object] = {}
+_OFFSETS: dict[str, dict] = {}            # 2026-10-28: log path -> where each account's records start
 _HELD_OLD = re.compile(r"，已持有滿 (\d+) 個交易日")
 
 
@@ -460,15 +461,41 @@ class StockForwardTracker:
         page had parsed all 130,000 records, about 8 s, for its own few dozen)."""
         if not self.log_path.is_file():
             return []
-        mark = f'"{rule_hash}"'
         output = []
-        with open(self.log_path, encoding="utf-8") as handle:
-            for line in handle:
-                if mark in line:
-                    record = json.loads(line)
-                    if record.get("rule_hash") == rule_hash:
-                        output.append(record)
+        with open(self.log_path, "rb") as handle:
+            for offset in self._offsets().get(rule_hash, []):
+                handle.seek(offset)
+                record = json.loads(handle.readline().decode("utf-8"))
+                if record.get("rule_hash") == rule_hash:
+                    output.append(record)
         return output
+
+    def _offsets(self) -> dict[str, list[int]]:
+        """rule hash -> where its records start in the log (kept per process; the log only grows between restarts of an
+        account, so a longer file with the same beginning is read on from where the last look stopped — a full scan of
+        the 190 MB took 2-3 s a page)."""
+        path = self.log_path
+        stat = path.stat()
+        key = str(path.resolve())
+        state = _OFFSETS.get(key)
+        if state and state["size"] == stat.st_size and state["mtime"] == stat.st_mtime_ns:
+            return state["index"]
+        with open(path, "rb") as handle:
+            head = handle.read(4096)
+            start, index = 0, {}
+            if state and stat.st_size > state["size"] and head == state["head"]:
+                start, index = state["size"], state["index"]
+            handle.seek(start)
+            position = start
+            marker = b'"rule_hash": "'
+            for line in handle:
+                at = line.find(marker)
+                if at >= 0:
+                    begin = at + len(marker)
+                    index.setdefault(line[begin:line.find(b'"', begin)].decode("ascii", "replace"), []).append(position)
+                position += len(line)
+        _OFFSETS[key] = {"size": stat.st_size, "mtime": stat.st_mtime_ns, "head": head, "index": index}
+        return index
 
     @property
     def rebases_path(self) -> Path:

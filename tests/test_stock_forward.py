@@ -541,3 +541,25 @@ def test_a_stopped_account_on_the_list_again_is_decided_again_not_replayed(tmp_p
     archive = json.loads((folder / "decisions-archive.json").read_text(encoding="utf-8"))
     assert list(archive.values()) == [old] and list(archive)[0].startswith(f"{rule.rule_hash}@2026-09-01~")
     assert (folder / "log-archive.jsonl").is_file()
+
+
+def test_an_accounts_records_are_read_by_their_place_in_the_log(tmp_path):
+    """2026-10-28 (使用者：研究的載入也太慢了吧): a rule's page reads only its own records, found by where they start;
+    records added later are found too, and a rewritten log is read again."""
+    import json as json_module
+
+    from quant_platform.research.stock_forward import StockForwardTracker
+
+    tracker = StockForwardTracker(tmp_path)
+    tracker.log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def line(rule, day):
+        return json_module.dumps({"date": day, "rule_hash": rule, "name": "名稱", "value": 1.0}, ensure_ascii=False) + "\n"
+
+    tracker.log_path.write_text(line("a", "2026-09-01") + line("b", "2026-09-01") + line("a", "2026-09-02"), encoding="utf-8")
+    assert [row["date"] for row in tracker.records_of("a")] == ["2026-09-01", "2026-09-02"]
+    with open(tracker.log_path, "a", encoding="utf-8") as handle:
+        handle.write(line("a", "2026-09-03"))
+    assert [row["date"] for row in tracker.records_of("a")] == ["2026-09-01", "2026-09-02", "2026-09-03"]
+    tracker.log_path.write_text(line("b", "2026-09-01") + line("a", "2026-09-09"), encoding="utf-8")   # rewritten
+    assert [row["date"] for row in tracker.records_of("a")] == ["2026-09-09"] and tracker.records_of("c") == []
