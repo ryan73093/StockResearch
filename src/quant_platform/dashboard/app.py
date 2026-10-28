@@ -3051,17 +3051,22 @@ def _keep_research_warm(dependencies) -> None:
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
-        from quant_platform.dashboard.v2 import ready_views, warm
+        import subprocess
+        import sys
 
         while True:
-            # 2026-10-28: each view on its own (one failing kept the others from warming) and kept for the pages
-            for name, compute in ready_views(research_dir).items():
-                try:
-                    warm(name, research_dir, compute)
-                except Exception:  # noqa: BLE001 — a warm-up failure must not stop the site; the page computes it itself
-                    log.exception("Research pages warm-up failed: %s", name)
-            # 2026-10-28: every 5 minutes, not every minute — while a research batch writes trials.jsonl all day each
-            # round recomputes the pool and the dashboard (a minute of CPU in this process), and the pages waited on it
+            # 2026-10-28 (使用者：研究的載入也太慢了吧): the views are computed in a process of their own
+            # (dashboard/warm.py, no window) and the pages read its files — computed in this process, every round held
+            # the interpreter for a minute or more and each page waited on it
+            try:
+                done = subprocess.run([sys.executable, "-m", "quant_platform.dashboard.warm", str(research_dir)],
+                                      capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800,
+                                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                if done.returncode:
+                    log.error("Research pages warm-up failed: %s", (done.stderr or "")[-2000:])
+            except Exception:  # noqa: BLE001 — a warm-up failure must not stop the site; the page computes it itself
+                log.exception("Research pages warm-up failed")
+            # every 5 minutes: a research batch writes trials.jsonl all day, so each round computes again
             time.sleep(300)
 
     threading.Thread(target=loop, name="research-warm", daemon=True).start()

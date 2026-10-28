@@ -492,3 +492,15 @@ def test_the_optimization_log_is_read_from_the_research_method(tmp_path):
     rows = research_optimizations(doc)
     assert [row["what"] for row in rows] == ["前 10 名", "內部人"] and rows[0]["verdict"] == "沒過"
     assert research_optimizations(tmp_path / "missing.md") == []
+
+
+def test_a_view_the_warm_up_process_wrote_is_read_from_its_file(tmp_path):
+    """2026-10-28 (使用者：研究的載入也太慢了吧): the pages read what dashboard/warm.py wrote; with no file they compute."""
+    from quant_platform.dashboard import v2, warm
+
+    calls = []
+    assert v2.ready("pool:seed", tmp_path, lambda: calls.append(1) or {"made": "here"}) == {"made": "here"} and calls == [1]
+    warm.write(tmp_path, "pool:seed", {"made": "by the warm-up"})
+    assert v2.ready("pool:seed", tmp_path, lambda: calls.append(2)) == {"made": "by the warm-up"} and calls == [1]
+    assert warm.path_of(tmp_path, "pool:seed").name == "pool-seed.pkl"
+

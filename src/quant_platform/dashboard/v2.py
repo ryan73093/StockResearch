@@ -239,10 +239,31 @@ READY_FOR = 15 * 60
 
 
 def ready(name: str, research_dir: Path, compute):
+    """The view as the warm-up process last wrote it (dashboard/warm.py; at most READY_FOR old, read again only when the
+    file changes), else as this process last computed it, else computed now."""
+    import pickle
+    import time as clock
     from time import monotonic
+
+    from quant_platform.dashboard.warm import path_of
 
     key = f"{name}|{Path(research_dir).resolve()}"
     found = _READY.get(key)
+    path = path_of(research_dir, name)
+    try:
+        stamp = path.stat().st_mtime
+    except OSError:
+        stamp = None
+    if stamp is not None and clock.time() - stamp < READY_FOR:
+        if found is not None and len(found) > 2 and found[2] == stamp:
+            return found[1]
+        try:
+            with open(path, "rb") as handle:
+                value = pickle.load(handle)
+            _READY[key] = (monotonic(), value, stamp)
+            return value
+        except (OSError, EOFError, pickle.UnpicklingError, AttributeError, ImportError):
+            pass
     if found is not None and monotonic() - found[0] < READY_FOR:
         return found[1]
     value = compute()
