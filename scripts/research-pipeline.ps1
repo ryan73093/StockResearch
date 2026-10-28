@@ -65,7 +65,18 @@ function Wait-ForMemory([string[]]$Arguments) {
         (Get-CommitFreeGB) -lt $need -or (Test-DeepTraining) } 60
 }
 
+# 2026-10-29 (AGENTS.md 研究規範：逐筆模擬的批次同時最多兩個程序): a batch of rules (daily --name) waits while two
+# others run — counted by their .venv launcher (each step is the launcher and the interpreter it starts)
+function Wait-ForSimulationSlot([string[]]$Arguments) {
+    if (($Arguments -join " ") -notlike "*quant_platform.research daily --name*") { return }
+    $launcher = Join-Path $root ".venv\Scripts\python.exe"
+    Wait-While "等逐筆模擬的空位（同時最多兩個批次）" {
+        @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
+            $_.ExecutablePath -eq $launcher -and $_.CommandLine -like "*quant_platform.research daily --name*" }).Count -ge 2 } 60
+}
+
 function Invoke-Step([string]$Label, [string[]]$Arguments) {
+    Wait-ForSimulationSlot $Arguments
     Wait-ForMemory $Arguments
     # 2026-10-20: three pipelines ended with the board at once (3-4 GB and a CPU each) and a deploy timed out; the
     # board and the month's list are rebuilt by one run at a time — wait while another research process runs the same
