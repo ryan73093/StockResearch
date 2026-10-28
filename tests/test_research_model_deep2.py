@@ -82,7 +82,8 @@ def test_the_direct_loss_pays_for_turnover_and_crowding_by_hand(tmp_path):
     high = {year: 0.5 for year in years}                       # 0.015 - 0.010 = 0.005
     check = model_deep2.gate_check_direct(meta, other, low, high, years)
     assert check["passed"] and check["net_gain"] == pytest.approx(0.008) and check["against_net_gain"] == pytest.approx(0.005)
-    assert not model_deep2.gate_check_direct(meta, other, high, low, years)["passed"]
+    failed = model_deep2.gate_check_direct(meta, other, high, low, years)
+    assert failed["passed"] is False and json.dumps(failed)        # 10-29: a numpy bool did not go into meta.json
     assert not model_deep2.gate_check_direct(meta, other, {2021: 0.2}, high, years)["passed"]   # years missing
 
     # the turnover: the top 20 of 60 stocks moving by five places a week

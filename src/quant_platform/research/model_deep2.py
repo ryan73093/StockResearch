@@ -495,7 +495,7 @@ def gate_check_direct(meta: dict, against: dict, mine: dict, theirs: dict,
             "against_net_gain": float(np.mean(other)) if complete else None,
             "turnover": {str(year): round(mine[year], 4) for year in years if year in mine},
             "against_turnover": {str(year): round(theirs[year], 4) for year in years if year in theirs},
-            "years_better": better, "passed": complete and np.mean(own) >= np.mean(other) and better >= DIRECT_BETTER}
+            "years_better": better, "passed": bool(complete and np.mean(own) >= np.mean(other) and better >= DIRECT_BETTER)}
 
 
 def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
