@@ -61,7 +61,7 @@ function Wait-ForMemory([string[]]$Arguments) {
     $deep = ($Arguments -join " ") -like "*--model-version dl-*"
     $need = if ($deep) { $DeepTrainingGB } else { $StepGB }
     $other = if ($deep) { "另一個深度學習訓練" } else { "深度學習訓練" }
-    Wait-While "等記憶體：這一步要約 $need GB 可用，而且沒有$other在跑（10/28 記憶體用完七次）" {
+    Wait-While "等記憶體：這一步要約 $need GB 可用，而且沒有$($other)在跑（10/28 記憶體用完七次）" {
         (Get-CommitFreeGB) -lt $need -or (Test-DeepTraining) } 60
 }
 
@@ -1712,7 +1712,9 @@ switch ($Name) {
     "regate221" {
         # 2026-10-29: dl-2.2.1 (research_method §7「深度學習舊版本用 2021～2025 重判」) did not finish on 10-28 21:28 — the
         # machine ran out of memory; trained again with the same gate, then the batch's rules (only versions that passed)
-        Wait-While "等深度直接強化學習用完顯示卡（deepdirect）" { [bool](Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "research-pipeline\.ps1" -and $_.CommandLine -match "-Name deepdirect( |$)" }) } 300
+        # the GPU: not while the full search's stage one runs on it (the memory gate keeps a second training out)
+        Wait-While "等顯示卡空出來（全段大搜尋第一階段在用）" {
+            Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*scan-full*--part*" } } 300
         Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.2.1")
         Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deepregate", "--broker", "cathay")
         Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
