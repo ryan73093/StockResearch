@@ -5187,6 +5187,34 @@ def all_half_twins() -> list:
     return half_twins(rules, {record.spec_hash for record in records})
 
 
+def t2_half_twins() -> list:
+    """2026-10-28 (research_method §7「T2 規則補減碼一半版本」, written before the run): the half-guard twin of every
+    latest 100%-stock T2 rule (beating 0050 from 2020-10 but short on the windows or the drawdown) that has none —
+    model M's three T2 rules gave one T0 candidate with it."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = _Path("instance") / "research"
+    records = TrialRegistry(research / "trials.jsonl").records()
+    latest = newest(records, lambda record: record.kind == "candidate" and record.period == "recent")
+    rules = []
+    for record in sorted(latest.values(), key=lambda record: record.trial_id):
+        if tier(record.metrics or {})[0] != "T2":
+            continue
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+            rule = parse_spec(spec)
+        except (OSError, ValueError, KeyError):
+            continue
+        if not uses_0050(spec):
+            rules.append(rule)
+    return half_twins(rules, {record.spec_hash for record in records})
+
+
 def stale_engine(research=None) -> list:
     """2026-10-27: the latest result of every 100%-stock rule on an engine older than ENGINE_VERSION (the pool showed
     #2189 as a T0 candidate from engine 1.2.0, 1,735萬; the October list's 1.5.0 grading has it T3) — as rules."""
@@ -5254,7 +5282,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
            "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
-           "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
+           "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
            "halftwins_b": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1],
            "stale": stale_engine,
            "windows_stale": windows_stale_batch,
