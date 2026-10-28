@@ -20,7 +20,7 @@
             <td data-primary><strong>{{ row.role }}</strong></td>
             <td class="num" data-label="策略數">{{ row.rules }}</td>
             <td class="num" data-label="過門檻">{{ row.passing }}（{{ row.t0 }}／{{ row.risky }}／{{ row.t1 }}）</td>
-            <td data-label="最好的策略">{% if row.best.spec %}<a href="/research/rules/{{ row.best.spec }}">{{ row.best.name }}</a> <span class="badge {{ 'badge--ok' if row.best.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in (row.best.tier or '') else 'badge--warn') }}">{{ row.best.tier }}</span>{% endif %}</td>
+            <td data-label="最好的策略">{% if row.best.spec %}<a href="/research/rules/{{ row.best.spec }}">{{ rule_no(row.best.spec) }} {{ row.best.name }}</a> <span class="badge {{ 'badge--ok' if row.best.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in (row.best.tier or '') else 'badge--warn') }}">{{ row.best.tier }}</span>{% endif %}</td>
             <td class="num" data-label="期末">{{ money(row.best.final) }}</td>
             <td class="num" data-label="比 1 天前">{{ pct(row.change_1d) }}</td>
             <td class="num" data-label="比 7 天前">{{ pct(row.change_7d) }}</td>

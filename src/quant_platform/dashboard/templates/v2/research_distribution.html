@@ -26,7 +26,7 @@
     <tbody>
     {% for item in items %}
       <tr><td class="num" data-label="名次">{{ start + loop.index0 }}</td>
-        <td data-primary>{% set who = ('#' ~ item.trial ~ ' ') if item.trial is not none else '' %}{% if item.spec_hash and item.trial is not none %}<a href="/research/rules/{{ item.spec_hash }}">{{ who }}{{ item.name }}</a>{% else %}{{ who }}{{ item.name }}{% endif %} <span class="badge">{{ item.family }}</span></td>
+        <td data-primary>{% set who = ('#' ~ item.trial ~ ' ') if item.trial is not none else '' %}{% if item.spec_hash and item.trial is not none %}<a href="/research/rules/{{ item.spec_hash }}">{{ rule_no(item.spec_hash) }} {{ who }}{{ item.name }}</a>{% else %}{{ who }}{{ item.name }}{% endif %} <span class="badge">{{ item.family }}</span></td>
         <td class="num" data-label="{{ '全部賣掉' if key == 'forward' else '期末' }}">{{ '{:,.1f}'.format(item.value / 10000) if key == 'forward' else '{:,.0f}'.format(item.value / 10000) }} 萬</td>
         <td class="num" data-label="是 0050 的">{{ '{:.2f}'.format(item.value / track.bench) }} 倍</td>
         <td data-label="等級">{{ item.tier or '—' }}</td></tr>

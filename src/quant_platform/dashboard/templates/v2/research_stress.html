@@ -33,7 +33,7 @@
     <tbody>
     {% for row in rows|sort(attribute='held_count', reverse=True) %}
       <tr>
-        <td data-primary><a href="/research/rules/{{ row.spec_hash }}">#{{ row.trial }}</a> {{ row.name }} <span class="badge">{{ row.why }}</span></td>
+        <td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }}</a> {{ row.name }} <span class="badge">{{ row.why }}</span></td>
         <td class="num" data-label="撐過"><b>{{ row.held_count }}</b>／{{ row.scenario_count }} 次{% if row.held_all %} <span class="badge badge--ok">每次都撐過</span>{% endif %}</td>
         <td data-label="2008"><span class="badge {{ 'badge--ok' if row.held_2008 else ('badge--bad' if row.held_2008 is sameas false else '') }}">{{ '撐過' if row.held_2008 else ('撐不過' if row.held_2008 is sameas false else '—') }}</span></td>
         <td class="num {{ 'up' if row.final > row.base_final else 'down' }}" data-label="期末">{{ wan(row.final) }}<span class="muted small">（{{ wan(row.base_final) }}）</span></td>
@@ -133,7 +133,7 @@
         <td class="num" data-label="錢留住">{{ '{:.0%}'.format(g.kept) }}</td>
         <td class="num {{ 'up' if g.drawdown >= 0 else 'down' }}" data-label="最大回撤">{{ '淺' if g.drawdown >= 0 else '深' }} {{ '%.1f'|format(g.drawdown|abs) }} 點</td>
         <td class="num {{ 'up' if g.gap >= 0 else 'down' }}" data-label="0050 最大那次跌">{{ '少跌' if g.gap >= 0 else '多跌' }} {{ '%.1f'|format(g.gap|abs) }} 點<span class="muted small">（{{ g.less }} 個比原版好）</span></td>
-        <td data-label="錢最多的"><a href="/research/rules/{{ g.best.spec_hash }}">#{{ g.best.trial }}</a> {{ wan(g.best.final) }}<span class="muted small">（原版 #{{ g.best.origin }} {{ wan(g.best.origin_final) }}）</span></td>
+        <td data-label="錢最多的"><a href="/research/rules/{{ g.best.spec_hash }}">{{ rule_no(g.best.spec_hash) }}</a> {{ wan(g.best.final) }}<span class="muted small">（原版 #{{ g.best.origin }} {{ wan(g.best.origin_final) }}）</span></td>
       </tr>
     {% endfor %}
     </tbody>

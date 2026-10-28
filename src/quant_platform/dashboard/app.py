@@ -3051,15 +3051,15 @@ def _keep_research_warm(dependencies) -> None:
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
-        from quant_platform.dashboard.v2 import dashboard_data
-        from quant_platform.research.pool import pool_view
+        from quant_platform.dashboard.v2 import ready_views, warm
 
         while True:
-            try:
-                pool_view(research_dir, basis="seed")
-                dashboard_data(research_dir)
-            except Exception:  # noqa: BLE001 — a warm-up failure must not stop the site; the page computes it itself
-                log.exception("Research pages warm-up failed")
+            # 2026-10-28: each view on its own (one failing kept the others from warming) and kept for the pages
+            for name, compute in ready_views(research_dir).items():
+                try:
+                    warm(name, research_dir, compute)
+                except Exception:  # noqa: BLE001 — a warm-up failure must not stop the site; the page computes it itself
+                    log.exception("Research pages warm-up failed: %s", name)
             time.sleep(60)
 
     threading.Thread(target=loop, name="research-warm", daemon=True).start()

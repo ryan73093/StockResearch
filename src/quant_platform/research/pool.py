@@ -528,7 +528,7 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
     for run in runs:
         run["current"] = run["period"] not in seen_periods
         seen_periods.add(run["period"])
-    forward = next((row for row in StockForwardTracker(base).summary() if row["rule_hash"] == spec_hash), None)
+    forward = StockForwardTracker(base).summary_for(spec_hash)       # 2026-10-28: its own records only (it took ~14 s)
     return {"spec_hash": spec_hash, "name": records[-1].spec_name, "spec": spec, "description": describe_rule(spec),
             # 2026-10-14: the daily-decision rules ("daily:" data) are stock rules too (the page said ETF 規則)
             "family": "個股規則" if records[-1].data_fingerprint.startswith(("stocks:", "daily:")) else "ETF 規則",

@@ -19,7 +19,7 @@
 {{ charts.periods|safe }}
 {{ legend([{'css': 'vbar', 'label': '0050'}, {'css': 'v1bar', 'label': '這一類規則的中位數'}]) }}
 <p class="small muted" style="margin:4px 0 0">下面的百分比是這一類贏 0050 的規則比例。</p>
-{% if f.faded %}<p class="small" style="margin:6px 0 0">前期每年贏五點以上、後期變輸的：{% for row in f.faded %}<a href="/research/rules/{{ row.spec_hash }}">{{ row.name[:40] }}</a>（2020 年以前每年比 0050 {{ '多' if row.periods.early.excess >= 0 else '少' }} {{ '%.0f'|format((row.periods.early.excess * 100)|abs) }} 個百分點，2020 年以後{{ '多' if row.periods.late.excess >= 0 else '少' }} {{ '%.0f'|format((row.periods.late.excess * 100)|abs) }} 個百分點）{% if not loop.last %}；{% endif %}{% endfor %}</p>{% endif %}
+{% if f.faded %}<p class="small" style="margin:6px 0 0">前期每年贏五點以上、後期變輸的：{% for row in f.faded %}<a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name[:40] }}</a>（2020 年以前每年比 0050 {{ '多' if row.periods.early.excess >= 0 else '少' }} {{ '%.0f'|format((row.periods.early.excess * 100)|abs) }} 個百分點，2020 年以後{{ '多' if row.periods.late.excess >= 0 else '少' }} {{ '%.0f'|format((row.periods.late.excess * 100)|abs) }} 個百分點）{% if not loop.last %}；{% endif %}{% endfor %}</p>{% endif %}
 {% endif %}
 
 <h3 class="dash-h">訓練狀況</h3>
@@ -51,7 +51,7 @@
     <thead><tr><th>規則</th><th class="num">回測期末</th><th class="num">2020-10 起</th><th class="num">前向比 0050</th></tr></thead>
     <tbody>
     {% for row in f.top %}
-      <tr><td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else '') }}">{{ row.tier }}</span></td>
+      <tr><td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else '') }}">{{ row.tier }}</span></td>
         <td class="num" data-label="回測期末">{{ wan(row.final_value) }}</td>
         <td class="num" data-label="2020-10 起">{{ wan(row.since_2020_final_value) }}</td>
         <td class="num {{ 'up' if row.forward and row.forward.ahead > 0 else ('down' if row.forward else '') }}" data-label="前向比 0050">{% if row.forward %}<a href="/research/forward/{{ row.spec_hash }}">{{ '{:+,.0f}'.format(row.forward.ahead) }}</a>{% else %}<span class="muted small">不在名單</span>{% endif %}</td></tr>

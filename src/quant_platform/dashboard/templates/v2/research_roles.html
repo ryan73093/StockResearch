@@ -30,7 +30,7 @@
       {% for row in growth.roles %}{% set now = row.now %}
         <tr>
           <td class="name"><strong>{{ row.role }}</strong><br><span class="badge">{{ now.tier }}</span></td>
-          <td class="name"><a href="/research/rules/{{ now.spec }}">#{{ now.trial }}</a> {{ now.name }}</td>
+          <td class="name"><a href="/research/rules/{{ now.spec }}">{{ rule_no(now.spec) }}</a> {{ now.name }}</td>
           <td class="num">{{ '{:,.0f}'.format(now.final / 10000) }} 萬</td>
           <td class="num">{{ '{:.1%}'.format(now.xirr) if now.xirr is not none else '—' }}（{{ '{:.1%}'.format(now.bench_xirr) if now.bench_xirr is not none else '—' }}）</td>
           <td class="num {{ 'up' if (now.excess_full or 0) > 0 else 'down' }}">{{ '{:+.0%}'.format(now.excess_full) if now.excess_full is not none else '—' }}</td>

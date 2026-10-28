@@ -78,7 +78,7 @@
       <thead><tr><th>規則</th><th class="num">佔帳戶</th><th class="num">持有日</th><th class="num">開始觀察</th></tr></thead>
       <tbody>
       {% for holder in page.holders|sort(attribute='share', reverse=true) %}
-        <tr><td class="name" data-primary><a href="/research/rules/{{ holder.rule_hash }}">{{ holder.name }}</a></td>
+        <tr><td class="name" data-primary><a href="/research/rules/{{ holder.rule_hash }}">{{ rule_no(holder.rule_hash) }} {{ holder.name }}</a></td>
           <td class="num" data-label="佔帳戶">{{ '{:.1%}'.format(holder.share) }}</td><td class="num" data-label="持有日">{{ holder.date }}</td><td class="num" data-label="開始觀察">{{ holder.since }}</td></tr>
       {% endfor %}
       </tbody>

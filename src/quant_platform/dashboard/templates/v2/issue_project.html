@@ -1,16 +1,17 @@
 {# 2026-10-28 (使用者：每個議題弄成一個專案去追蹤，你現在全部混在一起我要怎麼看): one issue project — the question, its
    lights and the reading (research/issue_notes.py), its drawings, its details, what it tracks and the lines, its changes. #}
 {% extends "v2/base.html" %}
-{% from "v2/_issues_macros.html" import light, wan_usd, pct, indicator_rows, panel, topic_level %}
+{% from "v2/_issues_macros.html" import light, wan_usd, pct, indicator_rows, panel, topic_level, issue_tile, issue_icon %}
 {% block title %}{{ topic.title }} · 議題追蹤{% endblock %}
 {% block heading %}
-<header class="page-head">
-  <div>
-    <h1>{{ topic.title }}</h1>
-    <p class="page-head__sub">{{ topic.question }}・{{ payload.built_at[:16].replace('T', ' ') }} 更新</p>
-  </div>
-  <div class="page-head__meta"><a href="/issues">全部議題</a>{% for other in payload.topics if other.key != topic.key %}・<a href="/issues/{{ other.key }}">{{ other.short }}</a>{% endfor %}</div>
+{# 2026-10-28 (使用者：議題的專案選擇做成像 app 那樣): an app bar — back to the projects, the project, and every project's
+   tile to switch #}
+<header class="app-bar">
+  <a class="app-bar__back" href="/issues" aria-label="回到全部議題">‹ 議題</a>
+  <span class="app-bar__icon app-tile--{{ topic_level(topic)|trim }}">{{ issue_icon(topic.key) }}</span>
+  <div class="app-bar__title"><h1>{{ topic.title }}</h1><p class="page-head__sub">{{ topic.question }}・{{ payload.built_at[:16].replace('T', ' ') }} 更新</p></div>
 </header>
+<nav class="app-switcher" aria-label="切換議題專案">{% for other in payload.topics %}{{ issue_tile(other, topic.key, True) }}{% endfor %}</nav>
 {% endblock %}
 {% block content %}
 {% set level = topic_level(topic)|trim %}

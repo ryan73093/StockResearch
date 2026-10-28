@@ -27,3 +27,25 @@
 </figure>
 {% endif %}{% endmacro %}
 {% macro topic_level(topic) %}{{ 'alert' if topic.indicators|selectattr('level', 'equalto', 'alert')|list else ('watch' if topic.indicators|selectattr('level', 'equalto', 'watch')|list else 'ok') }}{% endmacro %}
+{# 2026-10-28 (使用者：議題的專案選擇麻煩做成像 app 那樣，現在的方式很亂): each project an app tile — an icon coloured by its
+   worst light, its short name and how many lights are on; the same tiles, small, switch projects on a project's page. #}
+{% macro issue_icon(key) -%}
+<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+{%- if key == 'ai' %}<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/><path d="M10 10h4v4h-4z"/>
+{%- elif key == 'housing_market' %}<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/>
+{%- elif key == 'housing_credit' %}<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h4"/>
+{%- elif key == 'property_stocks' %}<path d="M4 20V9l5-3v14M9 20V4l6 3v13M15 20V11l5 2v7"/><path d="M3 20h18"/>
+{%- elif key == 'leverage' %}<path d="M4 18l16-6"/><path d="M12 15v5M8 20h8"/><circle cx="6" cy="9" r="2"/><path d="M18 6v4"/>
+{%- else %}<circle cx="12" cy="12" r="8"/>{%- endif %}
+</svg>
+{%- endmacro %}
+{% macro issue_tile(topic, current=None, small=False) -%}
+{%- set level = topic_level(topic)|trim -%}
+{%- set alerts = topic.indicators|selectattr('level', 'equalto', 'alert')|list|length -%}
+{%- set watches = topic.indicators|selectattr('level', 'equalto', 'watch')|list|length -%}
+<a class="app-tile app-tile--{{ level }}{{ ' app-tile--small' if small else '' }}" href="/issues/{{ topic.key }}"{% if current == topic.key %} aria-current="page"{% endif %}>
+  <span class="app-tile__icon">{{ issue_icon(topic.key) }}</span>
+  <span class="app-tile__name">{{ topic.short }}</span>
+  {% if not small %}<span class="app-tile__state">{% if alerts %}{{ alerts }} 項告警{% endif %}{% if alerts and watches %}・{% endif %}{% if watches %}{{ watches }} 項警示{% endif %}{% if not alerts and not watches %}都正常{% endif %}</span>{% endif %}
+</a>
+{%- endmacro %}

@@ -11,10 +11,17 @@ import statistics
 from datetime import date
 from pathlib import Path
 
+from quant_platform.research.numbers import label
+
 _MODEL_META: dict[str, dict] = {}
 _VIEW: dict[str, object] = {}
 # the robots' own models (their rules name the robot, not a model factor)
 MODEL_PREFIXES = {"RL 機器人": ("block-rl", "free-rl", "factor-rl"), "技術分析機器人": ("tech-rl",)}
+
+
+def key_of(row: dict | None) -> str | None:
+    """A row's spec hash, whichever name it goes by."""
+    return (row or {}).get("spec_hash") or (row or {}).get("rule_hash")
 
 
 def source_groups() -> list[tuple[str, str, bool, frozenset]]:
@@ -191,7 +198,8 @@ def charts(research: Path, start: str, overall: dict | None, ordinary: dict | No
             for point in points:
                 value = found.get(point["x"].strftime("%Y-%m"))
                 point[f"s{number}"] = value[0] if value else None
-            lines.append({"key": f"s{number}", "label": f"{short} #{row.get('trial_id') or row.get('trial')}", "css": css,
+            # 2026-10-28: the strategy's number (research/numbers.py), the same on every page
+            lines.append({"key": f"s{number}", "label": f"{short} {label(research, key_of(row)) or '#' + str(row.get('trial_id') or row.get('trial'))}", "css": css,
                           "short": short})
         lines += [{"key": "bench", "label": "0050（同樣的錢）", "css": "vref", "dashed": True, "short": "0050"},
                   {"key": "paid", "label": "投入的錢", "css": "vput", "dashed": True, "short": "投入"}]
@@ -274,7 +282,7 @@ def family_charts(research: Path, family: dict, periods: dict) -> dict[str, str]
         points = [{"x": date(int(key[:4]), int(key[5:7]), 1), "rule": value[0], "bench": value[1], "paid": value[2]}
                   for key, value in sorted(found.items())]
         output["growth"] = svg.line(points, [
-            {"key": "rule", "label": f"最好的 #{best.get('trial_id')}", "css": "v1", "short": "最好的"},
+            {"key": "rule", "label": f"最好的 {label(research, key_of(best)) or '#' + str(best.get('trial_id'))}", "css": "v1", "short": "最好的"},
             {"key": "bench", "label": "0050（同樣的錢）", "css": "vref", "dashed": True, "short": "0050"},
             {"key": "paid", "label": "投入的錢", "css": "vput", "dashed": True, "short": "投入"}],
             wan, lambda x, full: x.strftime("%Y-%m") if full else str(x.year), "這一類最好的規則與 0050")

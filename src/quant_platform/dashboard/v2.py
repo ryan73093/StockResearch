@@ -229,6 +229,44 @@ FORWARD_ROWS = 100
 POOL_FILTERS = ("q", "family", "tier", "trait")
 
 
+# 2026-10-28 (使用者：研究的載入也太慢了吧): the research pages' heavy views (the pool, the overview's dashboard, the
+# frontier table, the forward accounts' summary, the status table) are served from what the background warm-up
+# (app.start_research_warmup, every minute) last computed; their own caches are keyed on files the research writes all
+# day (trials.jsonl, the forward log), so a visitor kept paying 12–70 s while a batch ran. A page computes a view itself
+# only when the warm-up has none younger than READY_FOR.
+_READY: dict[str, tuple[float, object]] = {}
+READY_FOR = 15 * 60
+
+
+def ready(name: str, research_dir: Path, compute):
+    from time import monotonic
+
+    key = f"{name}|{Path(research_dir).resolve()}"
+    found = _READY.get(key)
+    if found is not None and monotonic() - found[0] < READY_FOR:
+        return found[1]
+    value = compute()
+    _READY[key] = (monotonic(), value)
+    return value
+
+
+def warm(name: str, research_dir: Path, compute) -> None:
+    """The warm-up's side: compute now (each view's own cache makes an unchanged one cheap) and keep it."""
+    from time import monotonic
+
+    _READY[f"{name}|{Path(research_dir).resolve()}"] = (monotonic(), compute())
+
+
+def ready_views(research_dir: Path) -> dict[str, object]:
+    """name -> how to compute it: what the warm-up keeps ready."""
+    from quant_platform.research.pool import pool_view
+    from quant_platform.research.status import overview as research_status
+
+    return {"pool:seed": lambda: pool_view(research_dir, basis="seed"), "dashboard": lambda: dashboard_data(research_dir),
+            "downside": lambda: downside_table(research_dir), "forward": lambda: StockForwardTracker(research_dir).summary(),
+            "status": lambda: research_status(research_dir), "scale": lambda: search_scale(research_dir)}
+
+
 def dashboard_data(research_dir: Path) -> dict[str, object]:
     """2026-10-23 (使用者：總覽就是一個完整的 dashboard): the overview dashboard (research/dashboard.py; kept until its
     files change, warmed in the background by dashboard.app)."""
@@ -400,10 +438,18 @@ def _model_gate(folder: Path, version: str, meta: dict) -> dict[str, object] | N
             from quant_platform.research.model_deep2 import gate as deep2_gate
 
             check = deep2_gate(folder, version)
-            if "top20_gain" not in check:
+            # 2026-10-28: a version still training (its gate years not all in), dl-3.0's margin gate and dl-4.0's
+            # after-cost gate have no plain top-20 pair — the formatting raised, the research pages' warm-up failed
+            # every minute and each visit computed everything again (使用者：研究的載入也太慢了吧)
+            mine, theirs = check.get("top20_gain", check.get("net_gain")), check.get("against_top20_gain",
+                                                                                  check.get("against_net_gain"))
+            if mine is None or theirs is None:
                 return None
-            return {"passed": check["passed"], "text": f"{check['top20_gain']:+.2%} 對模型 G {check['against_top20_gain']:+.2%}，"
-                    f"{check['years_above_floor']}／5 年 ≥ +0.6%"}
+            years = (f"{check['years_above_floor']}／5 年 ≥ +0.6%" if "years_above_floor" in check
+                     else f"{check.get('years_better')}／5 年較好")
+            word = "扣成本後 " if "net_gain" in check else ""
+            return {"passed": bool(check.get("passed")),
+                    "text": f"{word}{mine:+.2%} 對 {check.get('against') or '模型 G'} {theirs:+.2%}，{years}"}
         if meta.get("label") == "deep_risk2":
             check = meta.get("gate") or {}
             if check.get("auc_within_volatility") is None:
@@ -425,7 +471,7 @@ def _model_gate(folder: Path, version: str, meta: dict) -> dict[str, object] | N
             if check.get("top20_gain") is None or check.get("against_top20_gain") is None:
                 return None
             return {"passed": check["passed"], "text": f"{check['top20_gain']:+.2%} 對 {against} {check['against_top20_gain']:+.2%}"}
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError):      # one model's gate must not take the research pages down
         return None
     return None
 
@@ -500,6 +546,27 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             return None
 
     blueprint.add_app_template_global(risk_note, "risk_note")
+
+    def rule_no(rule_hash: str | None) -> str:
+        """2026-10-28 (使用者：麻煩每個策略給個編號好嗎): "#7339" — a strategy's number (its first trial,
+        research/numbers.py) in front of its name on every page; "" for an account with no rule behind it."""
+        from quant_platform.research.numbers import label
+
+        try:
+            return label(_instance_dir(dependencies.settings.database_url) / "research", rule_hash)
+        except OSError:
+            return ""
+
+    blueprint.add_app_template_global(rule_no, "rule_no")
+
+    def rule_family(spec: dict | None, source: str = "") -> str:
+        """The strategy's family (research/categories.py), for the breadcrumb 研究總覽 › family › #number."""
+        from quant_platform.research.categories import classify
+
+        try:
+            return str(classify(spec or {}, source).get("family") or "") if spec else ""
+        except (KeyError, TypeError, ValueError):
+            return ""
 
     @blueprint.context_processor
     def layout_context() -> dict[str, object]:
@@ -1040,11 +1107,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         forward_rows = ForwardTracker(research_dir).summary()
         round_view = round_summary(research_dir / "trials.jsonl", "development", stats)
         jobs = JobLog(research_dir).jobs()
-        overview = pool_view(research_dir, basis=_default_basis(research_dir)) if tab == "overview" else None
+        basis = _default_basis(research_dir)
+        overview = ready(f"pool:{basis}", research_dir, lambda: pool_view(research_dir, basis=basis)) if tab == "overview" else None
         best = [row for row in overview["daily"] if row["tier"] in BEST_TIERS and not row["uses_0050"]] if overview else []
         best_total = len(best)
         best = sorted(best, key=lambda row: -(row.get("final_value") or 0))[:BEST_ROWS]
-        downside = downside_table(research_dir) if tab == "overview" else None
+        downside = ready("downside", research_dir, lambda: downside_table(research_dir)) if tab == "overview" else None
         if downside:
             downside_total = len(downside)
             richest = {row["rule_hash"] for row in sorted(downside, key=lambda row: -(row.get("final_value") or 0))[:BEST_ROWS]}
@@ -1054,14 +1122,14 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         status = dashboard = None
         if tab == "overview":     # 2026-10-23: the dashboard first; a failure shows the rest of the page
             try:
-                dashboard = dashboard_data(research_dir)
+                dashboard = ready("dashboard", research_dir, lambda: dashboard_data(research_dir))
             except Exception:  # noqa: BLE001
                 logger.exception("Research dashboard failed")
         if tab == "overview":     # 2026-10-22 (使用者：研究首頁建一個表讓我快速知道現在狀況): never breaks the page
             try:
                 from quant_platform.research.status import overview as research_status
 
-                status = research_status(research_dir)
+                status = ready("status", research_dir, lambda: research_status(research_dir))
             except Exception:  # noqa: BLE001
                 logger.exception("Research status table failed")
         return render_template(
@@ -1078,7 +1146,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             # 2026-10-17: the stock accounts start the day after the month's rolling cutoff
             rolling_cutoff=cutoff_for(datetime.now(TAIPEI).date()).isoformat(),
             rolling_start=forward_common_start(datetime.now(TAIPEI).date()).isoformat(),
-            stock_forward=StockForwardTracker(research_dir).summary(),
+            stock_forward=ready("forward", research_dir, lambda: StockForwardTracker(research_dir).summary()),
             # 2026-10-23 (使用者：網頁很慢): the forward tab lists the FORWARD_ROWS best of each table (1,200 rows each
             # made it 3.5 MB); ?all=1 shows every account
             forward_limit=None if request.args.get("all") else FORWARD_ROWS,
@@ -1090,7 +1158,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             ml=ml_view(research_dir) if tab == "ml" else None,
             robustness=robustness_latest(research_dir) if tab == "overview" else None,
             downside=downside_rows, downside_total=downside_total, best_total=best_total,
-            search_scale=search_scale(research_dir) if tab == "overview" else None, dashboard=dashboard,
+            search_scale=ready("scale", research_dir, lambda: search_scale(research_dir)) if tab == "overview" else None, dashboard=dashboard,
             news=news_view(research_dir, dependencies.settings) if tab == "news" else None,
             factor_columns=factor_columns(latest_factor_strength(research_dir / "factors")),
             overview=overview,
@@ -1117,7 +1185,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         basis = request.args.get("basis") or _default_basis(research_dir)
         basis = basis if basis in ("seed", "lump_sum", "dca") else "seed"
-        view = pool_view(research_dir, basis=basis)
+        view = ready(f"pool:{basis}", research_dir, lambda: pool_view(research_dir, basis=basis))
         picked = {key: (request.args.get(key) or "").strip() for key in POOL_FILTERS}
         matched = [row for row in view["daily"] if pool_match(row, picked)]
         shown = matched if request.args.get("all") else matched[:POOL_ROWS]
@@ -1143,7 +1211,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     def research_family(family: str):
         """2026-10-23 (使用者：點深度學習就跳出浮動視窗顯示它目前大致的訓練狀況): one family, the dashboard's window."""
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        data = dashboard_data(research_dir)
+        data = ready("dashboard", research_dir, lambda: dashboard_data(research_dir))
         found = next((item for item in data["families"] if item["family"] == family), None)
         if found is None:
             abort(404)
@@ -1179,7 +1247,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         return render_template("v2/research_searches.html",
-                               f=funnel(research_dir, pool_view(research_dir, basis="seed")["daily"]))
+                               f=funnel(research_dir, ready("pool:seed", research_dir, lambda: pool_view(research_dir, basis="seed"))["daily"]))
 
     @blueprint.get("/issues")
     def issues_page():
@@ -1221,12 +1289,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         key = request.args.get("track") if request.args.get("track") in (*distribution.TRACKS, "forward") else "recent"
-        rows = pool_view(research_dir, basis="seed")["daily"]
+        rows = ready("pool:seed", research_dir, lambda: pool_view(research_dir, basis="seed"))["daily"]
         if key == "forward":       # 2026-10-27 (使用者：獲益的那些分佈圖我也要看): the forward accounts, all sold
             from quant_platform.research.stock_forward import StockForwardTracker
 
             start = forward_common_start(datetime.now(TAIPEI).date()).isoformat()
-            found = distribution.forward_view(rows, StockForwardTracker(research_dir).summary(), start)
+            found = distribution.forward_view(rows, ready("forward", research_dir, lambda: StockForwardTracker(research_dir).summary()), start)
         else:
             found = distribution.view(research_dir, rows)
         whole = found.get(key)
@@ -1253,7 +1321,25 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         if detail is None:
             abort(404)
         return render_template("v2/research_rule.html", active_nav="research", rule=detail, research_tab="pool",
+                               family=rule_family(detail.get("spec"), detail.get("source") or ""),
                                jobs=JobLog(research_dir).jobs())
+
+    @blueprint.get("/research/no")
+    @blueprint.get("/research/no/<int:number>")
+    def research_number(number: int | None = None):
+        """2026-10-28: a strategy by its number (#7339 or 7339 typed in the box on every strategy page)."""
+        from quant_platform.research.numbers import spec_of
+
+        if number is None:
+            typed = "".join(ch for ch in (request.args.get("n") or "") if ch.isdigit())
+            if not typed:
+                return redirect(url_for("v2.research_pool"))
+            number = int(typed)
+        spec = spec_of(_instance_dir(dependencies.settings.database_url) / "research", number)
+        if spec is None:
+            flash(f"沒有編號 #{number} 的策略（編號是它第一次登錄的試驗編號）", "error")
+            return redirect(url_for("v2.research_pool"))
+        return redirect(url_for("v2.research_rule", spec_hash=spec))
 
     @blueprint.get("/research/forward/<rule_hash>")
     def research_forward(rule_hash: str):
@@ -1272,6 +1358,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             board_row = None                                    # 2026-10-17: last month's start line is not shown
         return render_template("v2/research_forward.html", active_nav="research", forward=detail, chart=chart,
                                trades_chart=trades_chart, board=board, board_row=board_row, research_tab="forward",
+                               family=rule_family((detail["item"].get("rule") if detail["item"].get("kind") in ("daily", "blend")
+                                                   else None)),
                                jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/roles")

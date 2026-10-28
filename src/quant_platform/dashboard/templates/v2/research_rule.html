@@ -1,14 +1,10 @@
 {% extends "v2/base.html" %}
 {% from "v2/_risk.html" import risk_badge %}
-{% block title %}{{ rule.name }} · 研究{% endblock %}
+{% from "v2/_rule_head.html" import rule_head %}
+{% block title %}{{ rule_no(rule.spec_hash) }} {{ rule.name }} · 研究{% endblock %}
 {% block heading %}
-<header class="page-head">
-  <div>
-    <h1>{{ rule.name }}</h1>{{ risk_badge(rule.spec_hash) }}
-    <p class="page-head__sub">{{ rule.family }}・{{ rule.source }}・每一次的模擬回測紀錄</p>
-  </div>
-  <div class="page-head__meta"><a href="/research/pool">回選手池</a>・<a href="/research/rules/{{ rule.spec_hash }}.json">JSON</a></div>
-</header>
+{{ rule_head(rule.spec_hash, rule.name, family, 'backtest', has_forward=rule.forward is not none,
+             sub=rule.family ~ '・' ~ rule.source ~ '・每一次的模擬回測紀錄（' ~ rule_no(rule.spec_hash) ~ ' 是這個策略的固定編號，重跑也不變）') }}
 {% endblock %}
 {% block content %}
 {% include "v2/_research_tabs.html" %}

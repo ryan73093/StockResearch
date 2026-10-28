@@ -55,7 +55,7 @@
       <tbody>
       {% for row in data.recent %}
         <tr>
-          <td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
+          <td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
           <td class="num" data-label="2020-10 起期末">{{ wan(row.since_2020_final_value) }}<span class="muted small">（{{ wan(row.since_2020_benchmark_final_value) }}）</span></td>
           <td class="num" data-label="2015-06 起期末">{{ wan(row.final_value) }}</td>
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
@@ -73,7 +73,7 @@
       <tbody>
       {% for row in data.short %}
         <tr>
-          <td data-primary><a href="/research/rules/{{ row.spec_hash }}">#{{ row.trial }} {{ row.name }}</a><span class="muted small"> {{ row.start }} 起</span></td>
+          <td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a><span class="muted small"> {{ row.start }} 起</span></td>
           <td data-label="等級與原因" data-wide><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if row.tier == 'T3' else 'badge--warn') }}">{{ row.tier }}</span> <span class="small">{{ row.why }}</span></td>
           <td class="num" data-label="期末">{{ wan(row.final_value) }}<span class="muted small">（{{ wan(row.benchmark) }}）</span></td>
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_drawdown) if row.benchmark_drawdown is not none else '—' }}）</span></td>
@@ -97,7 +97,7 @@
         <tr>
           <td data-primary class="small">{{ row.at.strftime('%m/%d %H:00') }}</td>
           <td data-label="哪一個最好"><span class="badge">{{ '全部過門檻' if row.group == 'any' else '一般 T0 候選' }}</span></td>
-          <td data-label="規則" data-wide><a href="/research/rules/{{ row.spec_hash }}">#{{ row.trial }} {{ row.name }}</a> <span class="muted small">{{ row.grade }}</span></td>
+          <td data-label="規則" data-wide><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a> <span class="muted small">{{ row.grade }}</span></td>
           <td class="num" data-label="期末">{{ wan(row.value) }}</td>
           <td class="num {{ 'up' if row.previous and row.value > row.previous else ('down' if row.previous and row.value < row.previous else '') }}" data-label="變化">{% if row.previous %}{{ '{:+,.0f}'.format((row.value - row.previous) / 10000) }} 萬（{{ '{:+.0%}'.format(row.value / row.previous - 1) }}）{% else %}第一次{% endif %}</td>
           <td class="num" data-label="0050 的幾倍">{{ '{:.1f}'.format(row.value / line.benchmark) if line.benchmark else '—' }}</td>
@@ -156,7 +156,7 @@
       <tbody>
       {% for row in t0.nearest %}
         <tr>
-          <td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
+          <td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
           <td class="num" data-label="串接交易日">{{ row.sessions }}／{{ t0.needed }}</td>
           <td class="num" data-label="串起來的報酬">{{ '{:+.1%}'.format(row['return']) }}<span class="muted small">（{{ '{:+.1%}'.format(row.benchmark_return) }}）</span></td>
           <td class="num {{ 'up' if row.excess > 0 else 'down' }}" data-label="比 0050">{{ '{:+.1%}'.format(row.excess) }}</td>
@@ -176,7 +176,7 @@
       <tbody>
       {% for row in data.frontier %}{% set worst = row.worst_fall %}
         <tr>
-          <td data-primary><a href="/research/rules/{{ row.rule_hash }}">#{{ row.trial }}</a> {{ row.name }} <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
+          <td data-primary><a href="/research/rules/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }}</a> {{ row.name }} <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
           <td class="num" data-label="回測期末">{{ wan(row.final_value) }}</td>
           <td class="num" data-label="0050 大跌時最糟">{% if worst %}{{ '多跌' if worst.gap < 0 else '少跌' }} {{ '{:.1f}'.format((worst.gap * 100)|abs) }} 點{% else %}—{% endif %}</td>
           <td class="num {{ 'up' if (row.forward_gain or 0) > 0 else 'down' }}" data-label="前向全部賣掉">{% if row.forward_gain is not none %}<a href="/research/forward/{{ row.rule_hash }}">{{ '{:+,.0f}'.format(row.forward_gain) }} 元</a>{% else %}—{% endif %}</td>
@@ -223,7 +223,7 @@
         <tr>
           <td data-primary><strong>{{ row.family }}</strong></td>
           <td class="num" data-label="規則數／過門檻">{{ row.rules }}／{{ row.passing }}</td>
-          <td data-label="最好的規則" data-wide><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge">{{ row.tier }}</span></td>
+          <td data-label="最好的規則" data-wide><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a> <span class="badge">{{ row.tier }}</span></td>
           <td class="num" data-label="回測期末">{{ wan(row.final_value) }}{% if row.benchmark %}<span class="muted small">（{{ '{:.1f}'.format(row.final_value / row.benchmark) }} 倍）</span>{% endif %}</td>
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}</td>
           <td class="num" data-label="前向">{% if row.forward_gain is not none %}<span class="{{ 'up' if row.forward_gain > 0 else 'down' }}">{{ '{:+,.0f}'.format(row.forward_gain) }}</span>／<span class="{{ 'up' if (row.forward_ahead or 0) > 0 else 'down' }}">{{ '{:+,.0f}'.format(row.forward_ahead) }}</span>{% else %}<span class="muted small">沒有前向帳戶</span>{% endif %}</td>

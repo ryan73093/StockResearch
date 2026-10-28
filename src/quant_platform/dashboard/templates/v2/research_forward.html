@@ -1,15 +1,11 @@
 {% extends "v2/base.html" %}
 {% from "v2/_risk.html" import risk_badge %}
-{% block title %}{{ forward.item.name }} · 前向觀察{% endblock %}
+{% from "v2/_rule_head.html" import rule_head %}
+{% block title %}{{ rule_no(forward.item.rule_hash) }} {{ forward.item.name }} · 前向觀察{% endblock %}
 {% block heading %}
 {% set latest = forward.latest %}
-<header class="page-head">
-  <div>
-    <h1>{{ forward.item.name }}</h1>{{ risk_badge(forward.item.rule_hash) }}
-    <p class="page-head__sub">前向觀察：{{ forward.item.since }} 起、已記錄 {{ forward.sessions }} 個交易日{% if latest %}（最新 {{ latest.date }}）{% endif %}</p>
-  </div>
-  <div class="page-head__meta"><a href="/research?tab=forward">回前向觀察</a>{% if not forward.item.rule_hash.startswith('meta-') %}・<a href="/research/rules/{{ forward.item.rule_hash }}">回測紀錄</a>{% endif %}</div>
-</header>
+{{ rule_head(forward.item.rule_hash, forward.item.name, family, 'forward', has_backtest=rule_no(forward.item.rule_hash) != '',
+             sub='前向觀察：' ~ forward.item.since ~ ' 起、已記錄 ' ~ forward.sessions ~ ' 個交易日' ~ (('（最新 ' ~ latest.date ~ '）') if latest else '')) }}
 {% endblock %}
 {% block content %}
 {% include "v2/_research_tabs.html" %}
@@ -59,7 +55,7 @@
 {% if forward.decisions %}
 <section class="card">
   <div class="card__head"><h2>每季決定 <span class="badge">AI 研究員（整體）</span></h2><span class="muted small">決定當時寫下、之後不重算</span></div>
-  <ul class="reasons">{% for item in forward.decisions %}<li><strong>{{ item.date }}</strong>：{% if item.rule_hash %}跟隨「<a href="/research/rules/{{ item.rule_hash }}">{{ item.name }}</a>」（{{ item.tier }}，試驗 #{{ item.trial_id }}）{% else %}AI 研究員還沒有合格的規則，放 0050{% endif %}<span class="muted small">（{{ item.decided_at[:16].replace('T', ' ') }} 決定）</span></li>{% endfor %}</ul>
+  <ul class="reasons">{% for item in forward.decisions %}<li><strong>{{ item.date }}</strong>：{% if item.rule_hash %}跟隨「<a href="/research/rules/{{ item.rule_hash }}">{{ rule_no(item.rule_hash) }} {{ item.name }}</a>」（{{ item.tier }}，試驗 #{{ item.trial_id }}）{% else %}AI 研究員還沒有合格的規則，放 0050{% endif %}<span class="muted small">（{{ item.decided_at[:16].replace('T', ' ') }} 決定）</span></li>{% endfor %}</ul>
 </section>
 {% endif %}
 
@@ -119,9 +115,11 @@
   <div class="legend"><span><i class="swatch-gain"></i>這筆賺</span><span><i class="swatch-loss"></i>這筆賠</span><span><i style="background:var(--accent)"></i>賣出累計 {{ '{:+,.0f}'.format(trades_chart.realized) }}</span><span><i class="swatch-paper"></i>加上還拿著的帳面 {{ '{:+,.0f}'.format(trades_chart.final) }}</span><span>{{ trades_chart.first }}～{{ trades_chart.last }}，{{ trades_chart.sales }} 筆賣出；最高 {{ '{:+,.0f}'.format(trades_chart.high) }}、最低 {{ '{:+,.0f}'.format(trades_chart.low) }}</span></div>
   {% endif %}
   {% if forward.trades %}
+  {# 2026-10-28 (使用者：每一筆交易的紀錄都要顯示買入的價格跟賣出的價格，我怎麼驗證你買賣的正確性) #}
+  <p class="small muted" style="margin:0 0 8px">每一筆都列買進價與賣出價：賣出那筆的買進價是賣掉的那些股數當初的平均買進價（不含手續費；賺賠已扣手續費與稅）；買進那筆的賣出價是之後全部賣掉的那天的價格。對照「當天開盤／收盤」驗證：引擎的成交價＝收盤（隔天開盤成交的規則用開盤）買進加 0.2%、賣出減 0.2%，再取到升降單位，不超出漲跌停（<a href="/project/trading">交易需知</a>第 5 節）。</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>日期</th><th>操作</th><th>股票</th><th class="num">股數</th><th class="num">成交價</th><th class="num">金額</th><th class="num">手續費＋稅</th><th class="num">賺賠</th><th>原因</th></tr></thead>
+      <thead><tr><th>日期</th><th>操作</th><th>股票</th><th class="num">股數</th><th class="num">買進價</th><th class="num">賣出價</th><th class="num">當天開盤／收盤</th><th class="num">金額</th><th class="num">手續費＋稅</th><th class="num">賺賠</th><th>原因</th></tr></thead>
       <tbody>
       {% for trade in forward.trades %}
         <tr>
@@ -129,7 +127,14 @@
           <td data-label="操作"><span class="badge {{ 'badge--ok' if trade.side == 'BUY' else 'badge--warn' }}">{{ '買進' if trade.side == 'BUY' else '賣出' }}</span></td>
           <td data-label="股票">{% if trade.code != '0050' %}<a href="/stock/{{ trade.code }}">{{ trade.code }} {{ trade.name }}</a>{% else %}0050 元大台灣50{% endif %}</td>
           <td class="num" data-label="股數">{{ '{:,.0f}'.format(trade.shares) }}</td>
-          <td class="num" data-label="成交價">{{ '{:,.2f}'.format(trade.price) }}</td>
+          {% if trade.side == 'BUY' %}
+          <td class="num" data-label="買進價"><strong>{{ '{:,.2f}'.format(trade.buy_price if trade.buy_price is not none else trade.price) }}</strong></td>
+          <td class="num" data-label="賣出價">{% if trade.sold_price is not none %}{{ '{:,.2f}'.format(trade.sold_price) }}<span class="muted small">（{{ trade.sold_on }} 全部賣出）</span>{% elif trade.sold_on %}<span class="muted small">{{ trade.sold_on }} 下市或減資註銷</span>{% else %}<span class="muted small">還拿著{% if trade.close_now is not none %}，最新收盤 {{ '{:,.2f}'.format(trade.close_now) }}{% endif %}</span>{% endif %}</td>
+          {% else %}
+          <td class="num" data-label="買進價">{% if trade.buy_price is not none %}{{ '{:,.2f}'.format(trade.buy_price) }}<span class="muted small">（平均）</span>{% else %}—{% endif %}</td>
+          <td class="num" data-label="賣出價"><strong>{{ '{:,.2f}'.format(trade.sell_price if trade.sell_price is not none else trade.price) }}</strong></td>
+          {% endif %}
+          <td class="num" data-label="當天開盤／收盤">{% if trade.close is not none %}{{ '{:,.2f}'.format(trade.open) }}／{{ '{:,.2f}'.format(trade.close) }}{% else %}—{% endif %}</td>
           <td class="num" data-label="金額">{{ '{:,.0f}'.format(trade.amount) }}</td>
           <td class="num" data-label="手續費＋稅">{{ '{:,}'.format(trade.fee + trade.tax) }}</td>
           <td class="num" data-label="賺賠" data-wide>{% if trade.side == 'SELL' and trade.pnl is not none %}<strong class="{{ 'up' if trade.pnl >= 0 else 'down' }}">{{ '賺' if trade.pnl >= 0 else '賠' }} {{ '{:,.0f}'.format(trade.pnl|abs) }}</strong>{% if trade.pnl_pct is not none %}<span class="muted small">（{{ '{:+.1%}'.format(trade.pnl_pct) }}）</span>{% endif %}{% elif trade.side == 'BUY' and trade.now %}<span class="muted small">還拿著，帳面</span> <span class="{{ 'up' if trade.now.pnl >= 0 else 'down' }}">{{ '{:+.1%}'.format(trade.now.pnl_pct) }}</span>{% elif trade.side == 'BUY' and trade.sold_on %}<span class="muted small">{{ trade.sold_on }} 全部賣出，看那筆</span>{% else %}—{% endif %}</td>

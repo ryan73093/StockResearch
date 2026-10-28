@@ -2,7 +2,7 @@
    警示、什麼項目可以告警). 2026-10-28 (使用者：每個議題弄成一個專案去追蹤，你現在全部混在一起我要怎麼看；還有什麼議題值得
    追蹤、去討論的，我是叫你列): the projects, each opening its own page (issue_project.html), and the issues proposed. #}
 {% extends "v2/base.html" %}
-{% from "v2/_issues_macros.html" import light, topic_level %}
+{% from "v2/_issues_macros.html" import light, topic_level, issue_tile %}
 {% block title %}議題追蹤 · 交易研究分析平台{% endblock %}
 {% block heading %}
 <header class="page-head">
@@ -18,32 +18,15 @@
 <section class="card"><p class="muted">還沒有議題資料（每天 18:20 更新；第一次要先抓實價登錄與財報）。</p></section>
 {% else %}
 {% set c = payload.counts %}
-<div class="kpis kpis--page kpis--four">
-  <div class="kpi"><div class="kpi__label">追蹤中的議題</div><div class="kpi__value">{{ payload.topics|length }}<small> 個專案</small></div><div class="kpi__note">共 {{ c.alert + c.watch + c.ok + c.none }} 個追蹤項目</div></div>
-  <div class="kpi"><div class="kpi__label">亮燈的項目</div><div class="kpi__value">{{ c.alert }}<small> 告警</small> {{ c.watch }}<small> 警示</small></div><div class="kpi__note">正常 {{ c.ok }}・沒有資料 {{ c.none }}</div></div>
-  <div class="kpi"><div class="kpi__label">候選議題</div><div class="kpi__value">{{ candidates|length }}<small> 個</small></div><div class="kpi__note">建議先做 {{ candidates|selectattr('priority', 'equalto', 1)|list|length }} 個（看「候選議題」）</div></div>
-  <div class="kpi"><div class="kpi__label">燈號是什麼</div><div class="kpi__value small">{{ light('watch') }} {{ light('alert') }}</div><div class="kpi__note">警示＝值得注意；告警＝議題擔心的風險正在發生；只是提醒，不改策略</div></div>
-</div>
-
-<section class="card" data-tab="追蹤中的議題" id="projects">
+{# 2026-10-28 (使用者：議題的專案選擇麻煩做成像 app 那樣，現在的方式很亂): the projects as app tiles first #}
+<section class="app-home" aria-label="議題專案">
   {% for group, title in groups.items() %}
-  <h2 class="dash-h">{{ title }}</h2>
-  <div class="issues-card__grid">
-    {% for topic in payload.topics if topic.group == group %}
-    {% set level = topic_level(topic)|trim %}
-    {% set flagged = topic.indicators|selectattr('level', 'in', ['watch', 'alert'])|sort(attribute='rank', reverse=True)|list %}
-    <a class="issues-card__topic issues-project" href="/issues/{{ topic.key }}">
-      <span class="issues-card__title">{{ light(level) }} {{ topic.title }}</span>
-      <span class="issues-project__question">{{ topic.question }}</span>
-      {% if flagged %}
-      <ul>{% for item in flagged[:4] %}<li>{{ light(item.level) }} {{ item.name }}：{{ item.value_text }}</li>{% endfor %}
-        {% if flagged|length > 4 %}<li class="muted">還有 {{ flagged|length - 4 }} 項亮燈</li>{% endif %}</ul>
-      {% else %}<span class="small muted">{{ topic.indicators|length }} 個追蹤項目都正常</span>{% endif %}
-      <span class="issues-project__foot">{{ topic.indicators|length }} 個追蹤項目{% if notes.get(topic.key) %}・判讀 {{ notes[topic.key].written[5:].replace('-', '/') }}{% if notes[topic.key].moved %}（燈號已變，待更新）{% endif %}{% endif %}・打開專案 →</span>
-    </a>
-    {% endfor %}
+  <h2 class="app-home__group">{{ title }}</h2>
+  <div class="app-grid">
+    {% for topic in payload.topics if topic.group == group %}{{ issue_tile(topic) }}{% endfor %}
   </div>
   {% endfor %}
+  <p class="small muted app-home__note">圖示的顏色是那個專案最嚴重的燈號：紅＝告警（議題擔心的風險正在發生）、黃＝警示（值得注意）、綠＝都正常。共 {{ c.alert + c.watch + c.ok + c.none }} 個追蹤項目：告警 {{ c.alert }}、警示 {{ c.watch }}、正常 {{ c.ok }}、沒有資料 {{ c.none }}。只是提醒，不改策略、不下單。</p>
 </section>
 
 <section class="card" data-tab="候選議題" id="candidates">

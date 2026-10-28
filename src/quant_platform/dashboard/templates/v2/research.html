@@ -61,7 +61,7 @@
       <tbody>
       {% for row in best %}{% set fwd = forward_map.get(row.spec_hash) %}
         <tr>
-          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong>{{ risk_badge(row.spec_hash) }}<br><span class="muted small">{{ row.category.family }}{% if row.category.detail %}（{{ row.category.detail }}）{% endif %}</span></td>
+          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a></strong>{{ risk_badge(row.spec_hash) }}<br><span class="muted small">{{ row.category.family }}{% if row.category.detail %}（{{ row.category.detail }}）{% endif %}</span></td>
           <td data-label="等級"><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else 'badge--warn') }}">{{ row.tier }}</span></td>
           <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
           <td class="num" data-label="比 0050">{% if row.excess is not none %}<span class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.excess) }}</span>{% else %}—{% endif %}／{% if row.since_2020_excess is not none %}<span class="{{ 'up' if row.since_2020_excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.since_2020_excess) }}</span>{% else %}—{% endif %}</td>
@@ -88,7 +88,7 @@
         <tr><td><strong>0050（同樣的錢）</strong></td>{% for year in yearly.years %}{% set value = yearly.benchmark.get(year) %}<td class="num">{{ '{:+.0%}'.format(value) if value is not none else '—' }}</td>{% endfor %}<td></td></tr>
         {% for row in yearly.rows %}{% set wins = namespace(count=0, total=0) %}
         <tr>
-          <td><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a>{{ risk_badge(row.spec_hash) }} <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else 'badge--warn') }}">{{ row.tier }}</span></td>
+          <td><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a>{{ risk_badge(row.spec_hash) }} <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else 'badge--warn') }}">{{ row.tier }}</span></td>
           {% for year in yearly.years %}{% set item = row.years.get(year) %}
           {% if item %}{% set wins.total = wins.total + 1 %}{% if item.strategy > item.benchmark %}{% set wins.count = wins.count + 1 %}{% endif %}{% endif %}
           <td class="num {{ ('up' if item.strategy > item.benchmark else 'down') if item else '' }}" title="{{ '0050 {:+.1%}'.format(item.benchmark) if item else '' }}">{{ '{:+.0%}'.format(item.strategy) if item else '—' }}</td>
@@ -110,7 +110,7 @@
   {% set edge = downside|selectattr('frontier')|list %}
   {% if edge %}
   <p class="small" style="margin:0 0 10px"><b>錢與跌市的取捨</b>（<span class="badge badge--ok">前緣</span>：沒有別的過門檻規則同時賺得更多、0050 大跌時又少跌）——要錢多就往左邊挑，要跌市穩就往右邊挑：
-  {% for row in edge %}<a href="/research/rules/{{ row.rule_hash }}">#{{ row.trial }}</a> {{ '{:,.0f}'.format(row.final_value / 10000) }} 萬・{{ '多跌' if row.worst_fall and row.worst_fall.gap < 0 else '少跌' }} {{ '{:.1f}'.format(((row.worst_fall.gap if row.worst_fall else 0) * 100)|abs) }} 點{{ '' if loop.last else '　→　' }}{% endfor %}</p>
+  {% for row in edge %}<a href="/research/rules/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }}</a> {{ '{:,.0f}'.format(row.final_value / 10000) }} 萬・{{ '多跌' if row.worst_fall and row.worst_fall.gap < 0 else '少跌' }} {{ '{:.1f}'.format(((row.worst_fall.gap if row.worst_fall else 0) * 100)|abs) }} 點{{ '' if loop.last else '　→　' }}{% endfor %}</p>
   {% endif %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
@@ -118,7 +118,7 @@
       <tbody>
       {% for row in downside %}{% set worst = row.worst_fall %}
         <tr>
-          <td data-primary><a href="/research/rules/{{ row.rule_hash }}">{{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else 'badge--warn') }}">{{ row.tier }}</span>{{ risk_badge(row.rule_hash) }}{% if row.frontier %} <span class="badge badge--ok" title="沒有別的過門檻規則同時賺得更多、0050 大跌時又少跌">前緣</span>{% endif %}</td>
+          <td data-primary><a href="/research/rules/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }} {{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else 'badge--warn') }}">{{ row.tier }}</span>{{ risk_badge(row.rule_hash) }}{% if row.frontier %} <span class="badge badge--ok" title="沒有別的過門檻規則同時賺得更多、0050 大跌時又少跌">前緣</span>{% endif %}</td>
           <td class="num" data-label="期末">{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（回撤 {{ '{:.0%}'.format(row.max_drawdown) }}）</span></td>
           <td class="num" data-label="0050 下跌的月份">{{ '{:+.1%}'.format(row.down_rule) }} ／ {{ '{:+.1%}'.format(row.down_base) }}</td>
           <td class="num" data-label="跌得比 0050 多">{{ '{:.0%}'.format(row.down_worse_share) }}<span class="muted small">（{{ row.down_months }} 個月）</span></td>
@@ -145,7 +145,7 @@
       <tbody>
       {% for row in robustness.rows %}
         <tr>
-          <td data-primary>{% if row.rule_hash %}<a href="/research/rules/{{ row.rule_hash }}">#{{ row.trial }} {{ row.name }}</a>{% else %}#{{ row.trial }} {{ row.name }}{% endif %}</td>
+          <td data-primary>{% if row.rule_hash %}<a href="/research/rules/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }} {{ row.name }}</a>{% else %}#{{ row.trial }} {{ row.name }}{% endif %}</td>
           {% for key in (('base', 'costs_doubled', 'next_session', 'open_tight') if tight else ('base', 'costs_doubled', 'next_session')) %}{% set item = row[key] %}
           <td class="num" data-label="{{ {'base': '原本', 'costs_doubled': '成本加倍', 'next_session': '晚一天成交', 'open_tight': '開盤上限收緊'}[key] }}">{% if item %}{{ '{:,.0f}'.format(item.final_value / 10000) }} 萬<span class="muted small">（{{ '{:.0%}'.format(item.max_drawdown) }}）</span><br><span class="badge {{ 'badge--ok' if item.tier == 'T0 候選' else 'badge--warn' }}">{{ item.tier }}</span>{% elif key == 'open_tight' %}<span class="muted small">沒有開盤成交</span>{% else %}<span class="muted small">本來就晚一天成交</span>{% endif %}</td>
           {% endfor %}
@@ -307,7 +307,7 @@
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th>帳戶</th><th class="num">記錄天數</th><th class="num">目前資產</th><th class="num">相對 0050</th></tr></thead>
-      <tbody>{% for row in news.pair %}<tr><td data-primary><strong><a href="/research/forward/{{ row.rule_hash }}">{{ row.name }}</a></strong><span class="muted small"> {{ row.since }} 起</span></td><td class="num" data-label="天數">{{ row.sessions }}</td><td class="num" data-label="資產">{{ '{:,.0f}'.format(row.value) }}</td><td class="num" data-label="相對 0050">{{ '{:+.2%}'.format(row.excess) if row.excess is not none else '—' }}</td></tr>{% endfor %}</tbody>
+      <tbody>{% for row in news.pair %}<tr><td data-primary><strong><a href="/research/forward/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }} {{ row.name }}</a></strong><span class="muted small"> {{ row.since }} 起</span></td><td class="num" data-label="天數">{{ row.sessions }}</td><td class="num" data-label="資產">{{ '{:,.0f}'.format(row.value) }}</td><td class="num" data-label="相對 0050">{{ '{:+.2%}'.format(row.excess) if row.excess is not none else '—' }}</td></tr>{% endfor %}</tbody>
     </table>
   </div>
   {% else %}<p class="muted" style="margin:0">下一個交易日 15:30 開始記錄。</p>{% endif %}
@@ -362,7 +362,7 @@
   {% if item.explanation %}<p class="small">{{ item.explanation }}</p>{% endif %}
   {% if item.similar %}
   <details><summary class="small">平台試過的類似策略（{{ item.similar|length }} 個）</summary>
-    <ul class="small">{% for peer in item.similar %}<li><a href="/research/rules/{{ peer.spec_hash }}">{{ peer.name }}</a> <span class="badge">{{ peer.tier }}</span>{% if peer.excess is not none %} 比 0050 {{ '{:+.0%}'.format(peer.excess) }}{% endif %}{% if peer.drawdown is not none %}、回撤 {{ '{:.0%}'.format(peer.drawdown) }}{% endif %}</li>{% endfor %}</ul>
+    <ul class="small">{% for peer in item.similar %}<li><a href="/research/rules/{{ peer.spec_hash }}">{{ rule_no(peer.spec_hash) }} {{ peer.name }}</a> <span class="badge">{{ peer.tier }}</span>{% if peer.excess is not none %} 比 0050 {{ '{:+.0%}'.format(peer.excess) }}{% endif %}{% if peer.drawdown is not none %}、回撤 {{ '{:.0%}'.format(peer.drawdown) }}{% endif %}</li>{% endfor %}</ul>
   </details>
   {% endif %}
 </section>
@@ -706,7 +706,7 @@
         <tr>
           <td class="num" data-label="名次">{{ row.place }}</td>
           {% set account = accounts.get(row.rule_hash) %}
-          <td data-primary><a href="{{ '/research/forward/' ~ row.rule_hash if account else '/research/recent/' ~ row.rule_hash }}">{{ row.name }}</a>{{ risk_badge(row.rule_hash) }}<br><span class="small"><a href="/research/rules/{{ row.rule_hash }}">回測紀錄</a>・<a href="/research/recent/{{ row.rule_hash }}">近 3 個月</a></span>{% if row.twins %}<details class="small"><summary>另外 {{ row.twins|length }} 個設定這段期間買賣完全一樣（差別的設定還沒用到）</summary><ul style="margin:4px 0 0;padding-left:18px">{% for twin in row.twins %}<li><a href="/research/forward/{{ twin.rule_hash }}">{{ twin.name }}</a></li>{% endfor %}</ul></details>{% endif %}</td>
+          <td data-primary><a href="{{ '/research/forward/' ~ row.rule_hash if account else '/research/recent/' ~ row.rule_hash }}">{{ rule_no(row.rule_hash) }} {{ row.name }}</a>{{ risk_badge(row.rule_hash) }}<br><span class="small"><a href="/research/rules/{{ row.rule_hash }}">回測紀錄</a>・<a href="/research/recent/{{ row.rule_hash }}">近 3 個月</a></span>{% if row.twins %}<details class="small"><summary>另外 {{ row.twins|length }} 個設定這段期間買賣完全一樣（差別的設定還沒用到）</summary><ul style="margin:4px 0 0;padding-left:18px">{% for twin in row.twins %}<li><a href="/research/forward/{{ twin.rule_hash }}">{{ rule_no(twin.rule_hash) }} {{ twin.name }}</a></li>{% endfor %}</ul></details>{% endif %}</td>
           <td data-label="開始實時記錄">{% if account %}{{ account.since }}{% if account.since > forward_board.common_start %}<br><span class="muted small">之前是補算</span>{% endif %}{% else %}<span class="muted small">沒有實時帳戶</span>{% endif %}</td>
           <td class="num {{ 'up' if row['return'] > 0 else 'down' }}" data-label="報酬">{{ '{:+.2%}'.format(row['return']) }}</td>
           <td class="num {{ 'up' if row.excess > 0 else 'down' }}" data-label="比 0050">{{ '{:+.2%}'.format(row.excess) }}</td>
@@ -744,7 +744,7 @@
       {% set ranked = (live_rows|selectattr('sell_all')|sort(attribute='sell_all.ahead', reverse=True)|list) + (live_rows|rejectattr('sell_all')|list) %}
       {% for row in (ranked[:forward_limit] if forward_limit else ranked) %}
         <tr>
-          <td data-primary><strong><a href="/research/forward/{{ row.rule_hash }}">{{ row.name }}</a></strong>{{ risk_badge(row.rule_hash) }}<span class="muted small"> {{ row.since }} 起</span>{% if row.final %} <span class="badge {{ 'badge--ok' if row.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if row.final.passed else '未通過' }} {{ '{:+.0%}'.format(row.final.excess) }}</span>{% endif %}</td>
+          <td data-primary><strong><a href="/research/forward/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }} {{ row.name }}</a></strong>{{ risk_badge(row.rule_hash) }}<span class="muted small"> {{ row.since }} 起</span>{% if row.final %} <span class="badge {{ 'badge--ok' if row.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if row.final.passed else '未通過' }} {{ '{:+.0%}'.format(row.final.excess) }}</span>{% endif %}</td>
           <td class="num" data-label="已記錄交易日"><span>{{ row.sessions }}{% if row.late %}<span class="muted small">（補記 {{ row.late }}）</span>{% endif %}</span></td>
           <td class="num" data-label="投入">{{ '{:,.0f}'.format(row.contributed) }}</td>
           <td class="num" data-label="目前資產（0050）"><span>{{ '{:,.0f}'.format(row.value) }}<br><span class="muted small">{{ '{:,.0f}'.format(row.benchmark_value) }}</span></span></td>
@@ -766,7 +766,7 @@
   {% set stopped = stock_forward|selectattr('stopped')|list %}
   {% if stopped %}
   <details style="margin-top:10px"><summary class="small">已停止的 {{ stopped|length }} 個帳戶（含 0050，你自己另外持有 0050；紀錄保留）</summary>
-    <ul class="reasons">{% for row in stopped %}<li><a href="/research/forward/{{ row.rule_hash }}">{{ row.name }}</a><span class="muted small">（{{ row.since }}～{{ row.stopped }}，{{ row.sessions }} 天）</span></li>{% endfor %}</ul>
+    <ul class="reasons">{% for row in stopped %}<li><a href="/research/forward/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }} {{ row.name }}</a><span class="muted small">（{{ row.since }}～{{ row.stopped }}，{{ row.sessions }} 天）</span></li>{% endfor %}</ul>
   </details>
   {% endif %}
   <p class="note">點規則名稱看它的持股、資產走勢與每一筆交易。相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入。<b>已賣出賺賠</b>：起跑以來每一筆賣出照平均成本（含手續費和稅）算的賺賠合計與筆數。<b>今天全賣比 0050</b>：今天收盤把持股全部賣掉（扣手續費、證交稅、滑價）拿回的現金，減去同樣的錢買 0050 再賣掉拿回的現金；下方小字是拿回的現金。只有整數股；現金股利在發放日入帳、配股在發放日撥入（引擎 1.4.0 起）。對帳：每天的股數與現金都要能從前一天加當天的交易算出來，重算過去的日子也要和當天寫下的一致。前向結果只觀察，不拿來挑規則；機器可讀版在<a href="/research/pool.json">選手池 JSON</a> 的 forward_stocks。</p>

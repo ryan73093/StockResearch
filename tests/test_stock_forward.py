@@ -388,6 +388,11 @@ def test_every_trade_shows_what_it_made_and_why():
     assert summary["realized"] == pytest.approx(63 + 60.5 * 9 - 21 - 575)
     assert summary["unrealized"] == pytest.approx(1100 - 1020) and rows[3]["now"]["pnl"] == pytest.approx(80)
     assert rows[0]["now"] is None and rows[0]["sold_on"] == "2026-09-10"       # A was all sold: that buy says when
+    # 2026-10-28 (使用者：每一筆交易都要顯示買入的價格跟賣出的價格): a sale shows the average price its shares were
+    # bought at (fees apart) and its own; a buy its price and, once all sold, the price it went at
+    assert trim["buy_price"] == pytest.approx(1110 / 110) and trim["sell_price"] == 12.0
+    assert last["buy_price"] == pytest.approx(555 / 60.5) and last["sell_price"] == 9.0     # the dividend's shares cost 0
+    assert rows[0]["buy_price"] == 10.0 and rows[0]["sold_price"] == 9.0 and rows[3]["sold_price"] is None
 
 
 def test_reasons_are_filled_in_only_where_the_ranking_again_is_the_list_kept(tmp_path, monkeypatch):

@@ -455,6 +455,21 @@ class StockForwardTracker:
             return []
         return [json.loads(line) for line in self.log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
+    def records_of(self, rule_hash: str) -> list[dict[str, object]]:
+        """2026-10-28 (使用者：研究的載入也太慢了吧): one account's records — only the lines naming it are parsed (a rule's
+        page had parsed all 130,000 records, about 8 s, for its own few dozen)."""
+        if not self.log_path.is_file():
+            return []
+        mark = f'"{rule_hash}"'
+        output = []
+        with open(self.log_path, encoding="utf-8") as handle:
+            for line in handle:
+                if mark in line:
+                    record = json.loads(line)
+                    if record.get("rule_hash") == rule_hash:
+                        output.append(record)
+        return output
+
     @property
     def rebases_path(self) -> Path:
         return self._folder / "rebases.json"
@@ -753,10 +768,14 @@ class StockForwardTracker:
             _SUMMARY.update(key=key, rows=self._summary())
         return [dict(row) for row in _SUMMARY["rows"]]
 
-    def _summary(self) -> list[dict[str, object]]:
+    def summary_for(self, rule_hash: str) -> dict[str, object] | None:
+        """2026-10-28: ``summary``'s row of one account, from its own records only (a rule's page)."""
+        return next(iter(self._summary(rule_hash)), None)
+
+    def _summary(self, only: str | None = None) -> list[dict[str, object]]:
         from quant_platform.research.holding import named
 
-        records = self.records()
+        records = self.records_of(only) if only else self.records()
         marks = self.rebases()
         problems = reconcile(records, marks)
         finals = final_validation(self._base)
@@ -765,6 +784,8 @@ class StockForwardTracker:
         for record in records:
             by_rule.setdefault(record["rule_hash"], []).append(record)
         for item in self.tracked():
+            if only and item["rule_hash"] != only:
+                continue
             mine = by_rule.get(item["rule_hash"], [])
             latest = mine[-1] if mine else None
             traded = next((record for record in reversed(mine) if record["trades_today"]), None)
@@ -1013,9 +1034,8 @@ class StockForwardTracker:
         if item is None:
             return None
         by_day: dict[str, dict] = {}
-        for record in self.records():
-            if record["rule_hash"] == rule_hash:
-                by_day[record["date"]] = record          # a re-recorded day keeps its latest record
+        for record in self.records_of(rule_hash):
+            by_day[record["date"]] = record              # a re-recorded day keeps its latest record
         days = [by_day[day] for day in sorted(by_day)]
         latest = days[-1] if days else None
         holdings = []
@@ -1039,6 +1059,11 @@ class StockForwardTracker:
             for day, notes in trade_reasons(self._base, days).items():
                 why.setdefault(day, {}).update(notes)
         trades, results = explain_trades(days, why, float((item.get("rule") or {}).get("trim_above") or 0.0))
+        # 2026-10-28 (使用者：每一筆交易的紀錄都要顯示買入的價格跟賣出的價格，我怎麼驗證你買賣的正確性): the traded day's
+        # open and close from the research data, next to the fill
+        quotes = day_quotes(self._base, {(trade["code"], trade["date"]) for trade in trades})
+        for trade in trades:
+            trade["open"], trade["close"] = quotes.get((trade["code"], trade["date"]), (None, None))
         adjustments = [{**entry, "date": record["date"]} for record in reversed(days)
                        for entry in record.get("adjustments_today") or []]
         series = [{"date": record["date"], "value": record["value"], "benchmark": record["benchmark_value"],
@@ -1053,6 +1078,30 @@ class StockForwardTracker:
                 "series": series, "sessions": len(days), "problems": problems,
                 "buys": sum(1 for trade in trades if trade["side"] == "BUY"),
                 "sells": sum(1 for trade in trades if trade["side"] == "SELL")}
+
+
+def day_quotes(base: str | Path, wanted: set[tuple[str, str]]) -> dict[tuple[str, str], tuple[float, float]]:
+    """(code, ISO day) -> (open, close) of the listed or TPEx stock that session, from the research data
+    (history/stocks/<market>/<year>.parquet) — what a fill can be checked against."""
+    if not wanted:
+        return {}
+    import pandas as pd
+
+    root = Path(base) / "history" / "stocks"
+    codes = {code for code, _day in wanted}
+    output: dict[tuple[str, str], tuple[float, float]] = {}
+    for year in sorted({day[:4] for _code, day in wanted}):
+        for market in ("twse", "tpex"):
+            path = root / market / f"{year}.parquet"
+            if not path.is_file():
+                continue
+            frame = pd.read_parquet(path, columns=["date", "code", "open", "close"])
+            frame = frame[frame["code"].isin(codes)]
+            for row in frame.itertuples(index=False):
+                key = (str(row.code), row.date.isoformat() if hasattr(row.date, "isoformat") else str(row.date)[:10])
+                if key in wanted and key not in output:
+                    output[key] = (float(row.open), float(row.close))
+    return output
 
 
 def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above: float = 0.0
@@ -1070,8 +1119,9 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
 
     units: dict[str, float] = defaultdict(float)
     basis: dict[str, float] = defaultdict(float)
+    paid: dict[str, float] = defaultdict(float)   # 2026-10-28: what the shares held were bought at, fees left out
     episode: dict[str, int] = defaultdict(int)    # a stock's holding from a first buy until it is all sold
-    closed: dict[tuple[str, int], str] = {}       # (stock, episode) -> the day it was all sold
+    closed: dict[tuple[str, int], tuple[str, float | None]] = {}   # (stock, episode) -> the day it was all sold, at
     rows: list[dict] = []
     realized, wins, losses, paid_before = 0.0, 0, 0, None
     for record in days:
@@ -1089,14 +1139,20 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
                     "新進名單" if fresh else "每月 5 日投入的錢，補到目標比重" if paid_today
                     else "賣出後的現金，補到目標比重" if sold_today else "帳上現金（股利等），補到目標比重")
                 basis[code] += shares * price + costs
+                paid[code] += shares * price
                 units[code] += shares
                 row["episode"] = episode[code]
+                row["buy_price"] = price
             else:
                 before = units[code]
-                cost = basis[code] * (min(1.0, shares / before) if before > 1e-9 else 1.0)
+                share = min(1.0, shares / before) if before > 1e-9 else 1.0
+                cost = basis[code] * share
                 made = shares * price - costs - cost
                 full = shares >= before - 1e-6
-                row.update(cost=cost, pnl=made, pnl_pct=made / cost if cost else None)
+                # the average price the sold shares were bought at (fees apart: the result counts them) and the sale's
+                row.update(cost=cost, pnl=made, pnl_pct=made / cost if cost else None,
+                           buy_price=paid[code] / before if before > 1e-9 else None, sell_price=price)
+                paid[code] -= paid[code] * share
                 # 2026-10-25: the engine's reason first for a partial sale (it was guessed from the rule before)
                 row["why"] = (trade.get("engine_why") or notes.get(code) or "離開名單") if not full else (
                     notes.get(code) or trade.get("engine_why") or "離開名單")
@@ -1106,7 +1162,7 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
                 basis[code] -= cost
                 units[code] = max(0.0, before - shares)
                 if full:
-                    closed[(code, episode[code])] = day
+                    closed[(code, episode[code])] = (day, price)
                     episode[code] += 1
                 realized += made
                 wins += made > 0
@@ -1115,11 +1171,12 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
         held = {row["code"]: float(row["units"]) for row in record["holdings"]}
         for code in list(units):              # ex-rights and reductions change the shares, not what they cost
             if units[code] > 1e-9 and held.get(code, 0.0) <= 1e-9 and (code, episode[code]) not in closed:
-                closed[(code, episode[code])] = day          # gone without a sale (written off)
+                closed[(code, episode[code])] = (day, None)  # gone without a sale (written off)
                 episode[code] += 1
             units[code] = held.get(code, 0.0)
             if units[code] <= 1e-9:
                 basis[code] = 0.0
+                paid[code] = 0.0
         paid_before = float(record["contributed"])
     positions = {}
     if days:
@@ -1128,11 +1185,13 @@ def explain_trades(days: list[dict], why: dict[str, dict[str, str]], trim_above:
             if cost > 0:
                 positions[row["code"]] = {"value": row["value"], "cost": cost, "pnl": row["value"] - cost,
                                           "pnl_pct": (row["value"] - cost) / cost}
+    closes = {row["code"]: row.get("close") for row in days[-1]["holdings"]} if days else {}
     for row in rows:
         if row["side"] == "BUY":
-            ended = closed.get((row["code"], row.pop("episode")))
+            ended, sold_at = closed.get((row["code"], row.pop("episode")), (None, None))
             row["now"] = None if ended else positions.get(row["code"])
-            row["sold_on"] = ended
+            row["sold_on"], row["sold_price"] = ended, sold_at
+            row["close_now"] = None if ended else closes.get(row["code"])
     summary = {"realized": realized, "wins": wins, "losses": losses, "sells": wins + losses,
                "unrealized": sum(item["pnl"] for item in positions.values()), "positions": positions}
     by_day: dict[str, list[dict]] = {}

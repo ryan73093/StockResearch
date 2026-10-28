@@ -1,0 +1,22 @@
+{# 2026-10-28 (使用者：每個策略給個編號；點進去也不知道自己剛剛看的規則是哪個): one heading for a strategy's pages — where
+   it sits (研究總覽 › its family › #number), its number and name, and the two views of the same strategy as tabs. #}
+{% from "v2/_risk.html" import risk_badge %}
+{% macro rule_head(spec_hash, name, family, view, has_backtest=True, has_forward=True, sub='') -%}
+{%- set number = rule_no(spec_hash) -%}
+<header class="page-head rule-head">
+  <div>
+    <nav class="crumbs" aria-label="位置"><a href="/research">研究總覽</a><span aria-hidden="true">›</span>{% if family %}<a href="/research/pool?family={{ family|urlencode }}">{{ family }}</a><span aria-hidden="true">›</span>{% endif %}<span aria-current="page">{{ number or '策略' }}</span></nav>
+    <h1>{% if number %}<span class="rule-no">{{ number }}</span> {% endif %}{{ name }}</h1>{{ risk_badge(spec_hash) }}
+    {% if sub %}<p class="page-head__sub">{{ sub }}</p>{% endif %}
+  </div>
+  <form class="rule-jump" action="/research/no" method="get" role="search">
+    <label class="sr-only" for="rule-jump">策略編號</label>
+    <input id="rule-jump" name="n" inputmode="numeric" placeholder="輸入編號，例如 7339" autocomplete="off">
+    <button type="submit">開啟</button>
+  </form>
+</header>
+<nav class="subtabs rule-tabs" aria-label="{{ number or '這個策略' }} 的內容">
+  {% if has_backtest %}<a href="/research/rules/{{ spec_hash }}"{% if view == 'backtest' %} aria-current="true"{% endif %}>回測表現</a>{% endif %}
+  {% if has_forward %}<a href="/research/forward/{{ spec_hash }}"{% if view == 'forward' %} aria-current="true"{% endif %}>前向觀察・每一筆交易</a>{% endif %}
+</nav>
+{%- endmacro %}

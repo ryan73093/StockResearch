@@ -29,7 +29,7 @@
           <td class="num" data-label="T1">{{ item.tiers['T1'] }}</td>
           <td class="num" data-label="T2">{{ item.tiers['T2'] }}</td>
           <td class="num" data-label="T3">{{ item.tiers['T3'] }}</td>
-          <td data-label="最好的規則" data-wide><a href="/research/rules/{{ item.best.spec_hash }}">{{ item.best.name }}</a> <span class="badge {{ 'badge--ok' if item.best.tier in ('T0', 'T0 候選') else ('badge--warn' if item.best.tier == 'T1' else ('badge--bad' if item.best.tier == 'T3' or '高風險' in item.best.tier else '')) }}">{{ item.best.tier }}</span>{% if item.best.excess is not none %} <span class="small {{ 'up' if item.best.excess > 0 else 'down' }}">比 0050 {{ '{:+.0%}'.format(item.best.excess) }}</span>{% endif %}</td>
+          <td data-label="最好的規則" data-wide><a href="/research/rules/{{ item.best.spec_hash }}">{{ rule_no(item.best.spec_hash) }} {{ item.best.name }}</a> <span class="badge {{ 'badge--ok' if item.best.tier in ('T0', 'T0 候選') else ('badge--warn' if item.best.tier == 'T1' else ('badge--bad' if item.best.tier == 'T3' or '高風險' in item.best.tier else '')) }}">{{ item.best.tier }}</span>{% if item.best.excess is not none %} <span class="small {{ 'up' if item.best.excess > 0 else 'down' }}">比 0050 {{ '{:+.0%}'.format(item.best.excess) }}</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -45,7 +45,7 @@
   {% set ai = pool.ai_researcher %}
   <div>
     <strong>AI 研究員（整體）</strong>：把 AI 研究員本身當成一個策略。它每週六提出最多 2 個規則（只看 2015-06～2020-09 的結果），每個都登錄成試驗、用同一套門檻；
-    目前提出 {{ ai.trials }} 個規則{% if ai.rules %}（{% for row in ai.rules %}<a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> {{ row.tier }}{% if not loop.last %}、{% endif %}{% endfor %}）{% endif %}。
+    目前提出 {{ ai.trials }} 個規則{% if ai.rules %}（{% for row in ai.rules %}<a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a> {{ row.tier }}{% if not loop.last %}、{% endif %}{% endfor %}）{% endif %}。
     它的前向帳戶{% if ai.decision %}目前跟隨「{{ ai.decision.name }}」（{{ ai.decision.date }} 決定）{% else %}從下一個交易日開始，先放 0050{% endif %}，每季第一個交易日換到它最好的合格規則：
     <a href="/research/forward/{{ ai.meta_hash }}">看持股與交易</a>{% if ai.forward and ai.forward.sessions %}（{{ ai.forward.sessions }} 天、相對 0050 {{ '{:+.2%}'.format(ai.forward.excess) if ai.forward.excess is not none else '—' }}）{% endif %}。
   </div>
@@ -72,7 +72,7 @@
       <tbody>
       {% for row in daily_rows %}
         <tr data-name="{{ row.name }}" data-family="{{ row.category.family }}" data-tier="{{ '不採用' if row.uses_0050 else row.tier }}" data-traits="|{{ row.category.traits|join('|') }}|">
-          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong>{{ risk_badge(row.spec_hash) }}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
+          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a></strong>{{ risk_badge(row.spec_hash) }}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
           <td data-label="分類" data-wide><span class="badge">{{ row.category.family }}</span>{% if row.category.detail %} <span class="small">{{ row.category.detail }}</span>{% endif %}<br><span class="muted small">{{ row.category.traits|join('・') }}</span></td>
           <td data-label="等級" data-wide>{% if row.uses_0050 %}<span class="badge">不採用</span> <span class="small">含 0050（你自己另外持有 0050），回測等級 {{ row.tier }}</span>{% else %}<span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--warn' if row.tier == 'T1' else ('badge--bad' if row.tier == 'T3' or '高風險' in row.tier else '')) }}">{{ row.tier }}</span> <span class="small">{{ row.tier_reason }}</span>{% endif %}</td>
           <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
@@ -125,7 +125,7 @@
     {% for row in rows %}
       {% set d = row.development %}{% set v = row.validation %}
       <tr data-name="{{ row.name }}" data-status="{{ row.status }}" data-family="{{ row.family }}">
-        <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a></strong><span class="muted small"> {{ row.family }}・{{ row.source }}</span></td>
+        <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a></strong><span class="muted small"> {{ row.family }}・{{ row.source }}</span></td>
         <td data-label="狀態"><span class="badge {{ 'badge--ok' if row.status in ('approved', 'forward', 'holdout_passed', 'validation_passed') else ('badge--bad' if row.status in ('validation_failed', 'holdout_failed') else '') }}">{{ row.status_label }}</span>{% if row.track and row.track != '一般' %} <span class="badge badge--warn">{{ row.track }}</span>{% endif %}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
         <td class="num" data-label="開發期期末（0050）">{% if d.final_value %}{{ '{:,.0f}'.format(d.final_value / 10000) }} 萬（{{ '{:,.0f}'.format(d.benchmark_final_value / 10000) }} 萬）{% else %}—{% endif %}</td>
         <td class="num {{ 'up' if (d.excess or 0) > 0 else ('down' if (d.excess or 0) < 0 else '') }}" data-label="開發期比 0050">{{ '{:+.0%}'.format(d.excess) if d.excess is not none else '—' }}</td>

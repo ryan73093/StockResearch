@@ -7,7 +7,7 @@
     <thead><tr><th>規則</th><th class="num">回測期末</th>{% for label in era.labels %}<th class="num">{{ label }}</th>{% endfor %}</tr></thead>
     <tbody>
     {% for row in items %}
-      <tr><td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ row.name }}</a> <span class="badge">{{ row.family }}</span> <span class="muted small">{{ row.tier }}</span></td>
+      <tr><td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a> <span class="badge">{{ row.family }}</span> <span class="muted small">{{ row.tier }}</span></td>
         <td class="num" data-label="回測期末">{{ '{:,.0f}'.format(row.final_value / 10000) if row.final_value else '—' }} 萬</td>
         {% for label in era.labels %}<td class="num" data-label="{{ label }}">{{ pts(row.periods[label].excess) }}</td>{% endfor %}</tr>
     {% endfor %}
