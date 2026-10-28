@@ -1,6 +1,7 @@
 """2026-10-20: the owner's decisions checked as code (research/invariants.py)."""
 import json
 from datetime import date
+from pathlib import Path
 
 from quant_platform.research import invariants
 from quant_platform.research.daily import DailyRule
@@ -226,3 +227,19 @@ def test_a_rule_whose_latest_result_is_an_older_engine_is_listed(tmp_path):
     registry.register(kind="candidate", period="recent", spec_hash=stale_engine(tmp_path)[0].rule_hash, spec_name="規則0",
                       input_hash="i9", data_fingerprint="f", metrics={"engine": ENGINE_VERSION}, report_file="r0.json")
     assert stale_engine(tmp_path) == []
+
+
+def test_the_trading_page_names_the_engine_and_is_on_the_project_list(tmp_path):
+    """2026-10-28 (使用者：專案資訊有把所有的交易事項需知、開發需知、規則寫清楚嗎)."""
+    from quant_platform.research.daily import ENGINE_VERSION
+
+    assert "沒有 docs/trading_rules.md" in invariants.trading_page(tmp_path)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "trading_rules.md").write_text("現行引擎：**daily-0.0.1**", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("x", encoding="utf-8")
+    assert any("引擎版本" in item for item in invariants.trading_page(tmp_path))
+    (tmp_path / "docs" / "trading_rules.md").write_text(f"現行引擎：**{ENGINE_VERSION}**", encoding="utf-8")
+    assert invariants.trading_page(tmp_path) == []
+    project = Path(__file__).resolve().parents[1]
+    assert invariants.trading_page(project) == []                 # the repository's own page and list
+

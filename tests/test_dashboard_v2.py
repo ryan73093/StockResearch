@@ -94,6 +94,14 @@ def test_the_sidebar_always_lists_the_project_documents(client):
     assert 'data-doc-key="roadmap"' in client.get("/project").get_data(as_text=True)        # the roadmap first
     assert client.get("/project/unknown").status_code == 404
     assert client.get("/system/docs/dl_review").get_json()["path"] == "docs/research_dl_exits_review.md"
+    # 2026-10-28 (使用者：專案資訊有把所有的交易事項需知、開發需知、規則寫清楚嗎): both on the list and in the sidebar;
+    # a link between documents opens the other tab (the page gets each document's path)
+    assert 'href="/project/trading"' in body and 'href="/project/agents"' in body
+    assert client.get("/system/docs/trading").get_json()["path"] == "docs/trading_rules.md"
+    assert "交易需知" in client.get("/system/docs/trading").get_json()["markdown"]
+    assert client.get("/system/docs/agents").get_json()["path"] == "AGENTS.md"
+    trading = client.get("/project/trading").get_data(as_text=True)
+    assert 'data-doc-key="trading"' in trading and "REQUIREMENTS.md&#34;: &#34;requirements" in trading
 
 
 def test_market_overview_is_new_and_the_legacy_one_moved(client):

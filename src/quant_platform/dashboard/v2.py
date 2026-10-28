@@ -76,6 +76,10 @@ THEMES = ("dark", "light")
 DOCS = {
     "guide": ("使用教學", "docs/user-guide.md"),
     "roadmap": ("路線圖", "docs/development_roadmap.md"),
+    # 2026-10-28 (使用者：專案資訊有把所有的交易事項需知、開發需知、規則寫清楚嗎): the trading rules' one place, and the
+    # development rules (REQUIREMENTS §12 had listed AGENTS.md for this page; it was missing)
+    "trading": ("交易需知", "docs/trading_rules.md"),
+    "agents": ("開發規則（AGENTS.md）", "AGENTS.md"),
     "architecture": ("架構", "docs/system_architecture.md"),
     "requirements": ("需求", "REQUIREMENTS.md"),
     "handoff": ("目前工作（交接）", "docs/development_handoff.md"),
@@ -89,8 +93,8 @@ DOCS = {
     "ai_full": ("AI 與程式交易全面研究", "reports/AI 與程式交易可行方法全面研究.md"),
 }
 # 2026-10-17 (使用者：要在 sidebar 看到專案資訊——路線圖、專案紀錄、開發歷程): the project pages, in this order
-PROJECT_DOCS = ("roadmap", "handoff", "risks", "history", "research_method", "requirements", "architecture", "dl_review",
-                "ai_methods", "taiwan_quant", "ai_full", "line", "guide")
+PROJECT_DOCS = ("roadmap", "trading", "agents", "handoff", "risks", "history", "research_method", "requirements",
+                "architecture", "dl_review", "ai_methods", "taiwan_quant", "ai_full", "line", "guide")
 JOB_LABELS = {
     "daily_market_data": "日線行情",
     "taiwan_research_data": "台股籌碼與基本面",
@@ -1675,7 +1679,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         if key not in PROJECT_DOCS:
             abort(404)
         return render_template("v2/project.html", active_nav="project", doc_key=key, doc_label=DOCS[key][0],
-                               project_docs=[(name, DOCS[name][0]) for name in PROJECT_DOCS])
+                               project_docs=[(name, DOCS[name][0]) for name in PROJECT_DOCS],
+                               doc_paths={DOCS[name][1]: name for name in PROJECT_DOCS})
 
     @blueprint.get("/system/docs/<key>")
     def system_doc(key: str):

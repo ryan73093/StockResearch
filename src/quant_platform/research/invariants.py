@@ -405,6 +405,11 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
         checks.append(_check("研究總覽的分佈圖標出每一類策略", "使用者 2026-10-27：每一類策略落在分佈圖的哪裡要標出來", False,
                              f"沒辦法檢查：{str(exc)[:120]}"))
+    # 2026-10-28 (使用者：專案資訊有把所有的交易事項需知、開發需知、規則寫清楚嗎)
+    found = trading_page(research.parent.parent)
+    checks.append(_check("專案資訊有交易需知與開發規則、交易需知寫的引擎版本和程式一致",
+                         "使用者 2026-10-28：專案資訊有把所有的交易事項需知、開發需知、規則寫清楚嗎", not found,
+                         "；".join(found) if found else "是"))
     # 2026-10-26 (使用者：我不要再放在這個皮咪資料夾下；向量資料庫吃 C:\\Dev\\DBQdrant)
     place = placement(research.parent.parent, research)
     checks.append(_check("專案在 C:\\Dev、知識庫向量在共用的 DBQdrant", "使用者 2026-10-26：比照其他專案搬到 C:\\Dev",
@@ -419,6 +424,29 @@ def run(research: str | Path, today: date, backups: Path | None = None,
         checks.append(_check("桌面沒有本專案開出的視窗", "AGENTS.md：背景程式不開視窗（使用者 2026-10-20）", False,
                              f"沒辦法檢查：{str(exc)[:120]}"))
     return checks
+
+
+def trading_page(root: Path) -> list[str]:
+    """What is wrong with the trading rules' page (docs/trading_rules.md) and the 專案資訊 list: missing, naming another
+    engine than ``daily.ENGINE_VERSION``, or the page or AGENTS.md left off the list."""
+    from quant_platform.research.daily import ENGINE_VERSION
+
+    wrong = []
+    page = Path(root) / "docs" / "trading_rules.md"
+    if not page.is_file():
+        wrong.append("沒有 docs/trading_rules.md")
+    elif f"**{ENGINE_VERSION}**" not in page.read_text(encoding="utf-8"):
+        wrong.append(f"交易需知寫的引擎版本不是程式的 {ENGINE_VERSION}")
+    if not (Path(root) / "AGENTS.md").is_file():
+        wrong.append("沒有 AGENTS.md")
+    try:
+        from quant_platform.dashboard.v2 import DOCS, PROJECT_DOCS
+
+        wrong += [f"專案資訊沒有「{label}」" for key, label in (("trading", "交易需知"), ("agents", "開發規則"))
+                  if key not in PROJECT_DOCS or key not in DOCS]
+    except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
+        wrong.append(f"沒辦法讀專案資訊的文件清單：{str(exc)[:80]}")
+    return wrong
 
 
 def placement(root: Path, research: Path, home: str | None = None) -> list[str]:

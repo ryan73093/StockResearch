@@ -10,6 +10,7 @@
 4. 開發時選一個可驗收的工作包，先寫目標、範圍、測試與回復方式，再實作；持續推進到驗收或具體外部阻礙。
 5. 完成後同步：`DEVELOPMENT_HISTORY.md` 新增一筆（最新在最上方）、`docs/development_handoff.md` 換成下一個工作包、路線圖狀態、受影響的需求或架構。每種資訊只寫在一個地方：
    - 需求 → `REQUIREMENTS.md`（修改現行條文）
+   - 交易規則（時段、費用與稅、成交方式、漲跌停、策略可選的設定、前向與分級摘要）→ `docs/trading_rules.md`「交易需知」；引擎改版時同一個 commit 改它寫的版本（16:00 需求檢查核對）
    - 階段、工作包、狀態、工時 → `docs/development_roadmap.md`
    - 架構與流程圖 → `docs/system_architecture.md`
    - 當前工作包 → `docs/development_handoff.md`（只留當前）

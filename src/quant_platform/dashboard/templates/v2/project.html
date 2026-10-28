@@ -14,7 +14,7 @@
         <a href="/project/{{ key }}"{% if key == doc_key %} aria-current="true"{% endif %}>{{ label }}</a>
       {% endfor %}
     </nav>
-    <article class="doc" id="doc-body" data-doc-key="{{ doc_key }}"><p class="muted">載入中…</p></article>
+    <article class="doc" id="doc-body" data-doc-key="{{ doc_key }}" data-doc-paths="{{ doc_paths | tojson | forceescape }}"><p class="muted">載入中…</p></article>
   </div>
 </section>
 {% endblock %}
@@ -33,6 +33,21 @@
     const payload = await response.json();
     const renderer = new marked.Renderer();
     const baseCode = renderer.code.bind(renderer);
+    // 2026-10-28: a link to another project document (relative to this one, e.g. ../REQUIREMENTS.md) opens its tab here
+    const paths = JSON.parse(body.dataset.docPaths || '{}');
+    const baseLink = renderer.link.bind(renderer);
+    renderer.link = (href, title, text) => {
+      const target = typeof href === 'object' ? href.href : href;
+      try {
+        const url = new URL(target, `https://doc.invalid/${payload.path}`);
+        const known = url.host === 'doc.invalid' && paths[decodeURIComponent(url.pathname.slice(1))];
+        if (known) {
+          const label = typeof href === 'object' ? (href.text || target) : text;
+          return `<a href="/project/${known}${url.hash}">${label}</a>`;
+        }
+      } catch (error) { /* not a link this page can resolve */ }
+      return baseLink(href, title, text);
+    };
     renderer.code = (code, language) => {
       const source = typeof code === 'object' ? code.text : code;
       const lang = typeof code === 'object' ? code.lang : language;
