@@ -28,6 +28,7 @@ def _digest(payload: dict[str, object]) -> str:
 
 
 _PARSED: dict[str, object] = {}       # the last file parsed by ``TrialRegistry.records``
+_VERIFIED: dict[str, dict] = {}       # 2026-10-29: per file, the bytes already checked and where the chain stood
 # 2026-10-27 (the gate moved to the 2020-10 track, research/daily.py gate): the windows starting in that track of a
 # result registered before the windows kept them, run again by the engine and checked against the registered result
 # (research/windows2020.py) — kept beside the registry, which stays as written (its chain is not touched)
@@ -261,11 +262,24 @@ class TrialRegistry:
         )
 
     def verify(self) -> list[str]:
-        """Problems found in the chain; an empty list means intact."""
-        problems = []
-        previous = GENESIS
-        for index, record in enumerate(self.written(), 1):
-            body = {name: getattr(record, name) for name in TrialRecord.__slots__ if name != "record_hash"}
+        """Problems found in the chain; an empty list means intact. 2026-10-29: the research overview verified all 12,000
+        records on every load (1.06 of its 1.5 seconds) — while the bytes already checked are unchanged (their digest),
+        only the records appended since are checked, carrying on from the last one."""
+        if not self._path.is_file():
+            return []
+        data = self._path.read_bytes()
+        data = data[:data.rfind(b"\n") + 1]                 # a line being appended is checked next time
+        name = str(self._path.resolve())
+        kept = _VERIFIED.get(name)
+        start, index, previous, problems = 0, 0, GENESIS, []
+        if kept and len(data) >= kept["size"] and hashlib.sha256(data[:kept["size"]]).hexdigest() == kept["digest"]:
+            start, index, previous, problems = kept["size"], kept["index"], kept["previous"], list(kept["problems"])
+        for line in data[start:].decode("utf-8").splitlines():
+            if not line.strip():
+                continue
+            index += 1
+            record = TrialRecord(**json.loads(line))
+            body = {field: getattr(record, field) for field in TrialRecord.__slots__ if field != "record_hash"}
             if record.trial_id != index:
                 problems.append(f"第 {index} 筆的編號是 {record.trial_id}")
             if record.prev_hash != previous:
@@ -273,4 +287,6 @@ class TrialRegistry:
             if _digest(body) != record.record_hash:
                 problems.append(f"第 {index} 筆內容與雜湊不符（紀錄被修改）")
             previous = record.record_hash
+        _VERIFIED[name] = {"size": len(data), "digest": hashlib.sha256(data).hexdigest(), "index": index,
+                           "previous": previous, "problems": list(problems)}
         return problems

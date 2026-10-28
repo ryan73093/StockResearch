@@ -59,6 +59,23 @@ def test_registry_is_append_only_idempotent_and_tamper_evident(tmp_path):
     assert registry.verify()  # deleting the first record breaks the chain
 
 
+def test_the_chain_is_checked_again_only_when_the_file_changes(tmp_path, monkeypatch):
+    """2026-10-29: the research overview verified the whole chain on every load (1.06 of its 1.5 seconds)."""
+    import quant_platform.research.registry as registry_module
+
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    _register(registry)
+    assert registry.verify() == []
+
+    def checked_again(body):
+        raise AssertionError("checked again")
+    monkeypatch.setattr(registry_module, "_digest", checked_again)
+    assert registry.verify() == []                                # the file did not change: the kept answer
+    monkeypatch.undo()
+    _register(registry, input_hash="i2")
+    assert registry.verify() == []                                # it changed: checked again
+
+
 def test_holdout_needs_validation_and_runs_once(tmp_path):
     registry = TrialRegistry(tmp_path / "trials.jsonl")
     kwargs = dict(kind="candidate", spec=CANDIDATE, market=MARKET, plan=PLAN, registry=registry,
