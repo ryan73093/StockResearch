@@ -409,7 +409,7 @@ class DailyRule(BaseModel):
     # sessions; holdings are kept by the usual rules. Left out of the hash when "none".
     # 2026-10-22 (集保因子第三版): "h1" = no new buys of the fifth whose small holders' share rose the most in 4 weeks
     # (retail_down_4w lowest), "h2" = of the fifth whose holders grew the most (holders_down_4w lowest)
-    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm", "t1", "e1", "he", "s1", "l1"] = "none"
+    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm", "t1", "e1", "he", "s1", "l1", "x1"] = "none"
     # 2026-10-12 (全面研究「之後再試」第 1 項): "cost1" = a holding that leaves the keep zone is replaced only when
     # the replacement's expected next-20-session excess beats the holding's by more than a round trip (about
     # 0.99%: fee both ways, the sell tax, slippage both ways). The expectation is the rule's own score
@@ -3561,7 +3561,9 @@ VETO_FACTORS = {**{key: (value,) for key, value in HOLDER_EXCLUDES.items()}, "hm
                 # 否決第五版: the fifth furthest below the 200-session average; the fifth whose earnings fell the most
                 "t1": ("trend_200",), "e1": ("eps_growth",),
                 # 否決第六版: holders and earnings together; the most borrowed-and-sold; the dearest to borrow
-                "he": ("holders_down_4w", "eps_growth"), "s1": ("low_sbl_short",), "l1": ("low_lending_fee_60",)}
+                "he": ("holders_down_4w", "eps_growth"), "s1": ("low_sbl_short",), "l1": ("low_lending_fee_60",),
+                # 2026-10-29 (技術分析機器人第六版): the fifth the price-and-volume robot (dl-2.5.1) ranks lowest
+                "x1": ("ml_tech_deep_r",)}
 HOLDER_VETO_SHARE = 0.2
 
 # 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」, written before the
@@ -3688,7 +3690,8 @@ VETO2_H2 = (6492, 6509, 6501)
 VETO_WORDS = {"h1": "不買散戶大增的五分之一", "h2": "不買股東大增的五分之一", "m1": "不買融資快斷頭的五分之一",
               "hm": "不買股東大增或融資快斷頭的五分之一", "t1": "不買離年線最遠的五分之一",
               "e1": "不買獲利衰退最多的五分之一", "he": "不買股東大增或獲利衰退最多的五分之一",
-              "s1": "不買借券賣出最多的五分之一", "l1": "不買借券費率最高的五分之一"}
+              "s1": "不買借券賣出最多的五分之一", "l1": "不買借券費率最高的五分之一",
+              "x1": "不買技術機器人最不看好的五分之一"}
 # 2026-10-22 (research_method §7「否決第三版」, written before the run; the lists frozen at 14:4x from the passing single
 # rules ranking the top 20 without a veto, by end value): the holders' veto on the 120 richest, both vetoes together on
 # the 20 richest and on the three top-10 rules the margin veto moved onto the frontier
@@ -4559,6 +4562,16 @@ def tech_second_batch() -> list[DailyRule]:
         output.append(DailyRule(name=f"深度學習第二版・前一成：{stem}｜持有：{style}", factors={"ml_deep2_top": 1.0},
                                 **{**DEEP_TOP10_FRAME, **fields}))
     return output
+
+
+def tech_veto_batch() -> list[DailyRule]:
+    """2026-10-29 (research_method §7「技術分析機器人第六版」, written before the run): #7339's frame on dl-2.1.0 as it is,
+    leaving out the fifth the price-and-volume robot (dl-2.5.1) ranks lowest (exclude "x1"), in the three holding styles;
+    compared with the same frame without the veto (#7339 and the two registered on 10-29)."""
+    stem = "前 10 名、同產業最多 3 成、每週、前 30 名內續抱、看成本才換股、只管買進"
+    return [DailyRule(name=f"深度學習前一成・不買技術機器人最不看好的五分之一：{stem}｜持有：{style}",
+                      factors={"ml_deep2_top": 1.0}, exclude="x1", **{**DEEP_TOP10_FRAME, **fields})
+            for style, fields in HOLD_STYLES]
 
 
 REGATED_FACTORS = {"dl-2.0.1": "ml_deep2_r", "dl-2.2.1": "ml_deep2_wide_r", "dl-2.4.1": "ml_deep2_riskadj_r",
@@ -5544,7 +5557,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "blendrecent": blend_recent_batch, "blendfrontier": blend_frontier_batch, "blendfour": blend_four_batch, "blendsize": blend_size_batch, "techsecond": tech_second_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "techdeep4": tech_deep4_batch, "deepregate": deep_regate_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "blendrecent": blend_recent_batch, "blendfrontier": blend_frontier_batch, "blendfour": blend_four_batch, "blendsize": blend_size_batch, "techsecond": tech_second_batch, "techveto": tech_veto_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "techdeep4": tech_deep4_batch, "deepregate": deep_regate_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
            "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear9": bear9_batch, "bear10": bear10_batch, "bear11": bear11_batch, "modelo": model_o_batch, "deepdirect": deep_direct_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
