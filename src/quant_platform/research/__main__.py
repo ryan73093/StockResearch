@@ -435,7 +435,7 @@ def main() -> int:
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
     parser.add_argument("--require", help="scan：只跑含這個訊號的組（例如新模型 ml_gbm_quality）")
     parser.add_argument("--missing-only", action="store_true",
-                        help="rolling --step models：只重訓還沒有這個截止日版本的模型（月中新增的模型）")
+                        help="rolling --step models：只重訓還沒有這個截止日版本的模型（月中新增的模型）；已經在讀它們的前向帳戶一律從起算日重新記錄")
     parser.add_argument("--refit-accounts", action="store_true",
                         help="rolling --step models：重訓後，讀到這些模型的前向帳戶從起算日重新記錄（舊紀錄與決定封存）")
     parser.add_argument("--step", choices=("select", "models", "holdout"),
@@ -1277,7 +1277,12 @@ def main() -> int:
                              | ({"dl1", "dl1x", "dl1m", "risk_half", "dl_risk"} if risky else set())
                              | ({"meta1"} if meta_due else set())
                              | {factor for factor in read if factor in robots and robots[factor] in robots_done})
-                again = tracker.refit(retrained, f"模型重訓到 {cutoff}（每月滾動），從起算日重新記錄") if args.refit_accounts else []
+                # 2026-10-28 (forward audit: 14 RL 3.2/3.3 accounts opened 10/27 ran on the robots' yearly weights; the
+                # robots' 8/31 refit came at 04:37 from a --missing-only step, the accounts kept the old decisions): a
+                # model refitted only now was read without its refit by any account already open, so --missing-only
+                # always records those accounts again from their start
+                again = (tracker.refit(retrained, f"模型重訓到 {cutoff}（每月滾動），從起算日重新記錄")
+                         if args.refit_accounts or args.missing_only else [])
                 job.payload["summary"] = (f"{len(trained)} 個模型重訓到 {cutoff}（深度學習 {len(deep)} 個）"
                                           + (f"；{len(again)} 個前向帳戶重新記錄" if again else ""))
             print(job.payload["summary"])

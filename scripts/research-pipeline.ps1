@@ -1738,8 +1738,9 @@ switch ($Name) {
     }
     "forwardaudit2" {
         # 2026-10-28: the forward audit again before the 16:00 check (10/27 20:45 found 8 accounts, restarted since),
-        # after bear8 and blendrecent (two simulation processes at most)
-        Wait-While "等空頭防護第八版與組合搜尋第九輪跑完（bear8、blendrecent）" { [bool](Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "research-pipeline\.ps1" -and $_.CommandLine -match "-Name (bear8|blendrecent)( |$)" }) } 300
+        # after bear8 and blendrecent (two simulation processes at most); run again 10/28 10:35 after the 14 RL 3.2/3.3
+        # accounts were recorded again, after the T2 half twins
+        Wait-While "等空頭防護第八版、組合搜尋第九輪、T2 減碼一半版本跑完（逐筆模擬同時最多兩個程序）" { [bool](Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "research-pipeline\.ps1" -and $_.CommandLine -match "-Name (bear8|blendrecent|t2half_a|t2half_b)( |$)" }) } 300
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-audit" @("-m", "quant_platform.research", "forward-audit")
     }
