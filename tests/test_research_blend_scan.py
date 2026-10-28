@@ -144,3 +144,19 @@ def test_the_frontier_search_keeps_only_blends_no_member_beats_on_both():
     members.append(member(14, best))
     found = bs.search(members, sizes=(2,), frontier=True)
     assert found["passed"] == 0 and not found["finalists"]                    # #14 alone beats every blend on both
+
+
+def test_the_fourth_member_goes_only_on_the_triples_that_stayed():
+    """2026-10-28 (第十一輪): with ``extend`` each kept triple is tried again with every member numbered after its three;
+    the counts add up and a finalist may hold four rules, each a different family."""
+    rng = np.random.default_rng(3)
+    paths = []
+    for number in range(6):
+        steps = 1 + rng.normal(0.03, 0.05, 7)
+        paths.append(list(100 * np.r_[1.0, np.cumprod(steps)]))
+    members = [member(10 + number, path) for number, path in enumerate(paths)]
+    plain = bs.search(members, sizes=(2, 3), frontier=True)
+    found = bs.search(members, sizes=(2, 3), frontier=True, extend=True)
+    assert found["candidates"] >= plain["candidates"]
+    assert all(len(item["members"]) <= 4 for item in found["finalists"])
+    assert all(len(set(item["members"])) == len(item["members"]) for item in found["finalists"])
