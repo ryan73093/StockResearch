@@ -900,7 +900,8 @@ def check_invariants(container: "Container", now: datetime | None = None) -> obj
     if closure is not None:     # 2026-10-23 (颱風休市): no news or records are due on a closed day
         logger.info("Skipping invariant checks: TW market closed (%s)", closure)
         return None
-    checks = invariants.run(instance / "research", local.date(), instance / "backups" / "daily")
+    checks = invariants.run(instance / "research", local.date(), instance / "backups" / "daily",
+                            site="http://127.0.0.1:5000")       # 2026-10-28: the research pages opened as the owner would
     invariants.save(instance / "research", checks, local)
     failed = [item for item in checks if not item["ok"]]
     if failed:

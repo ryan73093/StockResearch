@@ -82,7 +82,7 @@ def _check(name: str, source: str, ok: bool, detail: str) -> dict[str, object]:
 
 
 def run(research: str | Path, today: date, backups: Path | None = None,
-        windows: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
+        windows: list[dict[str, object]] | None = None, site: str | None = None) -> list[dict[str, object]]:
     from quant_platform.research.categories import uses_0050
     from quant_platform.research.forward_board import common_start
     from quant_platform.research.rolling import cutoff_for, folder as rolling_folder
@@ -405,6 +405,14 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
         checks.append(_check("研究總覽的分佈圖標出每一類策略", "使用者 2026-10-27：每一類策略落在分佈圖的哪裡要標出來", False,
                              f"沒辦法檢查：{str(exc)[:120]}"))
+    # 2026-10-28 (使用者：研究的載入也太慢了吧；每個策略給個編號；每一筆交易都要顯示買入的價格跟賣出的價格): the worker
+    # passes the local site; the pages are opened as the owner would
+    if site:
+        live_hashes = [item["rule_hash"] for item in live if item.get("kind") == "daily"]
+        slow = research_pages(site, live_hashes[0] if live_hashes else None)
+        checks.append(_check("研究頁 5 秒內打開、規則有編號、每一筆交易有買進價與賣出價",
+                             "使用者 2026-10-28：研究的載入也太慢了吧；每個策略給個編號；每一筆交易都要顯示買入的價格跟賣出的價格",
+                             not slow, "；".join(slow) if slow else "研究總覽、規則頁、前向頁都在 5 秒內"))
     # 2026-10-28 (使用者：專案資訊有把所有的交易事項需知、開發需知、規則寫清楚嗎)
     found = trading_page(research.parent.parent)
     checks.append(_check("專案資訊有交易需知與開發規則、交易需知寫的引擎版本和程式一致",
@@ -424,6 +432,35 @@ def run(research: str | Path, today: date, backups: Path | None = None,
         checks.append(_check("桌面沒有本專案開出的視窗", "AGENTS.md：背景程式不開視窗（使用者 2026-10-20）", False,
                              f"沒辦法檢查：{str(exc)[:120]}"))
     return checks
+
+
+PAGE_LIMIT = 5.0           # seconds a research page may take (使用者 2026-10-28：研究的載入也太慢了吧)
+
+
+def research_pages(site: str, rule_hash: str | None, limit: float = PAGE_LIMIT) -> list[str]:
+    """What is wrong with the research pages as the owner opens them: slower than ``limit``, not opening, a strategy's
+    page without its number, a forward page without the buy and sell prices."""
+    import time
+    import urllib.request
+
+    pages = [("研究總覽", "/research", ())]
+    if rule_hash:
+        pages += [("規則頁", f"/research/rules/{rule_hash}", ('class="rule-no"',)),
+                  ("前向頁", f"/research/forward/{rule_hash}", ('class="rule-no"', "買進價", "賣出價"))]
+    wrong = []
+    for name, path, needed in pages:
+        started = time.monotonic()
+        try:
+            with urllib.request.urlopen(site.rstrip("/") + path, timeout=60) as response:
+                body = response.read().decode("utf-8", "replace")
+        except Exception as exc:                        # noqa: BLE001 - a page that does not open is the finding
+            wrong.append(f"{name}打不開：{str(exc)[:80]}")
+            continue
+        spent = time.monotonic() - started
+        if spent > limit:
+            wrong.append(f"{name} {spent:.1f} 秒")
+        wrong += [f"{name}沒有「{text}」" for text in needed if text not in body]
+    return wrong
 
 
 def trading_page(root: Path) -> list[str]:

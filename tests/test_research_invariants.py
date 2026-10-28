@@ -243,3 +243,23 @@ def test_the_trading_page_names_the_engine_and_is_on_the_project_list(tmp_path):
     project = Path(__file__).resolve().parents[1]
     assert invariants.trading_page(project) == []                 # the repository's own page and list
 
+
+def test_the_research_pages_are_opened_and_timed(monkeypatch):
+    """2026-10-28 (使用者：研究的載入也太慢了吧；每一筆交易都要顯示買入的價格跟賣出的價格)."""
+    import io
+    import urllib.request
+
+    bodies = {"/research": "ok", "/research/rules/h": '<span class="rule-no">#1</span>',
+              "/research/forward/h": '<span class="rule-no">#1</span> 買進價'}
+
+    def opened(url, timeout=0):
+        path = url.split("5000", 1)[1]
+        return io.BytesIO(bodies[path].encode("utf-8"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", opened)
+    found = invariants.research_pages("http://127.0.0.1:5000", "h")
+    assert found == ["前向頁沒有「賣出價」"]
+    bodies["/research/forward/h"] += " 賣出價"
+    assert invariants.research_pages("http://127.0.0.1:5000", "h") == []
+    assert invariants.research_pages("http://127.0.0.1:5000", "h", limit=-1.0)[0].startswith("研究總覽 ")
+
