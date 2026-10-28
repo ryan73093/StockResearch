@@ -252,6 +252,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_k": "機器學習集成 K（全部付費資料：再加上八大行庫、券商集中度、當沖、融資成本）",
                  "ml_gbm_l": "機器學習集成 L（模型 K 的特徵，近年的訓練樣本加重：每 3 年權重減半）",
                  "ml_gbm_m": "機器學習集成 M（模型 K 的特徵，加上市場狀態：大盤趨勢、波動、上漲家數、報酬分散、融資維持率）",
+                 "ml_gbm_o": "機器學習集成 O（模型 M 再加上季報盈餘驚喜、盈餘加速、盈餘連續成長）",
                  "ml_gbm_ext_monthly": "機器學習集成 G・每月重訓（同模型 G，每個月只用之前結束的標籤重新訓練）",
                  "ml_deep2_riskadj": "深度學習第二版・學以波動調整的前一成（不靠挑高波動股）",
                  "ml_deep2_monthly": "深度學習第二版・前一成，每月重新訓練（每個月只用之前結束的標籤，10 個種子）",
@@ -4320,6 +4321,28 @@ def model_k_batch() -> list[DailyRule]:
 RECENT_GATE_YEARS = (2021, 2022, 2023, 2024, 2025)
 
 
+def model_o_batch() -> list[DailyRule]:
+    """2026-10-28 (research_method §7「模型 O」, written before the run): gbm-2.10.0 (model M with the earnings-news
+    family) - only if its 2021-2025 top-20 gain is at least gbm-2.9.0's - alone and with the deep model's top tenth,
+    weekly, each in the three holding styles."""
+    from quant_platform.research.model_ensemble import gate
+
+    check = gate(Path("instance") / "research" / "models", "gbm-2.10.0", "gbm-2.9.0", RECENT_GATE_YEARS)
+    print(f"gbm-2.10.0 門檻（2021-2025 前 20 名多賺，對 gbm-2.9.0）：{check}", flush=True)
+    if not check["passed"]:
+        return []
+    output = []
+    for name, factors in (("機器學習集成（模型 O，加盈餘驚喜）", {"ml_gbm_o": 1.0}),
+                          ("模型 O＋深度學習前一成", {"ml_gbm_o": 1.0, "ml_deep2_top": 1.0})):
+        output += [DailyRule(name=f"{name}：前 20 名、同產業最多 3 成、每週決策、持有 20 天", factors=factors, check="weekly",
+                             industry_cap=0.3),
+                   DailyRule(name=f"{name}：前 20 名、同產業最多 3 成、每週決策、月線上續抱", factors=factors, check="weekly",
+                             industry_cap=0.3, hold="trend", min_hold=0),
+                   DailyRule(name=f"{name}：前 20 名、同產業最多 3 成、每週決策、不設最短持有", factors=factors, check="weekly",
+                             industry_cap=0.3, min_hold=0)]
+    return output
+
+
 def model_m_batch() -> list[DailyRule]:
     """2026-10-28 (research_method §7「模型 M」, written before the run): gbm-2.9.0 (model K with the market's state)
     - only if its 2021-2025 top-20 gain is at least gbm-2.7.0's - alone and with the deep model's top tenth, weekly,
@@ -5453,7 +5476,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "blendrecent": blend_recent_batch, "blendfrontier": blend_frontier_batch, "blendfour": blend_four_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "techdeep4": tech_deep4_batch, "deepregate": deep_regate_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
-           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear9": bear9_batch, "bear10": bear10_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear9": bear9_batch, "bear10": bear10_batch, "modelo": model_o_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

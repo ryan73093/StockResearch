@@ -75,6 +75,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # predictors; trees find the interactions) - the same value for every stock of a day, as its percentile in
           # the market's own last three years; judged on 2021-2025 against model K
           "ml_gbm_m": {"version": "gbm-2.9.0", "label": "ensemble", "features": "extended_m"},
+          # 2026-10-28 (research_method §7「模型 O」): model M with the earnings-news family (fundamentals.EARNINGS_FACTORS:
+          # the standardized surprise, its acceleration, the streak of beats; Bernard & Thomas 1989, Novy-Marx 2015) —
+          # rule factors outside FACTOR_LABELS, so no earlier version saw them; judged on 2021-2025 against model M
+          "ml_gbm_o": {"version": "gbm-2.10.0", "label": "ensemble", "features": "extended_o"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -186,6 +190,11 @@ def version_features(version: str | None) -> tuple[str, ...]:
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in DISCLOSURE_FACTORS
                      and name not in PLEDGE_FACTORS and name not in INDUSTRY_FACTORS and name not in HOLDER_FACTORS
                      and name not in PAID_FACTORS)
+    if kind == "extended_o":           # 2026-10-28: M's list and the earnings-news family
+        from quant_platform.research.fundamentals import EARNINGS_FACTORS
+
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
+                     and name != "branch_informed_20") + tuple(EARNINGS_FACTORS) + MARKET_FEATURES
     if kind == "extended_m":           # 2026-10-28: K's list and the market's state
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
                      and name != "branch_informed_20") + MARKET_FEATURES

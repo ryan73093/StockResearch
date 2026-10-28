@@ -195,6 +195,18 @@ def test_the_market_state_is_one_value_a_day_placed_in_its_own_history():
     assert "market:maintenance" in model.version_features("gbm-2.9.0")
 
 
+def test_model_o_sees_model_m_s_features_and_the_earnings_family():
+    """2026-10-28 (gbm-2.10.0, research_method §7「模型 O」): model M's list, the market's state still last, and the three
+    earnings-news factors, which no earlier version had."""
+    from quant_platform.research.fundamentals import EARNINGS_FACTORS
+
+    mine, theirs = model.version_features("gbm-2.10.0"), model.version_features("gbm-2.9.0")
+    assert set(mine) == set(theirs) | set(EARNINGS_FACTORS)
+    assert mine[-len(model.MARKET_FEATURES):] == model.MARKET_FEATURES
+    assert not set(EARNINGS_FACTORS) & set(model.version_features("gbm-2.7.0"))
+    assert model.VERSIONS["gbm-2.10.0"]["features"] == "extended_o"
+
+
 def test_the_technical_robot_s_fourth_version_is_gated_on_2021_to_2025():
     """2026-10-28: dl-2.5.1 is dl-2.5.0 judged on 2021-2025 against gbm-2.1.0 (four of five years at +0.6% or more)."""
     from quant_platform.research import model_deep2
