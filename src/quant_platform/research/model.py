@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pickle
 from datetime import UTC, datetime
 from pathlib import Path
@@ -639,6 +640,82 @@ def digest(out_dir: str | Path) -> str:
     return output.hexdigest()
 
 
+SCORE_CACHE = "score-cache"          # 2026-10-29: a block's scores, by the digest of everything they come from
+SCORE_CACHE_DAYS = 21                 # a block not used for this long is removed (computed again when needed)
+
+
+def _code_digest() -> bytes:
+    """The code a block's scores come from (this file, the ensemble's) and the libraries computing them."""
+    cached = globals().get("_CODE_DIGEST")
+    if cached is None:
+        import sklearn
+
+        from quant_platform.research import model_ensemble
+
+        output = hashlib.blake2b(digest_size=20)
+        for module in (__file__, model_ensemble.__file__):
+            output.update(Path(module).read_bytes())
+        output.update(f"{np.__version__} {pd.__version__} {sklearn.__version__}".encode())
+        cached = globals()["_CODE_DIGEST"] = output.digest()
+    return cached
+
+
+def block_key(fp, part: list[int], eligible: np.ndarray, names: tuple[str, ...], model_digest: bytes) -> str:
+    """2026-10-29 (S9-W39, 使用者：是你的程式太肥；不要為了省效能最後又給我錯的資料): the digest of everything a block of
+    sessions' scores is computed from — the model file, the code and libraries, the stocks and sessions, the features'
+    values before they are ranked and the eligible stocks. Equal digests: the same inputs, the same scores."""
+    output = hashlib.blake2b(digest_size=20)
+    output.update(model_digest)
+    output.update(_code_digest())
+    output.update(json.dumps([list(names), list(fp.symbols), [fp.sessions[column].isoformat() for column in part]],
+                             ensure_ascii=False).encode())
+    output.update(np.ascontiguousarray(eligible[:, part]).tobytes())
+    for name in names:
+        values = market_state(fp, name)[part] if name.startswith("market:") else fp.matrix(name)[:, part]
+        array = np.ascontiguousarray(values)
+        output.update(f"{name} {array.dtype} {array.shape}".encode())
+        output.update(array.tobytes())
+    return output.hexdigest()
+
+
+def _cached_block(folder: Path, key: str) -> np.ndarray | None:
+    path = folder / SCORE_CACHE / f"{key}.npy"
+    try:
+        found = np.load(path, allow_pickle=False)
+    except (OSError, ValueError):
+        return None
+    try:
+        os.utime(path)                      # in use: not removed as unused
+    except OSError:
+        pass
+    return found
+
+
+def _keep_block(folder: Path, key: str, values: np.ndarray) -> None:
+    from quant_platform.research import files
+
+    target = folder / SCORE_CACHE
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        partial = target / f"{key}.{os.getpid()}.partial.npy"
+        np.save(partial, values, allow_pickle=False)
+        files.replace(partial, target / f"{key}.npy")
+    except OSError:
+        pass                                 # not kept: computed again next time
+
+
+def _drop_unused_blocks(folder: Path) -> None:
+    import time as _time
+
+    limit = _time.time() - SCORE_CACHE_DAYS * 86400
+    for path in (folder / SCORE_CACHE).glob("*.npy") if (folder / SCORE_CACHE).is_dir() else []:
+        try:
+            if path.stat().st_mtime < limit:
+                path.unlink()
+        except OSError:
+            continue
+
+
 def scores(fp, out_dir: str | Path) -> np.ndarray:
     """sessions × symbols: each session scored by the model of its year (the latest model after the last
     trained year); NaN where the stock is not eligible or no model exists yet."""
@@ -664,18 +741,32 @@ def scores(fp, out_dir: str | Path) -> np.ndarray:
         usable = [key for key in models if _learned_until(key) < day]
         if usable:
             by_year.setdefault(max(usable, key=_learned_until), []).append(column)
+    # 2026-10-29 (S9-W39): every run had scored every session since 2013 again — about 80 seconds a model, in the
+    # after-close orders, the forward record, the board and every research step. A block's scores are kept under the
+    # digest of everything they come from (``block_key``) and taken again only for the same digest; a new session, a
+    # new stock, a changed value or a changed model or code is another digest and is computed.
+    _drop_unused_blocks(folder)
     for year, columns in by_year.items():
-        model = pickle.loads(models[year].read_bytes())
+        raw = models[year].read_bytes()
+        model, model_digest = None, hashlib.blake2b(raw, digest_size=20).digest()
         for start in range(0, len(columns), 60):
             part = columns[start: start + 60]
+            key = block_key(fp, part, eligible, names, model_digest)
+            kept = _cached_block(folder, key)
+            if kept is not None and kept.shape == (len(part), len(fp.symbols)):
+                output[part] = kept
+                continue
+            if model is None:
+                model = pickle.loads(raw)
             block = feature_block(fp, part, eligible, names)
             live = np.isfinite(block).any(axis=2) & eligible[:, part].T
             if hasattr(model, "predict_days"):             # gbm-2.0.0: the day's cross-section at once
                 output[part] = model.predict_days(block, live)
-                continue
-            flat = block[live]
-            if len(flat):
-                predicted = np.full(live.shape, np.nan, dtype=np.float32)
-                predicted[live] = model.predict(flat)
-                output[part] = predicted
+            else:
+                flat = block[live]
+                if len(flat):
+                    predicted = np.full(live.shape, np.nan, dtype=np.float32)
+                    predicted[live] = model.predict(flat)
+                    output[part] = predicted
+            _keep_block(folder, key, output[part])
     return output

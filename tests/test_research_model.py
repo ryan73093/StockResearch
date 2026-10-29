@@ -240,3 +240,46 @@ def test_the_regated_versions_copy_every_setting_of_the_old_one():
     weaker = {str(year): {"top20_gain": 0.015} for year in range(2021, 2026)}
     check = d.gate_check_d3({"years": years}, {"years": weaker}, d.gate_years("dl-3.0.1"))
     assert check["passed"] and check["years"] == [2021, 2022, 2023, 2024, 2025]
+
+
+def test_a_blocks_scores_are_kept_by_what_they_come_from(tmp_path, monkeypatch):
+    """2026-10-29 (S9-W39; 使用者：是你的程式太肥；不要為了省效能最後又給我錯的資料): every run had scored every session
+    since 2013 again. A block's scores are kept under the digest of the model file, the code, the stocks, the sessions,
+    the features' values and the eligible stocks: the same as computing every block; another run on the same data loads
+    no model at all; a changed price is another digest for the blocks it reaches, which are computed again."""
+    from types import SimpleNamespace
+
+    data, _drifts = planted()
+    fp = FactorPanel(Panel(data))
+    folder = tmp_path / model.MODEL_VERSION
+    model.train(fp, folder, "data:x", [2015, 2016])
+    cached, keep = model._cached_block, model._keep_block
+
+    def every_block(panel):
+        monkeypatch.setattr(model, "_cached_block", lambda folder, key: None)
+        monkeypatch.setattr(model, "_keep_block", lambda folder, key, values: None)
+        output = model.scores(panel, folder)
+        monkeypatch.setattr(model, "_cached_block", cached)
+        monkeypatch.setattr(model, "_keep_block", keep)
+        return output
+
+    fresh = every_block(fp)
+    first = model.scores(fp, folder)
+    blocks = set((folder / model.SCORE_CACHE).glob("*.npy"))
+    assert np.array_equal(first, fresh, equal_nan=True) and blocks
+    real_pickle = model.pickle
+    monkeypatch.setattr(model, "pickle", SimpleNamespace(loads=lambda raw: (_ for _ in ()).throw(
+        AssertionError("a model was loaded"))))
+    assert np.array_equal(model.scores(FactorPanel(Panel(data)), folder), fresh, equal_nan=True)
+    monkeypatch.setattr(model, "pickle", real_pickle)
+
+    changed, _drifts = planted()
+    symbol, last = "1101.TW", changed.sessions[-1]
+    changed.closes[symbol][last] *= 1.3                               # the last session's close of one stock
+    fp_changed = FactorPanel(Panel(changed))
+    expected = every_block(fp_changed)
+    found = model.scores(fp_changed, folder)
+    assert np.array_equal(found, expected, equal_nan=True)
+    assert not np.array_equal(found, fresh, equal_nan=True)          # the change reached the scores
+    new = set((folder / model.SCORE_CACHE).glob("*.npy")) - blocks
+    assert 1 <= len(new) < len(blocks)                                # only the blocks it reaches
