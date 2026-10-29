@@ -466,7 +466,7 @@ class StockForwardTracker:
             passed = {str(row.get("rule_hash")) for row in payload.get("graded") or [] if row.get("passed")}
             if passed and payload.get("cutoff"):
                 lists[payload["cutoff"]] = passed
-        found = chain(self.archived() + self.records(), lists, today)
+        found = chain(self.archived() + self.records(), lists, today, self._costs)
         _CHAINED.update(key=key, value=found)
         return {rule: dict(value) for rule, value in found.items()}
 
@@ -1301,7 +1301,8 @@ def kept(record: dict, positions: dict, costs) -> dict[str, float]:
 
     counted, paper, held_loss = float(record["cash"]), 0.0, 0.0
     for row in record["holdings"]:
-        units, close = float(row["units"]), float(row["close"])
+        units = float(row["units"])
+        close = float(row.get("close") or (float(row.get("value") or 0.0) / units if units > 0 else 0.0))
         if units <= 0 or close <= 0:
             continue
         amount = units * close * (1 - costs.slippage_bps / 10_000)
@@ -1452,7 +1453,7 @@ def _replay_check(earlier: list[dict[str, object]], rule_hash: str, replayed: di
 CHAIN_START = "2026-10"     # the first month with a rolling list (cutoff 2026-08-31)
 
 
-def chain(records: list[dict], lists: dict[str, set[str]], today: date) -> dict[str, dict[str, object]]:
+def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=None) -> dict[str, dict[str, object]]:
     """2026-10-19 (使用者：評估專案可能失敗的原因並排除；選「串接滾動前向紀錄」): the record a rule earns while it is on the
     monthly lists. Each month M is judged by M's list — the rules passing with data up to cutoff_for(M), the end of the
     month two months back — the list an owner would use that month. M's sessions come from the rule's forward account
@@ -1475,6 +1476,14 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date) -> dict[
     by_account: dict[tuple[str, str], dict[str, dict]] = {}
     for record in records:
         by_account.setdefault((record["rule_hash"], str(record.get("since"))), {})[record["date"]] = record
+    if costs is not None:
+        # 2026-10-30 (使用者：我拿到的才叫賺，拿到的才叫賠；同類的地方直接照做): the T0 judgment chains the money counted
+        # each day (``kept_by_day``: a gain once sold, every loss) against 0050 sold that day, not the held stocks at
+        # their close
+        for key, days in by_account.items():
+            counted = kept_by_day([days[day] for day in sorted(days)], costs)
+            by_account[key] = {day: {**record, "value": counted[day]["cash_back"],
+                                     "benchmark_value": counted[day]["bench_back"]} for day, record in days.items()}
     output: dict[str, dict[str, object]] = {}
     hashes = {key for passed in lists.values() for key in passed}
     for rule_hash in hashes:

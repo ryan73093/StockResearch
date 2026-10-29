@@ -599,3 +599,29 @@ def test_the_result_counts_a_gain_once_sold_and_every_loss_by_hand():
     assert daily["2026-09-02"]["gain"] == pytest.approx(186.5 + (2241 - 2502.5))
     # day 1: up 174.2 on paper after the costs of selling — not counted
     assert daily["2026-09-01"]["gain"] == pytest.approx(0.0) and daily["2026-09-01"]["paper"] == pytest.approx(174.2)
+
+
+def test_the_t0_chain_counts_the_money_kept_against_0050_sold():
+    """2026-10-30 (使用者：我拿到的才叫賺，拿到的才叫賠): with the costs the chain reads each day's money counted — a
+    stock up on paper adds nothing, one down counts — and 0050 sold that day."""
+    from types import SimpleNamespace
+
+    from quant_platform.research.stock_forward import chain
+
+    costs = SimpleNamespace(slippage_bps=0.0, fee=lambda amount: 0.0, tax=lambda amount, kind, side: 0.0)
+
+    def rec(day, close, bench, trades=()):
+        return {"rule_hash": "A", "since": "2026-09-01", "date": day, "contributed": 1000.0, "cash": 0.0,
+                "value": 10 * close, "benchmark_value": bench, "trades_today": list(trades),
+                "holdings": [{"code": "2330", "units": 10, "close": close, "value": 10 * close}]}
+
+    buy = {"code": "2330", "side": "BUY", "shares": 10, "price": 100.0, "fee": 0.0, "tax": 0.0}
+    records = [rec("2026-09-01", 100.0, 1000.0, [buy]), rec("2026-09-02", 130.0, 1010.0), rec("2026-09-03", 90.0, 1020.0)]
+    lists = {"2026-08-31": {"A"}}
+    paper = chain(records, lists, date(2026, 10, 5))["A"]
+    counted = chain(records, lists, date(2026, 10, 5), costs)["A"]
+    assert paper["return"] == pytest.approx(-0.10) and paper["benchmark_return"] == pytest.approx(0.02)
+    # counted: 1,000 on 9/1, still 1,000 on 9/2 (up 300 on paper, not counted), 900 on 9/3 (down 100, counted)
+    assert counted["return"] == pytest.approx(-0.10) and counted["benchmark_return"] == pytest.approx(0.02)
+    mid = chain(records[:2], lists, date(2026, 10, 5), costs)["A"]
+    assert mid["return"] == pytest.approx(0.0) and chain(records[:2], lists, date(2026, 10, 5))["A"]["return"] == pytest.approx(0.30)
