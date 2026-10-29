@@ -283,3 +283,12 @@ def test_a_blocks_scores_are_kept_by_what_they_come_from(tmp_path, monkeypatch):
     assert not np.array_equal(found, fresh, equal_nan=True)          # the change reached the scores
     new = set((folder / model.SCORE_CACHE).glob("*.npy")) - blocks
     assert 1 <= len(new) < len(blocks)                                # only the blocks it reaches
+
+
+def test_model_p_is_model_o_with_the_branches_informed_buying():
+    """2026-10-30 (gbm-2.11.0, research_method §7「模型 P」): model O's list and the paid branch data's informed-buying
+    signal, which models K to O left out; the market's state still last."""
+    mine, theirs = model.version_features("gbm-2.11.0"), model.version_features("gbm-2.10.0")
+    assert set(mine) == set(theirs) | {"branch_informed_20"} and "branch_informed_20" not in theirs
+    assert mine[-len(model.MARKET_FEATURES):] == model.MARKET_FEATURES
+    assert model.VERSIONS["gbm-2.11.0"]["features"] == "extended_p"

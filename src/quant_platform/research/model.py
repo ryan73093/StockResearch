@@ -81,6 +81,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # the standardized surprise, its acceleration, the streak of beats; Bernard & Thomas 1989, Novy-Marx 2015) —
           # rule factors outside FACTOR_LABELS, so no earlier version saw them; judged on 2021-2025 against model M
           "ml_gbm_o": {"version": "gbm-2.10.0", "label": "ensemble", "features": "extended_o"},
+          # 2026-10-30 (research_method §7「模型 P」; 使用者：付費資料都給你了你到底做了哪些東西): model O with the paid
+          # branch data's informed-buying signal (research/branches.py), once the download is whole; judged on 2021-2025
+          # against model O
+          "ml_gbm_p": {"version": "gbm-2.11.0", "label": "ensemble", "features": "extended_p"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -212,6 +216,10 @@ def version_features(version: str | None) -> tuple[str, ...]:
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in DISCLOSURE_FACTORS
                      and name not in PLEDGE_FACTORS and name not in INDUSTRY_FACTORS and name not in HOLDER_FACTORS
                      and name not in PAID_FACTORS)
+    if kind == "extended_p":           # 2026-10-30: O's list with the branches' informed buying in its place
+        from quant_platform.research.fundamentals import EARNINGS_FACTORS
+
+        return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS)             + tuple(EARNINGS_FACTORS) + MARKET_FEATURES
     if kind == "extended_o":           # 2026-10-28: M's list and the earnings-news family
         from quant_platform.research.fundamentals import EARNINGS_FACTORS
 
