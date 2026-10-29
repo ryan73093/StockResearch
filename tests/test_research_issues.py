@@ -194,12 +194,16 @@ def test_the_page_and_the_home_card(tmp_path):
     client = create_app(build_container(Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}",
                                                  scheduler_in_web=False))).test_client()
     page = client.get("/issues").get_data(as_text=True)
-    # 2026-10-28 (使用者：每個議題弄成一個專案；還有什麼議題值得追蹤，我是叫你列): the index lists projects and proposals
-    assert "議題追蹤" in page and 'href="/issues/ai"' in page and "台積電月營收" in page and "告警" in page
+    # 2026-10-28 (使用者：每個議題弄成一個專案；還有什麼議題值得追蹤，我是叫你列): the index lists projects and proposals;
+    # (使用者：議題的專案選擇麻煩做成像 app 那樣) each project an app tile coloured by its worst light with how many are on —
+    # the lit items' names moved to the project's page and the home card
+    assert "議題追蹤" in page and 'class="app-tile app-tile--alert" href="/issues/ai"' in page
+    assert "AI 資本支出" in page and "1 項告警" in page
     assert "還值得追蹤、討論的議題" in page and "台積電與大盤集中度" in page
     assert '<a href="/issues" aria-current="page">' in page                                  # in the main navigation
     project = client.get("/issues/ai").get_data(as_text=True)
     assert "巨頭蓋 AI 資料中心的錢會不會燒過頭" in project and "現在怎麼看" in project and "追蹤什麼、為什麼" in project
+    assert "台積電月營收（近 3 個月合計）年增率" in project and "轉負" in project                # the lit item and its line
     assert "借錢蓋" in project                                                                  # the written reading
     assert client.get("/issues/nothing").status_code == 404
     home = client.get("/").get_data(as_text=True)
