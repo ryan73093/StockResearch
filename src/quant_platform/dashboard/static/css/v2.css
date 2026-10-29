@@ -129,6 +129,9 @@ h1, h2, h3, p, li, dd { overflow-wrap: anywhere; }
 }
 .appbar .brand { gap: 8px; font-size: 16px; }
 .appbar .brand-mark { width: 26px; height: 26px; }
+/* 2026-10-30: the name wrapped to three lines on a phone and pushed the page down; the mark alone there */
+.appbar .brand span { white-space: nowrap; }
+@media (max-width: 480px) { .appbar .brand span { display: none; } }
 .appbar .session { margin-left: auto; }
 
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700; }
@@ -875,7 +878,7 @@ td.wrap { white-space: normal; min-width: 180px; }
 .viz .fbin { opacity: .6; }
 .viz .fiqr { fill: var(--text-2); opacity: .45; }
 .viz .fmed { stroke: var(--text); stroke-width: 2.5; stroke-linecap: round; }
-.viz text.flbl { font-size: 11px; }
+.viz text.flbl { font-size: 14px; }   /* 2026-10-30: readable on a phone (it is the narrow drawing's text) */
 .legend .sw-fmed { background: var(--text); width: 3px; height: 14px; }
 .legend .sw-fiqr { background: var(--text-2); opacity: .45; height: 4px; }
 .spread-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }

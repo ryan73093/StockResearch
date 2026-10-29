@@ -321,10 +321,21 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
             "tier": grade, "tier_label": TIER_LABELS[grade], "tier_reason": why,
             "spec_hash": spec_hash, "name": record.spec_name, "source": origin.get(spec_hash, "其他"),
             "trial_id": record.trial_id, "passed": not reasons, "reasons": reasons,
-            "final_value": metrics.get("final_value"), "benchmark_final_value": metrics.get("benchmark_final_value"),
+            # 2026-10-30 (使用者：我拿到的才叫賺；直接用兩種方式): the money every ranking and "best" reads is the money
+            # counted (a gain once sold, every loss) against 0050 sold; the value with the held stocks' paper gains is
+            # kept beside it. A result from before (no counted value) keeps its paper figure until it is run again
+            "counted": metrics.get("counted_value") is not None,
+            "final_value": metrics.get("counted_value") if metrics.get("counted_value") is not None else metrics.get("final_value"),
+            "benchmark_final_value": (metrics.get("benchmark_sold_value") if metrics.get("counted_value") is not None
+                                      else metrics.get("benchmark_final_value")),
+            "paper_value": metrics.get("final_value"), "paper_gain": metrics.get("paper"),
             "excess": metrics.get("full_period_excess"), "since_2020_excess": metrics.get("since_2020_excess"),
-            "since_2020_final_value": metrics.get("since_2020_final_value"),
-            "since_2020_benchmark_final_value": metrics.get("since_2020_benchmark_final_value"),
+            "since_2020_final_value": (metrics.get("since_2020_counted_value") if metrics.get("since_2020_counted_value")
+                                       is not None else metrics.get("since_2020_final_value")),
+            "since_2020_benchmark_final_value": (metrics.get("since_2020_benchmark_sold_value")
+                                                 if metrics.get("since_2020_counted_value") is not None
+                                                 else metrics.get("since_2020_benchmark_final_value")),
+            "since_2020_paper_value": metrics.get("since_2020_final_value"),
             "win_1y": one.get("win_ratio"), "win_3y": three.get("win_ratio"), "median_3y": three.get("median_excess"),
             "max_drawdown": metrics.get("max_drawdown"), "benchmark_max_drawdown": metrics.get("benchmark_max_drawdown"),
             "xirr": metrics.get("xirr"), "benchmark_xirr": metrics.get("benchmark_xirr"),

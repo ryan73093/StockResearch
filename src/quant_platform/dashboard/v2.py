@@ -278,6 +278,29 @@ def warm(name: str, research_dir: Path, compute) -> None:
     _READY[f"{name}|{Path(research_dir).resolve()}"] = (monotonic(), compute())
 
 
+def roles_view(research_dir: Path) -> dict[str, object]:
+    """The strategy roles page: each role's growth, the month's list, the division of labour, the holding styles."""
+    from quant_platform.research import rolling as rolling_test
+    from quant_platform.research.roles import summary
+
+    rolling = rolling_test.summary(rolling_test.latest(research_dir)) or rolling_test.pending(research_dir)
+    try:                          # 2026-10-20 (使用者：因子、DL、RL、ML 各負責什麼): the division of labour
+        from quant_platform.research.division import diagnose
+
+        division = diagnose(research_dir)
+    except Exception:
+        logger.exception("Division of labour failed")
+        division = None
+    try:                          # 2026-10-20 (使用者：20 天、月線上都沒看到): the holding styles side by side
+        from quant_platform.research.holding import compare
+
+        holding = compare(research_dir)
+    except Exception:
+        logger.exception("Holding comparison failed")
+        holding = None
+    return {"growth": summary(research_dir), "rolling": rolling, "division": division, "holding": holding}
+
+
 def ready_views(research_dir: Path) -> dict[str, object]:
     """name -> how to compute it: what the warm-up keeps ready."""
     from quant_platform.research.pool import pool_view
@@ -285,7 +308,8 @@ def ready_views(research_dir: Path) -> dict[str, object]:
 
     return {"pool:seed": lambda: pool_view(research_dir, basis="seed"), "dashboard": lambda: dashboard_data(research_dir),
             "downside": lambda: downside_table(research_dir), "forward": lambda: StockForwardTracker(research_dir).summary(),
-            "status": lambda: research_status(research_dir), "scale": lambda: search_scale(research_dir)}
+            "status": lambda: research_status(research_dir), "scale": lambda: search_scale(research_dir),
+            "roles": lambda: roles_view(research_dir)}
 
 
 def dashboard_data(research_dir: Path) -> dict[str, object]:
@@ -1413,28 +1437,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     @blueprint.get("/research/roles")
     def research_roles():
         """2026-10-16 (使用者：策略是我的角色，我要知道每個角色成長了多少): every strategy role, its growth and metrics."""
-        from quant_platform.research import rolling as rolling_test
-        from quant_platform.research.roles import summary
-
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        rolling = rolling_test.summary(rolling_test.latest(research_dir)) or rolling_test.pending(research_dir)
-        try:                      # 2026-10-20 (使用者：因子、DL、RL、ML 各負責什麼): the division of labour
-            from quant_platform.research.division import diagnose
-
-            division = diagnose(research_dir)
-        except Exception:
-            logger.exception("Division of labour failed")
-            division = None
-        try:                      # 2026-10-20 (使用者：20 天、月線上都沒看到): the holding styles side by side
-            from quant_platform.research.holding import compare
-
-            holding = compare(research_dir)
-        except Exception:
-            logger.exception("Holding comparison failed")
-            holding = None
+        # 2026-10-30 (使用者：UI、UX 優化了嗎；研究頁 5 秒內): computed at every visit it took 17.9 s — now from the
+        # background warm-up like the other research views
+        view = ready("roles", research_dir, lambda: roles_view(research_dir))
         return render_template("v2/research_roles.html", active_nav="research", research_tab="roles",
-                               growth=summary(research_dir), rolling=rolling, jobs=JobLog(research_dir).jobs(),
-                               division=division, holding=holding)
+                               jobs=JobLog(research_dir).jobs(), **view)
 
     @blueprint.get("/research/knowledge")
     def research_knowledge():

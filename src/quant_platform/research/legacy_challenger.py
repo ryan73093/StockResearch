@@ -322,6 +322,12 @@ class RunResult:
     taxes: int = 0
     bought: float = 0.0     # NT$ of shares bought (before fees)
     sold: float = 0.0       # NT$ of shares sold (before fees and tax)
+    # 2026-10-30 (使用者：我拿到的才叫賺，拿到的才叫賠；未實現損益你也算賺錢哦): at the last session, the money counted
+    # (the cash and each holding at its cost or, when selling it now brings less, at that), what selling everything
+    # would bring (fee, tax and slippage off), and the held stocks' gains on paper (not counted); None: not computed
+    counted_value: float | None = None
+    sold_value: float | None = None
+    paper: float | None = None
 
     @property
     def final_value(self) -> float:
@@ -338,6 +344,8 @@ class RunResult:
             "final_value": round(self.final_value, 2), "contributed": round(self.contributed, 2),
             "xirr": None if rate is None else round(rate, 6), "max_drawdown": round(drawdown, 6),
             "trades": self.trades, "fees": self.fees, "taxes": self.taxes,
+            **({"counted_value": round(self.counted_value, 2), "sold_value": round(self.sold_value, 2),
+                "paper": round(self.paper, 2)} if self.counted_value is not None else {}),
         }
 
 

@@ -1041,3 +1041,28 @@ def test_the_rerun_halves_split_by_the_rule_s_hash(monkeypatch):
     assert not {rule.rule_hash for rule in first} & {rule.rule_hash for rule in second}
     monkeypatch.setattr(daily, "rerun_all_batch", lambda: list(reversed(rules[3:])))   # the other half went first
     assert {rule.rule_hash for rule in daily.BATCHES["rerun_all_a"]()} == {rule.rule_hash for rule in first if rule in rules[3:]}
+
+
+def test_a_backtest_keeps_both_the_money_counted_and_everything_sold():
+    """2026-10-30 (使用者：我拿到的才叫賺；直接用兩種方式，一個是未實現一個是已實現): at the last session every run keeps
+    what selling everything would bring and the money counted — each holding at its cost, or below it when selling it
+    now brings less — and the paper gain left out; checked by hand from the ledger, a rising and a falling 0050."""
+    from quant_platform.research.daily import simulate_daily
+
+    costs = CostModel(fee_rate=0.001425, minimum_fee=20, slippage_bps=10.0)
+    for prices, up in (([50.0, 55.0, 60.0], True), ([50.0, 45.0, 40.0], False)):
+        days = weekdays(date(2026, 9, 1), date(2026, 9, 3))
+        data = LegacyData(sessions=days, closes={"0050.TW": dict(zip(days, prices))},
+                          traded_value={"0050.TW": {day: 5e9 for day in days}}, factors={}, predictions={})
+        ledger = []
+        run = simulate_daily(data, None, costs, days[0], days[-1], plan=SeedPlan(300_000, 10_000), ledger=ledger)
+        bought = [entry for entry in ledger if entry["side"] == "BUY"]
+        units = sum(entry["shares"] for entry in bought)
+        basis = sum(entry["shares"] * entry["price"] + entry["fee"] for entry in bought)
+        cash = run.final_value - units * prices[-1]
+        amount = units * prices[-1] * (1 - 10 / 10_000)
+        net = amount - costs.fee(amount) - costs.tax(amount, "stock_etf", "SELL")
+        assert run.sold_value == pytest.approx(cash + net)
+        assert run.counted_value == pytest.approx(cash + min(basis, net))
+        assert run.paper == pytest.approx(max(0.0, net - basis)) and (run.paper > 0) == up
+        assert run.summary()["counted_value"] == round(run.counted_value, 2)

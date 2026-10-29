@@ -101,8 +101,8 @@ def test_pool_and_research_page_show_costs_and_forward_tracking(tmp_path):
     assert rows["stock-old"]["development"]["cost_share"] == 0.1
     assert rows["stock-both"]["forward_since"] == START and rows["etf-win"]["forward_since"] is None
     client = create_app(container).test_client()
-    page = client.get("/research?tab=forward").get_data(as_text=True)
-    assert "個股規則前向帳戶" in page and "/research/forward/stock-both" in page and "正常" in page
+    # 2026-10-29 (使用者：前向觀察不是總表): no forward master table; the old address opens the overview
+    assert client.get("/research?tab=forward").status_code == 302
     detail = client.get("/research/forward/stock-both").get_data(as_text=True)   # 2026-10-17: holdings on its own page
     assert "台積電" in detail
     pool = client.get("/research/pool?basis=dca").get_data(as_text=True)
@@ -132,7 +132,6 @@ def test_final_validation_result_shows_on_pool_and_forward_rows(tmp_path):
     final = StockForwardTracker(research).summary()[0]["final"]
     assert final["passed"] is False and final["excess"] == -0.71
     client = create_app(container).test_client()
-    assert "最終驗證未通過 -71%" in client.get("/research?tab=forward").get_data(as_text=True)
     assert "最終驗證比 0050 -71%" in client.get("/research/pool?basis=dca").get_data(as_text=True)
 
 

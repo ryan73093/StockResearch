@@ -1657,6 +1657,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
     by_day = dict(contributions)
     result = RunResult(rule.rule_hash[:12] if rule else "dca_0050", sessions, [], [], contributions)
     cash, units = 0.0, defaultdict(float)
+    basis: dict[str, float] = defaultdict(float)   # 2026-10-30: what the shares held cost (fees in; as the forward page)
     picks: list[str] = []
     shares_of: dict[str, float] = {}
     was_parked = False
@@ -1776,6 +1777,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
             fee = order_fee(shares, fill, day)
             cash -= shares * fill + fee
             units[symbol] += shares
+            basis[symbol] += shares * fill + fee
             result.trades += 1
             result.fees += fee
             result.bought += shares * fill
@@ -1806,9 +1808,11 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         amount = shares * fill
         fee, tax = order_fee(shares, fill, day), costs.tax(amount, _tax_kind(symbol), "SELL")
         cash += amount - fee - tax
+        basis[symbol] -= basis[symbol] * min(1.0, shares / units[symbol])
         units[symbol] -= shares
         if units[symbol] < 1e-9:
             units[symbol] = 0.0
+            basis[symbol] = 0.0
         result.trades += 1
         result.fees += fee
         result.taxes += tax
@@ -1881,6 +1885,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                     ledger.append({"day": day, "symbol": symbol, "side": "SELL", "shares": units[symbol],
                                    "price": 0.0, "fee": 0.0, "tax": 0.0, "reason": "下市，持股歸零"})
                 units[symbol] = 0.0
+                basis[symbol] = 0.0                # worthless: its cost is lost (not in the money counted)
         contribution = by_day.get(day, 0.0)
         cash += contribution
         if free_goals is not None:                 # 2026-10-16: the free rule's weights (RL 4.0)
@@ -1973,6 +1978,18 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         result.flows.append(contribution)
         if snapshots is not None:
             snapshots[day] = (cash + receivable, owned)
+    if sessions:                                 # 2026-10-30: both results at the last session (see RunResult)
+        counted = sold_all = cash + receivable
+        paper = 0.0
+        for symbol, count in owned.items():
+            amount = count * price(symbol, sessions[-1]) * (1 - costs.slippage_bps / 10_000)
+            if amount <= 0:
+                continue
+            net = amount - costs.fee(amount) - costs.tax(amount, _tax_kind(symbol), "SELL")
+            sold_all += net
+            counted += min(basis.get(symbol, 0.0), net)
+            paper += max(0.0, net - basis.get(symbol, 0.0))
+        result.counted_value, result.sold_value, result.paper = counted, sold_all, paper
     return result
 
 
@@ -2310,6 +2327,20 @@ def account_parking(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: C
 
 
 def _excess(run: RunResult, benchmark: RunResult) -> float:
+    """Beating 0050, per NT$ put in. 2026-10-30 (使用者：我拿到的才叫賺，拿到的才叫賠；未實現損益你也算賺錢哦): the
+    money counted (RunResult.counted_value: a gain once sold, every loss) against 0050 sold that day (0050 is the
+    owner's own holding and never sells) — the gate, the windows and the rankings all read this. A run without them
+    (an older result) keeps the value with the held stocks at their close (``_paper_excess``)."""
+    if not run.contributed:
+        return 0.0
+    counted, sold = getattr(run, "counted_value", None), getattr(benchmark, "sold_value", None)
+    if counted is not None and sold is not None:
+        return (counted - sold) / run.contributed
+    return _paper_excess(run, benchmark)
+
+
+def _paper_excess(run: RunResult, benchmark: RunResult) -> float:
+    """The same with the held stocks at their close (their paper gains in): shown beside, never judged."""
     return (run.final_value - benchmark.final_value) / run.contributed if run.contributed else 0.0
 
 
@@ -2525,8 +2556,10 @@ def account_report(data: LegacyData, account, first: date, costs: CostModel,
         "start": first.isoformat(), "end": end.isoformat(),
         "strategy": run.summary(), "benchmark": benchmark.summary(),
         "full_period_excess": round(_excess(run, benchmark), 6),
+        "full_period_paper_excess": round(_paper_excess(run, benchmark), 6),
         "since_2020": {"start": REGIME_START.isoformat(), "strategy": regime_run.summary(),
-                       "benchmark": regime_benchmark.summary(), "excess": round(_excess(regime_run, regime_benchmark), 6)},
+                       "benchmark": regime_benchmark.summary(), "excess": round(_excess(regime_run, regime_benchmark), 6),
+                       "paper_excess": round(_paper_excess(regime_run, regime_benchmark), 6)},
         "windows": {key: account_windows(data, account, costs, months, max(first, windows_from or first), end,
                                          cache.setdefault(key, {}))
                     for key, months in WINDOWS.items()},
@@ -2869,6 +2902,13 @@ def report_metrics(report: dict, engine: str, plan: dict) -> dict[str, object]:
         "full_period_excess": report["full_period_excess"], "since_2020_excess": report["since_2020"]["excess"],
         "since_2020_final_value": report["since_2020"]["strategy"]["final_value"],
         "since_2020_benchmark_final_value": report["since_2020"]["benchmark"]["final_value"],
+        # 2026-10-30 (使用者：直接用兩種方式，一個是未實現一個是已實現): both kept; the excess above is the counted one
+        "counted_value": strategy.get("counted_value"), "benchmark_sold_value": benchmark.get("sold_value"),
+        "paper": strategy.get("paper"),
+        "since_2020_counted_value": report["since_2020"]["strategy"].get("counted_value"),
+        "since_2020_benchmark_sold_value": report["since_2020"]["benchmark"].get("sold_value"),
+        "full_period_paper_excess": report.get("full_period_paper_excess"),
+        "since_2020_paper_excess": report["since_2020"].get("paper_excess"),
         "windows": report["windows"], "trades": strategy["trades"], "costs": strategy["fees"] + strategy["taxes"],
         "cost_share": report["activity"].get("cost_share"), "turnover": report["activity"].get("turnover"),
         "orders_per_month": report["activity"].get("orders_per_month"),

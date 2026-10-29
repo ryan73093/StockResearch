@@ -18,7 +18,7 @@ def client(tmp_path):
 @pytest.mark.parametrize(
     ("path", "marker"),
     [
-        ("/", "今日行動"),
+        ("/", "資料狀態"),
         ("/holdings", "模擬帳戶"),
         ("/plan", "建立你的投資計畫"),
         ("/research", "研究現況"),
@@ -182,9 +182,12 @@ def test_today_reminds_when_the_account_falls_past_the_plans_tolerance(tmp_path)
     assert "需要留意" in body and "帳戶從高點回落 32.0%，已超過計畫的可承受回撤 30%" in body
 
 
-def test_today_without_a_plan_asks_for_one_instead_of_legacy_picks(client):
-    body = client.get("/").get_data(as_text=True)
-    assert "先建立投資計畫" in body and "研究模型觀察" not in body and "模擬權益" not in body
+def test_today_without_a_plan_opens_on_the_issue_warnings(client):
+    """2026-10-30 (使用者：UI、UX 優化了嗎；10-27：首頁做初步警示): without a plan the first thing is the issue warnings;
+    the setup checklist the owner never used is last and the big plan prompt is gone."""
+    body = client.get("/").get_data(as_text=True)          # (no issue data here: the warnings card is not drawn)
+    assert "先建立投資計畫" not in body and "研究模型觀察" not in body and "模擬權益" not in body
+    assert "開始使用" not in body or body.index("資料狀態") < body.index("開始使用")
 
 
 def test_legacy_tools_left_the_research_page_for_the_system_page(client):

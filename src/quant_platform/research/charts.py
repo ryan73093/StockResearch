@@ -232,7 +232,7 @@ def _histogram(bins, refs, label, dots, count_text, size, rows=()) -> str:
     width, base_height = SIZES[size]
     wide = size != "narrow"
     strip = 46 if (dots and wide) else 0
-    row_height = 22 if wide else 30
+    row_height = 22 if wide else 40          # 2026-10-30: a phone's rows were too small to read (11px text, 2px dots)
     rows_height = len(rows) * row_height + 12 if rows else 0
     height = base_height + strip + rows_height
     left, right, top, bottom = ((150 if rows else 54), 12, 30, 30) if wide else (40, 8, 40, 28)
@@ -284,7 +284,7 @@ def _histogram(bins, refs, label, dots, count_text, size, rows=()) -> str:
     first = base_height + strip + 6
     for number, row in enumerate(rows):
         y0 = first + number * row_height
-        band_top, band_bottom = (y0 + 4, y0 + row_height - 4) if wide else (y0 + 15, y0 + row_height - 3)
+        band_top, band_bottom = (y0 + 4, y0 + row_height - 4) if wide else (y0 + 18, y0 + row_height - 3)
         data = "".join(f' data-{name}="{escape(str(value))}"' for name, value in (row.get("data") or {}).items())
         parts.append(f'<g class="frow"{data} tabindex="0" role="button" aria-label="{escape(row["title"])}">'
                      f'<title>{escape(row["title"])}</title>'
@@ -294,12 +294,12 @@ def _histogram(bins, refs, label, dots, count_text, size, rows=()) -> str:
         if wide:
             parts.append(f'<text class="lbl" x="{left - 8}" y="{(band_top + band_bottom) / 2 + 4:.1f}" text-anchor="end">{escape(name)}</text>')
         else:
-            parts.append(f'<text class="lbl flbl" x="2" y="{y0 + 11}">{escape(name)}・中位 {row["median"]:,.{1 if row["median"] < 100 else 0}f} 萬</text>')
+            parts.append(f'<text class="lbl flbl" x="2" y="{y0 + 14}">{escape(name)}・中位 {row["median"]:,.{1 if row["median"] < 100 else 0}f} 萬</text>')
         if row.get("dots"):
             for dot in row["dots"]:
                 jitter = _jitter(dot["title"])
                 parts.append(f'<circle class="{dot["css"]}" cx="{sx(dot["value"]):.1f}" '
-                             f'cy="{band_top + 2 + jitter * (band_bottom - band_top - 5):.1f}" r="2.4"><title>{escape(dot["title"])}</title></circle>')
+                             f'cy="{band_top + 2 + jitter * (band_bottom - band_top - 5):.1f}" r="{2.4 if wide else 3.4}"><title>{escape(dot["title"])}</title></circle>')
         else:
             peak_row = max(row["bins"]) or 1
             for item, count in zip(bins, row["bins"]):

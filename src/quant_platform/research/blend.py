@@ -113,6 +113,10 @@ def combine(name: str, runs: list[RunResult]) -> RunResult:
     combined.taxes = sum(run.taxes for run in runs)
     combined.bought = sum(run.bought for run in runs)
     combined.sold = sum(run.sold for run in runs)
+    if all(run.counted_value is not None for run in runs):    # 2026-10-30: each sleeve's money counted, added up
+        combined.counted_value = sum(run.counted_value for run in runs)
+        combined.sold_value = sum(run.sold_value for run in runs)
+        combined.paper = sum(run.paper for run in runs)
     return combined
 
 

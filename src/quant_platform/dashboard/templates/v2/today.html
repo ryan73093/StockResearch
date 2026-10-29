@@ -163,18 +163,8 @@
   </aside>
 </div>
 {% elif not plan %}
-{% if onboarding and onboarding.show %}{{ onboarding_card(onboarding) }}{% endif %}
-<section class="hero hero--idle">
-  <div>
-    <div class="hero__eyebrow">{{ icon('spark') }}今日行動</div>
-    <h2 class="hero__headline">先建立投資計畫</h2>
-    <p class="hero__mode">在「計畫」頁填每月投入金額、投入日與採用的策略；之後每個交易日 13:30 收盤後，這裡會告訴你要不要買、買什麼、限價多少。</p>
-    <div class="hero__chips">
-      <a class="btn btn--primary" href="/plan">建立計畫</a>
-      <a class="btn" href="/research/pool">看研究選手池</a>
-    </div>
-  </div>
-</section>
+{# 2026-10-30 (使用者：UI、UX 優化了嗎；10-27：首頁做初步警示): without a plan the page opens on the issue warnings — the
+   setup checklist and the plan prompt the owner never used came first and took the whole phone screen #}
 {{ issues_card(issues_head) }}
 {{ rolling_card(rolling) }}
 {{ roles_card(growth) }}
@@ -186,6 +176,7 @@
     <div><dt>今日排除</dt><dd>{{ status.excluded }} 檔{% if status.excluded %}（可能停牌）{% endif %}</dd></div>
   </dl>
 </section>
+{% if onboarding and onboarding.show %}{{ onboarding_card(onboarding) }}{% endif %}
 {% else %}
 {% if onboarding and onboarding.show %}{{ onboarding_card(onboarding) }}{% endif %}
 <section class="hero hero--{{ kind }}">
