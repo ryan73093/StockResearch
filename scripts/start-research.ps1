@@ -12,7 +12,10 @@ $script = Join-Path $root "scripts\research-pipeline.ps1"
 # closed them and the runs stopped. conhost --headless gives the run a console without any window, and its children
 # (Start-Process -NoNewWindow) share it. Each run writes <name>-<stamp>-pipeline.log: every step, when it began and ended.
 $command = "conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" -Name $Name"
-$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+# 2026-10-29 (使用者：你他媽當我電腦資源很多是不是): created at the idle priority (64), its steps inherit it; the
+# market-hours capture (liveflow) at the normal one (32) — late, it would record the wrong moment
+$priority = if ($Name -in @("liveflow")) { [uint32]32 } else { [uint32]64 }
+$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0; PriorityClass = $priority }
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
     CommandLine = $command; CurrentDirectory = $root; ProcessStartupInformation = $startup }
 if ($result.ReturnValue -ne 0) {

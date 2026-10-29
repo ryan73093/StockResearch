@@ -3,6 +3,7 @@
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
 $ErrorActionPreference = "Continue"
+$RealTimeFlows = @("liveflow")      # 2026-10-29: captured as the market trades; they keep the normal priority
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $env:PYTHONPATH = "src"
@@ -21,6 +22,10 @@ function Write-Note([string]$Text) {
     Add-Content -Path $pipelineLog -Value $line -Encoding UTF8
 }
 Write-Note "開始研究流程 $Name（PID $PID）"
+# 2026-10-29 (使用者：你他媽當我電腦資源很多是不是 — 研究程式佔滿 CPU，另一個專案的 UE 編譯 8 小時只跑 9%): the run and
+# every step it starts (a child inherits the idle class) at the idle priority, so any other work on the machine goes first.
+# Not the market-hours capture (liveflow): late, it would record the wrong moment (使用者：不要為了省效能最後又給我錯的資料)
+if ($Name -notin $RealTimeFlows) { try { (Get-Process -Id $PID).PriorityClass = 'Idle' } catch { } }
 # 2026-10-21 (使用者 2026-10-16：隨時看得到研究有沒有在跑；稽核：排隊中的流程網頁上看不到): a wait shows on
 # 研究 › 執行中的程式 as 等待中 with its reason, and in the step log
 function Wait-While([string]$Reason, [scriptblock]$Condition, [int]$Seconds = 120) {

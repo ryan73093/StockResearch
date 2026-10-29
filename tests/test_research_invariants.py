@@ -265,6 +265,21 @@ def test_the_research_pages_are_opened_and_timed(monkeypatch):
 
 
 
+def test_a_research_process_above_the_idle_priority_is_caught(tmp_path):
+    """2026-10-29 (使用者：你他媽當我電腦資源很多是不是): research and worker at the idle class; the pages may be normal."""
+    root = str(tmp_path.parent.parent)
+    rows = [{"pid": 1, "priority": 4, "command": f"{root}\\.venv\\Scripts\\python.exe -m quant_platform.research forward"},
+            {"pid": 2, "priority": 8, "command": f"{root}\\.venv\\Scripts\\quant-web.exe"},
+            {"pid": 3, "priority": 8, "command": "C:\\Other\\UnrealBuildTool.exe"},
+            {"pid": 4, "priority": 8, "command": "python.exe -m quant_platform.research scan-full --phase b"}]
+    rows.append({"pid": 5, "priority": 8, "command": f"{root}\\.venv\\Scripts\\quant-worker.exe"})
+    rows.append({"pid": 6, "priority": 8, "command": "python.exe -m quant_platform.research live-flow"})
+    assert [item["pid"] for item in invariants.greedy(rows, tmp_path.parent.parent)] == [4]
+    found = invariants.priority_check(rows, tmp_path.parent.parent)
+    assert found["name"] == "本專案的研究程式都用最低優先權" and not found["ok"] and "PID 4" in found["detail"]
+    assert invariants.priority_check([row for row in rows if row["pid"] != 4], tmp_path.parent.parent)["ok"]
+
+
 def test_a_day_the_machine_ran_out_of_memory_is_caught(tmp_path):
     """2026-10-28: seven times; a forward, two boards, a training and the full search died."""
     name = "過去 24 小時記憶體沒有用完"

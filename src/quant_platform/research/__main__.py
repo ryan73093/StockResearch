@@ -2122,4 +2122,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # 2026-10-29 (使用者：是你的程式太肥、架構太肥，還是真的這麼多): the steps every flow ends with run one at a time and
+    # are skipped when nothing they read changed since the last finished run (research/shared_steps.py)
+    from quant_platform.research.shared_steps import guarded
+
+    sys.exit(guarded(main, RESEARCH, sys.argv[1:]))

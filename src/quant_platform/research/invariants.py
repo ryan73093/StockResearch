@@ -105,13 +105,54 @@ def memory_events(hours: int = 24) -> list[dict[str, object]]:
     return output
 
 
+IDLE_PRIORITY = 4          # Win32_Process.Priority of the idle class (below normal 6, normal 8)
+# the pages, their supervisor, the worker (the 13:50 table, the after-close records) and the market-hours capture keep
+# the normal priority: late, they would record the wrong moment (使用者 2026-10-29：不要為了省效能最後又給我錯的資料)
+SERVED = ("quant-web.exe", "quant-api.exe", "quant-worker.exe", "run_local_services.ps1", "research live-flow",
+          "-name liveflow")
+
+
+def machine_processes() -> list[dict[str, object]]:
+    """2026-10-29: every process with a command line — its PID, base priority and command line (Windows only, read with
+    no window)."""
+    import json
+    import subprocess
+    import sys
+
+    if sys.platform != "win32":
+        return []
+    script = ("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | "
+              "Select-Object ProcessId, Priority, CommandLine | ConvertTo-Json -Compress")
+    done = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True,
+                          creationflags=0x08000000, timeout=120)                 # CREATE_NO_WINDOW
+    if done.returncode != 0:
+        raise RuntimeError(done.stderr.decode("utf-8", errors="replace")[:120] or f"powershell {done.returncode}")
+    rows = json.loads(done.stdout.decode("utf-8", errors="replace") or "[]")
+    return [{"pid": int(row["ProcessId"]), "priority": int(row.get("Priority") or 0), "command": row["CommandLine"]}
+            for row in ([rows] if isinstance(rows, dict) else rows)]
+
+
+def greedy(processes: list[dict[str, object]], root: Path) -> list[dict[str, object]]:
+    """2026-10-29 (使用者：你他媽當我電腦資源很多是不是): this project's research and pipeline processes running above the
+    idle class — the SERVED ones are left normal."""
+    folder = str(root).lower()
+    output = []
+    for item in processes:
+        command = str(item.get("command") or "").lower()
+        if ((folder in command or "quant_platform" in command) and not any(mark in command for mark in SERVED)
+                and int(item.get("priority") or 0) > IDLE_PRIORITY):
+            output.append(item)
+    return output
+
+
 def _check(name: str, source: str, ok: bool, detail: str) -> dict[str, object]:
     return {"name": name, "source": source, "ok": bool(ok), "detail": detail}
 
 
 def run(research: str | Path, today: date, backups: Path | None = None,
         windows: list[dict[str, object]] | None = None, site: str | None = None,
-        memory: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
+        memory: list[dict[str, object]] | None = None,
+        processes: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
     from quant_platform.research.categories import uses_0050
     from quant_platform.research.forward_board import common_start
     from quant_platform.research.rolling import cutoff_for, folder as rolling_folder
@@ -470,7 +511,21 @@ def run(research: str | Path, today: date, backups: Path | None = None,
             if events else "沒有"))
     except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
         checks.append(_check(name, source, False, f"沒辦法檢查：{str(exc)[:120]}"))
+    # 2026-10-29 (使用者：你他媽當我電腦資源很多是不是): the research took the whole CPU and another project's UE build ran
+    # 9% in 8 hours; research, pipelines and the worker run at the idle priority so other work goes first
+    checks.append(priority_check(processes, research.parent.parent))
     return checks
+
+
+def priority_check(processes: list[dict[str, object]] | None, root: Path) -> dict[str, object]:
+    """2026-10-29 (使用者：你他媽當我電腦資源很多是不是): the research and pipeline processes at the idle priority."""
+    name, source = "本專案的研究程式都用最低優先權", "使用者 2026-10-29：研究程式不能搶這台電腦其他工作的 CPU"
+    try:
+        found = greedy(machine_processes() if processes is None else processes, root)
+        return _check(name, source, not found, (f"{len(found)} 個不是最低：" + "；".join(
+            f"PID {item['pid']}（{str(item['command'])[-60:]}）" for item in found[:3])) if found else "是")
+    except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
+        return _check(name, source, False, f"沒辦法檢查：{str(exc)[:120]}")
 
 
 PAGE_LIMIT = 5.0           # seconds a research page may take (使用者 2026-10-28：研究的載入也太慢了吧)
