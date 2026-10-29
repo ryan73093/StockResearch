@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from quant_platform.research import files  # 2026-10-29: replace, tried again while read
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -262,7 +263,7 @@ def build_actions(
         pq.write_table(
             pa.Table.from_pylist(series, schema=TR_SCHEMA), partial, compression="zstd"
         )
-        partial.replace(tr_path)
+        files.replace(partial, tr_path, wait=120.0)
         years = (rows[-1]["date"] - rows[0]["date"]).days / 365.25
         growth = series[-1]["total_return_index"] / series[0]["total_return_index"]
         price_growth = float(rows[-1]["close"]) / float(rows[0]["close"])

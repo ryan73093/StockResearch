@@ -32,6 +32,7 @@ from datetime import date, datetime
 from datetime import time as clock_time
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from quant_platform.research import files  # 2026-10-29: replace, tried again while read
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 URL = "https://api.finmindtrade.com/api/v4/data"
@@ -285,7 +286,7 @@ def fetch_all(base: Path, token: str, codes: Iterable[str], datasets: Iterable[s
                         "data": payload.get("data") or []}
                 partial = path.with_suffix(".partial")
                 partial.write_bytes(gzip.compress(json.dumps(body, ensure_ascii=False).encode("utf-8")))
-                partial.replace(path)
+                files.replace(partial, path, wait=120.0)
             done += 1
             sleep(interval)
     if job:

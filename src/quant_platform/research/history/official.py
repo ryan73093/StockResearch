@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
+from quant_platform.research import files  # 2026-10-29: replace, tried again while read
 
 TWSE = "https://www.twse.com.tw/rwd/zh"
 TPEX = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
@@ -179,7 +180,7 @@ class OfficialHistoryClient:
         path.parent.mkdir(parents=True, exist_ok=True)
         partial = path.with_suffix(".json.partial")
         partial.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        partial.replace(path)
+        files.replace(partial, path, wait=120.0)
         return payload
 
     def _request(self, url: str, data: bytes | None = None) -> object:

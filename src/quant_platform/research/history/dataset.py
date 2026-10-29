@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from quant_platform.research import files  # 2026-10-29: replace, tried again while read
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -310,7 +311,7 @@ def write_parquet(rows: list[DailyRow], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(".parquet.partial")
     pq.write_table(table, partial, compression="zstd")
-    partial.replace(path)
+    files.replace(partial, path, wait=120.0)
 
 
 def sha256(path: Path) -> str:

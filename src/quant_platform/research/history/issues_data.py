@@ -27,6 +27,7 @@ import xml.etree.ElementTree as ElementTree
 import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from quant_platform.research import files  # 2026-10-29: replace, tried again while read
 
 USER_AGENT = "StockResearch research platform (personal, non-commercial)"
 SEC_FACTS = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
@@ -78,7 +79,7 @@ def fetch_sec(history: Path, get=_get, pause: float = 0.3) -> dict[str, int]:
             continue
         partial = folder / f"{ticker}.partial"
         partial.write_bytes(payload)
-        partial.replace(folder / f"{ticker}.json")
+        files.replace(partial, folder / f"{ticker}.json", wait=120.0)
         sizes[ticker] = len(payload)
         time.sleep(pause)                       # SEC asks for at most 10 requests a second
     return sizes
@@ -362,7 +363,7 @@ def fetch_lvr(history: Path, today: date, get=_get, full: bool = False) -> dict[
     merged = merged.sort_values("order").drop_duplicates("serial", keep="last").drop(columns="order")
     partial = path.with_suffix(".partial")
     merged.to_parquet(partial, index=False)
-    partial.replace(path)
+    files.replace(partial, path, wait=120.0)
     return counts
 
 
@@ -457,5 +458,5 @@ def update_sectors(history: Path) -> int:
     merged = merged.sort_values("date")
     partial = path.with_suffix(".partial")
     merged.to_parquet(partial, index=False)
-    partial.replace(path)
+    files.replace(partial, path, wait=120.0)
     return len(rows)

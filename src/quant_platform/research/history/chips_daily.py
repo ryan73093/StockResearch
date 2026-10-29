@@ -42,6 +42,7 @@ import re
 from collections.abc import Iterable, Iterator
 from datetime import date
 from pathlib import Path
+from quant_platform.research import files  # 2026-10-29: replace, tried again while read
 
 from quant_platform.research.history.official import TPEX_BULLETIN, OfficialHistoryClient, number
 
@@ -262,7 +263,7 @@ def fetch_revenue(base: Path, client: OfficialHistoryClient) -> dict[str, object
             path.parent.mkdir(parents=True, exist_ok=True)
             partial = path.with_suffix(".json.partial")
             partial.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-            partial.replace(path)
+            files.replace(partial, path, wait=120.0)
         saved[exchange] = len(rows)
     return saved
 

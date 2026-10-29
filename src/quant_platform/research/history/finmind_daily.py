@@ -24,6 +24,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
+from quant_platform.research import files  # 2026-10-29: replace, tried again while read
 
 from quant_platform.research.history.finmind import TAIPEI, URL, QuotaReached, quota_wait
 
@@ -101,7 +102,7 @@ def _store(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(".partial")
     partial.write_bytes(gzip.compress(json.dumps(payload, ensure_ascii=False).encode("utf-8")))
-    partial.replace(path)
+    files.replace(partial, path, wait=120.0)
 
 
 def download(base: str | Path, token: str, tasks: list[tuple[str, date]], kind: str, per_hour: int, job=None,
