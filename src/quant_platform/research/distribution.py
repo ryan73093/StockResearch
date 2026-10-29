@@ -158,12 +158,12 @@ def forward_view(rows: list[dict], summary: list[dict], start: str) -> dict[str,
     each one's money if everything were sold at its last session (the tracker's sell_all), with the same cash flow in 0050
     — on the same kind of drawing, each category marked."""
     by_hash = {row.get("spec_hash"): row for row in rows}
-    live = [row for row in summary if not row.get("stopped") and row.get("since") == start and row.get("sell_all")
+    live = [row for row in summary if not row.get("stopped") and row.get("since") == start and row.get("kept")
             and row.get("contributed")]
     if not live:
         return {}
     invested = Counter(round(float(row["contributed"])) for row in live).most_common(1)[0][0]
-    bench = Counter(round(float(row["sell_all"]["bench_back"])) for row in live
+    bench = Counter(round(float(row["kept"]["bench_back"])) for row in live
                     if round(float(row["contributed"])) == invested).most_common(1)[0][0]
     items = []
     for row in live:
@@ -172,9 +172,9 @@ def forward_view(rows: list[dict], summary: list[dict], start: str) -> dict[str,
         pool = by_hash.get(row["rule_hash"]) or {}
         items.append({"trial": pool.get("trial_id"), "name": pool.get("name") or row.get("name"), "tier": pool.get("tier"),
                       "family": (pool.get("category") or {}).get("family") or ("組合帳戶" if row.get("kind") == "blend" else "其他"),
-                      "spec_hash": row["rule_hash"], "value": float(row["sell_all"]["cash_back"])})
+                      "spec_hash": row["rule_hash"], "value": float(row["kept"]["cash_back"])})
     last = max(row.get("date") or "" for row in live)
-    found = _track(f"{FORWARD_LABEL}（{start[5:7].lstrip('0')}/{start[8:].lstrip('0')} 起、{last[5:7].lstrip('0')}/{last[8:].lstrip('0')} 全部賣掉）",
+    found = _track(f"{FORWARD_LABEL}（{start[5:7].lstrip('0')}/{start[8:].lstrip('0')} 起、{last[5:7].lstrip('0')}/{last[8:].lstrip('0')} 實際結果）",
                    float(invested), float(bench), items, "個帳戶", least=1.02)   # two months: a few percent either way
     found.update(start=start, end=last)
     return {"forward": found}

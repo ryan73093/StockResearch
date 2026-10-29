@@ -19,7 +19,7 @@
     <div class="kpi"><div class="kpi__label">回測錢最多</div><div class="kpi__value">{{ wan(d.overall.final_value) if d.overall else '—' }}</div><div class="kpi__note">{% if d.overall and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.overall.final_value / d.benchmark) }} 倍・{{ d.overall.tier }}{% endif %}</div></div>
     <div class="kpi"><div class="kpi__label">一般風險錢最多</div><div class="kpi__value">{{ wan(d.ordinary.final_value) if d.ordinary else '—' }}</div><div class="kpi__note">{% if d.ordinary and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.ordinary.final_value / d.benchmark) }} 倍・回撤不比 0050 深 5 點以上{% endif %}</div></div>
     <div class="kpi"><div class="kpi__label">跌市最穩的錢最多</div><div class="kpi__value">{{ wan(d.steady.final_value) if d.steady else '—' }}</div><div class="kpi__note">{% if d.steady and d.steady.worst_fall %}#{{ d.steady.trial }}・0050 跌最多那次{{ '少跌' if d.steady.worst_fall.gap >= 0 else '多跌' }} {{ '%.1f'|format((d.steady.worst_fall.gap * 100)|abs) }} 點{% endif %}</div></div>
-    <div class="kpi"><div class="kpi__label">前向：{{ fw.start[5:7]|int }}/{{ fw.start[8:10]|int }} 起照規則做</div><div class="kpi__value">{{ '{:.0%}'.format(fw.ahead_share) if fw.ahead_share is not none else '—' }} 贏 0050</div><div class="kpi__note">{{ '{:,}'.format(fw.accounts) }} 個帳戶，全部賣掉計算</div></div>
+    <div class="kpi"><div class="kpi__label">前向：{{ fw.start[5:7]|int }}/{{ fw.start[8:10]|int }} 起照規則做</div><div class="kpi__value">{{ '{:.0%}'.format(fw.ahead_share) if fw.ahead_share is not none else '—' }} 贏 0050</div><div class="kpi__note">{{ '{:,}'.format(fw.accounts) }} 個帳戶，實際結果計算</div></div>
     <div class="kpi"><div class="kpi__label">第一個 T0 最快</div><div class="kpi__value">{{ first_t0[5:7]|int }}/{{ first_t0[8:10]|int }}</div><div class="kpi__note">前向已 {{ d.t0.sessions }}／{{ d.t0.needed }} 個交易日</div></div>
   </div>
 
@@ -58,7 +58,7 @@
     {% endif %}
     {% if c.forward %}
     <figure class="dash-panel">
-      <figcaption><h3>前向：{{ fw.start[5:7]|int }}/{{ fw.start[8:10]|int }} 起真的照規則做</h3><span>每個帳戶當天全部賣掉，比投入的錢多或少幾元</span></figcaption>
+      <figcaption><h3>前向：{{ fw.start[5:7]|int }}/{{ fw.start[8:10]|int }} 起真的照規則做</h3><span>每個帳戶的實際結果（賺的只算賣掉拿到的、賠的連還拿著的都算，帳面獲利不算；0050 用同樣的錢今天全部賣掉比），比投入的錢多或少幾元</span></figcaption>
       {{ c.forward|safe }}
       {{ legend([{'css': 'v1', 'label': '帳戶的中位數'}, {'css': 'band', 'label': '中間一半的帳戶'}, {'css': 'vref', 'label': '0050 同樣的錢'}]) }}
     </figure>
@@ -66,11 +66,11 @@
     {% set fs = d.spread.forward if d.spread else none %}{% if fs %}
     {# 2026-10-27 (使用者：獲益的那些分佈圖我也要看): the forward accounts' money if all sold, each category a row #}
     <figure class="dash-panel dash-panel--full">
-      <figcaption><h3>前向帳戶全部賣掉拿回多少錢（{{ fs.start[5:7]|int }}/{{ fs.start[8:10]|int }} 起，{{ fs.end[5:7]|int }}/{{ fs.end[8:10]|int }} 收盤）</h3><span>{{ '{:,}'.format(fs.counts.lost + fs.counts.behind + fs.counts.ahead) }} 個觀察中的帳戶・橫軸是當天收盤全部賣掉（扣手續費與稅）拿回的錢（萬元），縱軸是帳戶個數・投入的錢在正中間</span></figcaption>
+      <figcaption><h3>前向帳戶的實際結果（{{ fs.start[5:7]|int }}/{{ fs.start[8:10]|int }} 起，{{ fs.end[5:7]|int }}/{{ fs.end[8:10]|int }} 收盤）</h3><span>{{ '{:,}'.format(fs.counts.lost + fs.counts.behind + fs.counts.ahead) }} 個觀察中的帳戶・橫軸是當天收盤全部賣掉（扣手續費與稅）拿回的錢（萬元），縱軸是帳戶個數・投入的錢在正中間</span></figcaption>
       {{ fs.svg|safe }}
       <div class="legend"><span><i class="sw-v2bar"></i>賠錢也輸 0050 {{ '{:,}'.format(fs.counts.lost) }} 個</span>{% if fs.counts.behind %}<span><i class="sw-vputbar"></i>賺錢但輸 0050 {{ '{:,}'.format(fs.counts.behind) }} 個</span>{% endif %}<span><i class="sw-v1bar"></i>不輸 0050 {{ '{:,}'.format(fs.counts.ahead) }} 個</span><span>虛線：投入 {{ '{:,.0f}'.format(fs.invested / 10000) }} 萬、同樣的錢買 0050 {{ '{:,.1f}'.format(fs.bench / 10000) }} 萬</span><span><i class="sw-fmed"></i>每一類的中位數</span><span><i class="sw-fiqr"></i>中間一半</span></div>
       <p class="small muted" style="margin:4px 0 0">中位數 {{ '{:,.1f}'.format(fs.median) }} 萬；最多 {{ '{:,.1f}'.format(fs.best.value / 10000) }} 萬（{{ (fs.best.name or '')[:30] }}）；最少 {{ '{:,.1f}'.format(fs.worst.value / 10000) }} 萬。前向還很短，一兩個月的輸贏多半是運氣；第一個 T0 最快 {{ first_t0 }}。</p>
-      <p class="dash-link"><button type="button" class="button-link" data-spread="forward" data-spread-title="前向帳戶全部賣掉拿回多少錢">每個帳戶在哪一點、每一類的中位數</button></p>
+      <p class="dash-link"><button type="button" class="button-link" data-spread="forward" data-spread-title="前向帳戶的實際結果">每個帳戶在哪一點、每一類的中位數</button></p>
     </figure>
     {% endif %}
     {% set top = d.families|map(attribute='best')|select|map(attribute='final_value')|max %}
@@ -152,7 +152,7 @@
     <ul>
       <li><b>帳戶</b>：2015-06 開戶 30 萬、每月 5 日再投入 1 萬；0050 是同樣的錢全部買 0050。回測期末是 2026-09-30 全部賣掉（扣手續費與稅）的金額。</li>
       <li><b>一般風險</b>：最大回撤不比 0050 深超過 5 個百分點（T0 候選）；超過的叫高風險（最多深 15 點）。<b>跌市最穩</b>：取捨前緣上，0050 跌最多的那一次沒有比 0050 跌更多的規則裡錢最多的。</li>
-      <li><b>前向</b>：本月名單上的規則從截止日隔天起每天照規則做，當天收盤全部賣掉算賺賠；中間一半＝第 25 到第 75 百分位的帳戶。</li>
+      <li><b>前向</b>：本月名單上的規則從截止日隔天起每天照規則做，算實際結果（賺的只算賣掉拿到的、賠的連還拿著的都算，帳面獲利不算；0050 用同樣的錢今天全部賣掉比）；中間一半＝第 25 到第 75 百分位的帳戶。</li>
       <li><b>每個時期</b>：每個規則同一個帳戶切成 {{ era.labels|join('、') }}，每年報酬扣掉當月投入；長條是全部 {{ '{:,}'.format(d.rules) }} 個規則的中位數。</li>
       <li><b>空頭</b>：20 個代表策略的模型用 2004 年起的資料逐年重訓，從 2007 年跑；規則沒看過 2007～2014，是測試不是挑選。</li>
       <li>完整回測 {{ '{:,}'.format(d.rules) }} 個規則、{{ '{:,}'.format(d.passing) }} 個過門檻；個股策略設定見「大搜尋」（組合帳戶的組合數另外算，不加進去）。圖 {{ c.built }} 更新。</li>
@@ -192,7 +192,7 @@
     const row = target.closest('[data-spread-family]');
     if (!row) return false;
     const family = row.dataset.spreadFamily, track = row.dataset.spreadTrack;
-    open((family ? family + '：' : '') + (track === 'forward' ? '前向帳戶全部賣掉拿回多少錢' : '最後有多少錢的分佈'),
+    open((family ? family + '：' : '') + (track === 'forward' ? '前向帳戶的實際結果' : '最後有多少錢的分佈'),
       '/research/distribution?track=' + encodeURIComponent(track) + (family ? '&family=' + encodeURIComponent(family) : ''));
     return true;
   };

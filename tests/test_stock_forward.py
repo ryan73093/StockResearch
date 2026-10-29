@@ -563,3 +563,39 @@ def test_an_accounts_records_are_read_by_their_place_in_the_log(tmp_path):
     assert [row["date"] for row in tracker.records_of("a")] == ["2026-09-01", "2026-09-02", "2026-09-03"]
     tracker.log_path.write_text(line("b", "2026-09-01") + line("a", "2026-09-09"), encoding="utf-8")   # rewritten
     assert [row["date"] for row in tracker.records_of("a")] == ["2026-09-09"] and tracker.records_of("c") == []
+
+
+def test_the_result_counts_a_gain_once_sold_and_every_loss_by_hand():
+    """2026-10-29 (使用者：我拿到的才叫賺，拿到的才叫賠；那其他還沒有賣出的賠錢，你有沒有算進去；未實現損益你也算賺錢哦)."""
+    from types import SimpleNamespace
+
+    from quant_platform.research.stock_forward import explain_trades, kept, kept_by_day
+
+    costs = SimpleNamespace(slippage_bps=0.0, fee=lambda amount: amount * 0.001,
+                            tax=lambda amount, kind, side: amount * 0.003)
+    record = {"cash": 1000.0, "contributed": 10000.0, "benchmark_value": 10500.0,
+              "holdings": [{"code": "2330", "units": 10, "close": 600.0}, {"code": "1101", "units": 100, "close": 30.0}]}
+    found = kept(record, {"2330": {"cost": 5000.0}, "1101": {"cost": 4000.0}}, costs)
+    # 2330 sold now: 6,000 - 6 - 18 = 5,976 > its cost 5,000 — up 976 on paper, counted at its cost;
+    # 1101: 3,000 - 3 - 9 = 2,988 < 4,000 — down 1,012, counted
+    assert found["cash_back"] == pytest.approx(1000 + 5000 + 2988)
+    assert found["gain"] == pytest.approx(-1012) and found["paper"] == pytest.approx(976)
+    assert found["held_loss"] == pytest.approx(-1012)
+    assert found["bench_gain"] == pytest.approx(10500 - 10.5 - 31.5 - 10000)          # 0050 sold today
+    assert found["ahead"] == pytest.approx(-1012 - 458)
+    days = [
+        {"date": "2026-09-01", "contributed": 6000.0, "cash": 995.0, "benchmark_value": 6000.0,
+         "trades_today": [{"code": "2330", "side": "BUY", "shares": 10, "price": 500.0, "fee": 5.0, "tax": 0.0}],
+         "holdings": [{"code": "2330", "units": 10, "close": 520.0, "value": 5200.0}]},
+        {"date": "2026-09-02", "contributed": 6000.0, "cash": 3684.0, "benchmark_value": 6100.0,
+         "trades_today": [{"code": "2330", "side": "SELL", "shares": 5, "price": 540.0, "fee": 3.0, "tax": 8.0}],
+         "holdings": [{"code": "2330", "units": 5, "close": 450.0, "value": 2250.0}]},
+    ]
+    _trades, results = explain_trades(days, {}, 0.0)
+    assert results["realized"] == pytest.approx(5 * 540 - 11 - 5005 / 2)            # sold half: 186.5
+    daily = kept_by_day(days, costs)
+    assert daily["2026-09-02"] == pytest.approx(kept(days[-1], results["positions"], costs))
+    # the held half cost 2,502.5 and sells for 2,250 - 2.25 - 6.75: the day's result is the sale's 186.5 and that loss
+    assert daily["2026-09-02"]["gain"] == pytest.approx(186.5 + (2241 - 2502.5))
+    # day 1: up 174.2 on paper after the costs of selling — not counted
+    assert daily["2026-09-01"]["gain"] == pytest.approx(0.0) and daily["2026-09-01"]["paper"] == pytest.approx(174.2)

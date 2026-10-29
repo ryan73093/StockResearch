@@ -6,7 +6,7 @@
     <h1>{{ recent.name }}</h1>
     <p class="page-head__sub">近 3 個月模擬操作：{{ recent.start }}～{{ recent.end }}，30 萬起跑、每月 5 日投入 1 萬，照規則每天收盤後決定（漲停買不到、跌停賣不掉，被擋下的那一筆隔天再試）</p>
   </div>
-  <div class="page-head__meta"><a href="/research?tab=forward">回前向觀察</a>・<a href="/research/rules/{{ recent.rule_hash }}">回測紀錄</a></div>
+  <div class="page-head__meta"><a href="/research">回研究總覽</a>・<a href="/research/rules/{{ recent.rule_hash }}">回測紀錄</a></div>
 </header>
 {% endblock %}
 {% block content %}

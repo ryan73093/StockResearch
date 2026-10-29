@@ -225,7 +225,7 @@ def charts(research: Path, start: str, overall: dict | None, ordinary: dict | No
         output["forward"] = svg.line(
             points, [{"key": "median_gain", "label": "帳戶中位數", "css": "v1", "short": "帳戶中位數"},
                      {"key": "bench_gain", "label": "0050（同樣的錢）", "css": "vref", "dashed": True, "short": "0050"}],
-            lambda value: f"{value:+,.0f} 元", lambda x, full: x.strftime("%m/%d"), "前向帳戶全部賣掉後賺賠",
+            lambda value: f"{value:+,.0f} 元", lambda x, full: x.strftime("%m/%d"), "前向帳戶的實際結果（帳面獲利不算）",
             band=("p25_gain", "p75_gain"), guides=[(0.0, "沒賺沒賠")])
         output["forward_last"] = fwd["series"][-1]
     # 4. each period: what 0050 made a year, what the median rule made a year (and how many beat 0050)
@@ -317,7 +317,7 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
     pool = pool_view(research, basis="seed")
     tracker = StockForwardTracker(research)
     summary = {row["rule_hash"]: row for row in tracker.summary()}
-    live = {key: row for key, row in summary.items() if not row.get("stopped") and row.get("since") == start and row.get("sell_all")}
+    live = {key: row for key, row in summary.items() if not row.get("stopped") and row.get("since") == start and row.get("kept")}
     periods = eras(research)
     by_rule = {row["spec_hash"]: row["periods"] for row in periods["rows"]}       # each rule's own periods
     labels = {key: label for key, label, _paid, _group in source_groups()}
@@ -350,7 +350,7 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
                      key=lambda row: row["since_2020_final_value"], default=None)
         with_paid = [row for row in mains if used[row["spec_hash"]] & paid_keys]
         accounts = [live[row["spec_hash"]] for row in members if row["spec_hash"] in live]
-        ahead = [item["sell_all"]["ahead"] for item in accounts]
+        ahead = [item["kept"]["ahead"] for item in accounts]
         counts: dict[str, int] = {}
         for row in mains:
             for key in used[row["spec_hash"]]:
@@ -368,7 +368,7 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
             "median_ahead": statistics.median(ahead) if ahead else None, "best_ahead": max(ahead) if ahead else None,
             "eras": periods["families"].get(family), "log": family_log(optimizations, family),
             "faded": [row for row in periods["faded"] if row["family"] == family][:5],
-            "top": [{**row, "forward": (live.get(row["spec_hash"]) or {}).get("sell_all"),
+            "top": [{**row, "forward": (live.get(row["spec_hash"]) or {}).get("kept"),
                      "periods": by_rule.get(row["spec_hash"])} for row in top],
         })
     order = {name: index for index, name in enumerate(FAMILY_ORDER)}
@@ -381,7 +381,7 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
         benchmark = overall["benchmark_final_value"]
     if recent_all and recent_all.get("since_2020_benchmark_final_value"):
         recent_benchmark = recent_all["since_2020_benchmark_final_value"]
-    cashed = [row["sell_all"] for row in live.values()]
+    cashed = [row["kept"] for row in live.values()]
     forward = {"accounts": len(cashed), "start": start,
                "median_gain": statistics.median(item["gain"] for item in cashed) if cashed else None,
                "bench_gain": statistics.median(item["bench_gain"] for item in cashed) if cashed else None,

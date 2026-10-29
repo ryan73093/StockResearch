@@ -4,7 +4,7 @@
 <header class="page-head">
   <div>
     <h1>研究進展</h1>
-    <p class="page-head__sub">從第一個每天決策的規則到現在：回測最好的成績、搜尋了多少策略、9/1 起的前向帳戶全部賣掉後賺多少，到底有沒有在成長。</p>
+    <p class="page-head__sub">從第一個每天決策的規則到現在：回測最好的成績、搜尋了多少策略、9/1 起的前向帳戶實際賺賠多少（賺的只算賣掉的），到底有沒有在成長。</p>
   </div>
   <div class="page-head__meta">更新 {{ generated }}</div>
 </header>
@@ -111,7 +111,7 @@
 </section>
 
 <section class="card" id="days" data-tab="每天的進度">
-  <div class="card__head"><h2>每天的進度</h2><span class="muted small">最新在上；前向是 {{ start }} 起的帳戶、全部賣掉計算</span></div>
+  <div class="card__head"><h2>每天的進度</h2><span class="muted small">最新在上；前向是 {{ start }} 起的帳戶、實際結果計算</span></div>
   <div class="table-wrap table-wrap--stack table-wrap--tall">
     <table class="table--stack">
       <thead><tr><th>日期</th><th class="num">當天回測</th><th class="num">過門檻／回測過的規則</th><th class="num">全部過門檻的最好</th><th class="num">一般 T0 候選最好</th><th class="num">搜尋累計</th><th class="num">前向：帳戶中位數／0050</th><th class="num">前向贏 0050 的帳戶</th></tr></thead>
@@ -135,7 +135,7 @@
 </section>
 
 <section class="card" id="forward" data-tab="前向（真的在跑的帳戶）">
-  <div class="card__head"><h2>前向帳戶每天的賺賠（{{ start }} 起，全部賣掉計算）</h2><span class="muted small">{{ data.forward.accounts }} 個帳戶；只用截止日以前的資料挑、之後才記錄</span></div>
+  <div class="card__head"><h2>前向帳戶每天的賺賠（{{ start }} 起，實際結果計算）</h2><span class="muted small">{{ data.forward.accounts }} 個帳戶；只用截止日以前的資料挑、之後才記錄</span></div>
   {% if fwd %}
   <div class="kpis kpis--four">
     <div class="kpi"><div class="kpi__label">0050 同樣的錢（{{ fwd.date[5:] }}）</div><div class="kpi__value {{ 'up' if fwd.bench_gain > 0 else 'down' }}">{{ '{:+,.0f}'.format(fwd.bench_gain) }} 元</div></div>
@@ -172,14 +172,14 @@
   <h3 style="margin:16px 0 6px;font-size:15px">取捨前緣上的規則：回測和前向對照</h3>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th class="num">回測期末</th><th class="num">0050 大跌時最糟</th><th class="num">前向全部賣掉</th><th class="num">比 0050</th><th class="num">已賣出的損益</th></tr></thead>
+      <thead><tr><th>規則</th><th class="num">回測期末</th><th class="num">0050 大跌時最糟</th><th class="num">前向實際結果</th><th class="num">比 0050</th><th class="num">已賣出的損益</th></tr></thead>
       <tbody>
       {% for row in data.frontier %}{% set worst = row.worst_fall %}
         <tr>
           <td data-primary><a href="/research/rules/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }}</a> {{ row.name }} <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
           <td class="num" data-label="回測期末">{{ wan(row.final_value) }}</td>
           <td class="num" data-label="0050 大跌時最糟">{% if worst %}{{ '多跌' if worst.gap < 0 else '少跌' }} {{ '{:.1f}'.format((worst.gap * 100)|abs) }} 點{% else %}—{% endif %}</td>
-          <td class="num {{ 'up' if (row.forward_gain or 0) > 0 else 'down' }}" data-label="前向全部賣掉">{% if row.forward_gain is not none %}<a href="/research/forward/{{ row.rule_hash }}">{{ '{:+,.0f}'.format(row.forward_gain) }} 元</a>{% else %}—{% endif %}</td>
+          <td class="num {{ 'up' if (row.forward_gain or 0) > 0 else 'down' }}" data-label="前向實際結果">{% if row.forward_gain is not none %}<a href="/research/forward/{{ row.rule_hash }}">{{ '{:+,.0f}'.format(row.forward_gain) }} 元</a>{% else %}—{% endif %}</td>
           <td class="num {{ 'up' if (row.forward_ahead or 0) > 0 else 'down' }}" data-label="比 0050">{{ '{:+,.0f}'.format(row.forward_ahead) if row.forward_ahead is not none else '—' }}</td>
           <td class="num" data-label="已賣出的損益">{{ '{:+,.0f}'.format(row.realized) if row.realized is not none else '—' }}</td>
         </tr>
@@ -188,7 +188,7 @@
     </table>
   </div>
   {% endif %}
-  <p class="col-help"><b>欄位說明</b>　<b>全部賣掉計算</b>：那天收盤把持股全部賣掉（扣手續費、交易稅、滑價）後，比投入的錢多或少多少元；0050 也一樣賣掉算。<b>中間一半</b>：把帳戶依賺賠排序，第 25% 到第 75% 的範圍。<b>取捨前緣</b>：沒有別的過門檻規則同時錢更多、0050 大跌時又少跌。<b>0050 大跌時最糟</b>：0050 每次從高點跌 10% 以上的期間，策略最糟一次比 0050 多跌或少跌幾個百分點。<b>比 0050</b>：前向全部賣掉後比同樣的錢買 0050 多或少多少元。<b>已賣出的損益</b>：已經賣掉的股票實際賺賠的合計。<b>串接交易日</b>：連續留在每月名單上的月份串起來的前向交易日（第一個月從那份名單的截止日隔天算起）。<b>串起來的報酬</b>：每天扣掉投入的錢後串起來的報酬，括號是同一批帳戶裡的 0050。<b>比 0050</b>：兩者相減；離 T0 最近的依交易日多、再依比 0050 多排。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>實際結果計算</b>：賺的只算賣掉拿到的、賠的連還拿著的都算，帳面獲利不算；0050 用同樣的錢今天全部賣掉比（扣手續費、交易稅、滑價），比投入的錢多或少多少元。<b>中間一半</b>：把帳戶依賺賠排序，第 25% 到第 75% 的範圍。<b>取捨前緣</b>：沒有別的過門檻規則同時錢更多、0050 大跌時又少跌。<b>0050 大跌時最糟</b>：0050 每次從高點跌 10% 以上的期間，策略最糟一次比 0050 多跌或少跌幾個百分點。<b>比 0050</b>：前向實際結果比同樣的錢買 0050 多或少多少元。<b>已賣出的損益</b>：已經賣掉的股票實際賺賠的合計。<b>串接交易日</b>：連續留在每月名單上的月份串起來的前向交易日（第一個月從那份名單的截止日隔天算起）。<b>串起來的報酬</b>：每天扣掉投入的錢後串起來的報酬，括號是同一批帳戶裡的 0050。<b>比 0050</b>：兩者相減；離 T0 最近的依交易日多、再依比 0050 多排。</p>
 </section>
 
 <section class="card" id="search" data-tab="搜尋規模">

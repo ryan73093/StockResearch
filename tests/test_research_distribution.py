@@ -132,21 +132,23 @@ def test_each_category_is_a_row_with_its_median_and_middle_half(tmp_path):
     assert distribution.focus(recent, "RL 機器人") is None
 
 
-def test_the_forward_accounts_sold_on_their_last_session_and_ahead_of_0050_first():
+def test_the_forward_accounts_by_their_counted_result_and_ahead_of_0050_first():
     """2026-10-27 (使用者：獲益的那些分佈圖我也要看): an account behind the money put in but ahead of 0050 (which lost
-    more) is ahead of 0050, not with the losers."""
+    more) is ahead of 0050, not with the losers. 2026-10-29 (使用者：我拿到的才叫賺): each account by the money counted
+    (stock_forward.kept), not everything sold at the close."""
     pool = [{"spec_hash": "a", "trial_id": 1, "name": "甲", "tier": "T0 候選", "category": {"family": "深度學習"}},
             {"spec_hash": "b", "trial_id": 2, "name": "乙", "tier": "T1", "category": {"family": "RL 機器人"}}]
     def account(key, back, **extra):
         return {"rule_hash": key, "since": "2026-09-01", "date": "2026-10-27", "contributed": 320_000.0, "name": key,
-                "sell_all": {"cash_back": back, "bench_back": 311_233.0}, **extra}
+                "kept": {"cash_back": back, "bench_back": 311_233.0},
+                "sell_all": {"cash_back": back + 50_000.0, "bench_back": 311_233.0}, **extra}      # not counted
     summary = [account("a", 330_000.0), account("b", 315_000.0), account("c", 300_000.0, kind="blend"),
                account("d", 900_000.0, stopped="2026-10-27"), {**account("e", 1.0), "since": "2026-08-01"}]
     track = distribution.forward_view(pool, summary, "2026-09-01")["forward"]
     assert track["invested"] == 320_000 and track["bench"] == 311_233 and track["noun"] == "個帳戶"
     assert [(item["spec_hash"], item["side"]) for item in track["items"]] == [("a", "ahead"), ("b", "ahead"), ("c", "lost")]
     assert [row["family"] for row in track["families"]] == ["深度學習", "RL 機器人", "組合帳戶"]
-    assert track["label"] == "前向帳戶（9/1 起、10/27 全部賣掉）"
+    assert track["label"] == "前向帳戶（9/1 起、10/27 實際結果）"
     assert "每個帳戶最後有多少錢的分佈" in distribution.charts({"forward": track})["forward"]
     assert distribution.forward_view(pool, [], "2026-09-01") == {}
 

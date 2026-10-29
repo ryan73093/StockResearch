@@ -802,6 +802,18 @@ class StockForwardTracker:
             _SUMMARY.update(key=key, rows=self._summary())
         return [dict(row) for row in _SUMMARY["rows"]]
 
+    def kept_of(self, rule_hash: str, through: date | None = None) -> dict[str, object] | None:
+        """``kept`` of an account from its own records up to ``through`` and the day it stands on (the board ranks by
+        it, 2026-10-29); None before its first record."""
+        records = [record for record in self.records_of(rule_hash)
+                   if through is None or record["date"] <= through.isoformat()]
+        if not records:
+            return None
+        by_day = {record["date"]: record for record in records}
+        days = [by_day[day] for day in sorted(by_day)]
+        _trades, results = explain_trades(days, {}, 0.0)
+        return {**kept(days[-1], results["positions"], self._costs), "date": days[-1]["date"]}
+
     def summary_for(self, rule_hash: str) -> dict[str, object] | None:
         """2026-10-28: ``summary``'s row of one account, from its own records only (a rule's page)."""
         return next(iter(self._summary(rule_hash)), None)
@@ -852,6 +864,8 @@ class StockForwardTracker:
                 "rebased": sorted((marks.get(item["rule_hash"]) or {}).items()),
                 "realized": results["realized"], "wins": results["wins"], "losses": results["losses"],
                 "unrealized": results["unrealized"], "sell_all": cashed,
+                # 2026-10-29 (使用者：我拿到的才叫賺): the result that ranks and is reported — gains once sold, every loss
+                "kept": kept(latest, results["positions"], self._costs) if latest else None,
             })
         return rows
 
@@ -1107,6 +1121,7 @@ class StockForwardTracker:
         decisions = self.meta_decisions() if item.get("kind") == "meta-ai" else []
         return {"item": item, "latest": latest, "holdings": holdings, "trades": trades, "results": results,
                 "sell_all": sell_all(latest, self._costs) if latest else None,
+                "kept": kept(latest, results["positions"], self._costs) if latest else None,
                 "adjustments": adjustments,
                 "decisions": list(reversed(decisions)), "rebased": sorted((marks.get(rule_hash) or {}).items()),
                 "series": series, "sessions": len(days), "problems": problems,
@@ -1256,10 +1271,69 @@ def sell_all(record: dict, costs) -> dict[str, float]:
             "bench_gain": bench_back - contributed, "ahead": back - bench_back}
 
 
-def trade_chart(trades: list[dict], results: dict | None, width: int = 640, height: int = 220) -> dict | None:
+def kept(record: dict, positions: dict, costs) -> dict[str, float]:
+    """2026-10-29 (使用者：我拿到的才叫賺，拿到的才叫賠；那其他還沒有賣出的賠錢，你有沒有算進去；未實現損益你也算賺錢哦):
+    a strategy's result counts a gain only once it is sold and every loss, sold or still held. The money counted: the
+    cash (every sale, dividend and refund already in it) and each holding at what it cost or, when selling it now
+    would bring less (the fee, the tax and the slippage taken off, as ``sell_all``), at that; ``gain`` is that less the
+    money put in — the sales' results and the dividends (``explain_trades``: the same average cost) and the held stocks'
+    losses. ``paper``: what the held stocks are up after those costs, not counted. 0050 is the owner's own holding and
+    never sells: it is compared as it is, sold today (``bench_back``)."""
+    from quant_platform.research.legacy_challenger import _tax_kind
+
+    counted, paper, held_loss = float(record["cash"]), 0.0, 0.0
+    for row in record["holdings"]:
+        units, close = float(row["units"]), float(row["close"])
+        if units <= 0 or close <= 0:
+            continue
+        amount = units * close * (1 - costs.slippage_bps / 10_000)
+        net = amount - costs.fee(amount) - costs.tax(amount, _tax_kind(row["code"]), "SELL")
+        cost = float((positions.get(row["code"]) or {}).get("cost") or 0.0)
+        counted += min(cost, net)
+        paper += max(0.0, net - cost)
+        held_loss += min(0.0, net - cost)
+    cashed = sell_all(record, costs)
+    gain = counted - float(record["contributed"])
+    return {"cash_back": counted, "gain": gain, "paper": paper, "held_loss": held_loss,
+            "bench_back": cashed["bench_back"], "bench_gain": cashed["bench_gain"], "ahead": gain - cashed["bench_gain"]}
+
+
+def kept_by_day(days: list[dict], costs) -> dict[str, dict[str, float]]:
+    """``kept`` on every recorded day of one account (its records in date order): the same average cost as
+    ``explain_trades`` — a buy adds what it cost, a sale takes its share of the cost, ex-rights change the shares and not
+    the cost — so the last day's equals ``kept`` of the page."""
+    from collections import defaultdict
+
+    units: dict[str, float] = defaultdict(float)
+    basis: dict[str, float] = defaultdict(float)
+    output = {}
+    for record in days:
+        for trade in record["trades_today"]:
+            code, shares, price = trade["code"], float(trade["shares"]), float(trade["price"])
+            if trade["side"] == "BUY":
+                basis[code] += shares * price + float(trade.get("fee") or 0) + float(trade.get("tax") or 0)
+                units[code] += shares
+            else:
+                before = units[code]
+                share = min(1.0, shares / before) if before > 1e-9 else 1.0
+                basis[code] -= basis[code] * share
+                units[code] = max(0.0, before - shares)
+        held = {row["code"]: float(row["units"]) for row in record["holdings"]}
+        for code in list(units):
+            units[code] = held.get(code, 0.0)
+            if units[code] <= 1e-9:
+                basis[code] = 0.0
+        output[record["date"]] = kept(record, {code: {"cost": cost} for code, cost in basis.items() if cost > 0}, costs)
+    return output
+
+
+def trade_chart(trades: list[dict], results: dict | None, width: int = 640, height: int = 220,
+                counted: dict | None = None) -> dict | None:
     """2026-10-20 (使用者：我要有每一筆買賣的資產增加累積圖): every sale in order — a bar for what it made (up) or lost
-    (down) and a line of what the sales have made so far; a last dashed step adds what the stocks still held are up or
-    down on paper. None before the first sale."""
+    (down) and a line of what the sales have made so far; a last dashed step to the result counted (``counted``, ``kept``:
+    2026-10-29 使用者：未實現損益你也算賺錢哦 — the dividends and the held stocks' losses; their paper gains are not
+    counted). Without ``counted`` the step adds what the held stocks are up or down on paper. None before the first
+    sale."""
     sales = [trade for trade in reversed(trades) if trade["side"] == "SELL" and trade.get("pnl") is not None]
     if not sales:
         return None
@@ -1268,7 +1342,7 @@ def trade_chart(trades: list[dict], results: dict | None, width: int = 640, heig
         running += float(trade["pnl"])
         totals.append(running)
     unrealized = float((results or {}).get("unrealized") or 0.0)
-    final = running + unrealized
+    final = float(counted["gain"]) if counted else running + unrealized
     low = min(0.0, final, *totals, *(float(trade["pnl"]) for trade in sales))
     high = max(0.0, final, *totals, *(float(trade["pnl"]) for trade in sales))
     span = (high - low) or 1.0

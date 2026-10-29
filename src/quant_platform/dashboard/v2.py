@@ -1135,6 +1135,11 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             return redirect(url_for("v2.system") + "#legacy-tools")
         if tab in OLD_RESEARCH_TABS:
             return redirect(url_for("v2.research", tab="legacy") + "#" + OLD_RESEARCH_TABS[tab])
+        if tab == "forward":
+            # 2026-10-29 (使用者：先點策略看總共有哪些策略、哪個表現好，從表現好的策略點到前向觀察一個一個去看；你現在還在給
+            # 我用前向觀察作為總表): no master table of forward accounts — the overview lists the strategies, each
+            # strategy's page has its forward observation
+            return redirect(url_for("v2.research"))
         tab = tab if tab in RESEARCH_TABS else "overview"
         reports_dir = research_dir / "reports"
         ranking = trial_ranking(research_dir / "trials.jsonl", "development")
@@ -1392,13 +1397,14 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         chart = value_chart({row["date"]: [row["value"], row["benchmark"], row["contributed"]] for row in detail["series"]})
         from quant_platform.research.stock_forward import trade_chart
 
-        trades_chart = trade_chart(detail["trades"], detail.get("results"))    # 2026-10-20: every sale, cumulated
+        # 2026-10-20: every sale, cumulated; 2026-10-29: ending on the result counted (gains once sold, every loss)
+        trades_chart = trade_chart(detail["trades"], detail.get("results"), counted=detail.get("kept"))
         board = forward_board_load(research_dir) or {}         # 2026-10-17: the same rule on the common start line
         board_row = next((row for row in board.get("rows") or [] if row.get("rule_hash") == rule_hash), None)
         if board.get("common_start") != forward_common_start(datetime.now(TAIPEI).date()).isoformat():
             board_row = None                                    # 2026-10-17: last month's start line is not shown
         return render_template("v2/research_forward.html", active_nav="research", forward=detail, chart=chart,
-                               trades_chart=trades_chart, board=board, board_row=board_row, research_tab="forward",
+                               trades_chart=trades_chart, board=board, board_row=board_row, research_tab="overview",
                                family=rule_family((detail["item"].get("rule") if detail["item"].get("kind") in ("daily", "blend")
                                                    else None)),
                                execution=execution_text(detail["item"].get("rule") or {}),
@@ -1527,7 +1533,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         for trade in replay["trades"]:
             by_day.setdefault(trade["date"], []).append(trade)
         return render_template("v2/research_recent.html", active_nav="research", recent=replay, chart=chart,
-                               trade_days=sorted(by_day.items(), reverse=True), research_tab="forward",
+                               trade_days=sorted(by_day.items(), reverse=True), research_tab="overview",
                                jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/rules/<spec_hash>.json")

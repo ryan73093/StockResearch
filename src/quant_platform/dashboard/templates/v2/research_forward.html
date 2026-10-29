@@ -12,24 +12,31 @@
 {% set latest = forward.latest %}
 
 {% if latest %}
+{# 2026-10-29 (使用者：我拿到的才叫賺，拿到的才叫賠；未實現損益你也算賺錢哦): the result counted first — a gain once sold,
+   every loss sold or still held; the held stocks' paper gains shown apart and not counted #}
+{% set got = forward.kept %}
 <div class="kpis kpis--page kpis--four">
-  <div class="kpi"><div class="kpi__label">目前資產</div><div class="kpi__value">{{ '{:,.0f}'.format(latest.value) }}<small> 元</small></div></div>
-  <div class="kpi"><div class="kpi__label">同樣的錢買 0050</div><div class="kpi__value">{{ '{:,.0f}'.format(latest.benchmark_value) }}<small> 元</small></div></div>
-  <div class="kpi"><div class="kpi__label">相對 0050（÷ 投入）</div><div class="kpi__value {{ 'up' if (latest.excess or 0) > 0 else ('down' if (latest.excess or 0) < 0 else '') }}">{{ '{:+.2%}'.format(latest.excess) if latest.excess is not none else '—' }}</div></div>
+  {% if got %}
+  <div class="kpi"><div class="kpi__label">實際結果（賺的只算賣掉的）</div><div class="kpi__value {{ 'up' if got.gain > 0 else ('down' if got.gain < 0 else '') }}">{{ '{:+,.0f}'.format(got.gain) }}<small> 元</small></div></div>
+  <div class="kpi"><div class="kpi__label">同樣的錢買 0050（今天賣掉）</div><div class="kpi__value {{ 'up' if got.bench_gain > 0 else ('down' if got.bench_gain < 0 else '') }}">{{ '{:+,.0f}'.format(got.bench_gain) }}<small> 元</small></div></div>
+  <div class="kpi"><div class="kpi__label">比 0050</div><div class="kpi__value {{ 'up' if got.ahead > 0 else ('down' if got.ahead < 0 else '') }}">{{ '{:+,.0f}'.format(got.ahead) }}<small> 元</small></div></div>
+  <div class="kpi"><div class="kpi__label">還沒拿到的帳面獲利（不算）</div><div class="kpi__value">{{ '{:,.0f}'.format(got.paper) }}<small> 元</small></div></div>
+  {% else %}
   <div class="kpi"><div class="kpi__label">投入・現金</div><div class="kpi__value">{{ '{:,.0f}'.format(latest.contributed) }}<small>・現金 {{ '{:,.0f}'.format(latest.cash) }}</small></div></div>
+  {% endif %}
 </div>
-{% set out = forward.sell_all %}
-{% if out %}
-<p class="small" style="margin:0 0 12px"><b>今天全部賣掉</b>（{{ latest.date }} 收盤價、扣手續費、證交稅與滑價 {{ '{:,.0f}'.format(out.costs) }} 元）實際拿回 <strong>{{ '{:,.0f}'.format(out.cash_back) }}</strong> 元，比投入的 {{ '{:,.0f}'.format(latest.contributed) }} 元 <strong class="{{ 'up' if out.gain >= 0 else 'down' }}">{{ '多' if out.gain >= 0 else '少' }} {{ '{:,.0f}'.format(out.gain|abs) }}</strong> 元；同樣的錢買 0050 全部賣掉拿回 {{ '{:,.0f}'.format(out.bench_back) }} 元（{{ '多' if out.bench_gain >= 0 else '少' }} {{ '{:,.0f}'.format(out.bench_gain|abs) }}）。這個規則比 0050 <strong class="{{ 'up' if out.ahead >= 0 else 'down' }}">{{ '多拿回' if out.ahead >= 0 else '少拿回' }} {{ '{:,.0f}'.format(out.ahead|abs) }}</strong> 元。</p>
+{% if got %}
+<p class="small" style="margin:0 0 12px"><b>怎麼算</b>：投入 {{ '{:,.0f}'.format(latest.contributed) }} 元。賺的只算已經賣掉、拿到手的錢（含股利）；賠的不管賣了沒都算——還拿著的股票如果今天賣掉（扣手續費、證交稅、滑價）會低於成本，差額算進虧損（{{ '{:,.0f}'.format(got.held_loss) }} 元）；還拿著、帳面賺的 {{ '{:,.0f}'.format(got.paper) }} 元還沒拿到，不算。0050 是你自己的部位、從來不賣，用同樣的錢今天全部賣掉的結果比。{% set out = forward.sell_all %}{% if out %}<span class="muted">參考（不算成績）：今天全部賣掉拿回 {{ '{:,.0f}'.format(out.cash_back) }} 元、扣掉的費稅與滑價 {{ '{:,.0f}'.format(out.costs) }} 元；帳上總值 {{ '{:,.0f}'.format(latest.value) }} 元。</span>{% endif %}</p>
 {% endif %}
 
 {% if board_row %}
 <section class="card">
   <div class="card__head"><h2>共同起跑線上的同一個策略</h2><span class="muted small">{{ board.common_start }} 起，所有策略同一天起跑</span></div>
   <dl class="facts">
-    <div><dt>名次</dt><dd>{{ board_row.rank or '—' }}{% if board.rows %}／{{ board.rows|selectattr('rank')|list|length }}{% endif %}</dd></div>
-    <div><dt>報酬</dt><dd>{{ '{:+.2%}'.format(board_row['return']) }}</dd></div>
-    <div><dt>比 0050</dt><dd class="{{ 'up' if board_row.excess > 0 else 'down' }}">{{ '{:+.2%}'.format(board_row.excess) }}</dd></div>
+    <div><dt>名次（實際結果）</dt><dd>{{ board_row.rank or '—' }}{% if board.rows %}／{{ board.rows|selectattr('rank')|list|length }}{% endif %}</dd></div>
+    {% if board_row.kept %}<div><dt>實際結果</dt><dd class="{{ 'up' if board_row.kept.gain > 0 else 'down' }}">{{ '{:+,.0f}'.format(board_row.kept.gain) }} 元</dd></div>
+    <div><dt>比 0050</dt><dd class="{{ 'up' if board_row.kept.ahead > 0 else 'down' }}">{{ '{:+,.0f}'.format(board_row.kept.ahead) }} 元</dd></div>{% endif %}
+    <div><dt>含帳面的報酬（不算成績）</dt><dd>{{ '{:+.2%}'.format(board_row['return']) }}（比 0050 {{ '{:+.2%}'.format(board_row.excess) }}）</dd></div>
     <div><dt>回撤</dt><dd>{{ '{:.1%}'.format(board_row.max_drawdown) }}</dd></div>
     <div><dt>買／賣</dt><dd>{{ board_row.buys }}／{{ board_row.sells }}</dd></div>
   </dl>

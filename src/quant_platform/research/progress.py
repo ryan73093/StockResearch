@@ -204,14 +204,18 @@ def timeline(research: str | Path, rows: dict[str, dict] | None = None) -> dict[
 def forward(research: str | Path, start: str, named: dict[str, str] | None = None) -> dict[str, object]:
     """The month's accounts (started ``start``) day by day, each as the cash if everything were sold at that close
     (fees, tax, slippage), against the same money in 0050; ``named``: rule hash → label, those accounts' own lines."""
-    from quant_platform.research.stock_forward import StockForwardTracker, sell_all
+    from quant_platform.research.stock_forward import StockForwardTracker, kept_by_day
 
     tracker = StockForwardTracker(research)
     live = {item["rule_hash"] for item in tracker.tracked() if not item.get("stopped") and item.get("since") == start}
-    by_day: dict[str, dict[str, dict]] = {}
+    accounts: dict[str, dict[str, dict]] = {}
     for record in tracker.records():
         if record["rule_hash"] in live and str(record.get("since")) == start:
-            by_day.setdefault(record["date"], {})[record["rule_hash"]] = sell_all(record, tracker._costs)
+            accounts.setdefault(record["rule_hash"], {})[record["date"]] = record
+    by_day: dict[str, dict[str, dict]] = {}
+    for rule_hash, days in accounts.items():     # 2026-10-29 (使用者：我拿到的才叫賺): the result counted each day
+        for day, counted in kept_by_day([days[day] for day in sorted(days)], tracker._costs).items():
+            by_day.setdefault(day, {})[rule_hash] = counted
     series = []
     for day in sorted(by_day):
         cashed = by_day[day]
@@ -241,7 +245,7 @@ def short_rules(research: Path, summary: dict[str, dict]) -> list[dict[str, obje
     for record in latest.values():
         metrics = record.metrics
         grade, why = tier(metrics)
-        cashed = (summary.get(record.spec_hash) or {}).get("sell_all") or {}
+        cashed = (summary.get(record.spec_hash) or {}).get("kept") or {}
         out.append({"trial": record.trial_id, "spec_hash": record.spec_hash, "name": record.spec_name, "tier": grade,
                     "why": why, "start": str(metrics.get("start"))[:10], "final_value": metrics.get("final_value"),
                     "benchmark": metrics.get("benchmark_final_value"), "max_drawdown": metrics.get("max_drawdown"),
@@ -287,7 +291,7 @@ def families(pool_rows: list[dict], summary: dict[str, dict]) -> list[dict[str, 
 
     for family, members in groups.items():
         best = best_of(members)
-        cashed = (summary.get(best["spec_hash"]) or {}).get("sell_all") or {}
+        cashed = (summary.get(best["spec_hash"]) or {}).get("kept") or {}
         out.append({"family": family, "rules": len(members), "passing": sum(row["tier"] in PASSING for row in members),
                     "name": best["name"], "spec_hash": best["spec_hash"], "tier": best["tier"],
                     "final_value": best["final_value"], "benchmark": best.get("benchmark_final_value"),
@@ -346,7 +350,7 @@ def view(research: str | Path, start: str) -> dict[str, object]:
         latest = fwd["series"][-1] if fwd["series"] else None
         frontier_rows = []
         for row in frontier:
-            cashed = (summary.get(row["rule_hash"]) or {}).get("sell_all") or {}
+            cashed = (summary.get(row["rule_hash"]) or {}).get("kept") or {}
             frontier_rows.append({**row, "forward_gain": cashed.get("gain"), "forward_ahead": cashed.get("ahead"),
                                   "realized": (summary.get(row["rule_hash"]) or {}).get("realized"),
                                   "sessions": (summary.get(row["rule_hash"]) or {}).get("sessions")})

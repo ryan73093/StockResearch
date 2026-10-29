@@ -7,7 +7,7 @@
 {% else %}
 {% set noun = track.noun or '個規則' %}
 {% set total = track.counts.lost + track.counts.behind + track.counts.ahead %}
-<p class="small" style="margin:0 0 8px"><b>{{ track.label }}</b>：{% if key == 'forward' %}每個帳戶 {{ track.start[5:7]|int }}/{{ track.start[8:10]|int }} 開戶 30 萬、每月 5 日再投入 1 萬，照規則真的做到 {{ track.end[5:7]|int }}/{{ track.end[8:10]|int }}，當天收盤全部賣掉（扣手續費與稅）拿回的錢{% else %}每個規則開戶 30 萬、每月 5 日再投入 1 萬，到 2026-09-30 全部賣掉（扣手續費與稅）的錢{% endif %}。共投入 {{ '{:,.0f}'.format(track.invested / 10000) }} 萬，同樣的錢買 0050 是 {{ '{:,.1f}'.format(track.bench / 10000) if key == 'forward' else '{:,.0f}'.format(track.bench / 10000) }} 萬。{{ '{:,}'.format(total) }} {{ noun }}：賠錢 {{ '{:,}'.format(track.counts.lost) }} 個、賺錢但輸 0050 {{ '{:,}'.format(track.counts.behind) }} 個、贏 0050 {{ '{:,}'.format(track.counts.ahead) }} 個（{{ '{:.0%}'.format(track.counts.ahead / total) }}）。</p>
+<p class="small" style="margin:0 0 8px"><b>{{ track.label }}</b>：{% if key == 'forward' %}每個帳戶 {{ track.start[5:7]|int }}/{{ track.start[8:10]|int }} 開戶 30 萬、每月 5 日再投入 1 萬，照規則真的做到 {{ track.end[5:7]|int }}/{{ track.end[8:10]|int }}的實際結果（賺的只算賣掉拿到的、賠的連還拿著的都算，帳面獲利不算；0050 用同樣的錢今天全部賣掉比）{% else %}每個規則開戶 30 萬、每月 5 日再投入 1 萬，到 2026-09-30 全部賣掉（扣手續費與稅）的錢{% endif %}。共投入 {{ '{:,.0f}'.format(track.invested / 10000) }} 萬，同樣的錢買 0050 是 {{ '{:,.1f}'.format(track.bench / 10000) if key == 'forward' else '{:,.0f}'.format(track.bench / 10000) }} 萬。{{ '{:,}'.format(total) }} {{ noun }}：賠錢 {{ '{:,}'.format(track.counts.lost) }} 個、賺錢但輸 0050 {{ '{:,}'.format(track.counts.behind) }} 個、贏 0050 {{ '{:,}'.format(track.counts.ahead) }} 個（{{ '{:.0%}'.format(track.counts.ahead / total) }}）。</p>
 {% if whole and whole.families %}
 <div class="spread-pick" role="group" aria-label="看哪一類">
   <button type="button" class="chip{{ '' if family else ' chip--on' }}" data-spread-family="" data-spread-track="{{ key }}">全部 {{ '{:,}'.format(whole["items"]|length) }}</button>
@@ -22,12 +22,12 @@
 {% macro rows(items, start=1) %}
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
-    <thead><tr><th class="num">名次</th><th>{{ '帳戶（規則）' if key == 'forward' else '規則' }}</th><th class="num">{{ '全部賣掉' if key == 'forward' else '期末' }}</th><th class="num">是 0050 的</th><th>等級</th></tr></thead>
+    <thead><tr><th class="num">名次</th><th>{{ '帳戶（規則）' if key == 'forward' else '規則' }}</th><th class="num">{{ '實際結果' if key == 'forward' else '期末' }}</th><th class="num">是 0050 的</th><th>等級</th></tr></thead>
     <tbody>
     {% for item in items %}
       <tr><td class="num" data-label="名次">{{ start + loop.index0 }}</td>
         <td data-primary>{% set who = ('#' ~ item.trial ~ ' ') if item.trial is not none else '' %}{% if item.spec_hash and item.trial is not none %}<a href="/research/rules/{{ item.spec_hash }}">{{ rule_no(item.spec_hash) }} {{ who }}{{ item.name }}</a>{% else %}{{ who }}{{ item.name }}{% endif %} <span class="badge">{{ item.family }}</span></td>
-        <td class="num" data-label="{{ '全部賣掉' if key == 'forward' else '期末' }}">{{ '{:,.1f}'.format(item.value / 10000) if key == 'forward' else '{:,.0f}'.format(item.value / 10000) }} 萬</td>
+        <td class="num" data-label="{{ '實際結果' if key == 'forward' else '期末' }}">{{ '{:,.1f}'.format(item.value / 10000) if key == 'forward' else '{:,.0f}'.format(item.value / 10000) }} 萬</td>
         <td class="num" data-label="是 0050 的">{{ '{:.2f}'.format(item.value / track.bench) }} 倍</td>
         <td data-label="等級">{{ item.tier or '—' }}</td></tr>
     {% endfor %}

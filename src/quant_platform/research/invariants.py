@@ -305,6 +305,17 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                 early.append(record.spec_name)
     checks.append(_check(f"{FIRST_T0:%m/%d} 以前沒有規則被標成 T0", f"路線圖判定準則：串接前向滿 {FORWARD_SESSIONS} 個交易日",
                          today >= FIRST_T0 or not early, f"被標成 T0 的 {len(early)} 個"))
+    # 2026-10-29 (使用者：我拿到的才叫賺，拿到的才叫賠；未實現損益你也算賺錢哦): the board ranks by the result counted
+    try:
+        board_rows = json.loads((research / "forward" / "stocks" / "board.json").read_text(encoding="utf-8")).get("rows") or []
+    except (OSError, ValueError):
+        board_rows = []
+    ranked = sorted((row for row in board_rows if row.get("rank")), key=lambda row: row["rank"])
+    keys = [(row.get("kept") is None, -(row.get("kept") or {}).get("gain", 0.0)) for row in ranked]
+    unranked = sum(1 for row in ranked if row.get("kept") is None)
+    checks.append(_check("前向看板依實際結果排名（賺的只算賣掉的、賠的都算）", "使用者 2026-10-29：我拿到的才叫賺，拿到的才叫賠",
+                         bool(ranked) and keys == sorted(keys) and unranked < len(ranked),
+                         f"{len(ranked)} 個帳戶，{unranked} 個還沒有紀錄" if ranked else "看板沒有排名"))
 
     # 2026-10-21 (使用者 2026-10-14：確實檢查每個時期都照當時的台股規則): the latest trade audit, at most 8 days old
     audits = sorted((research / "audit").glob("trade-audit-*.json"), key=lambda path: path.stat().st_mtime) \

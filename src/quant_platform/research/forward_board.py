@@ -226,7 +226,16 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
             row = by_hash.get(item["rule_hash"])
             if row is not None and "periods" in replay:
                 row["recent"] = replay["periods"].get("all")
-    ranked = sorted((row for row in rows if "excess" in row), key=lambda row: -row["excess"])
+    # 2026-10-29 (使用者：你賣出去了全部都賠錢，好意思跟我說這個是最好的策略；我拿到的才叫賺，拿到的才叫賠；未實現損益你也算
+    # 賺錢哦): ranked by the money counted — a gain once sold, every loss sold or held (stock_forward.kept, from the
+    # account's own records, the page's figures) — not by the value with the held stocks' paper gains; an account with no
+    # record yet comes after, by its value
+    tracker = StockForwardTracker(research, costs)
+    for row in rows:
+        if "excess" in row:
+            row["kept"] = tracker.kept_of(row["rule_hash"], last)
+    ranked = sorted((row for row in rows if "excess" in row),
+                    key=lambda row: (row["kept"] is None, -(row["kept"] or {}).get("gain", 0.0), -row["excess"]))
     for place, row in enumerate(ranked, start=1):
         row["rank"] = place
     store.save()                                      # merges; never moves an account's decisions back
@@ -257,7 +266,9 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
         partial = folder / f"board_history.jsonl.{os.getpid()}.partial"
         with partial.open("w", encoding="utf-8") as handle:
             for entry in [*earlier, {"date": last.isoformat(), "ranks": {row["rule_hash"]: row["rank"] for row in ranked},
-                                     "excess": {row["rule_hash"]: row["excess"] for row in ranked}}]:
+                                     "excess": {row["rule_hash"]: row["excess"] for row in ranked},
+                                     "kept": {row["rule_hash"]: round(row["kept"]["gain"], 2) for row in ranked
+                                              if row.get("kept")}}]:
                 handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
         files.replace(partial, history_path, wait=120.0)
     return board
