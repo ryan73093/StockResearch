@@ -57,17 +57,17 @@
   {% if best %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th>等級</th><th class="num">2015-06 起期末（0050）</th><th class="num">比 0050<br>2015-06 起／2020-10 起</th><th class="num">最大回撤（0050）</th><th class="num">每月下單</th><th class="num">前向觀察<br>天數・相對 0050</th></tr></thead>
+      <thead><tr><th>規則</th><th>等級</th><th class="num">2015-06 起已實現（0050 賣掉）</th><th class="num">比 0050<br>2015-06 起／2020-10 起</th><th class="num">最大回撤（0050）</th><th class="num">每月下單</th><th class="num">前向觀察<br>天數・相對 0050</th></tr></thead>
       <tbody>
       {% for row in best %}{% set fwd = forward_map.get(row.spec_hash) %}
         <tr>
-          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a></strong>{{ risk_badge(row.spec_hash) }}<br><span class="muted small">{{ row.category.family }}{% if row.category.detail %}（{{ row.category.detail }}）{% endif %}</span></td>
+          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a></strong>{{ risk_badge(row.spec_hash) }}{% if row.same %}<br><span class="small muted">另外 {{ row.same|length }} 個結果完全相同（濾網或否決從沒觸發）：{% for other in row.same[:6] %}<a href="/research/rules/{{ other.spec_hash }}">{{ rule_no(other.spec_hash) }}</a>{{ '、' if not loop.last else '' }}{% endfor %}{% if row.same|length > 6 %}…{% endif %}</span>{% endif %}<br><span class="muted small">{{ row.category.family }}{% if row.category.detail %}（{{ row.category.detail }}）{% endif %}</span></td>
           <td data-label="等級"><span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--bad' if '高風險' in row.tier else 'badge--warn') }}">{{ row.tier }}</span></td>
           <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
           <td class="num" data-label="比 0050">{% if row.excess is not none %}<span class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.excess) }}</span>{% else %}—{% endif %}／{% if row.since_2020_excess is not none %}<span class="{{ 'up' if row.since_2020_excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.since_2020_excess) }}</span>{% else %}—{% endif %}</td>
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
           <td class="num" data-label="每月下單">{{ '%.0f 筆' % row.orders_per_month if row.orders_per_month else '—' }}</td>
-          <td class="num" data-label="前向觀察">{% if fwd and fwd.sessions %}<a href="/research/forward/{{ row.spec_hash }}">{{ fwd.sessions }} 天</a>{% if fwd.excess is not none %}・<span class="{{ 'up' if fwd.excess > 0 else ('down' if fwd.excess < 0 else '') }}">{{ '{:+.2%}'.format(fwd.excess) }}</span>{% endif %}{% elif row.forward_since %}<span class="muted small">{{ row.forward_since[5:] }} 起</span>{% else %}<span class="muted small">下個交易日 15:30 加入</span>{% endif %}</td>
+          <td class="num" data-label="前向觀察">{% if fwd and fwd.sessions %}<a href="/research/forward/{{ row.spec_hash }}">{{ fwd.sessions }} 天</a>{% if fwd.kept %}・實際比 0050 <span class="{{ 'up' if fwd.kept.ahead > 0 else ('down' if fwd.kept.ahead < 0 else '') }}">{{ '{:+,.0f}'.format(fwd.kept.ahead) }} 元</span>{% endif %}{% elif row.forward_since %}<span class="muted small">{{ row.forward_since[5:] }} 起</span>{% else %}<span class="muted small">下個交易日 15:30 加入</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

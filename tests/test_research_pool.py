@@ -183,3 +183,17 @@ def test_rule_page_jobs_and_factor_tabs(tmp_path):
     pool = client.get("/research/pool?basis=dca").get_data(as_text=True)
     assert 'href="/research/rules/stock-both"' in pool and 'id="rule-search"' in pool and ">選手池<" in pool and "舊設計紀錄（2005 起、每月）" in pool
     job.finish("done", "完成了")
+
+
+def test_variants_with_the_same_results_are_one_row():
+    """2026-10-30: #6890, #7166, #7187 (filters that never fired) — one row, the first registered standing for them."""
+    from quant_platform.research.pool import merge_same
+
+    def row(trial, money, recent=300.0, drawdown=-0.3, tier="T0 候選"):
+        return {"spec_hash": f"h{trial}", "trial_id": trial, "name": f"規則 {trial}", "final_value": money,
+                "since_2020_final_value": recent, "max_drawdown": drawdown, "tier": tier}
+
+    rows = [row(7166, 900.0), row(9000, 950.0), row(6890, 900.0), row(7187, 900.0), row(7200, 900.0, drawdown=-0.31)]
+    merged = merge_same(sorted(rows, key=lambda item: -item["final_value"]))
+    assert [item["trial_id"] for item in merged] == [9000, 6890, 7200]
+    assert [other["trial_id"] for other in merged[1]["same"]] == [7166, 7187] and merged[0]["same"] == []

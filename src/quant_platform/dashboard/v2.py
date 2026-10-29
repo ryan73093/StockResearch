@@ -45,7 +45,7 @@ from quant_platform.research.factors import columns as factor_columns
 from quant_platform.research.factors import table as factor_table
 from quant_platform.research.jobs import JobLog
 from quant_platform.research.pool import _svg as value_chart
-from quant_platform.research.pool import basis_counts, pool_view, rule_detail, yearly_matrix
+from quant_platform.research.pool import basis_counts, merge_same, pool_view, rule_detail, yearly_matrix
 from quant_platform.research.progress import search_scale
 from quant_platform.research.after_close import load as after_close_load
 from quant_platform.research.forward_board import load as forward_board_load
@@ -1181,7 +1181,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         overview = ready(f"pool:{basis}", research_dir, lambda: pool_view(research_dir, basis=basis)) if tab == "overview" else None
         best = [row for row in overview["daily"] if row["tier"] in BEST_TIERS and not row["uses_0050"]] if overview else []
         best_total = len(best)
-        best = sorted(best, key=lambda row: -(row.get("final_value") or 0))[:BEST_ROWS]
+        # 2026-10-30: variants with the very same results are one row (pool.merge_same)
+        best = merge_same(sorted(best, key=lambda row: -(row.get("final_value") or 0)))[:BEST_ROWS]
         downside = ready("downside", research_dir, lambda: downside_table(research_dir)) if tab == "overview" else None
         if downside:
             downside_total = len(downside)
