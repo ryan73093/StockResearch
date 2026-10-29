@@ -51,3 +51,80 @@ def test_block_bootstrap_is_deterministic_and_centred():
     second = block_bootstrap_mean(positive, samples=500)
     assert first == second
     assert first["low"] < first["mean"] < first["high"] and first["share_above_zero"] > 0.95
+
+
+def _pbo_one_trial_at_a_time(matrix, blocks=16):
+    """The PBO as written before 2026-10-29: one sharpe() call per trial and half."""
+    import itertools
+    import math
+
+    from quant_platform.research.statistics import sharpe
+
+    data = np.asarray(matrix, dtype=float)
+    periods, trials = data.shape
+    blocks = min(blocks, periods)
+    blocks -= blocks % 2
+    edges = np.linspace(0, periods, blocks + 1).astype(int)
+    parts = [np.arange(edges[index], edges[index + 1]) for index in range(blocks)]
+    logits = []
+    for chosen in itertools.combinations(range(blocks), blocks // 2):
+        inside = np.concatenate([parts[index] for index in chosen])
+        outside = np.concatenate([parts[index] for index in range(blocks) if index not in chosen])
+        in_scores = np.array([sharpe(data[inside, column]) for column in range(trials)])
+        out_scores = np.array([sharpe(data[outside, column]) for column in range(trials)])
+        best = int(np.argmax(in_scores))
+        rank = float((out_scores < out_scores[best]).sum() + 1) / (trials + 1)
+        logits.append(math.log(rank / (1 - rank)))
+    array = np.array(logits)
+    return {"pbo": float((array <= 0).mean()), "combinations": len(logits), "blocks": blocks,
+            "median_logit": float(np.median(array))}
+
+
+def _bootstrap_one_sample_at_a_time(returns, block=6, samples=2000, confidence=0.95, seed=20261001):
+    """The block bootstrap as written before 2026-10-29: each sample put together and averaged on its own."""
+    import math
+
+    values = np.asarray(returns, dtype=float)
+    count = values.size
+    block = max(1, min(block, count))
+    generator = np.random.default_rng(seed)
+    starts_needed = math.ceil(count / block)
+    means = np.empty(samples)
+    for index in range(samples):
+        starts = generator.integers(0, count - block + 1, size=starts_needed)
+        means[index] = np.concatenate([values[start:start + block] for start in starts])[:count].mean()
+    tail = (1 - confidence) / 2
+    return {"mean": float(values.mean()), "low": float(np.quantile(means, tail)),
+            "high": float(np.quantile(means, 1 - tail)), "share_above_zero": float((means > 0).mean()),
+            "block": block, "samples": samples, "seed": seed}
+
+
+def test_the_sharpe_ratios_of_all_trials_at_once_are_those_of_one_at_a_time_bit_for_bit():
+    """2026-10-29 (S9-W39; 使用者：不要為了省效能最後又給我錯的資料): row by row the same numbers as sharpe(), for lengths
+    under 8, from 8 to 128 and over 128 (numpy's three ways of summing), a flat row, and a Fortran-ordered slice made
+    contiguous first."""
+    from quant_platform.research.statistics import row_sharpes, sharpe
+
+    generator = np.random.default_rng(29)
+    for length in (2, 3, 7, 8, 9, 31, 32, 63, 64, 127, 128, 129, 200, 300):
+        data = generator.normal(0.004, 0.05, size=(length, 40))
+        data[:, 3] = 0.01                                              # no deviation: 0
+        index = np.sort(generator.choice(length, size=max(2, length // 2), replace=False))
+        rows = np.ascontiguousarray(np.ascontiguousarray(data.T)[:, index])
+        expected = np.array([sharpe(data[index, column]) for column in range(data.shape[1])])
+        assert np.array_equal(row_sharpes(rows), expected), length
+        assert np.array_equal(row_sharpes(np.ascontiguousarray(data.T)),
+                              np.array([sharpe(data[:, column]) for column in range(data.shape[1])])), length
+
+
+def test_the_pbo_and_the_bootstrap_are_what_they_were():
+    from quant_platform.research.statistics import block_bootstrap_mean, probability_of_backtest_overfitting
+
+    generator = np.random.default_rng(1029)
+    for periods, trials in ((63, 25), (135, 12), (40, 7)):
+        matrix = generator.normal(0.003, 0.04, size=(periods, trials))
+        matrix[:, 2] += 0.01
+        assert probability_of_backtest_overfitting(matrix, blocks=16) == _pbo_one_trial_at_a_time(matrix, blocks=16)
+    for length, block in ((135, 6), (63, 6), (5, 6), (7, 3), (300, 12), (1, 6)):
+        returns = generator.normal(0.002, 0.03, size=length)
+        assert block_bootstrap_mean(returns, block=block) == _bootstrap_one_sample_at_a_time(returns, block=block)

@@ -68,8 +68,22 @@ def deflated_sharpe(
     }
 
 
+def row_sharpes(rows: np.ndarray) -> np.ndarray:
+    """``sharpe`` of every row of a C-contiguous array, bit for bit: each row is summed along its own contiguous memory,
+    the way numpy sums one trial's months on their own (pairwise). 2026-10-29: a fancy-indexed slice ``a[:, index]`` is
+    Fortran-ordered and summed in another order (differences of 1e-15) — the caller makes the rows contiguous."""
+    if rows.shape[1] < 2:
+        return np.zeros(rows.shape[0])
+    deviation = rows.std(axis=1, ddof=1)
+    means = rows.mean(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(deviation > 0, means / deviation, 0.0)
+
+
 def probability_of_backtest_overfitting(matrix: np.ndarray, blocks: int = 16) -> dict[str, object]:
-    """CSCV on a T × N matrix of per-period returns (rows = periods, columns = trials)."""
+    """CSCV on a T × N matrix of per-period returns (rows = periods, columns = trials). 2026-10-29 (S9-W39, 使用者：是你的
+    程式太肥): every trial's Sharpe ratio of a half at once (``row_sharpes``) instead of one ``sharpe`` call per trial —
+    the same numbers bit for bit (checked on the 7,295 daily candidates: 24 halves identical), 67 minutes → 95 seconds."""
     data = np.asarray(matrix, dtype=float)
     periods, trials = data.shape
     if trials < 2:
@@ -80,12 +94,13 @@ def probability_of_backtest_overfitting(matrix: np.ndarray, blocks: int = 16) ->
         raise ValueError("期間太短，無法切分")
     edges = np.linspace(0, periods, blocks + 1).astype(int)
     parts = [np.arange(edges[index], edges[index + 1]) for index in range(blocks)]
+    columns = np.ascontiguousarray(data.T)                   # each trial's months together
     logits = []
     for chosen in itertools.combinations(range(blocks), blocks // 2):
         inside = np.concatenate([parts[index] for index in chosen])
         outside = np.concatenate([parts[index] for index in range(blocks) if index not in chosen])
-        in_scores = np.array([sharpe(data[inside, column]) for column in range(trials)])
-        out_scores = np.array([sharpe(data[outside, column]) for column in range(trials)])
+        in_scores = row_sharpes(np.ascontiguousarray(columns[:, inside]))
+        out_scores = row_sharpes(np.ascontiguousarray(columns[:, outside]))
         best = int(np.argmax(in_scores))
         rank = float((out_scores < out_scores[best]).sum() + 1) / (trials + 1)
         logits.append(math.log(rank / (1 - rank)))
@@ -112,11 +127,12 @@ def block_bootstrap_mean(
     block = max(1, min(block, count))
     generator = np.random.default_rng(seed)
     starts_needed = math.ceil(count / block)
-    means = np.empty(samples)
-    for index in range(samples):
-        starts = generator.integers(0, count - block + 1, size=starts_needed)
-        sample = np.concatenate([values[start:start + block] for start in starts])[:count]
-        means[index] = sample.mean()
+    # 2026-10-29 (S9-W39): the starts drawn one sample at a time as before (the same random numbers), the samples put
+    # together at once, each in its own contiguous row: the same means bit for bit (``row_sharpes``' note), a quarter of
+    # the time
+    starts = np.array([generator.integers(0, count - block + 1, size=starts_needed) for _ in range(samples)])
+    picks = (starts[:, :, None] + np.arange(block)).reshape(samples, -1)[:, :count]
+    means = np.ascontiguousarray(values[picks]).mean(axis=1)
     tail = (1 - confidence) / 2
     return {
         "mean": float(values.mean()),
