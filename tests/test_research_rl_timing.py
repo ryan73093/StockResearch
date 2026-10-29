@@ -284,3 +284,29 @@ def test_a_robot_scores_with_the_factors_it_was_trained_on_not_todays_longer_lis
     assert int(np.nanargmax(scores[330])) == int(np.nanargmax(momentum))
     alike = rl_timing.scores(fp, tmp_path, "equal", rl_timing.ALL_VERSION)
     assert np.isfinite(alike[330]).any()
+
+
+def test_the_robot_versions_of_a_run_share_one_ranking_of_each_factor(tmp_path, monkeypatch):
+    """2026-10-29 (S9-W39): each robot version ranked the same factors again over every session (about 80 s a version,
+    seven versions in the forward accounts). Where the run remembers, each factor is ranked once for every version:
+    the scores are those of a panel computing everything itself; the shared ranking cannot be changed by a caller."""
+    from quant_platform.research import model
+
+    days = weekdays(date(2016, 1, 4), date(2017, 6, 30))
+    data, fp = market(days, stocks=6)
+    names = rl_timing.factor_names()
+    tilted = [0.0] * len(names)
+    tilted[names.index("momentum_3")] = 1.0
+    (tmp_path / "meta.json").write_text(json.dumps({"weights": {days[300].isoformat(): tilted}}), encoding="utf-8")
+    plain = rl_timing.scores(FactorPanel(Panel(data)), tmp_path)
+    alike = rl_timing.scores(FactorPanel(Panel(data)), tmp_path, "equal")
+    calls = []
+    real = model._rank
+    monkeypatch.setattr(model, "_rank", lambda values: calls.append(1) or real(values))
+    fp._memo = {}
+    assert np.array_equal(rl_timing.scores(fp, tmp_path), plain, equal_nan=True)
+    assert np.array_equal(rl_timing.scores(fp, tmp_path, "equal"), alike, equal_nan=True)
+    assert len(calls) == len(names)                                   # ranked once for both
+    shared = model.eligible_percentiles(fp, names[0])
+    with pytest.raises(ValueError):
+        shared[0, 0] = 0.5

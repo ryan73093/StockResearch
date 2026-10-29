@@ -638,7 +638,7 @@ def _decided(meta: dict) -> list:
 def _rolling_scores(fp, folder: str | Path, kind: str, version: str = ROLLING_VERSION) -> np.ndarray:
     """The robot 3.1's scores (``robot``) or its yardstick's (``equal``: the year's eight factors alike): each session
     uses its year's factors (the latest trained year's after it) and the latest decision's weights."""
-    from quant_platform.research.model import _rank, eligibility
+    from quant_platform.research.model import eligible_percentiles
 
     output = np.full((len(fp.sessions), len(fp.symbols)), np.nan, dtype=np.float32)
     path = Path(folder) / "meta.json"
@@ -648,10 +648,9 @@ def _rolling_scores(fp, folder: str | Path, kind: str, version: str = ROLLING_VE
     members = meta.get("members") or {}
     if not members:
         return output
-    eligible = eligibility(fp)
     needed = sorted({name for names in members.values() for name in names}
                     | {name for found in (meta.get("monthly") or {}).values() for name in found.get("members") or []})
-    percentiles = {name: _rank(np.where(eligible, fp.matrix(name), np.nan).T).astype(np.float32) for name in needed}
+    percentiles = {name: eligible_percentiles(fp, name).astype(np.float32) for name in needed}
     decided = _decided(meta)
     years = sorted(members)
     monthly = sorted((cutoff, found["members"]) for cutoff, found in (meta.get("monthly") or {}).items()
@@ -681,7 +680,7 @@ def _rolling_scores(fp, folder: str | Path, kind: str, version: str = ROLLING_VE
 def scores(fp, folder: str | Path, kind: str = "robot", version: str = VERSION) -> np.ndarray:
     """sessions × symbols. ``robot``: each session's percentiles weighted by the latest decision's weights (NaN
     before the first test decision or without a trained robot); ``equal``: the version's factors alike."""
-    from quant_platform.research.model import _rank, eligibility
+    from quant_platform.research.model import eligible_percentiles
 
     if version in ROLLING_VERSIONS:
         return _rolling_scores(fp, folder, kind, version)
@@ -690,9 +689,7 @@ def scores(fp, folder: str | Path, kind: str = "robot", version: str = VERSION) 
     # 2026-10-20: the inputs it was trained on (meta "factors"): factor_names(ALL_VERSION) grows with every new factor
     # (47 when robot 2.1 was trained on 10-14, 59 on 10-20), and its weights fit only the 47
     names = list((meta or {}).get("factors") or factor_names(version))
-    eligible = eligibility(fp)
-    percentiles = np.stack([_rank(np.where(eligible, fp.matrix(name), np.nan).T)
-                            for name in names])                                 # factor × session × symbol
+    percentiles = np.stack([eligible_percentiles(fp, name) for name in names])    # factor × session × symbol
     if kind == "equal":
         with np.errstate(invalid="ignore"):
             return np.nanmean(percentiles, axis=0)

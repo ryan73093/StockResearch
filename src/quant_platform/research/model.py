@@ -168,6 +168,22 @@ def _rank(values: np.ndarray) -> np.ndarray:
     return pd.DataFrame(values).rank(axis=1, pct=True).to_numpy(dtype=np.float32)
 
 
+def eligible_percentiles(fp, name: str) -> np.ndarray:
+    """sessions × symbols: each session's percentile of ``name`` among the eligible stocks (``eligibility``), read-only.
+    2026-10-29 (S9-W39): every technical robot version ranked the same factors again over every session since 2013
+    (about 80 seconds a version, seven versions in the forward accounts); where the run remembers (``daily.remember``:
+    the board, the forward record, the after-close orders) each factor is ranked once — the same array for every
+    version, read-only so that no caller changes it for the others."""
+    from quant_platform.research.daily import remember
+
+    def compute() -> np.ndarray:
+        values = _rank(np.where(eligibility(fp), fp.matrix(name), np.nan).T)
+        values.flags.writeable = False
+        return values
+
+    return remember(fp, fp, ("eligible percentiles", name), compute)
+
+
 def version_features(version: str | None) -> tuple[str, ...]:
     """The features a new version starts with: the shared list, or its own (gbm-1.4.0: every rule factor
     except monthly revenue, the trend-quality ones included)."""
