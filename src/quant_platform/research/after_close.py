@@ -17,6 +17,7 @@ out: TPEx's table is not out before 14:30.
 from __future__ import annotations
 
 import json
+import time
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -24,6 +25,10 @@ from zoneinfo import ZoneInfo
 TAIPEI = ZoneInfo("Asia/Taipei")
 FOLDER = Path("forward") / "stocks" / "orders"
 MIN_ROWS = 500                    # a table with fewer listed stocks is not today's full table yet
+# 2026-10-29: the report was written whole after every rule — 3,607 rules made it 14 minutes of encoding and about
+# 15 GB written; it is written after the first rule, then at most every SAVE_EVERY seconds, and at the end
+SAVE_EVERY = 10.0
+ALIVE = 600.0                     # a report not written for this long is a run that died
 
 
 def today_table(payload: object, day: date) -> tuple[list[dict], float | None, float | None]:
@@ -157,12 +162,17 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
               "table_rows": len(rows), "taiex": taiex, "benchmark_close": benchmark,
               "started_at": started.isoformat(timespec="seconds"), "total": len(items), "rules": output}
 
-    def save(finished: bool) -> None:          # written after every rule: the page shows the first ones early
+    saved = [0.0]
+
+    def save(finished: bool) -> None:          # the page shows the first ones early
+        if not finished and len(output) > 1 and time.monotonic() - saved[0] < SAVE_EVERY:
+            return
         report["done"] = len(output)
         report["finished_at"] = datetime.now(TAIPEI).isoformat(timespec="seconds") if finished else None
         partial = path.with_suffix(".partial")
         partial.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
         partial.replace(path)
+        saved[0] = time.monotonic()
 
     for item in items:
         ledger: list = []
@@ -203,6 +213,29 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
     store.save()
     save(True)
     return report
+
+
+def wait_for_orders(research: Path, day: date, pause: float = 20.0, alive: float = ALIVE) -> bool:
+    """2026-10-29: today's orders still being computed — wait until they are written. They keep today's decisions only at
+    their end; a forward record or a board deciding today meanwhile (on the 15:16 data, which the 13:50 table did not
+    have: the day's whole turnover) would record other decisions, and the orders' would then be written over them —
+    records and decisions out of step. On 10-29 the orders of 3,607 accounts ran from 13:52 to after 14:30; the 15:30
+    record does not wait on its own (the worker runs jobs side by side). A report not written for ``alive`` seconds is a
+    run that died and is not waited for. True when it waited."""
+    path = research / FOLDER / f"{day.isoformat()}.json"
+    waited = False
+    while True:
+        try:
+            age = time.time() - path.stat().st_mtime
+            report = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return waited
+        if report.get("finished_at") or age > alive:
+            return waited
+        if not waited:
+            print(f"等今天的盤後單算完（{report.get('done')}／{report.get('total')}）：它算完才寫下今天的決定", flush=True)
+        waited = True
+        time.sleep(pause)
 
 
 def load(research: Path, day: date) -> dict[str, object] | None:

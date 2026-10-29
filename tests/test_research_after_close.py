@@ -129,3 +129,34 @@ def test_the_table_the_orders_read_is_kept_and_compared_with_the_days_data(tmp_p
     assert after_close.revisions(tmp_path, tmp_path / "history", today, {"1102.TW", "1106.TW"}) == {
         "1106": {"orders": None, "data": {"close": price(5, len(days) - 1), "volume": 3_000_000, "turnover": 60_000_000_000}}}
     assert after_close.revisions(tmp_path, tmp_path / "history", days[-2]) is None          # no table kept that day
+
+
+def test_a_record_waits_for_todays_orders_that_are_still_being_computed(tmp_path):
+    """2026-10-29: the orders keep today's decisions only at their end; the forward record and the board wait for them
+    (10-29: 3,607 accounts' orders ran past 14:30; the 15:30 record does not wait on its own). A report not written for
+    a while is a run that died; no report, or a finished one: no wait."""
+    import os
+    import threading
+    import time as clock
+
+    day = date(2026, 10, 29)
+    assert after_close.wait_for_orders(tmp_path, day, pause=0.05) is False             # no orders today
+    folder = tmp_path / after_close.FOLDER
+    folder.mkdir(parents=True)
+    path = folder / f"{day.isoformat()}.json"
+    path.write_text(json.dumps({"done": 10, "total": 20, "finished_at": None}), encoding="utf-8")
+
+    def finish():
+        clock.sleep(0.3)
+        path.write_text(json.dumps({"done": 20, "total": 20, "finished_at": "2026-10-29T14:35:00+08:00"}), encoding="utf-8")
+    writer = threading.Thread(target=finish)
+    began = clock.monotonic()
+    writer.start()
+    assert after_close.wait_for_orders(tmp_path, day, pause=0.05) is True
+    writer.join()
+    assert clock.monotonic() - began >= 0.25
+    assert after_close.wait_for_orders(tmp_path, day, pause=0.05) is False             # finished: no wait
+    path.write_text(json.dumps({"done": 10, "total": 20, "finished_at": None}), encoding="utf-8")
+    old = clock.time() - 3600
+    os.utime(path, (old, old))                                                          # not written for an hour
+    assert after_close.wait_for_orders(tmp_path, day, pause=0.05, alive=600) is False

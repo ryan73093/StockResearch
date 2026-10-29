@@ -615,7 +615,11 @@ class StockForwardTracker:
         return self.record(today, freeze=True)
 
     def record(self, today: date, now: datetime | None = None, freeze: bool = False) -> list[dict[str, object]]:
-        """Under the forward lock (2026-10-22): ``_record``."""
+        """Under the forward lock (2026-10-22): ``_record``; after today's after-close orders are written (2026-10-29,
+        ``after_close.wait_for_orders``)."""
+        from quant_platform.research.after_close import wait_for_orders
+
+        wait_for_orders(self._base, today)
         with ForwardLock(self._folder):
             return self._record(today, now, freeze)
 

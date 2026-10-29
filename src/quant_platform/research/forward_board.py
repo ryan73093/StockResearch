@@ -132,6 +132,9 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
     from quant_platform.research.stock_forward import StockForwardTracker
     from quant_platform.research.stock_rules import WARMUP_YEARS, Panel, SeedPlan, load_stock_data
 
+    from quant_platform.research.after_close import wait_for_orders
+
+    wait_for_orders(research, today)                  # 2026-10-29: today's decisions are the orders'
     began = datetime.now()
     costs = costs or broker_costs("cathay")
     items = [item for item in StockForwardTracker(research).tracked()
