@@ -716,8 +716,12 @@ class FactorPanel:
             # the statements sit next to the chip files: the store follows the chip store's history
             if self.chips is None:
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
-            store = FundamentalStore(Path(self.chips._folder).parent, self.sessions, self.symbols,
-                                     until=getattr(self.chips, "until", None))
+            # 2026-10-29 (S9-W39): one store per panel — each of the eight factors had built its own and computed the
+            # whole statement table again from the same file (about 25 seconds each)
+            store = getattr(self, "_statements", None)
+            if store is None:
+                store = self._statements = FundamentalStore(Path(self.chips._folder).parent, self.sessions,
+                                                            self.symbols, until=getattr(self.chips, "until", None))
             if not store.available():
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
             return store.matrix(factor).T                           # back to sessions × symbols

@@ -146,3 +146,48 @@ def test_the_worker_starts_the_refresh_once_a_quarter(tmp_path):
     assert start_statements_refresh(container, moment, launch=started.append) == date(2026, 9, 30)
     assert start_statements_refresh(container, moment, launch=started.append) is None        # once a quarter
     assert started == [date(2026, 9, 30)] and (folder / "refresh-2026-09-30.started").is_file()
+
+
+def test_the_statement_factors_of_a_panel_share_one_table(tmp_path, monkeypatch):
+    """2026-10-29 (S9-W39): each statement factor of a panel built its own store and computed the whole table again
+    from the same file (about 25 seconds each on the real statements, eight factors); one store per panel now, the
+    matrices the same as a store of their own gives."""
+    from quant_platform.research import fundamentals
+    from quant_platform.research.chips import ChipStore
+    from quant_platform.research.daily import FactorPanel
+    from quant_platform.research.legacy_challenger import LegacyData
+    from quant_platform.research.stock_rules import Panel
+
+    raw = tmp_path / "raw" / "finmind"
+    income, balance = raw / "TaiwanStockFinancialStatements", raw / "TaiwanStockBalanceSheet"
+    income.mkdir(parents=True)
+    balance.mkdir(parents=True)
+    income_rows, balance_rows = [], []
+    for row in frame().to_dict("records"):
+        day = row["quarter"].isoformat()
+        for name, item in (("Revenue", "revenue"), ("GrossProfit", "gross_profit"), ("OperatingIncome", "operating_income"),
+                           ("EquityAttributableToOwnersOfParent", "net_income"), ("EPS", "eps")):
+            income_rows.append({"date": day, "type": name, "value": row[item]})
+        for name, item in (("TotalAssets", "assets"), ("Liabilities", "liabilities"),
+                           ("EquityAttributableToOwnersOfParent", "equity")):
+            balance_rows.append({"date": day, "type": name, "value": row[item]})
+    (income / "1101.json.gz").write_bytes(gzip.compress(json.dumps({"data": income_rows}).encode()))
+    (balance / "1101.json.gz").write_bytes(gzip.compress(json.dumps({"data": balance_rows}).encode()))
+    build(tmp_path)
+    sessions = list(pd.bdate_range("2025-03-03", "2025-06-30").date)
+    closes = {symbol: {day: 20.0 for day in sessions} for symbol in ("1101.TW", "2330.TW", "0050.TW")}
+    data = LegacyData(sessions=sessions, closes=closes,
+                      traded_value={symbol: {day: 50_000_000.0 for day in sessions} for symbol in closes},
+                      factors={}, predictions={})
+    panel = Panel(data)
+    fp = FactorPanel(panel, chips=ChipStore(tmp_path, panel.sessions, panel.symbols, panel.close))
+    calls = []
+    real = fundamentals.factor_table
+    monkeypatch.setattr(fundamentals, "factor_table", lambda table: calls.append(1) or real(table))
+    names = ("roe_ttm", "gross_margin", "eps_growth", "low_debt")
+    found = {name: fp.matrix(name) for name in names}
+    assert len(calls) == 1
+    for name in names:
+        alone = FundamentalStore(tmp_path, panel.sessions, panel.symbols).matrix(name)
+        assert np.array_equal(found[name], alone, equal_nan=True), name
+    assert np.isfinite(found["roe_ttm"]).any()
