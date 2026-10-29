@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import json
 import time
-import os
 from datetime import date
 from pathlib import Path
+
+from quant_platform.research import files
 
 
 def key(rule_hash: str, start: date, sleeve: int | None = None) -> str:
@@ -90,7 +91,7 @@ class DecisionStore:
         if taken:
             partial = self.path.with_suffix(".partial")
             partial.write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
-            os.replace(partial, self.path)
+            files.replace(partial, self.path, wait=300.0)
             marks = self._dropped()
             marks.update({name: time.time() for name in names})
             tomb = self.path.with_name("decisions-dropped.json")
@@ -127,7 +128,7 @@ class DecisionStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         partial = self.path.with_suffix(".partial")
         partial.write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
-        os.replace(partial, self.path)
+        files.replace(partial, self.path, wait=300.0)      # 2026-10-29: a reader holding it (research/files.py)
         self._data, self._kept = current, {}
 
 

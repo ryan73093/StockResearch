@@ -22,6 +22,8 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from quant_platform.research import files
+
 TAIPEI = ZoneInfo("Asia/Taipei")
 FOLDER = Path("forward") / "stocks" / "orders"
 MIN_ROWS = 500                    # a table with fewer listed stocks is not today's full table yet
@@ -29,6 +31,9 @@ MIN_ROWS = 500                    # a table with fewer listed stocks is not toda
 # 15 GB written; it is written after the first rule, then at most every SAVE_EVERY seconds, and at the end
 SAVE_EVERY = 10.0
 ALIVE = 600.0                     # a report not written for this long is a run that died
+# 2026-10-29: the run died at 14:27 with 2,222 accounts done and none of today's decisions kept (they were written only
+# at the end); the decisions so far are written every DECISIONS_EVERY seconds too
+DECISIONS_EVERY = 120.0
 
 
 def today_table(payload: object, day: date) -> tuple[list[dict], float | None, float | None]:
@@ -163,16 +168,24 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
               "table_rows": len(rows), "taiex": taiex, "benchmark_close": benchmark,
               "started_at": started.isoformat(timespec="seconds"), "total": len(items), "rules": output}
 
-    saved = [0.0]
+    saved = [0.0, time.monotonic()]          # the report, today's decisions
 
     def save(finished: bool) -> None:          # the page shows the first ones early
+        if not finished and time.monotonic() - saved[1] >= DECISIONS_EVERY:
+            store.save()
+            saved[1] = time.monotonic()
         if not finished and len(output) > 1 and time.monotonic() - saved[0] < SAVE_EVERY:
             return
         report["done"] = len(output)
         report["finished_at"] = datetime.now(TAIPEI).isoformat(timespec="seconds") if finished else None
         partial = path.with_suffix(".partial")
         partial.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-        partial.replace(path)
+        try:                                   # 2026-10-29: a page or a check reading it (research/files.py)
+            files.replace(partial, path, wait=300.0 if finished else 30.0)
+        except PermissionError:
+            if finished:
+                raise
+            return                             # held for half a minute: the next save writes it
         saved[0] = time.monotonic()
 
     for item in items:

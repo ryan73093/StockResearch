@@ -1,6 +1,7 @@
 """2026-10-14 (使用者：要在 14:30 前算出建議): today's orders from TWSE's table before the stock files are written."""
 import json
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 
 from quant_platform.research import after_close
 from quant_platform.research.daily import DailyRule
@@ -160,3 +161,71 @@ def test_a_record_waits_for_todays_orders_that_are_still_being_computed(tmp_path
     old = clock.time() - 3600
     os.utime(path, (old, old))                                                          # not written for an hour
     assert after_close.wait_for_orders(tmp_path, day, pause=0.05, alive=600) is False
+
+
+def _two_accounts(research):
+    rules = [RULE, DailyRule(name="每天 3 個月動能：前 4 名", factors={"momentum_3": 1.0}, top=4, min_hold=0)]
+    folder = research / "forward" / "stocks"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "tracked.json").write_text(json.dumps([{
+        "rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.canonical(), "kind": "daily", "plan": "seed",
+        "since": "2026-10-01"} for rule in rules], ensure_ascii=False), encoding="utf-8")
+    return rules
+
+
+def test_a_report_held_open_by_a_reader_does_not_stop_the_orders(tmp_path, monkeypatch):
+    """2026-10-29 14:27: the orders died when a check held the report open as the worker replaced it (2,222 of 3,607
+    accounts done). A save the reader blocks is skipped — the next one writes it; the run goes on to the end."""
+    days = weekdays(date(2025, 1, 1), date(2026, 10, 13))
+    today = days[-1]
+    build(tmp_path / "history", days[:-1])
+    rules = _two_accounts(tmp_path)
+    real = after_close.files.replace
+    calls = []
+
+    def held(source, target, wait=30.0):
+        calls.append(wait)
+        if len(calls) == 1:
+            raise PermissionError(5, "存取被拒")
+        return real(source, target, wait)
+    monkeypatch.setattr(after_close.files, "replace", held)
+    report = after_close.prepare(tmp_path / "history", tmp_path, today, table(today, len(days) - 1),
+                                 now=datetime.combine(today, time(13, 52), tzinfo=TAIPEI), min_rows=1)
+    assert report["finished_at"] and report["done"] == 2 and calls[0] == 30.0 and calls[-1] == 300.0
+    written = after_close.load(tmp_path, today)
+    assert written["finished_at"] and [row["rule_hash"] for row in written["rules"]] == [rule.rule_hash for rule in rules]
+
+
+def test_todays_decisions_are_kept_as_the_orders_go(tmp_path, monkeypatch):
+    """2026-10-29: the decisions were written only at the end and the run that died kept none; now every
+    DECISIONS_EVERY seconds — a run dying after its second account has kept both accounts' decisions for today."""
+    from quant_platform.research.decisions import DecisionStore
+    from quant_platform.research.decisions import key as decision_key
+
+    days = weekdays(date(2025, 1, 1), date(2026, 10, 13))
+    today = days[-1]
+    build(tmp_path / "history", days[:-1])
+    rules = _two_accounts(tmp_path)
+    monkeypatch.setattr(after_close, "DECISIONS_EVERY", 0.0)
+    monkeypatch.setattr(after_close, "SAVE_EVERY", 0.0)          # the report after every account
+    real = after_close.files.replace
+    calls = []
+
+    def dies(source, target, wait=30.0):                # the report's second write: the run stops
+        if Path(target).name == f"{today.isoformat()}.json":
+            calls.append(target)
+            if len(calls) == 2:
+                raise RuntimeError("the worker stopped")
+        return real(source, target, wait)
+    monkeypatch.setattr(after_close.files, "replace", dies)
+    import pytest
+
+    with pytest.raises(RuntimeError):
+        after_close.prepare(tmp_path / "history", tmp_path, today, table(today, len(days) - 1),
+                            now=datetime.combine(today, time(13, 52), tzinfo=TAIPEI), min_rows=1)
+    written = after_close.load(tmp_path, today)
+    assert written["finished_at"] is None and written["done"] == 1          # it died before its end
+    store = DecisionStore(tmp_path)
+    for rule in rules:
+        kept = store.fixed(decision_key(rule.rule_hash, date(2026, 10, 1)))
+        assert kept is not None and kept["through"] == today

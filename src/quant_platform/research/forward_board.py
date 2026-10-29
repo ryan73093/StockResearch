@@ -23,6 +23,8 @@ from pathlib import Path
 
 import numpy as np
 
+from quant_platform.research import files
+
 
 
 def common_start(today: date) -> date:
@@ -246,18 +248,18 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
                  "common_start": first.isoformat(), "date": last.isoformat(), "sessions": len(days),
                  "months": round(months, 2), "rows": rows,
                  "counts": {label: sum(1 for row in rows if row.get("state") == label) for label in ADVICE}}
-        for path in staging.glob("*.json"):
-            os.replace(path, target / path.name)
+        for path in staging.glob("*.json"):          # a page reading one: tried again (research/files.py)
+            files.replace(path, target / path.name, wait=120.0)
         shutil.rmtree(staging, ignore_errors=True)
         partial = folder / f"board.json.{os.getpid()}.partial"
         partial.write_text(json.dumps(board, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.replace(partial, folder / "board.json")
+        files.replace(partial, folder / "board.json", wait=120.0)
         partial = folder / f"board_history.jsonl.{os.getpid()}.partial"
         with partial.open("w", encoding="utf-8") as handle:
             for entry in [*earlier, {"date": last.isoformat(), "ranks": {row["rule_hash"]: row["rank"] for row in ranked},
                                      "excess": {row["rule_hash"]: row["excess"] for row in ranked}}]:
                 handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        os.replace(partial, history_path)
+        files.replace(partial, history_path, wait=120.0)
     return board
 
 

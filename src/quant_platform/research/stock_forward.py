@@ -27,6 +27,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+from quant_platform.research import files
 from quant_platform.research.costs import CostModel, broker_costs
 from quant_platform.research.legacy_challenger import BENCHMARK, simulate
 from quant_platform.research.registry import TrialRegistry
@@ -411,7 +412,7 @@ class StockForwardTracker:
         partial = self.log_path.with_suffix(".partial")
         partial.write_text("".join(json.dumps(record, ensure_ascii=False, default=str) + "\n" for record in kept),
                            encoding="utf-8")
-        os.replace(partial, self.log_path)
+        files.replace(partial, self.log_path, wait=300.0)       # 2026-10-29: a page reading it (research/files.py)
         marks = self.rebases()
         if any(key in marks for key in hashes):
             self.rebases_path.write_text(json.dumps({key: value for key, value in marks.items() if key not in hashes},
@@ -539,7 +540,7 @@ class StockForwardTracker:
         partial = self.log_path.with_suffix(".partial")
         partial.write_text("".join(json.dumps(record, ensure_ascii=False, default=str) + "\n" for record in kept),
                            encoding="utf-8")
-        os.replace(partial, self.log_path)
+        files.replace(partial, self.log_path, wait=300.0)
         for item in items:
             if item["rule_hash"] in live:
                 item.setdefault("added", item["since"])

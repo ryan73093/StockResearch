@@ -137,7 +137,12 @@ def record(research: str | Path, step: str, began: float) -> None:
         return
     partial = folder / f"{step}.json.{os.getpid()}.partial"
     partial.write_text(json.dumps({"started": began, "finished": time.time(), "pid": os.getpid()}), encoding="utf-8")
-    os.replace(partial, folder / f"{step}.json")
+    from quant_platform.research import files
+
+    try:
+        files.replace(partial, folder / f"{step}.json")
+    except PermissionError:                    # not written: a later flow runs the step again (less shared, not wrong)
+        print(f"沒有寫入共用步驟紀錄（{step}）：檔案被另一個程式開著", flush=True)
 
 
 def _lock(handle) -> bool:
