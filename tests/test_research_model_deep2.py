@@ -499,3 +499,32 @@ def test_the_residual_version_learns_the_residual_and_trains(monkeypatch, tmp_pa
     rank = __import__("pandas").Series(prior[known]).rank(pct=True).to_numpy()
     assert abs(np.corrcoef(seen["labels"][column][known], rank)[0, 1]) < 1e-4  # learned: the residual
     assert meta["gate"]["against"] == "dl-2.1.0" and "zone_spread" in meta["gate"]
+
+
+def test_the_forward_days_are_scored_from_the_snapshot_of_those_days_only(monkeypatch, tmp_path):
+    """2026-10-29 (S9-W39): a kept model's forward days are scored from the snapshot of only those sessions (each
+    session is ranked on its own): the same rows as every session's, the others left 0, and the same scores."""
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "GATE_YEARS", (2017,))
+    snapshot = tmp_path / "gbm-2.2.0"
+    snapshot.mkdir()
+    (snapshot / "meta.json").write_text(json.dumps({"version": "gbm-2.2.0", "features": ["momentum_3", "reversal_1"],
+                                                    "years": {"2017": {"top20_gain": 9.0}}}), encoding="utf-8")
+    _data, fp = _panel()
+    folder = tmp_path / "dl-2.0.0"
+    model.train(fp, folder, years=[2017], label="deep2", version="dl-2.0.0")      # 2018: the forward days
+    eligible = model.eligibility(fp)
+    later = [position for position, day in enumerate(fp.sessions) if day.year == 2018]
+    names = ("momentum_3", "reversal_1")
+    full = model_deep2.snapshot_inputs(fp, eligible, names)
+    some = model_deep2.snapshot_inputs(fp, eligible, names, later)
+    assert np.array_equal(some[later], full[later]) and not some[:later[0]].any() and full[:later[0]].any()
+    real = model_deep2.snapshot_inputs
+    monkeypatch.setattr(model_deep2, "snapshot_inputs",
+                        lambda fp, eligible, names, positions=None: real(fp, eligible, names))
+    every = model.scores(_panel()[1], folder)
+    monkeypatch.setattr(model_deep2, "snapshot_inputs", real)
+    assert np.array_equal(model.scores(_panel()[1], folder), every, equal_nan=True)
+    assert np.isfinite(every[later[-1]]).sum() >= 50

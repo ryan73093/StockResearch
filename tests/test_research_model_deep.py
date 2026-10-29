@@ -60,3 +60,44 @@ def test_the_deep_model_is_a_model_factor_the_robots_did_not_learn(tmp_path):
     # in the search unless its model was trained and failed its gate (2026-10-17, scan.failed_models): none here
     assert "ml_deep" in daily.MODEL_FACTORS and "ml_deep" in scan.signals(tmp_path)
     assert "ml_deep" not in rl_timing.factor_names(rl_timing.ALL_VERSION)
+
+
+def test_the_forward_days_are_scored_from_the_ranks_of_only_the_sessions_they_read(monkeypatch, tmp_path):
+    """2026-10-29 (S9-W39): scoring the forward days ranks only the LENGTH sessions up to each (each session is
+    ranked on its own): the same rows as ranking every session, the others left 0.5, and the same scores."""
+    monkeypatch.setattr(model_deep, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep, "LENGTH", 10)
+    monkeypatch.setattr(model_deep, "FACTORS", ("momentum_3", "reversal_1"))
+    from quant_platform.research import model
+
+    monkeypatch.setattr(model, "WARMUP", 60)
+    days = weekdays(date(2016, 1, 1), date(2018, 12, 31))
+    rng = np.random.default_rng(3)
+    drift = np.linspace(-0.0008, 0.0008, 30)
+    closes = {f"{1101 + n}.TW": dict(zip(days, np.maximum(30 * np.cumprod(1 + drift[n] + rng.normal(0, 0.01, len(days))), 11.0)))
+              for n in range(30)}
+    closes["0050.TW"] = {day: 50.0 for day in days}
+    data = LegacyData(sessions=days, closes=closes, traded_value={s: {d: 5e9 for d in v} for s, v in closes.items()},
+                      factors={}, predictions={})
+    model.train(FactorPanel(Panel(data)), tmp_path, years=[2018], label="deep", version="dl-1.0.0")
+    longer_days = weekdays(date(2016, 1, 1), date(2019, 2, 28))
+    for series in closes.values():
+        series.update({day: series[days[-1]] * (1 + 0.001 * number)
+                       for number, day in enumerate(longer_days[len(days):], start=1)})
+    longer = LegacyData(sessions=longer_days, closes=closes,
+                        traded_value={s: {d: 5e9 for d in v} for s, v in closes.items()}, factors={}, predictions={})
+    fp = FactorPanel(Panel(longer))
+    eligible = model.eligibility(fp)
+    later = list(range(len(days), len(longer_days)))
+    full = model_deep.sequences(fp, eligible)
+    some = model_deep.sequences(fp, eligible, later)
+    read = sorted({step for position in later for step in range(position - model_deep.LENGTH + 1, position + 1)})
+    assert np.array_equal(some[read], full[read])
+    assert (some[:read[0]] == 0.5).all() and not (full[:read[0]] == 0.5).all()
+    real = model_deep.sequences
+    monkeypatch.setattr(model_deep, "sequences", lambda fp, eligible, positions=None: real(fp, eligible))
+    every = model.scores(FactorPanel(Panel(longer)), tmp_path)
+    monkeypatch.setattr(model_deep, "sequences", real)
+    assert np.array_equal(model.scores(FactorPanel(Panel(longer)), tmp_path), every, equal_nan=True)
+    assert np.isfinite(every[later]).sum(axis=1).min() > 10

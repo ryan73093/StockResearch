@@ -34,8 +34,11 @@ SEEDS = (0, 1, 2)
 HELD_OUT = 0.2
 
 
-def sequences(fp, eligible: np.ndarray) -> np.ndarray:
-    """session × symbol × feature ranks (float16, 0.5 where unknown): return, turnover change, the factors."""
+def sequences(fp, eligible: np.ndarray, positions=None) -> np.ndarray:
+    """session × symbol × feature ranks (float16, 0.5 where unknown): return, turnover change, the factors.
+    ``positions``: only the LENGTH sessions up to each of them (what scoring them reads), the others left 0.5.
+    2026-10-29 (S9-W39): the forward days were scored after ranking every session since 2013; each session is ranked
+    on its own, so its row is the same either way."""
     prices = fp.panel.filled
     with np.errstate(divide="ignore", invalid="ignore"):
         move = np.full(prices.shape, np.nan)
@@ -44,9 +47,11 @@ def sequences(fp, eligible: np.ndarray) -> np.ndarray:
         change = (np.log1p(turnover) - np.log1p(turnover.rolling(20, min_periods=5).mean())).to_numpy().T
     columns = [move, change] + [fp.matrix(name) for name in FACTORS]
     output = np.full((len(fp.sessions), len(fp.symbols), len(columns)), 0.5, dtype=np.float16)
+    rows = slice(None) if positions is None else np.unique(np.array(
+        [step for position in positions for step in range(max(position - LENGTH + 1, 0), position + 1)], dtype=int))
     for index, values in enumerate(columns):
-        ranks = pd.DataFrame(np.where(eligible, values, np.nan).T).rank(axis=1, pct=True).to_numpy()
-        output[:, :, index] = np.nan_to_num(ranks, nan=0.5).astype(np.float16)
+        ranks = pd.DataFrame(np.where(eligible[:, rows], values[:, rows], np.nan).T).rank(axis=1, pct=True).to_numpy()
+        output[rows, :, index] = np.nan_to_num(ranks, nan=0.5).astype(np.float16)
     return output
 
 
@@ -272,7 +277,7 @@ def _score_later(fp, folder: Path, positions: list[int], output: np.ndarray, pre
         return
     networks = []
     eligible = eligibility(fp)
-    data = sequences(fp, eligible)
+    data = sequences(fp, eligible, positions)
     from quant_platform.research.gpu import device
 
     for path in chosen:

@@ -195,12 +195,17 @@ def sequence_inputs(fp, eligible: np.ndarray, chips: bool = True) -> np.ndarray:
     return output
 
 
-def snapshot_inputs(fp, eligible: np.ndarray, names: tuple[str, ...]) -> np.ndarray:
-    """session × symbol × names (float16): each factor's rank among the day's eligible stocks, centred (0 unknown)."""
+def snapshot_inputs(fp, eligible: np.ndarray, names: tuple[str, ...], positions=None) -> np.ndarray:
+    """session × symbol × names (float16): each factor's rank among the day's eligible stocks, centred (0 unknown).
+    ``positions``: only those sessions, the others left 0. 2026-10-29 (S9-W39): a kept model scores only the forward
+    days, yet every session since 2013 was ranked (about 13 seconds a build, most of the build); each session is
+    ranked on its own, so its row is the same either way."""
     output = np.zeros((len(fp.sessions), len(fp.symbols), len(names)), dtype=np.float16)
+    rows = slice(None) if positions is None else np.unique(np.asarray(positions, dtype=int))
     for index, name in enumerate(names):
-        ranks = pd.DataFrame(np.where(eligible, fp.matrix(name), np.nan).T).rank(axis=1, pct=True).to_numpy()
-        output[:, :, index] = np.nan_to_num(ranks - 0.5, nan=0.0).astype(np.float16)
+        ranks = pd.DataFrame(np.where(eligible[:, rows], fp.matrix(name)[:, rows], np.nan).T).rank(
+            axis=1, pct=True).to_numpy()
+        output[rows, :, index] = np.nan_to_num(ranks - 0.5, nan=0.0).astype(np.float16)
     return output
 
 
@@ -282,14 +287,15 @@ def _runs(sessions: np.ndarray) -> list[tuple[int, int]]:
 class Inputs:
     """The three input blocks on the device, and the batches of (session, symbol) pairs drawn from them."""
 
-    def __init__(self, fp, eligible: np.ndarray, names: tuple[str, ...], chips: bool = True) -> None:
+    def __init__(self, fp, eligible: np.ndarray, names: tuple[str, ...], chips: bool = True, positions=None) -> None:
+        """``positions``: the sessions that will be scored (the snapshot of only those, ``snapshot_inputs``)."""
         import torch
 
         from quant_platform.research.gpu import device
 
         self.on = device()
         self.sequence = torch.from_numpy(sequence_inputs(fp, eligible, chips)).to(self.on)
-        self.snapshot = torch.from_numpy(snapshot_inputs(fp, eligible, names)).to(self.on)
+        self.snapshot = torch.from_numpy(snapshot_inputs(fp, eligible, names, positions)).to(self.on)
         self.market = torch.from_numpy(market_inputs(fp, eligible)).to(self.on)
 
     def batch(self, pairs: np.ndarray):
@@ -849,7 +855,7 @@ def scores(fp, folder: str | Path) -> np.ndarray:
         meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
         eligible = eligibility(fp)
         inputs = Inputs(fp, eligible, tuple(meta["features"]),
-                        chips=len(meta.get("sequence") or SEQUENCE) == len(SEQUENCE))
+                        chips=len(meta.get("sequence") or SEQUENCE) == len(SEQUENCE), positions=later)
         year = max(int(path.stem.split("-")[0]) for path in saved)
         networks = []
         for path in [path for path in saved if path.stem.startswith(f"{year}-")]:
@@ -897,7 +903,7 @@ def _monthly(fp, folder: Path, output: np.ndarray) -> np.ndarray:
         meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
         eligible = eligibility(fp)
         inputs = Inputs(fp, eligible, tuple(meta["features"]),
-                        chips=len(meta.get("sequence") or SEQUENCE) == len(SEQUENCE))
+                        chips=len(meta.get("sequence") or SEQUENCE) == len(SEQUENCE), positions=missing)
         networks = []
         for path in saved:
             network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2],
