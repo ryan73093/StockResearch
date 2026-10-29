@@ -61,6 +61,24 @@ META_STOPPED = ("2026-10-15：AI 研究員還沒有合格的規則，這個帳�
 
 
 _SUMMARY: dict[str, object] = {}
+# 2026-10-30 (使用者：你他媽當我電腦資源很多是不是): a process that only reads (the pages' warm-up) parses each record
+# file once — the pool view parsed the 431 MB log twice and the archive once, every five minutes. Off by default: a
+# process that writes records (the forward record, the orders) must not hand out the same dicts it changes.
+SHARE_PARSED = False
+_PARSED_FILES: dict[str, tuple] = {}
+
+
+def _lines(path: Path) -> list[dict[str, object]]:
+    """The JSON lines of ``path``; with SHARE_PARSED, parsed once per version of the file (its size and time)."""
+    if not SHARE_PARSED:
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    stat = path.stat()
+    key = (stat.st_mtime_ns, stat.st_size)
+    found = _PARSED_FILES.get(str(path.resolve()))
+    if found is None or found[0] != key:
+        found = (key, [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()])
+        _PARSED_FILES[str(path.resolve())] = found
+    return list(found[1])
 _CHAINED: dict[str, object] = {}
 _OFFSETS: dict[str, dict] = {}            # 2026-10-28: log path -> where each account's records start
 _HELD_OLD = re.compile(r"，已持有滿 (\d+) 個交易日")
@@ -424,7 +442,7 @@ class StockForwardTracker:
         path = self._folder / "log-archive.jsonl"
         if not path.is_file():
             return []
-        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return _lines(path)
 
     def chained(self, today: date) -> dict[str, dict[str, object]]:
         """2026-10-19 (使用者選「串接滾動前向紀錄」): each rule's chained rolling forward record — see ``chain``.
@@ -455,7 +473,7 @@ class StockForwardTracker:
     def records(self) -> list[dict[str, object]]:
         if not self.log_path.is_file():
             return []
-        return [json.loads(line) for line in self.log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return _lines(self.log_path)
 
     def records_of(self, rule_hash: str) -> list[dict[str, object]]:
         """2026-10-28 (使用者：研究的載入也太慢了吧): one account's records — only the lines naming it are parsed (a rule's
@@ -1292,10 +1310,12 @@ def kept(record: dict, positions: dict, costs) -> dict[str, float]:
         counted += min(cost, net)
         paper += max(0.0, net - cost)
         held_loss += min(0.0, net - cost)
-    cashed = sell_all(record, costs)
-    gain = counted - float(record["contributed"])
+    contributed = float(record["contributed"])
+    gain = counted - contributed
+    bench = float(record["benchmark_value"]) * (1 - costs.slippage_bps / 10_000)     # as ``sell_all``: 0050 sold today
+    bench_back = bench - costs.fee(bench) - costs.tax(bench, "stock_etf", "SELL")
     return {"cash_back": counted, "gain": gain, "paper": paper, "held_loss": held_loss,
-            "bench_back": cashed["bench_back"], "bench_gain": cashed["bench_gain"], "ahead": gain - cashed["bench_gain"]}
+            "bench_back": bench_back, "bench_gain": bench_back - contributed, "ahead": gain - (bench_back - contributed)}
 
 
 def kept_by_day(days: list[dict], costs) -> dict[str, dict[str, float]]:

@@ -49,6 +49,17 @@ def compute_all(research_dir: str | Path) -> dict[str, str]:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from quant_platform.research import stock_forward
+
+    stock_forward.SHARE_PARSED = True     # 2026-10-30: this process only reads; each record file parsed once
+    from quant_platform.research import pool
+
+    pool.SHARE_VIEWS = True               # and the round's views share one pool
+    import gc
+
+    # one round, then the process ends: the parsed records stay alive the whole round and every automatic collection
+    # walked them again (a round took 61 s of CPU, 32 s without; the views are the same, build/check_warm_same.py)
+    gc.disable()
     research = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("instance") / "research"
     print(compute_all(research), flush=True)
 

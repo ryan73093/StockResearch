@@ -25,6 +25,7 @@ sell tax as in research/costs.py.
 
 from __future__ import annotations
 
+from functools import lru_cache
 import json
 import math
 import random
@@ -353,7 +354,9 @@ def _tick(symbol: str):
     return etf_tick if symbol.split(".")[0].startswith("00") else stock_tick
 
 
+@lru_cache(maxsize=None)
 def _tax_kind(symbol: str) -> str:
+    """2026-10-30: kept for each symbol (asked millions of times by the overview's day-by-day results)."""
     code = symbol.split(".")[0]
     if code.startswith("00"):
         return "bond_etf" if code.endswith("B") else "stock_etf"

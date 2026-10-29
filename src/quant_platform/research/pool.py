@@ -585,9 +585,25 @@ def ai_rounds(research_dir: str | Path) -> list[dict[str, object]]:
     return list(reversed(rounds))
 
 
+SHARE_VIEWS = False                # 2026-10-30: the warm-up (one read-only round) computes the pool once for its views
+_VIEWS: dict[tuple, dict] = {}
+
+
 def pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> dict[str, object]:
     """What the pool page shows: counts, the lists an owner asks about, and every rule, on one basis
-    (lump sum, the owner's strategy account since 2026-10-04, or the monthly plan)."""
+    (lump sum, the owner's strategy account since 2026-10-04, or the monthly plan). With SHARE_VIEWS (the pages'
+    warm-up: one round, read only) the same round's views share one computation — the overview's dashboard computed
+    the pool again right after the pool view (about 25 s each round, every five minutes)."""
+    key = (str(Path(research_dir).resolve()), top, basis)
+    if SHARE_VIEWS and key in _VIEWS:
+        return _VIEWS[key]
+    found = _pool_view(research_dir, top, basis)
+    if SHARE_VIEWS:
+        _VIEWS[key] = found
+    return found
+
+
+def _pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> dict[str, object]:
     from quant_platform.research.daily import TIERS
 
     rows = rule_rows(research_dir, basis)
