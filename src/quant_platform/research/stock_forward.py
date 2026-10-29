@@ -710,6 +710,8 @@ class StockForwardTracker:
                     panel, Industries(load_industries(self._history)),
                     ChipStore(self._history, panel.sessions, panel.symbols, panel.close),
                     market_closes(self._history, panel.sessions), models_root(self._history))
+                if getattr(factor_panel, "_memo", None) is None:
+                    factor_panel._memo = {}      # 2026-10-29 (daily.remember): shadows and sleeves shared
                 loaded[universe][3] = factor_panel
                 if item.get("kind") == "meta-ai":
                     rule = SimpleNamespace(rule_hash=item["rule_hash"], name=item["name"])

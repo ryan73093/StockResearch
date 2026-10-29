@@ -151,6 +151,7 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
     panel = Panel(data)
     fp = FactorPanel(panel, Industries(load_industries(history)), ChipStore(history, panel.sessions, panel.symbols, panel.close),
                      market_closes(history, panel.sessions), models_root(history))
+    fp._memo = {}               # 2026-10-29 (daily.remember): each account replayed twice, sleeves and shadows shared
     plan = SeedPlan()
     from quant_platform.research.decisions import DecisionStore
     from quant_platform.research.decisions import key as decision_key

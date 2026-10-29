@@ -190,3 +190,68 @@ def test_a_board_is_never_written_over_a_newer_one(tmp_path):
         assert "marker" not in json.loads((folder / "board.json").read_text(encoding="utf-8"))
         assert "marker" not in json.loads((folder / "recent" / f"{rule.rule_hash}.json").read_text(encoding="utf-8"))
         assert third["rows"][0]["value"] == first["rows"][0]["value"]          # the same replay
+
+
+def test_remembering_in_a_run_gives_the_same_board(tmp_path, monkeypatch):
+    """2026-10-29 (S9-W39, 使用者：不要為了省效能最後又給我錯的資料): the board remembers within its run the shadow accounts
+    of the own-account guards, the 0050 account beside them and the rankings without kept decisions; every account's
+    row and last three months are what they are when everything is computed again for each account — accounts that
+    share a shadow (differing only in their 0050 share) and a rule that is also a blend's sleeve included."""
+    from quant_platform.research import daily
+    from quant_platform.research.blend import BlendRule, Sleeve
+    from quant_platform.research.daily import DailyRule
+
+    history, rule, today = _board_world(tmp_path)
+    base = dict(factors={"momentum_3": 1.0}, top=3, min_hold=0)
+    rules = [rule,
+             DailyRule(name="自己跌深減碼", vol_scale="own_drawdown", **base),
+             DailyRule(name="自己跌深減碼（一成 0050）", vol_scale="own_drawdown", core=0.1, **base),
+             DailyRule(name="自己落後 0050 減碼", vol_scale="own_excess", **base),
+             DailyRule(name="自己一年下跌減碼", vol_scale="own_trend", **{**base, "top": 4})]
+    blend = BlendRule(name="組合：動能與減碼", sleeves=(Sleeve(rule=rules[0], share=0.5), Sleeve(rule=rules[1], share=0.5)))
+    items = [{"rule_hash": item.rule_hash, "name": item.name, "rule": item.canonical(), "kind": "daily", "plan": "seed",
+              "since": "2026-09-01"} for item in rules]
+    items.append({"rule_hash": "blend-" + rules[1].rule_hash[:8], "name": blend.name, "rule": blend.model_dump(mode="json"),
+                  "kind": "blend", "plan": "seed", "since": "2026-09-01"})
+    folder = tmp_path / "forward" / "stocks"
+    (folder / "tracked.json").write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+
+    def outputs():
+        board = json.loads((folder / "board.json").read_text(encoding="utf-8"))
+        rows = {row["rule_hash"]: {key: value for key, value in row.items() if key not in ("rank_change",)}
+                for row in board["rows"]}
+        recent = {path.name: {key: value for key, value in json.loads(path.read_text(encoding="utf-8")).items()
+                              if key != "built_at"} for path in (folder / "recent").glob("*.json")}
+        return rows, recent
+
+    calls = []
+    original = daily.remember
+    monkeypatch.setattr(daily, "remember", lambda fp, data, key, compute: calls.append(key[0]) or original(fp, data, key, compute))
+    remembered = forward_board.build(tmp_path, history, today)
+    assert not remembered.get("superseded") and all("error" not in row for row in remembered["rows"])
+    assert calls.count("own shadow") >= 6 and "0050 account" in calls and "rankings" in calls
+    first = outputs()
+    (folder / "decisions.json").unlink()                       # decide again from nothing, as the first run did
+    (folder / "board.json").unlink()
+    monkeypatch.setattr(daily, "remember", lambda fp, data, key, compute: compute())      # everything computed again
+    again = forward_board.build(tmp_path, history, today)
+    assert not again.get("superseded")
+    assert outputs() == first
+    assert len(first[0]) == 6 and len(first[1]) == 6
+
+
+def test_a_remembered_ranking_is_each_callers_own_copy(tmp_path):
+    from quant_platform.research.daily import DailyRule, FactorPanel, daily_rankings
+    from quant_platform.research.stock_rules import Panel, load_stock_data
+
+    history, rule, today = _board_world(tmp_path)
+    data = load_stock_data(history, 2025, 2026)
+    fp = FactorPanel(Panel(data))
+    fp._memo = {}
+    start = fp.sessions[-40]
+    first = daily_rankings(fp, rule, start, fp.sessions[-1])
+    first[start].append("changed")
+    first.pop(fp.sessions[-1])
+    second = daily_rankings(fp, rule, start, fp.sessions[-1])
+    fp._memo = None
+    assert second == daily_rankings(fp, rule, start, fp.sessions[-1]) and "changed" not in second[start]

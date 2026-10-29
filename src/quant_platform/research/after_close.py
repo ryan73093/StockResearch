@@ -145,6 +145,7 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
         market[-1] = taiex                        # TAIEX's series is written after 15:14
     fp = FactorPanel(panel, Industries(load_industries(history)), ChipStore(history, panel.sessions, panel.symbols, panel.close),
                      market, models_root(history))
+    fp._memo = {}               # 2026-10-29 (daily.remember): shadows and sleeves shared across the accounts
     names = {row["code"]: row["name"] for row in rows} | _names(history, day.year)
     plan = SeedPlan()
     from quant_platform.research.decisions import DecisionStore

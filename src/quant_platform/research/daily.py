@@ -1333,7 +1333,17 @@ def daily_rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fix
     2026-10-15 (research/decisions.py): ``fixed`` — the decisions already taken up to ``fixed["through"]`` are taken
     as they were made, only later sessions are ranked; ``trace`` receives the refused orders pending each session and
     (2026-10-19, 使用者：每一筆買賣要有原因) ``trace["why"]``: for each session decided here, why each stock came in or
-    left — its place in the day's ranking, the keep zone, the hold rule, the stop-loss, the market filter."""
+    left — its place in the day's ranking, the keep zone, the hold rule, the stop-loss, the market filter.
+    2026-10-29: without ``fixed`` or ``trace``, once per run where the run remembers (``remember``); each caller gets
+    its own copy."""
+    if fixed is None and trace is None and getattr(fp, "_memo", None) is not None:
+        found = remember(fp, fp, ("rankings", _key(rule), start, end), lambda: _rankings(fp, rule, start, end))
+        return {day: list(names) for day, names in found.items()}
+    return _rankings(fp, rule, start, end, fixed, trace)
+
+
+def _rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: dict | None = None,
+              trace: dict | None = None) -> dict[date, list[str]]:
     sessions = [day for day in fp.sessions if start <= day <= end]
     checks = check_days(sessions, rule.check)
     output: dict[date, list[str]] = {}
@@ -2008,6 +2018,32 @@ def participation(rule) -> float:
     return NEXT_DAY_PARTICIPATION if getattr(rule, "execution", "same") in ("next", "open", "split") else SAME_DAY_PARTICIPATION
 
 
+def _key(value) -> str:
+    """Every setting of a rule or cost model, as text (a memo key)."""
+    if hasattr(value, "model_dump"):
+        return json.dumps(value.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    return repr(value)
+
+
+def remember(fp, data, key: tuple, compute):
+    """2026-10-29 (S9-W39, 使用者：是你的程式太肥、架構太肥): the same computation repeated in one run — the board
+    replays every account twice, a blend's sleeves are rules with accounts of their own, accounts that differ only in
+    their 0050 share run the same shadow account from 2013 — done once. Only where the run turns it on (``fp._memo`` a
+    dict: the board, the forward record, the after-close orders; a batch of rules computes each once and would only
+    hold memory). ``key`` is everything the computation reads besides the run's own ``fp`` and ``data`` (the same
+    objects: an entry is used only with the ``data`` it was computed on); the value is kept as computed and must not
+    be changed by the caller."""
+    memo = getattr(fp, "_memo", None)
+    if memo is None:
+        return compute()
+    found = memo.get(key)
+    if found is not None and found[0] is data:
+        return found[1]
+    value = compute()
+    memo[key] = (data, value)
+    return value
+
+
 def lag_of(rule) -> int:
     """Sessions between the decision and the fill: 0 the same day's after-hours sessions, 1 the next session's
     closing auction ("next") or opening auction ("open")."""
@@ -2142,24 +2178,32 @@ def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs:
         shadow = guarded.model_copy(update={"core": 0.0, "account_filter": "none"})
         sessions = fp.sessions
         start, end = sessions[min(SHADOW_WARMUP, len(sessions) - 1)], sessions[-1]
-        ranks = daily_rankings(fp, shadow, start, end)
-        run = simulate_daily(data, shadow, costs, start, end, ranks, weights=daily_weights(fp, shadow, ranks),
-                             exposure=half)
-        units = pd.Series(unit_values(run.values, run.flows))
+
+        def replay() -> tuple:
+            ranks = daily_rankings(fp, shadow, start, end)
+            run = simulate_daily(data, shadow, costs, start, end, ranks, weights=daily_weights(fp, shadow, ranks),
+                                 exposure=half)
+            return tuple(run.days), tuple(unit_values(run.values, run.flows))
+        # ``half`` reads only the shadow's vol_scale (taiex_half) and execution (lag_of): the shadow's settings, the
+        # costs and the run's data are all the replay reads (2026-10-29: accounts differing in core share it)
+        run_days, values = remember(fp, data, ("own shadow", _key(shadow), _key(costs), start, end), replay)
+        units = pd.Series(values)
         if rule.vol_scale in ("own_trend", "own_excess"):   # 第十版: below where it was a year before → OWN_TREND_CUT
             if rule.vol_scale == "own_excess":                 # 第十一版: the account against 0050 with the same money
-                bench = simulate_daily(data, None, costs, start, end)
-                base = pd.Series(unit_values(bench.values, bench.flows), index=bench.days).reindex(run.days).ffill()
+                bench_days, bench_units = remember(fp, data, ("0050 account", _key(costs), start, end), lambda: (
+                    lambda bench: (tuple(bench.days), tuple(unit_values(bench.values, bench.flows))))(
+                    simulate_daily(data, None, costs, start, end)))
+                base = pd.Series(bench_units, index=bench_days).reindex(run_days).ffill()
                 units = pd.Series(units.to_numpy() / base.to_numpy())
             year = (units / units.shift(OWN_TREND)).to_numpy()
             own = {day: OWN_TREND_CUT if np.isfinite(value) and value < 1 else 1.0
-                   for day, value in zip(run.days, year, strict=True)}
+                   for day, value in zip(run_days, year, strict=True)}
         else:
             fall = (1 - units / units.cummax()).to_numpy()
             own = {day: float(np.clip(np.ceil(round((1 - value / OWN_DRAWDOWN) / VOL_STEP, 9)) * VOL_STEP, 0.0, 1.0))
-                   if np.isfinite(value) else 1.0 for day, value in zip(run.days, fall, strict=True)}
+                   if np.isfinite(value) else 1.0 for day, value in zip(run_days, fall, strict=True)}
         if lag_of(rule):                                      # known at the close, acted on at the next session
-            later = dict(zip(run.days, run.days[1:]))
+            later = dict(zip(run_days, run_days[1:]))
             own = {later[day]: level for day, level in own.items() if day in later}
         if rule.vol_scale in ("own_trend", "own_excess"):
             return {day: level * own.get(day, 1.0) for day, level in half.items()}
@@ -2178,19 +2222,23 @@ def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs:
     shadow = rule.model_copy(update={"vol_scale": "none", "core": 0.0, "account_filter": "none"})
     sessions = fp.sessions
     start, end = sessions[min(SHADOW_WARMUP, len(sessions) - 1)], sessions[-1]
-    ranks = daily_rankings(fp, shadow, start, end)
-    run = simulate_daily(data, shadow, costs, start, end, ranks, weights=daily_weights(fp, shadow, ranks))
-    units = pd.Series(unit_values(run.values, run.flows))
+
+    def replay() -> tuple:
+        ranks = daily_rankings(fp, shadow, start, end)
+        run = simulate_daily(data, shadow, costs, start, end, ranks, weights=daily_weights(fp, shadow, ranks))
+        return tuple(run.days), tuple(unit_values(run.values, run.flows))
+    run_days, values = remember(fp, data, ("plain shadow", _key(shadow), _key(costs), start, end), replay)
+    units = pd.Series(values)
     volatility = units.pct_change(fill_method=None).rolling(VOL_WINDOW).std()
     usual = volatility.rolling(VOL_BASELINE, min_periods=VOL_WINDOW * 6).median()
     output = {}
-    for day, now, normal in zip(run.days, volatility.to_numpy(), usual.to_numpy(), strict=True):
+    for day, now, normal in zip(run_days, volatility.to_numpy(), usual.to_numpy(), strict=True):
         if not (np.isfinite(now) and np.isfinite(normal)) or now <= 0:
             output[day] = 1.0
             continue
         output[day] = float(np.floor(min(1.0, VOL_BAND * normal / now) / VOL_STEP) * VOL_STEP)
     if lag_of(rule):                                          # 1.4.0: acted on at the next session
-        later = dict(zip(run.days, run.days[1:]))
+        later = dict(zip(run_days, run_days[1:]))
         output = {later[day]: level for day, level in output.items() if day in later}
     return output
 
@@ -2243,13 +2291,16 @@ def account_parking(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: C
     shadow = rule.model_copy(update={"account_filter": "none", "core": 0.0})
     sessions = fp.sessions
     start, end = sessions[min(SHADOW_WARMUP, len(sessions) - 1)], sessions[-1]
-    ranks = daily_rankings(fp, shadow, start, end)
-    run = simulate_daily(data, shadow, costs, start, end, ranks, weights=daily_weights(fp, shadow, ranks))
-    units = unit_values(run.values, run.flows)
+
+    def replay() -> tuple:
+        ranks = daily_rankings(fp, shadow, start, end)
+        run = simulate_daily(data, shadow, costs, start, end, ranks, weights=daily_weights(fp, shadow, ranks))
+        return tuple(run.days), tuple(unit_values(run.values, run.flows))
+    run_days, units = remember(fp, data, ("parking shadow", _key(shadow), _key(costs), start, end), replay)
     average = pd.Series(units).rolling(200).mean().to_numpy()
-    below = {day for day, unit, mean in zip(run.days, units, average, strict=True) if np.isfinite(mean) and unit < mean}
+    below = {day for day, unit, mean in zip(run_days, units, average, strict=True) if np.isfinite(mean) and unit < mean}
     if lag_of(rule):                                          # 1.4.0: acted on at the next session
-        later = dict(zip(run.days, run.days[1:]))
+        later = dict(zip(run_days, run_days[1:]))
         below = {later[day] for day in below if day in later}
     return below
 
