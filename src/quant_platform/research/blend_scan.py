@@ -44,6 +44,9 @@ FRONTIER_COPY = 0.95          # 2026-10-28 (第十輪): near copies at 0.95 (0.9
 FRONTIER_ROOM = 0.15          # 第十輪: the drawdown at most this much deeper than 0050's (the high-risk tier's room)
 ATTACK_SHARE = 0.05           # 2026-10-29 (空頭防護第十二版): the attackers, the pool's top 5% by money at the cutoff
 BEAR_FINALISTS = 12           # 空頭防護第十二版: finalists (each with its volatility-shared twin)
+TAIL = 0.05                   # 2026-10-29 (空頭防護第十三版): the blend's worst 5% of months (a 95% CVaR, Boudt et al.)
+PARITY_ROUNDS = 20            # 空頭防護第十三版: half-steps toward the shares of equal parts (the worst months move)
+REACH_FINALISTS = 12          # 2026-10-29 (組合搜尋第十三輪): finalists picked by how far they push the frontier out
 
 
 def label(name: str) -> str:
@@ -93,6 +96,55 @@ def pool(research: str | Path) -> list[dict]:
             and np.array_equal(item["paid"], common["paid"]) and np.allclose(item["bench"], common["bench"], rtol=0.005)]
 
 
+def blend_references(research: str | Path, members: list[dict]) -> dict[str, np.ndarray]:
+    """2026-10-29 (組合搜尋第十三輪): the registered blend accounts graded T0 候選 or T0 (the frontier's tiers), newest
+    engine, on the members' months, money and 0050 — their money at the cutoff and worst gap in 0050's falls, so the
+    frontier stage 1 measures against holds the blends already on it (#12219, #9916, #7324, …), not single rules only."""
+    from quant_platform.research.categories import uses_0050
+    from quant_platform.research.daily import ENGINE_VERSION, PASSING_TIERS, tier
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    if not members:
+        return {"money": np.zeros(0), "gap": np.zeros(0), "trials": []}
+    research = Path(research)
+    months, paid, bench = members[0]["months"], members[0]["paid"], members[0]["bench"]
+    records = newest([record for record in TrialRegistry(research / "trials.jsonl").records()
+                      if record.kind == "candidate" and record.period == "recent"
+                      and str(record.metrics.get("engine", "")).startswith(ENGINE_VERSION + "+blend")])
+    values, trials = [], []
+    for record in sorted(records.values(), key=lambda record: record.trial_id):
+        if tier(record.metrics)[0] not in PASSING_TIERS:
+            continue
+        try:
+            report = json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        curve = report.get("curve") or {}
+        if uses_0050(report.get("spec") or {}) or any(month not in curve for month in months):
+            continue
+        rows = np.array([curve[month] for month in months], dtype=float)
+        if np.array_equal(rows[:, 2], paid) and np.allclose(rows[:, 1], bench, rtol=0.005):
+            values.append(rows[:, 0])
+            trials.append(record.trial_id)
+    if not values:
+        return {"money": np.zeros(0), "gap": np.zeros(0), "trials": []}
+    stacked = np.stack(values)
+    return {"money": stacked[:, -1], "gap": measure(stacked, bench, paid, falls(month_returns(bench, paid)))["gap"],
+            "trials": trials}
+
+
+def reach(money: np.ndarray, gap: np.ndarray, front_money: np.ndarray, front_gap: np.ndarray, floor: float) -> np.ndarray:
+    """2026-10-29 (組合搜尋第十三輪): how far each (money, gap) pushes the frontier out — its money over the most money
+    among the frontier points no worse in 0050's falls (gap at least as large), less 1; beyond the calmest point, over
+    ``floor`` (0050's money for the same cash flow)."""
+    order = np.argsort(front_gap)
+    gaps = front_gap[order]
+    best = np.maximum.accumulate(front_money[order][::-1])[::-1]    # the most money at this gap or a calmer one
+    at = np.searchsorted(gaps, gap, side="left")
+    ceiling = np.where(at < len(gaps), best[np.minimum(at, len(gaps) - 1)], floor)
+    return money / ceiling - 1
+
+
 def month_returns(values: np.ndarray, paid: np.ndarray) -> np.ndarray:
     """Month returns net of the month's money (values: … × months)."""
     flow = np.diff(paid)
@@ -105,6 +157,25 @@ def downside_risk(returns: np.ndarray, bench_returns: np.ndarray) -> np.ndarray:
     down = bench_returns < 0
     losses = np.minimum(returns[:, down], 0.0)
     return np.maximum(np.sqrt((losses ** 2).mean(axis=1)), 1e-3) if down.any() else np.full(len(returns), 1e-3)
+
+
+def contribution_shares(returns: np.ndarray, tail: float = TAIL, rounds: int = PARITY_ROUNDS) -> np.ndarray:
+    """2026-10-29 (空頭防護第十三版): for each combo (returns: combos x members x months), the shares at which every
+    member adds the same to the blend's historical CVaR — the mean loss in its worst ``tail`` of months (Boudt, Carl &
+    Peterson 2013's CVaR budgets, all equal). A member's part is its share x its mean loss in those months, so the parts
+    are equal at shares in proportion to 1 / that loss; the worst months move with the shares, so from equal shares a
+    half step at a time, ``rounds`` times. A member that gained in those months counts as losing 0.1% (downside_risk's
+    floor), so it does not take everything."""
+    combos, size, months = returns.shape
+    count = max(1, int(np.ceil(tail * months)))
+    shares = np.full((combos, size), 1 / size)
+    for _ in range(rounds):
+        blend = np.einsum("km,kmt->kt", shares, returns)
+        worst = np.argpartition(blend, count - 1, axis=1)[:, :count]
+        loss = -np.take_along_axis(returns, np.repeat(worst[:, None, :], size, axis=1), axis=2).mean(axis=2)
+        target = 1 / np.maximum(loss, 1e-3)
+        shares = (shares + target / target.sum(axis=1, keepdims=True)) / 2
+    return shares
 
 
 def role_blocks(attack: np.ndarray, defense: np.ndarray, size: int):
@@ -165,7 +236,8 @@ def combo_blocks(count: int, size: int, block: int = 2_000_000):
 def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set[str] | None = None,
            recent_split: int | None = None, near_copy: float = NEAR_COPY, frontier: bool = False,
            extend: bool = False, per_size: int | None = None, weighting: str = "volatility", roles=None,
-           calm_floor: float | None = None, room: float | None = None) -> dict:
+           calm_floor: float | None = None, room: float | None = None, rank: str = "score",
+           references: dict | None = None) -> dict:
     """Stage 1 over every pair and triple of ``members``: the counts and the finalists (members, shares, development
     measures), best development excess first. ``taken``: blend hashes already registered (left out). ``recent_split``
     (2026-10-28, 第九輪: the index of RECENT_MONTH): the gate is beating 0050 from that month (time-weighted), the
@@ -179,7 +251,10 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
     and were always skipped. ``sizes`` in the result: per size, how many were tried, passed and the best score.
     2026-10-29 (空頭防護第十二版): ``weighting`` "downside" shares by 1 / downside_risk instead of 1 / the volatility;
     ``roles`` (attackers, defenders: member indices) one attacker with the rest defenders (role_blocks); ``calm_floor``
-    also at most this much further than 0050 in each of its falls; ``room`` the frontier's drawdown room instead."""
+    also at most this much further than 0050 in each of its falls; ``room`` the frontier's drawdown room instead.
+    第十三版: ``weighting`` "contribution" shares of equal parts in the blend's CVaR (contribution_shares).
+    組合搜尋第十三輪: ``references`` (blend_references) join the pool on the frontier, and ``rank`` "frontier" ranks the
+    blends that stay by how far they push it out (reach) instead of the score."""
     from quant_platform.research.scan_full import EARLY_WEIGHT
 
     if not members:
@@ -207,6 +282,12 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
                   for index in range(len(members))]
         top = np.array([not row.any() for row in beaten])
         front_money, front_gap = money[top], gaps[top]
+        if references is not None and len(references["money"]):
+            money = np.concatenate([front_money, references["money"]])
+            gaps = np.concatenate([front_gap, references["gap"]])
+            top = np.array([not ((money >= money[index]) & (gaps >= gaps[index])
+                                 & ((money > money[index]) | (gaps > gaps[index]))).any() for index in range(len(money))])
+            front_money, front_gap = money[top], gaps[top]
     counted, passed = 0, 0
     width = 4 if extend else max(sizes)
 
@@ -238,8 +319,11 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
         combos = combos[apart]
         for begin in range(0, len(combos), 20_000):                  # a block at a time (memory)
             block = combos[begin:begin + 20_000]
-            weights = 1 / risk[block]
-            shares = weights / weights.sum(axis=1, keepdims=True)
+            if weighting == "contribution":
+                shares = contribution_shares(returns[block])
+            else:
+                weights = 1 / risk[block]
+                shares = weights / weights.sum(axis=1, keepdims=True)
             blended = np.einsum("km,kmt->kt", shares, values[block])
             found = measure(blended, bench, paid, stretches, recent_split)
             beat = found["recent"] if recent_split is not None else found["excess"]
@@ -257,8 +341,11 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
             if not keep.any():
                 continue
             passed += int(keep.sum())
-            score = (EARLY_WEIGHT * found["early"] + (1 - EARLY_WEIGHT) * found["recent"]
-                     if recent_split is not None else found["excess"])
+            if rank == "frontier":
+                score = reach(blended[:, -1], found["gap"], front_money, front_gap, float(bench[-1]))
+            else:
+                score = (EARLY_WEIGHT * found["early"] + (1 - EARLY_WEIGHT) * found["recent"]
+                         if recent_split is not None else found["excess"])
             count_of["passed"] += int(keep.sum())
             best = float(score[keep].max())
             count_of["best"] = best if count_of["best"] is None else max(count_of["best"], best)
@@ -308,6 +395,8 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
     return {"version": SCAN_VERSION, "pool": len(members), "families": len({root(index) for index in range(len(members))}),
             "ranking": "recent" if recent_split is not None else "excess", "candidates": counted, "passed": passed,
             "weighting": weighting, **({"roles": {"attack": len(roles[0]), "defense": len(roles[1])}} if roles is not None else {}),
+            **({"rank": rank} if rank != "score" else {}),
+            **({"references": len(references["money"]), "frontier_points": len(front_money) if frontier else 0} if references is not None else {}),
             "bench_drawdown": round(float(measure(values[:1], bench, paid, stretches)["bench_drawdown"]), 4),
             "sizes": {str(size): {key: (round(value, 4) if isinstance(value, float) else value)
                                   for key, value in counts.items()} for size, counts in sorted(tally.items())},
@@ -584,10 +673,11 @@ def volatility_twin(members: list[dict], item: dict):
 def batch(research: str | Path = Path("instance") / "research", keep=None, recent: bool = False,
           near_copy: float = NEAR_COPY, frontier: bool = False, extend: bool = False,
           per_size: int | None = None, weighting: str = "volatility", roles=None, calm_floor: float | None = None,
-          room: float | None = None, count: int = FINALISTS, twins: bool = False) -> list:
+          room: float | None = None, count: int = FINALISTS, twins: bool = False, reach_out: bool = False) -> list:
     """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json.
     ``keep``: which pool members to search over (all by default). 2026-10-29 (空頭防護第十二版): ``roles`` a function of
-    the members giving (attackers, defenders); ``twins`` each finalist also at the usual shares (volatility_twin)."""
+    the members giving (attackers, defenders); ``twins`` each finalist also at the usual shares (volatility_twin).
+    ``reach_out`` (組合搜尋第十三輪): the registered blends on the frontier too, ranked by how far they push it out."""
     from quant_platform.research.registry import TrialRegistry
 
     research = Path(research)
@@ -598,8 +688,10 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     split = members[0]["months"].index(RECENT_MONTH) if recent and members else None
     found = search(members, count=count, taken=taken, recent_split=split, near_copy=near_copy, frontier=frontier,
                    extend=extend, per_size=per_size, weighting=weighting,
-                   roles=roles(members) if roles is not None and members else None, calm_floor=calm_floor, room=room)
-    pairs = []
+                   roles=roles(members) if roles is not None and members else None, calm_floor=calm_floor, room=room,
+                   rank="frontier" if reach_out else "score",
+                   references=blend_references(research, members) if reach_out else None)
+    pairs, known_twins = [], []
     if twins:
         known = taken | {item["blend"].rule_hash for item in found["finalists"]}
         for item in found["finalists"]:
@@ -607,6 +699,9 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
             if twin.rule_hash not in known:
                 known.add(twin.rule_hash)
                 pairs.append({"of": item["blend"].rule_hash, "blend": twin, "shares": shares})
+            else:                     # 第十三版: registered before (or another finalist's): compared, not run again
+                known_twins.append({"of": item["blend"].rule_hash, "name": twin.name, "rule_hash": twin.rule_hash,
+                                    "shares": shares, "known": True})
     folder = research / "blend_scan"
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -618,7 +713,7 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
                "dev_end": DEV_END, "calm_gap": CALM_GAP, "drawdown_room": DRAWDOWN_ROOM, "near_copy": near_copy,
                "frontier": frontier, "extend": extend, "per_size": per_size, "calm_floor": calm_floor, "room": room,
                "twins": [{"of": pair["of"], "name": pair["blend"].name, "rule_hash": pair["blend"].rule_hash,
-                          "shares": pair["shares"]} for pair in pairs],
+                          "shares": pair["shares"]} for pair in pairs] + known_twins,
                "finalists": [{key: value for key, value in item.items() if key not in ("blend", "combo", "groups")}
                              | {"name": item["blend"].name, "rule_hash": item["blend"].rule_hash}
                              for item in found["finalists"]]}
@@ -630,18 +725,21 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     for size, counts in found.get("sizes", {}).items():
         print(f"  {size} 檔：算了 {counts['candidates']:,} 個、過第一階段 {counts['passed']:,} 個、最好的分數 {counts['best']}、"
               f"進引擎 {sum(1 for item in found['finalists'] if len(item['members']) == int(size))} 個", flush=True)
+    if reach_out:
+        print(f"  前緣的參考：池裡的規則＋已登錄的組合 {found.get('references')} 個，前緣上 {found.get('frontier_points')} 個；"
+              f"照把前緣往外推多少挑", flush=True)
     if roles is not None:
         print(f"  進攻 {found.get('roles', {}).get('attack')} 個、防守 {found.get('roles', {}).get('defense')} 個；"
-              f"份額：{'跌市虧損' if weighting == 'downside' else '平常波動'}；另跑 {len(pairs)} 個份額照平常波動的對照",
-              flush=True)
+              f"份額：{ {'downside': '跌市虧損', 'contribution': '對最糟月份虧損的貢獻相等'}.get(weighting, '平常波動')}；"
+              f"另跑 {len(pairs)} 個份額照平常波動的對照（{len(known_twins)} 個之前登錄過，直接比）", flush=True)
     return [item["blend"] for item in found["finalists"]] + [pair["blend"] for pair in pairs]
 
 
-def bear_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+def bear_batch(research: str | Path = Path("instance") / "research", today=None, weighting: str = "downside") -> list:
     """2026-10-29 (research_method §7「空頭防護第十二版」; written before the run): one attacker with one or two defenders
     (bear_roles), shares by the loss in 0050's falling months, gated on beating 0050 from 2020-10, a drawdown at most
     DRAWDOWN_ROOM deeper, never further than 0050 in its falls and beyond the pool's frontier; BEAR_FINALISTS of them,
-    each with its volatility-shared twin."""
+    each with its volatility-shared twin. ``weighting`` "contribution": 第十三版 (bear13_batch)."""
     from datetime import date
 
     from quant_platform.research.rolling import cutoff_for
@@ -650,7 +748,31 @@ def bear_batch(research: str | Path = Path("instance") / "research", today=None)
     kept = DEV_END
     DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
     try:
-        return batch(research, recent=True, near_copy=FRONTIER_COPY, frontier=True, weighting="downside",
+        return batch(research, recent=True, near_copy=FRONTIER_COPY, frontier=True, weighting=weighting,
                      roles=bear_roles, calm_floor=0.0, room=DRAWDOWN_ROOM, count=BEAR_FINALISTS, twins=True)
     finally:
         DEV_END = kept
+
+
+def reach_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+    """2026-10-29 (research_method §7「組合搜尋第十三輪」; written before the run): every pair and triple of the pool at
+    the usual shares, gated as round ten (beating 0050 from 2020-10, the drawdown at most FRONTIER_ROOM deeper, beyond the
+    frontier) with the registered blends on the frontier too; REACH_FINALISTS by how far they push it out."""
+    from datetime import date
+
+    from quant_platform.research.rolling import cutoff_for
+
+    global DEV_END
+    kept = DEV_END
+    DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
+    try:
+        return batch(research, recent=True, near_copy=FRONTIER_COPY, frontier=True, count=REACH_FINALISTS,
+                     reach_out=True)
+    finally:
+        DEV_END = kept
+
+
+def bear13_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+    """2026-10-29 (research_method §7「空頭防護第十三版」; written before the run): 第十二版 with each member adding the
+    same to the blend's CVaR (contribution_shares) instead of shares by its own loss in 0050's falls."""
+    return bear_batch(research, today, weighting="contribution")

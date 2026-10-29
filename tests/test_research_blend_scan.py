@@ -222,3 +222,63 @@ def test_the_bear_search_pairs_attackers_with_calm_defenders_at_downside_shares(
         twin, shares = bs.volatility_twin(members, item)
         assert twin.name.startswith("組合搜尋（份額照波動）") and twin.rule_hash != item["blend"].rule_hash
         assert sum(shares) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_the_contribution_shares_by_hand():
+    """2026-10-29 (空頭防護第十三版): equal parts in the blend's CVaR — 20 months, the worst 5% is one month."""
+    attack = np.full(20, 0.02)
+    attack[3] = -0.10                                              # loses 10% in the month everything falls
+    calm = np.full(20, 0.01)
+    calm[3] = -0.02
+    shares = bs.contribution_shares(np.stack([attack, calm])[None])[0]
+    assert shares == pytest.approx([1 / 6, 5 / 6], abs=1e-5)       # 1 / 10% and 1 / 2%, normalised
+    assert shares[0] * 0.10 == pytest.approx(shares[1] * 0.02, abs=1e-6)   # the parts are equal
+    gainer = np.full(20, 0.01)
+    gainer[3] = 0.03                     # gains in that month: counts as losing 0.1%, so it takes nearly everything —
+    shares = bs.contribution_shares(np.stack([attack, gainer])[None])[0]     # until the blend no longer loses there
+    assert 0 < shares[0] < 0.1 and shares.sum() == pytest.approx(1.0)        # (no equal parts exist: it settles low)
+    many = bs.contribution_shares(np.random.default_rng(1).normal(0.01, 0.05, (50, 3, 135)))
+    assert many.sum(axis=1) == pytest.approx(np.ones(50)) and (many > 0).all()
+
+
+def test_the_bear13_search_shares_by_equal_cvar_parts():
+    wild = [100, 118, 106, 90, 102, 120, 150, 190.0]
+    calm = [100, 103, 108, 104, 109, 112, 118, 134.0]
+    steady = [100, 104, 101, 98, 104, 110, 117, 128.0]
+    members = [member(10, wild), member(12, calm), member(13, steady)]
+    found = bs.search(members, sizes=(2, 3), roles=bs.bear_roles(members), weighting="contribution", calm_floor=0.0,
+                      frontier=True, room=bs.DRAWDOWN_ROOM)
+    assert found["weighting"] == "contribution" and found["finalists"]
+    returns = bs.month_returns(np.stack([np.array(m["values"]) for m in members]), PAID)
+    trials = [m["trial"] for m in members]
+    for item in found["finalists"]:
+        rows = [trials.index(t) for t in item["members"]]
+        assert item["shares"] == pytest.approx(bs.contribution_shares(returns[rows][None])[0].tolist(), abs=1e-3)
+
+
+def test_how_far_a_blend_pushes_the_frontier_by_hand():
+    """2026-10-29 (組合搜尋第十三輪): money over the most money among the frontier points no worse in 0050's falls."""
+    front_money, front_gap = np.array([800.0, 600.0, 300.0]), np.array([-0.08, 0.02, 0.07])
+    found = bs.reach(np.array([700.0, 700.0, 900.0, 200.0]), np.array([0.03, -0.10, 0.0, 0.09]),
+                     front_money, front_gap, 100.0)
+    assert found[0] == pytest.approx(700 / 300 - 1)        # calmer than 0.02: only the 0.07 point is no worse
+    assert found[1] == pytest.approx(700 / 800 - 1)        # riskier than all: the most money anywhere (inside)
+    assert found[2] == pytest.approx(900 / 600 - 1)        # at 0.0: the 0.02 and 0.07 points, 600 the most
+    assert found[3] == pytest.approx(200 / 100 - 1)        # calmer than every point: over 0050's money
+
+
+def test_the_reach_search_counts_registered_blends_on_the_frontier():
+    wild = [100, 118, 106, 90, 102, 120, 150, 190.0]
+    calm = [100, 103, 108, 104, 109, 112, 118, 134.0]
+    steady = [100, 104, 101, 98, 104, 110, 117, 128.0]
+    members = [member(10, wild), member(12, calm), member(13, steady)]
+    plain = bs.search(members, sizes=(2,), frontier=True, rank="frontier", recent_split=4, references={"money": np.zeros(0), "gap": np.zeros(0)})
+    assert plain["rank"] == "frontier" and plain["finalists"]
+    best = plain["finalists"][0]
+    # a registered blend with more money and a smaller fall than every pair: nothing stays
+    covered = bs.search(members, sizes=(2,), frontier=True, rank="frontier", recent_split=4,
+                        references={"money": np.array([1e6]), "gap": np.array([0.5])})
+    assert covered["finalists"] == [] and covered["frontier_points"] == 1
+    # the reach is the ranking: the finalists in falling reach
+    scores = [item["score"] for item in plain["finalists"]]
+    assert scores == sorted(scores, reverse=True) and best["score"] > 0
