@@ -357,13 +357,23 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
         return None
     written = ForwardTracker(research).record(local_now.date())
     logger.info("Forward simulation recorded %s strategies", len(written))
+    # 2026-10-29 (research/shared_steps.py): the record and the board are the research flows' last two steps for
+    # today — written down as runs of them, so a flow that asked before they began shares them instead of recomputing
+    import time as _time
+
+    from quant_platform.research.shared_steps import record as shared_record
+
+    today = local_now.date() == datetime.now(zone).date()      # not a catch-up for an earlier day
     if (research / "history" / "stocks" / "twse").is_dir():
         try:
             from quant_platform.research.stock_forward import StockForwardTracker
 
+            began = _time.time()
             stocks = StockForwardTracker(research).record(local_now.date())
             logger.info("Stock-rule forward simulation recorded %s rules", len(stocks))
             written = written + stocks
+            if today:
+                shared_record(research, "forward", began)
         except Exception:
             logger.exception("Stock-rule forward simulation failed")
         try:                                       # 2026-10-27: what changed after the 13:50 table the orders read
@@ -381,8 +391,11 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
         try:                                       # 2026-10-13: the common-start board (research/forward_board.py)
             from quant_platform.research.forward_board import build as build_board
 
+            began = _time.time()
             board = build_board(research, research / "history", local_now.date())
-            logger.info("Forward board: %s", (board or {}).get("counts"))
+            logger.info("Forward board: %s", (board or {}).get("counts") or board)
+            if board and today:
+                shared_record(research, "board", began)
         except Exception:
             logger.exception("Forward board failed")
     return len(written)

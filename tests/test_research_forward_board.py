@@ -112,3 +112,81 @@ def test_accounts_with_the_same_trades_are_one_row():
     assert [twin["name"] for twin in first["twins"]] == ["b"] and board["rows"][1]["twin_of"] == "a"
     assert first["place"] == 1 and board["rows"][2]["place"] == 2 and board["rows"][3]["place"] == 3
     assert board["distinct"] == 3 and board["ahead"] == 2
+
+
+def _board_world(base):
+    """A small history (six stocks, 0050, the index; 2025-01 to 2026-10-13) and one tracked daily account."""
+    from datetime import date, timedelta
+
+    from quant_platform.research.daily import DailyRule
+    from quant_platform.research.history.dataset import write_parquet
+    from quant_platform.research.history.official import DailyRow
+    from quant_platform.research.history.stocks import write_year
+
+    days, day = [], date(2025, 1, 1)
+    while day <= date(2026, 10, 13):
+        if day.weekday() < 5:
+            days.append(day)
+        day += timedelta(days=1)
+    history = base / "history"
+    write_parquet([DailyRow(day, 100.0, 100.0, 100.0, 100.0, source="t") for day in days], history / "daily" / "TAIEX.parquet")
+    write_parquet([DailyRow(day, 50.0 + i * 0.01, 50.0, 50.0, 50.0 + i * 0.01, source="t") for i, day in enumerate(days)],
+                  history / "daily" / "0050.parquet")
+    by_year = {}
+    for i, day in enumerate(days):
+        for number in range(6):
+            close = round(20 * (1 + 0.0004 * (number - 2)) ** i + (0.3 if (i + number) % 7 == 0 else 0.0), 2)
+            by_year.setdefault(day.year, []).append({
+                "date": day, "code": str(1101 + number), "name": f"公司{number}", "open": close, "high": close,
+                "low": close, "close": close, "volume": 3_000_000, "turnover": 60_000_000_000, "trades": 100})
+    for year, rows in by_year.items():
+        write_year(rows, history / "stocks" / "twse" / f"{year}.parquet")
+    rule = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3, min_hold=0)
+    folder = base / "forward" / "stocks"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "tracked.json").write_text(json.dumps([{
+        "rule_hash": rule.rule_hash, "name": rule.name, "rule": rule.canonical(), "kind": "daily", "plan": "seed",
+        "since": "2026-09-01"}], ensure_ascii=False), encoding="utf-8")
+    return history, rule, date(2026, 10, 13)
+
+
+def test_a_board_is_never_written_over_a_newer_one(tmp_path):
+    """2026-10-29 (使用者：不要為了省效能最後又給我錯的資料): a run whose board on disk is from a later session, or from the
+    same session by a run that began later, writes nothing — not the board, its history line or any account's last three
+    months; an older board is replaced, all of it together."""
+    from datetime import datetime, timedelta
+
+    history, rule, today = _board_world(tmp_path)
+    folder = tmp_path / "forward" / "stocks"
+    first = forward_board.build(tmp_path, history, today)
+    assert not first.get("superseded") and first["date"] == "2026-10-13" and first["started_at"]
+    written = json.loads((folder / "board.json").read_text(encoding="utf-8"))
+    assert written["started_at"] == first["started_at"] and written["rows"][0]["rule_hash"] == rule.rule_hash
+    assert (folder / "recent" / f"{rule.rule_hash}.json").is_file() and not list(folder.glob("recent.staging-*"))
+    history_lines = (folder / "board_history.jsonl").read_text(encoding="utf-8")
+
+    # a run that began later wrote its board (same session): this one writes nothing
+    later = {**written, "started_at": (datetime.now() + timedelta(hours=1)).isoformat(), "marker": "later run"}
+    (folder / "board.json").write_text(json.dumps(later, ensure_ascii=False), encoding="utf-8")
+    (folder / "recent" / f"{rule.rule_hash}.json").write_text('{"marker": "later run"}', encoding="utf-8")
+    second = forward_board.build(tmp_path, history, today)
+    assert second["superseded"]
+    assert json.loads((folder / "board.json").read_text(encoding="utf-8"))["marker"] == "later run"
+    assert json.loads((folder / "recent" / f"{rule.rule_hash}.json").read_text(encoding="utf-8")) == {"marker": "later run"}
+    assert (folder / "board_history.jsonl").read_text(encoding="utf-8") == history_lines
+    assert not list(folder.glob("recent.staging-*"))
+
+    # a board of a later session: nothing written either
+    (folder / "board.json").write_text(json.dumps({**written, "date": "2026-10-14"}), encoding="utf-8")
+    assert forward_board.build(tmp_path, history, today)["superseded"]
+
+    # an older board (began earlier, or written before boards kept their start): replaced, all of it
+    for older in ({**written, "started_at": (datetime.now() - timedelta(hours=1)).isoformat()},
+                  {key: value for key, value in written.items() if key != "started_at"}):
+        (folder / "board.json").write_text(json.dumps({**older, "marker": "older run"}), encoding="utf-8")
+        (folder / "recent" / f"{rule.rule_hash}.json").write_text('{"marker": "older run"}', encoding="utf-8")
+        third = forward_board.build(tmp_path, history, today)
+        assert not third.get("superseded")
+        assert "marker" not in json.loads((folder / "board.json").read_text(encoding="utf-8"))
+        assert "marker" not in json.loads((folder / "recent" / f"{rule.rule_hash}.json").read_text(encoding="utf-8"))
+        assert third["rows"][0]["value"] == first["rows"][0]["value"]          # the same replay

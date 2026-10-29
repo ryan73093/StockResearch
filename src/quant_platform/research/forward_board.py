@@ -15,6 +15,9 @@ from a few days.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -84,7 +87,29 @@ ADVICE = {
 }
 
 
+def newer_on_disk(research: Path, last: date, began: datetime) -> bool:
+    """2026-10-29 (使用者：不要為了省效能最後又給我錯的資料): the board written is from a later session, or from the same
+    session by a run that began later — it read a later state, and this run's result is not written over it. A board
+    written before 10/29 has no start; only its session counts."""
+    try:
+        board = json.loads((research / "forward" / "stocks" / "board.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    written = str(board.get("date") or "")
+    if written != last.isoformat():
+        return written > last.isoformat()
+    try:
+        return datetime.fromisoformat(str(board["started_at"])) > began
+    except (KeyError, ValueError):
+        return False
+
+
 def build(research: Path, history: Path, today: date, costs=None) -> dict[str, object] | None:
+    """Replay every forward account from the common start and write the board. 2026-10-29: the run's outputs (the
+    board, its history line, every account's last three months) are written together at the end, and only if no run
+    that began later — or saw a later session — wrote its board meanwhile (``newer_on_disk``; a run that sees one stops
+    early): a board that began at 13:06 on the morning's data and finished after the 15:30 one would otherwise have put
+    the earlier session back on the page."""
     from quant_platform.research.blend import BlendAccount, BlendRule
     from quant_platform.research.costs import broker_costs
     from quant_platform.research.daily import (
@@ -107,6 +132,7 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
     from quant_platform.research.stock_forward import StockForwardTracker
     from quant_platform.research.stock_rules import WARMUP_YEARS, Panel, SeedPlan, load_stock_data
 
+    began = datetime.now()
     costs = costs or broker_costs("cathay")
     items = [item for item in StockForwardTracker(research).tracked()
              if not item.get("stopped") and item.get("kind") in ("daily", "blend")
@@ -133,7 +159,9 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
     months = len(days) / SESSIONS_PER_MONTH
     latest_by_hash = latest_candidates(research)
     rows = []
-    for item in items:
+    for index, item in enumerate(items):
+        if index % 200 == 0 and newer_on_disk(research, last, began):
+            return {"superseded": True, "date": last.isoformat(), "started_at": began.isoformat()}
         ledger: list = []
         try:
             if item.get("kind") == "blend":
@@ -169,40 +197,63 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
 
     names = _names(history, last.year)
     window = [day for day in data.sessions if day <= last][-RECENT_SESSIONS:]
-    target = research / "forward" / "stocks" / "recent"
+    folder = research / "forward" / "stocks"
+    target = folder / "recent"
     target.mkdir(parents=True, exist_ok=True)
-    for item in items:
+    for old in folder.glob("recent.staging-*"):      # left by a run that was stopped (a day old: none still running)
+        if old.is_dir() and time.time() - old.stat().st_mtime > 86400:
+            shutil.rmtree(old, ignore_errors=True)
+    staging = folder / f"recent.staging-{os.getpid()}"
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    by_hash = {row["rule_hash"]: row for row in rows}
+    for index, item in enumerate(items):
+        if index % 200 == 0 and newer_on_disk(research, last, began):
+            shutil.rmtree(staging, ignore_errors=True)
+            return {"superseded": True, "date": last.isoformat(), "started_at": began.isoformat()}
         try:
             replay = recent(research, history, item, data, fp, costs, window, names)
         except Exception as error:
             replay = {"rule_hash": item["rule_hash"], "name": item["name"], "error": str(error)[:200]}
         if replay:
-            (target / f"{item['rule_hash']}.json").write_text(json.dumps(replay, ensure_ascii=False), encoding="utf-8")
-            row = next((row for row in rows if row["rule_hash"] == item["rule_hash"]), None)
+            (staging / f"{item['rule_hash']}.json").write_text(json.dumps(replay, ensure_ascii=False), encoding="utf-8")
+            row = by_hash.get(item["rule_hash"])
             if row is not None and "periods" in replay:
                 row["recent"] = replay["periods"].get("all")
     ranked = sorted((row for row in rows if "excess" in row), key=lambda row: -row["excess"])
     for place, row in enumerate(ranked, start=1):
         row["rank"] = place
-    folder = research / "forward" / "stocks"
-    history_path = folder / "board_history.jsonl"
-    earlier = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()] \
-        if history_path.is_file() else []
-    earlier = [entry for entry in earlier if entry.get("date") != last.isoformat()]
-    before = earlier[-5] if len(earlier) >= 5 else (earlier[0] if earlier else None)
-    for row in ranked:
-        previous = (before or {}).get("ranks", {}).get(row["rule_hash"])
-        row["rank_change"] = (previous - row["rank"]) if previous else None      # positive: moved up
-    board = {"built_at": datetime.now().isoformat(timespec="seconds"), "common_start": first.isoformat(),
-             "date": last.isoformat(), "sessions": len(days), "months": round(months, 2), "rows": rows,
-             "counts": {label: sum(1 for row in rows if row.get("state") == label) for label in ADVICE}}
-    folder.mkdir(parents=True, exist_ok=True)
-    store.save()
-    (folder / "board.json").write_text(json.dumps(board, ensure_ascii=False, indent=1), encoding="utf-8")
-    with history_path.open("w", encoding="utf-8") as handle:
-        for entry in [*earlier, {"date": last.isoformat(), "ranks": {row["rule_hash"]: row["rank"] for row in ranked},
-                                 "excess": {row["rule_hash"]: row["excess"] for row in ranked}}]:
-            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    store.save()                                      # merges; never moves an account's decisions back
+    from quant_platform.research.shared_steps import exclusive
+
+    with exclusive(folder / "board.write.lock"):     # the check and the writes, one run at a time
+        if newer_on_disk(research, last, began):
+            shutil.rmtree(staging, ignore_errors=True)
+            return {"superseded": True, "date": last.isoformat(), "started_at": began.isoformat()}
+        history_path = folder / "board_history.jsonl"
+        earlier = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()] \
+            if history_path.is_file() else []
+        earlier = [entry for entry in earlier if entry.get("date") != last.isoformat()]
+        before = earlier[-5] if len(earlier) >= 5 else (earlier[0] if earlier else None)
+        for row in ranked:
+            previous = (before or {}).get("ranks", {}).get(row["rule_hash"])
+            row["rank_change"] = (previous - row["rank"]) if previous else None      # positive: moved up
+        board = {"built_at": datetime.now().isoformat(timespec="seconds"), "started_at": began.isoformat(),
+                 "common_start": first.isoformat(), "date": last.isoformat(), "sessions": len(days),
+                 "months": round(months, 2), "rows": rows,
+                 "counts": {label: sum(1 for row in rows if row.get("state") == label) for label in ADVICE}}
+        for path in staging.glob("*.json"):
+            os.replace(path, target / path.name)
+        shutil.rmtree(staging, ignore_errors=True)
+        partial = folder / f"board.json.{os.getpid()}.partial"
+        partial.write_text(json.dumps(board, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(partial, folder / "board.json")
+        partial = folder / f"board_history.jsonl.{os.getpid()}.partial"
+        with partial.open("w", encoding="utf-8") as handle:
+            for entry in [*earlier, {"date": last.isoformat(), "ranks": {row["rule_hash"]: row["rank"] for row in ranked},
+                                     "excess": {row["rule_hash"]: row["excess"] for row in ranked}}]:
+                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        os.replace(partial, history_path)
     return board
 
 

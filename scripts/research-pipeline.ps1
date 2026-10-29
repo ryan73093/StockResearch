@@ -86,10 +86,13 @@ function Wait-ForSimulationSlot([string[]]$Arguments) {
 }
 
 function Invoke-Step([string]$Label, [string[]]$Arguments) {
-    Wait-ForSimulationSlot $Arguments
-    Wait-ForMemory $Arguments
+    # 2026-10-29 (使用者：是你的程式太肥、架構太肥；不要為了省效能最後又給我錯的資料): when the step is asked for — every
+    # earlier step of the flow has ended — handed to it (research/shared_steps.py): a run of the same step that started
+    # after this moment and finished read all of it, and the step is skipped; the next whole second, never earlier
+    $env:RESEARCH_STEP_ASKED = "$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 1)"
     # 2026-10-20: three pipelines ended with the board at once (3-4 GB and a CPU each) and a deploy timed out; the
-    # board and the month's list are rebuilt by one run at a time — wait while another research process runs the same
+    # board and the month's list are rebuilt by one run at a time — wait while another research process runs the same.
+    # 2026-10-29: before the memory wait, so the memory is looked at just before the step starts
     foreach ($exclusive in @("forward-board", "--step select", "--step holdout")) {
         if (($Arguments -join " ") -like "*$exclusive*") {
             Wait-While "等另一個研究流程的 $exclusive 步驟跑完（同時只跑一個）" {
@@ -97,11 +100,20 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
                     $_.CommandLine -like "*quant_platform.research*$exclusive*" } } 60
         }
     }
+    # 2026-10-29 (AGENTS.md 研究規範：避開 13:30–14:40): every step, not only a flow's first — a flow that began in the
+    # morning started its board at 13:54. Not the market-hours capture (liveflow)
+    if ($Name -notin $RealTimeFlows) {
+        Wait-While "盤後單時段（13:30～14:40），這一步 14:40 再開始" {
+            (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 120
+    }
+    Wait-ForSimulationSlot $Arguments
+    Wait-ForMemory $Arguments
     $out = Join-Path $logs "$Name-$stamp-$Label.log"
     $err = Join-Path $logs "$Name-$stamp-$Label.err.log"
     Write-Note "步驟 $Label 開始：python $($Arguments -join ' ')（輸出：$out）"
     $process = Start-Process -FilePath $python -ArgumentList $Arguments -WorkingDirectory $root -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput $out -RedirectStandardError $err
+    Remove-Item Env:RESEARCH_STEP_ASKED -ErrorAction SilentlyContinue     # not for a command the flow runs on its own
     Write-Note "步驟 $Label 結束（結束碼 $($process.ExitCode)）"
     $script:StepExit = $process.ExitCode
     # 2026-10-24: the restart from the Start menu on 10-23 03:27 killed fmdaily_a's download step; the pipeline logged

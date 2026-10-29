@@ -1127,6 +1127,10 @@ def main() -> int:
         if not board:
             print("沒有可以計算的前向策略")
             return 1
+        if board.get("superseded"):        # 2026-10-29: a run that began later (or saw a later session) wrote its board
+            print(f"沒有寫入：已經有更新的看板（比這次 {board['started_at'][:19]} 開始、{board['date']} 的資料更新），"
+                  "這次的結果不蓋過它", flush=True)
+            return 0
         print(f"{board['common_start']} 起到 {board['date']}（{board['sessions']} 個交易日）：{board['counts']}")
         for row in sorted((row for row in board["rows"] if "rank" in row), key=lambda row: row["rank"])[:15]:
             print(f"{row['rank']:>2}. {row['name'][:40]}：報酬 {row['return']:+.2%}、比 0050 {row['excess']:+.2%}、{row['state']}")
