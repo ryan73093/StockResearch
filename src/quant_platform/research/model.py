@@ -24,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 MODEL_VERSION = "gbm-1.0.0"
 # Each model factor and how its model is trained. 1.0.0 (2026-10-06 00:29): the percentile of the next 20
@@ -412,7 +413,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
             continue
         positions = [samples.index(column) for column in train_cols]
         model, rows = _fit(x[positions].reshape(-1, x.shape[2]), y[positions].reshape(-1))
-        (out / f"{year}.pkl").write_bytes(pickle.dumps(model, protocol=5))
+        files.write_bytes(out / f"{year}.pkl", pickle.dumps(model, protocol=5))
         # out of sample: the year's own weekly samples (labels known by now)
         tests = [index for index, column in enumerate(samples) if fp.sessions[column].year == year]
         ics, tops, fifth_gains, top20_gains = [], [], [], []
@@ -454,7 +455,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
     meta = {"version": version, "label": label, "params": PARAMS, "features": list(names), "horizon": horizon,
             "step": STEP, "data": data_fingerprint, "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "years": dict(sorted({**earlier, **diagnostics}.items()))}
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 
@@ -507,10 +508,10 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
                 ages = {row: 0.5 ** ((now - samples[row]) / half_life) for row in set(rows20) | set(rows60)}
             ensemble = fit_year(x, y20, rank20, y60, rows20, rows60, PARAMS, weights=ages)
             if month is None:
-                (out / f"{year}.pkl").write_bytes(pickle.dumps(ensemble, protocol=5))
+                files.write_bytes(out / f"{year}.pkl", pickle.dumps(ensemble, protocol=5))
             else:
                 (out / MONTHLY).mkdir(parents=True, exist_ok=True)
-                (out / MONTHLY / f"{fp.sessions[first - 1].isoformat()}.pkl").write_bytes(pickle.dumps(ensemble, protocol=5))
+                files.write_bytes(out / MONTHLY / f"{fp.sessions[first - 1].isoformat()}.pkl", pickle.dumps(ensemble, protocol=5))
                 if job:
                     job.update(current=f"{year} 年 {month} 月的集成模型（每月重訓）", force=True)
             fitted[month] = ensemble
@@ -546,7 +547,7 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
     meta = {"version": version, "label": "ensemble", "params": PARAMS, "features": list(names), "horizon": HORIZON,
             "kinds": list(KINDS), "step": STEP, "data": data_fingerprint,
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds"), "years": diagnostics}
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 
@@ -606,7 +607,7 @@ def train_until(fp, out_dir: str | Path, cutoff, label: str, version: str, horiz
         y = label_block(fp, samples, eligible, label, horizon)
         chosen = rows(horizon)
         model, count = _fit(x[chosen].reshape(-1, x.shape[2]), y[chosen].reshape(-1))
-    (target / f"{cutoff.isoformat()}.pkl").write_bytes(pickle.dumps(model, protocol=5))
+    files.write_bytes(target / f"{cutoff.isoformat()}.pkl", pickle.dumps(model, protocol=5))
     return {"version": version, "cutoff": cutoff.isoformat(), "samples": count,
             "label_until": fp.sessions[last].isoformat(), "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
 

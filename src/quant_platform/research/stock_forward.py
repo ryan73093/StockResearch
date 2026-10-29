@@ -345,7 +345,7 @@ class StockForwardTracker:
         target.update(experiments)
         if not target:
             if changed:
-                self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+                files.write_text(self.tracked_path, json.dumps(items, ensure_ascii=False, indent=1))
             return []
         restart: set[str] = set()
         by_hash: dict[str, dict] = {}
@@ -382,7 +382,7 @@ class StockForwardTracker:
             self._archive_decisions(restart, moment)
         if added or changed:
             self._folder.mkdir(parents=True, exist_ok=True)
-            self.tracked_path.write_text(json.dumps(items + added, ensure_ascii=False, indent=1), encoding="utf-8")
+            files.write_text(self.tracked_path, json.dumps(items + added, ensure_ascii=False, indent=1))
         return added
 
     def _archive_decisions(self, hashes: set[str], moment: str) -> int:
@@ -396,7 +396,7 @@ class StockForwardTracker:
             archive = store.path.with_name("decisions-archive.json")
             kept = json.loads(archive.read_text(encoding="utf-8")) if archive.is_file() else {}
             kept.update({f"{name}~{moment}": value for name, value in moved.items()})
-            archive.write_text(json.dumps(kept, ensure_ascii=False), encoding="utf-8")
+            files.write_text(archive, json.dumps(kept, ensure_ascii=False))
         return len(moved)
 
     def _archive_records(self, hashes: set[str], moment: str) -> int:
@@ -415,8 +415,8 @@ class StockForwardTracker:
         files.replace(partial, self.log_path, wait=300.0)       # 2026-10-29: a page reading it (research/files.py)
         marks = self.rebases()
         if any(key in marks for key in hashes):
-            self.rebases_path.write_text(json.dumps({key: value for key, value in marks.items() if key not in hashes},
-                                                    ensure_ascii=False, indent=1), encoding="utf-8")
+            files.write_text(self.rebases_path, json.dumps({key: value for key, value in marks.items() if key not in hashes},
+                                                           ensure_ascii=False, indent=1))
         return len(moved)
 
     def archived(self) -> list[dict[str, object]]:
@@ -521,7 +521,7 @@ class StockForwardTracker:
             found += 1
         if found:
             self._folder.mkdir(parents=True, exist_ok=True)
-            self.rebases_path.write_text(json.dumps(marks, ensure_ascii=False, indent=1), encoding="utf-8")
+            files.write_text(self.rebases_path, json.dumps(marks, ensure_ascii=False, indent=1))
         return found
 
     def restart(self, start: date, reason: str, now: datetime | None = None) -> dict[str, object]:
@@ -546,13 +546,13 @@ class StockForwardTracker:
                 item.setdefault("added", item["since"])
                 item["since"] = start.isoformat()
                 item["restarted"] = {"at": stamp, "reason": reason}
-        self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+        files.write_text(self.tracked_path, json.dumps(items, ensure_ascii=False, indent=1))
         marks = self.rebases()
         if marks:
             (self._folder / f"rebases-before-restart-{stamp}.json").write_text(
                 json.dumps(marks, ensure_ascii=False, indent=1), encoding="utf-8")
-            self.rebases_path.write_text(json.dumps({key: value for key, value in marks.items() if key not in live},
-                                                    ensure_ascii=False, indent=1), encoding="utf-8")
+            files.write_text(self.rebases_path, json.dumps({key: value for key, value in marks.items() if key not in live},
+                                                           ensure_ascii=False, indent=1))
         return {"accounts": len(live), "archived_records": len(records) - len(kept), "archive": archive.name}
 
     def uses(self, item: dict) -> set[str]:
@@ -597,7 +597,7 @@ class StockForwardTracker:
         self._archive_decisions(hashes, moment)
         for item in hit:
             item[field] = {"at": moment, "reason": reason}
-        self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+        files.write_text(self.tracked_path, json.dumps(items, ensure_ascii=False, indent=1))
         return [item["name"] for item in hit]
 
     def stop(self, rule_hash: str, today: date, reason: str) -> bool:
@@ -607,7 +607,7 @@ class StockForwardTracker:
         for item in hit:
             item.update(stopped=today.isoformat(), stop_reason=reason)
         if hit:
-            self.tracked_path.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+            files.write_text(self.tracked_path, json.dumps(items, ensure_ascii=False, indent=1))
         return bool(hit)
 
     def freeze(self, today: date) -> list[dict[str, object]]:
@@ -1014,7 +1014,7 @@ class StockForwardTracker:
                   "differing_accounts": sum(1 for row in rows if row["differed"]),
                   "rows": sorted(rows, key=lambda row: -row["differed"])}
         path = self._folder / f"audit-{moment:%Y%m%d-%H%M%S}.json"
-        path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        files.write_text(path, json.dumps(report, ensure_ascii=False, indent=1))
         return path
 
     def explain_backfill(self) -> dict[str, int]:

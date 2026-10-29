@@ -30,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 VERSION = "tech-rl-2.0.0"
 # 2.1.0 (2026-10-14): the same robot over every factor with a full history — price, technical, chip, statement and
@@ -378,7 +379,7 @@ def walk_forward(fp, benchmark: np.ndarray, out_dir: Path, job=None, version: st
                        "epochs": EPOCHS, "rollouts": ROLLOUTS, "learning_rate": LEARNING_RATE, "seeds": list(SEEDS)},
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out_dir / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 
@@ -490,7 +491,7 @@ def walk_forward_blocks(fp, benchmark: np.ndarray, out_dir: Path, job=None, wors
                        "phases": list(PHASES), "held_out": HELD_OUT, "check_every": CHECK_EVERY},
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out_dir / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 
@@ -564,7 +565,7 @@ def walk_forward_rolling(fp, benchmark: np.ndarray, out_dir: Path, job=None,
                        "select_from": SELECT_FROM.isoformat(), "select_least": SELECT_LEAST},
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out_dir / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 

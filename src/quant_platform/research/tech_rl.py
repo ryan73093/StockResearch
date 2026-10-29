@@ -28,6 +28,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 TECH_VERSION = "tech-rl-1.0.0"
 TECH_FEATURES = ("trend_200", "high_52w", "momentum_3", "momentum_6", "momentum_12_1", "reversal_1", "reversal_5d",
@@ -361,7 +362,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
             if job:
                 job.update(done=number, current=f"{year} 年的機器人（種子 {seed}）", force=True)
             policy, curve = train_policy(board, first_session, start, seed + year * 100, config)
-            torch.save(policy.state_dict(), out / f"{year}-seed{seed}.pt")
+            files.save_beside(out / f"{year}-seed{seed}.pt", lambda path: torch.save(policy.state_dict(), path))
             policies.append(policy)
             curves.append(curve)
         check = (simulate_agent(board, policies, start, max(start + 1, end - 1), config["step"])
@@ -373,7 +374,7 @@ def train(fp, out_dir: str | Path, data_fingerprint: str = "", years: list[int] 
     meta = {"version": version, "features": list(TECH_FEATURES), "market": list(MARKET), "position": list(POSITION),
             "costs": {"in": COST_IN, "out": COST_OUT}, "config": config, "seeds": list(seeds), "data": data_fingerprint,
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds"), "years": diagnostics}
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 

@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 VERSION = "dl-1.0.0"
 FACTORS = ("momentum_3", "momentum_6", "high_52w", "trend_200", "rsi_14", "low_volatility_60", "reversal_1", "liquidity",
@@ -160,7 +161,7 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
             network.load_state_dict(best[1])
             networks.append(network)
             curves.append(curve)
-            torch.save(best[1], out / f"{year}-{seed}.pt")
+            files.save_beside(out / f"{year}-{seed}.pt", lambda path: torch.save(best[1], path))
         # every session of the year, every eligible stock: the seeds' scores averaged
         columns = [column for column, day in enumerate(fp.sessions) if day.year == year and column >= LENGTH]
         year_scores = np.full((len(columns), len(fp.symbols)), np.nan, dtype=np.float32)
@@ -193,13 +194,14 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
             job.update(done=number + 1, total=len(years),
                        current=f"{year}：樣本外 IC {diagnostics[str(year)]['ic']}、前 20 名多 {diagnostics[str(year)]['top20_gain']}")
     days = sorted(scores)
-    np.savez_compressed(out / "deep.npz", days=np.array(days), symbols=np.array(fp.symbols),
-                        scores=np.stack([scores[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0)))
+    files.save_beside(out / "deep.npz", lambda path: np.savez_compressed(
+        path, days=np.array(days), symbols=np.array(fp.symbols),
+        scores=np.stack([scores[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0))))
     meta = {"version": VERSION, "label": "deep", "features": ["return", "turnover_change", *FACTORS],
             "length": LENGTH, "hidden": HIDDEN, "epochs": EPOCHS, "seeds": list(SEEDS), "held_out": HELD_OUT,
             "horizon": HORIZON, "years": diagnostics, "device": device_name(),
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 

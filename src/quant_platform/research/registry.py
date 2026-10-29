@@ -35,15 +35,22 @@ _VERIFIED: dict[str, dict] = {}       # 2026-10-29: per file, the bytes already 
 SUPPLEMENT = "windows_since_2020.jsonl"
 
 
+def whole_lines(path: Path) -> list[str]:
+    """The file's lines that are written to their end. 2026-10-29: a record being appended right now has no line end
+    yet and is read next time (as ``verify`` does) — every research flow appends while the board, the forward record and
+    the pages read the registry, and half a line would stop the reader."""
+    text = Path(path).read_text(encoding="utf-8")
+    return [line for line in text[:text.rfind("\n") + 1].splitlines() if line.strip()]
+
+
 def supplements(path: Path) -> dict[str, dict]:
     """input hash → the backfilled windows (``{"1y": summary, "3y": summary}``) of the registry at ``path``."""
     found = Path(path).with_name(SUPPLEMENT)
     output: dict[str, dict] = {}
     if found.is_file():
-        for line in found.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                row = json.loads(line)
-                output[row["input_hash"]] = row["windows"]
+        for line in whole_lines(found):
+            row = json.loads(line)
+            output[row["input_hash"]] = row["windows"]
     return output
 
 
@@ -196,17 +203,15 @@ class TrialRegistry:
                extra_stat.st_mtime_ns if extra_stat else None, extra_stat.st_size if extra_stat else None)
         if _PARSED.get("key") != key:
             extra = supplements(self._path)
-            _PARSED.update(key=key, records=[
-                TrialRecord(**_merged(json.loads(line), extra))
-                for line in self._path.read_text(encoding="utf-8").splitlines() if line.strip()
-            ])
+            _PARSED.update(key=key, records=[TrialRecord(**_merged(json.loads(line), extra))
+                                             for line in whole_lines(self._path)])
         return list(_PARSED["records"])
 
     def written(self) -> list[TrialRecord]:
         """Every record exactly as written (no backfilled windows) — what the chain covers."""
         if not self._path.is_file():
             return []
-        return [TrialRecord(**json.loads(line)) for line in self._path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return [TrialRecord(**json.loads(line)) for line in whole_lines(self._path)]
 
     def find(self, kind: str, period: str, input_hash: str) -> TrialRecord | None:
         return next(

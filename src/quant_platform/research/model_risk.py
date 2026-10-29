@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 VERSION = "dl-risk-1.0.0"
 DROP = 0.15
@@ -88,7 +89,7 @@ def _fit_seeds(data, pairs, held, targets, held_targets, on, path_of) -> tuple[l
         network.load_state_dict(best[1])
         networks.append(network)
         curves.append(curve)
-        torch.save(best[1], path_of(seed))
+        files.save_beside(path_of(seed), lambda path: torch.save(best[1], path))
     return networks, curves
 
 
@@ -135,9 +136,9 @@ def train_until(fp, out_dir: str | Path, cutoff, job=None, label_function=None) 
             values[rows] = 1 / (1 + np.exp(-np.mean([_score(network, data, now) for network in networks], axis=0)))
         kept[fp.sessions[column].isoformat()] = values
     days = sorted(kept)
-    with open(target / f"{cutoff.isoformat()}.npz", "wb") as handle:
-        np.savez_compressed(handle, days=np.array(days), symbols=np.array(fp.symbols),
-                            scores=np.stack([kept[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0)))
+    files.save_beside(target / f"{cutoff.isoformat()}.npz", lambda path: np.savez_compressed(
+        path, days=np.array(days), symbols=np.array(fp.symbols),
+        scores=np.stack([kept[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0))))
     return {"version": VERSION, "cutoff": cutoff.isoformat(), "train_samples": int(len(pairs)),
             "held_samples": int(len(held)), "label_until": fp.sessions[train_cols[-1] + HORIZON].isoformat(),
             "held_best": [max(curve) for curve in curves], "scored_days": len(days),
@@ -205,12 +206,13 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None, ver
             job.update(done=number + 1, total=len(years),
                        current=f"{year}：大跌比例 {item['base_rate']}、AUC {item['auc']}（波動 {item['auc_volatility']}）")
     days = sorted(kept)
-    np.savez_compressed(out / "deep.npz", days=np.array(days), symbols=np.array(fp.symbols),
-                        scores=np.stack([kept[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0)))
+    files.save_beside(out / "deep.npz", lambda path: np.savez_compressed(
+        path, days=np.array(days), symbols=np.array(fp.symbols),
+        scores=np.stack([kept[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0))))
     meta = {"version": version, "label": "deep_risk", "target": target, "drop": DROP, "horizon": HORIZON,
             "length": LENGTH, "seeds": list(SEEDS), "epochs": EPOCHS, "held_out": HELD_OUT, "years": diagnostics,
             "device": device_name(), "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     del pd
     return meta
 

@@ -28,6 +28,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 VERSION = "meta-1.0.0"
 PRIMARY = "ml_deep2_top"        # the deep model's top tenth (dl-2.1.0): the frontier's rules use it
@@ -119,7 +120,7 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
             continue
         model = HistGradientBoostingClassifier(**PARAMS, random_state=0).fit(x[learn], won[learn])
         base = float(won[learn].mean())
-        (out / f"{year}.pkl").write_bytes(pickle.dumps({"model": model, "base": base}))
+        files.write_bytes(out / f"{year}.pkl", pickle.dumps({"model": model, "base": base}))
         margin[test] = model.predict_proba(x[test])[:, 1] - base
         judged = test & weekly & np.isfinite(won)
         kept, vetoed = judged & (margin >= 0), judged & (margin < 0)
@@ -140,13 +141,14 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
     days = np.array([fp.sessions[position].isoformat() for position in pairs[:, 0]])
     codes = np.array([fp.symbols[row] for row in pairs[:, 1]])
     known = np.isfinite(margin)
-    np.savez_compressed(out / "meta.npz", day=days[known], symbol=codes[known], margin=margin[known])
+    files.save_beside(out / "meta.npz", lambda path: np.savez_compressed(
+        path, day=days[known], symbol=codes[known], margin=margin[known]))
     meta = {"version": VERSION, "label": "meta", "primary": PRIMARY, "candidates": CANDIDATES, "horizon": HORIZON,
             "step": STEP, "features": [PRIMARY, *names, "low_volatility_60", "taiex_trend_200", "taiex_return_20",
                                        "rising_share", "taiex_volatility_20"],
             "params": PARAMS, "years": yearly, "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
     meta["gate"] = gate_check(meta)
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 
@@ -170,7 +172,7 @@ def train_until(fp, out_dir: str | Path, cutoff) -> dict[str, object]:
     learn = (pairs[:, 0] % STEP == 0) & (pairs[:, 0] + HORIZON <= last) & np.isfinite(won)
     model = HistGradientBoostingClassifier(**PARAMS, random_state=0).fit(x[learn], won[learn])
     base = float(won[learn].mean())
-    (target / f"{cutoff.isoformat()}.pkl").write_bytes(pickle.dumps({"model": model, "base": base}))
+    files.write_bytes(target / f"{cutoff.isoformat()}.pkl", pickle.dumps({"model": model, "base": base}))
     return {"version": VERSION, "cutoff": cutoff.isoformat(), "train_events": int(learn.sum()), "base_rate": round(base, 4),
             "label_until": fp.sessions[int(pairs[learn][:, 0].max()) + HORIZON].isoformat(),
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}

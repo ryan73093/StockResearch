@@ -95,7 +95,7 @@ class DecisionStore:
             marks = self._dropped()
             marks.update({name: time.time() for name in names})
             tomb = self.path.with_name("decisions-dropped.json")
-            tomb.write_text(json.dumps(marks, ensure_ascii=False), encoding="utf-8")
+            files.write_text(tomb, json.dumps(marks, ensure_ascii=False))
         self._data = current
         self._kept = {name: entry for name, entry in self._kept.items() if name not in names}
         return taken

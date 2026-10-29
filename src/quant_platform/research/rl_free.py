@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 VERSION = "free-rl-4.0.0"
 # 4.1.0 (2026-10-16): 4.0 learned to spread the account over about 800 stocks — free of costs in its training account,
@@ -317,7 +318,7 @@ def walk_forward(market: Market, out_dir: Path, job=None, version: str = VERSION
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "targets.json").write_text(json.dumps(targets), encoding="utf-8")
-    (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out_dir / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 

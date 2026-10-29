@@ -395,3 +395,20 @@ def test_newest_prefers_the_newest_engine_over_the_registry_order():
     chosen = newest(rows)
     assert chosen["a"].trial_id == 6 and chosen["b"].trial_id == 4 and chosen["c"].trial_id == 5
     assert engine_order(rows[0]) == (1, 5, 0) and newest(rows, lambda row: row.spec_hash == "b").keys() == {"b"}
+
+
+def test_a_record_being_appended_is_read_once_it_is_whole(tmp_path):
+    """2026-10-29: research flows append while the board, the forward record and the pages read the registry; a reader
+    that meets the end of a line still being written reads the records before it (as the chain check does)."""
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    _register(registry)
+    _register(registry, spec_hash="b" * 64, input_hash="i2")
+    whole = (tmp_path / "trials.jsonl").read_text(encoding="utf-8")
+    third = json.dumps({"kind": "candidate"})
+    with open(tmp_path / "trials.jsonl", "a", encoding="utf-8") as handle:
+        handle.write(third[:9])                                          # half of a line, no line end yet
+    assert [record.spec_hash for record in TrialRegistry(tmp_path / "trials.jsonl").records()] == ["a" * 64, "b" * 64]
+    assert len(TrialRegistry(tmp_path / "trials.jsonl").written()) == 2
+    assert TrialRegistry(tmp_path / "trials.jsonl").verify() == []
+    (tmp_path / "trials.jsonl").write_text(whole, encoding="utf-8")
+    assert len(TrialRegistry(tmp_path / "trials.jsonl").records()) == 2

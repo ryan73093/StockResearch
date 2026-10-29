@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 VERSION = "exit-2.0.0"
 TOP, ZONE, STEP = 20, 60, 5
@@ -203,7 +204,7 @@ def train(fp, out_dir: str | Path, factor: str = "ml_deep2_top", years: list[int
         for seed in range(BOOTSTRAPS):
             drawn = set(rng.choice(train_weeks, size=len(train_weeks), replace=True).tolist())
             models.append(fitted_q(weeks, usable & np.isin(weeks.week, list(drawn)), seed))
-        (out / f"{year}.pkl").write_bytes(pickle.dumps(models, protocol=5))
+        files.write_bytes(out / f"{year}.pkl", pickle.dumps(models, protocol=5))
         test = weeks.years == year
         if not test.any():
             continue
@@ -235,5 +236,5 @@ def train(fp, out_dir: str | Path, factor: str = "ml_deep2_top", years: list[int
             "gamma": GAMMA, "iterations": ITERATIONS, "bootstraps": BOOTSTRAPS, "z": Z, "cost": COST,
             "max_swaps": MAX_SWAPS, "params": PARAMS, "years": diagnostics, "gate": gate_check(diagnostics),
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds")}
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta

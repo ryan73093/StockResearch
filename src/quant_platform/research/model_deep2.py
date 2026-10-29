@@ -40,6 +40,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 LOSSES = {"dl-2.0.0": "listnet", "dl-2.1.0": "top10", "dl-3.0.0": "top10", "dl-2.2.0": "top10", "dl-2.4.0": "top10",
           "dl-2.5.0": "top10", "dl-2.6.0": "top10", "dl-2.7.0": "top10"}
@@ -671,7 +672,7 @@ def train_until(fp, out_dir: str | Path, version: str, cutoff, job=None) -> dict
         network.load_state_dict(state)
         networks.append(network)
         curves.append(curve)
-        torch.save(state, target / f"{cutoff.isoformat()}-{seed}.pt")
+        files.save_beside(target / f"{cutoff.isoformat()}-{seed}.pt", lambda path: torch.save(state, path))
         if job:
             job.update(current=f"{version}：重訓到 {cutoff}，第 {seed + 1}/{len(SEEDS)} 個種子，保留期前 20 名多 {max(curve):+.4f}",
                        force=True)
@@ -684,9 +685,9 @@ def train_until(fp, out_dir: str | Path, version: str, cutoff, job=None) -> dict
             values[live] = _rank_average([inputs.score(network, pairs) for network in networks])
         kept[fp.sessions[column].isoformat()] = values
     days = sorted(kept)
-    with open(target / f"{cutoff.isoformat()}.npz", "wb") as handle:
-        np.savez_compressed(handle, days=np.array(days), symbols=np.array(fp.symbols),
-                            scores=np.stack([kept[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0)))
+    files.save_beside(target / f"{cutoff.isoformat()}.npz", lambda path: np.savez_compressed(
+        path, days=np.array(days), symbols=np.array(fp.symbols),
+        scores=np.stack([kept[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0))))
     return {"version": version, "cutoff": cutoff.isoformat(), "train_days": len(train_days), "held_days": len(held_days),
             "label_until": fp.sessions[known[-1] + HORIZON].isoformat() if known else None,
             "held_best": [round(max(curve), 5) for curve in curves], "scored_days": len(days),
@@ -765,7 +766,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                 network.load_state_dict(state)
                 networks.append(network)
                 curves.append(curve)
-                torch.save(state, out / f"{year}-{seed}.pt")
+                files.save_beside(out / f"{year}-{seed}.pt", lambda path: torch.save(state, path))
                 if job:
                     when = f"{year} 年" + (f" {month} 月" if month is not None else "")
                     job.update(current=f"{version}：{when}第 {seed + 1}/{len(SEEDS)} 個種子，保留期前 20 名多 {max(curve):+.4f}")
@@ -796,14 +797,14 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                 report_labels, eligible)
         _save_scores(out, stored, fp.symbols)
         meta["trained_at"] = datetime.now(UTC).isoformat(timespec="seconds")
-        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+        files.write_text(meta_path, json.dumps(meta, ensure_ascii=False, indent=1))
         if job:
             item = meta["years"][str(year)]
             job.update(done=number + 1, total=len(order),
                        current=f"{year}：樣本外 IC {item['ic']}、前 20 名多 {item['top20_gain']}")
     if all(str(year) in meta["years"] for year in gate_years(version)):      # 2026-10-29: its own gate's years
         meta["gate"] = _judge(version, meta, out.parent)
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(meta_path, json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 
@@ -829,7 +830,7 @@ def _save_scores(folder: Path, kept: dict[str, np.ndarray], symbols: list[str]) 
     with open(partial, "wb") as handle:
         np.savez_compressed(handle, days=np.array(days), symbols=np.array(symbols),
                             scores=np.stack([kept[day] for day in days]).astype(np.float16) if days else np.zeros((0, 0)))
-    partial.replace(folder / "deep.npz")
+    files.replace(partial, folder / "deep.npz", wait=300.0)
 
 
 def scores(fp, folder: str | Path) -> np.ndarray:

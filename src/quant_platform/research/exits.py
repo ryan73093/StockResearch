@@ -24,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 EXIT_VERSION = "exit-1.0.0"
 HORIZON = 20
@@ -170,7 +171,7 @@ def train(fp, out_dir: str | Path, rule=None, years: list[int] | None = None, jo
         features = x[train_rows].copy()
         features[:, ~np.isfinite(features).any(axis=0)] = 0.0     # a state with no value yet: never used
         model.fit(features, y[train_rows])
-        (out / f"{year}.pkl").write_bytes(pickle.dumps(model, protocol=5))
+        files.write_bytes(out / f"{year}.pkl", pickle.dumps(model, protocol=5))
         tests = np.array([fp.sessions[position].year == year for position in positions])
         if tests.any():
             predicted = model.predict(x[tests])
@@ -185,7 +186,7 @@ def train(fp, out_dir: str | Path, rule=None, years: list[int] | None = None, jo
     meta = {"version": EXIT_VERSION, "base_rule": rule.canonical(), "features": list(FEATURES), "horizon": HORIZON,
             "round_trip": ROUND_TRIP, "params": PARAMS, "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "years": diagnostics}
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 

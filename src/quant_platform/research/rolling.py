@@ -23,6 +23,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 ROLLING_VERSION = "rolling-1.0.0"
 _worker: dict = {}
@@ -230,7 +231,7 @@ def save(research: str | Path, cutoff: date, payload: dict) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_suffix(".partial")
     partial.write_text(json.dumps(payload, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
-    os.replace(partial, target)
+    files.replace(partial, target, wait=300.0)       # 2026-10-29: a reader holding it
     return target
 
 

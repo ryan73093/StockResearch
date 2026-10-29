@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from quant_platform.research import files  # 2026-10-29: files written whole while read
 
 VERSION = "dl-risk-2.0.0"
 SIGMAS = 2.0
@@ -143,7 +144,7 @@ def train(fp, out_dir: str | Path, years: list[int] | None = None, job=None) -> 
     for year, item in found.items():
         meta["years"].setdefault(year, {}).update(item)
     meta.update(label="deep_risk2", sigmas=SIGMAS, gate=gate_check(found))
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 
 
