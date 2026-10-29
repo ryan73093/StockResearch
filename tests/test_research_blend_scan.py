@@ -282,3 +282,41 @@ def test_the_reach_search_counts_registered_blends_on_the_frontier():
     # the reach is the ranking: the finalists in falling reach
     scores = [item["score"] for item in plain["finalists"]]
     assert scores == sorted(scores, reverse=True) and best["score"] > 0
+
+
+def test_the_torch_blocks_give_the_numpy_results():
+    """2026-10-29 (使用者：不是叫你也要開 gpu 輔助嗎；不要為了省效能最後又給我錯的資料): the search on a torch device
+    (here the CPU one, so the test does not take the GPU from a running search) keeps the same blends at the same
+    shares with the same measures as the numpy one — on members where blends do pass (two 0050 falls, each member's
+    worst in a different one, so a half-half blend stands beyond the frontier)."""
+    import torch
+
+    bench = np.array([100, 110, 95, 98, 110, 120, 104, 106, 120, 130, 140, 150.0])
+    paid = np.full(12, 100.0)
+
+    def account(trial, values):
+        return {**member(trial, values[:8]), "values": np.array(values, dtype=float), "bench": bench, "paid": paid}
+    rng = np.random.default_rng(3)
+    members = [account(10, [100, 120, 96, 105, 125, 140, 133, 140, 160, 180, 200, 220]),
+               account(11, [100, 112, 108, 112, 128, 150, 120, 128, 150, 170, 195, 215])]
+    members += [account(12 + n, list(100 * np.cumprod(1 + rng.normal(0.02, 0.05, 12)))) for n in range(5)]
+    for options in ({"frontier": True, "recent_split": 4}, {"frontier": True, "recent_split": 4, "rank": "frontier",
+                                                           "references": {"money": np.zeros(0), "gap": np.zeros(0)}},
+                    {"weighting": "downside", "calm_floor": -1.0}):
+        plain = bs.search(members, sizes=(2, 3), count=50, **options)
+        torched = bs.search(members, sizes=(2, 3), count=50, device=torch.device("cpu"), **options)
+        assert plain["passed"] > 0 and plain["finalists"]                   # a real comparison, not two empty ones
+        assert (plain["candidates"], plain["passed"]) == (torched["candidates"], torched["passed"])
+        assert [item["members"] for item in plain["finalists"]] == [item["members"] for item in torched["finalists"]]
+        for left, right in zip(plain["finalists"], torched["finalists"]):
+            assert left["shares"] == right["shares"]
+            for key in ("dev_excess", "dev_drawdown", "dev_gap", "score"):
+                assert left.get(key) == pytest.approx(right.get(key), abs=1e-9)
+    values = np.stack([m["values"] for m in members])
+    stretches = bs.falls(bs.month_returns(bench, paid))
+    assert len(stretches) == 2
+    found = bs.measure(values, bench, paid, stretches, 4)
+    torched = bs.measure_torch(torch.as_tensor(values, dtype=torch.float64), bench, paid, stretches, 4)
+    for key in ("excess", "drawdown", "gap", "recent", "early"):
+        assert torched[key] == pytest.approx(found[key], abs=1e-12)
+    assert torched["bench_drawdown"] == pytest.approx(found["bench_drawdown"])

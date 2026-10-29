@@ -1126,7 +1126,11 @@ switch ($Name) {
     }
     "blendreach" {
         # 2026-10-29 (research_method §7「組合搜尋第十三輪」, written before the run): every pair and triple, the registered
-        # blends on the frontier too, the finalists by how far they push it out
+        # blends on the frontier too, the finalists by how far they push it out. Stage one on the GPU (使用者 10/29：不是
+        # 叫你也要開 gpu 輔助嗎; the CPU-only run was stopped at 09:45): not while the full search's stage one holds it
+        # (10-15 of the 16 GB, no handling of running out) — waiting takes no CPU
+        Wait-While "等顯示卡空出來（全段大搜尋第一階段在用，顯示卡記憶體 10～15 GB）" {
+            Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object { $_.CommandLine -like "*scan-full*--part*" } } 300
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-blends" @("-m", "quant_platform.research", "daily", "--name", "blendreach", "--broker", "cathay")
         Invoke-Step "2-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")

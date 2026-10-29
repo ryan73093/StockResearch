@@ -216,6 +216,36 @@ def measure(values: np.ndarray, bench: np.ndarray, paid: np.ndarray, stretches: 
     return output
 
 
+def measure_torch(values, bench: np.ndarray, paid: np.ndarray, stretches: list[tuple[int, int]],
+                  split: int | None = None) -> dict:
+    """2026-10-29 (使用者：不是叫你也要開 gpu 輔助嗎): ``measure`` on a torch tensor (the GPU), in float64 like the numpy
+    one — the same formulas, so the results differ only by the order of floating-point sums (tests: within 1e-9)."""
+    import torch
+
+    flow = torch.as_tensor(np.diff(paid), dtype=values.dtype, device=values.device)
+    returns = (values[:, 1:] - flow) / values[:, :-1] - 1
+    ones = torch.ones((values.shape[0], 1), dtype=values.dtype, device=values.device)
+    units = torch.cat([ones, torch.cumprod(1 + returns, dim=1)], dim=1)
+    drawdown = (units / torch.cummax(units, dim=1).values - 1).min(dim=1).values
+    base = np.concatenate([[1.0], np.cumprod(1 + month_returns(bench, paid))])
+    gap = torch.full((values.shape[0],), float("inf"), dtype=values.dtype, device=values.device)
+    for peak, trough in stretches:
+        gap = torch.minimum(gap, (units[:, trough] / units[:, peak] - 1) - float(base[trough] / base[peak] - 1))
+    output = {"excess": (values[:, -1] - float(bench[-1])) / float(paid[-1]), "drawdown": drawdown,
+              "gap": torch.where(torch.isfinite(gap), gap, torch.zeros_like(gap))}
+    if split is not None:
+        last = units.shape[1] - 1
+        output["recent"] = ((units[:, last] / units[:, split - 1]) / float(base[last] / base[split - 1])) ** (
+            12 / (last - split + 1)) - 1
+        output["early"] = (units[:, split - 1] / float(base[split - 1])) ** (12 / max(split - 1, 1)) - 1
+    found = {name: value.cpu().numpy() for name, value in output.items()}
+    found["bench_drawdown"] = float((base / np.maximum.accumulate(base) - 1).min())
+    return found
+
+
+GPU_BLOCK = 100_000           # 2026-10-29: blends a block on the GPU (about 0.8 GB at three members and 135 months)
+
+
 def combo_blocks(count: int, size: int, block: int = 2_000_000):
     """2026-10-28: every ``size``-member combination of ``count`` members, a block at a time, in itertools order (the
     triples of 1,576 rules would not fit in memory at once)."""
@@ -237,7 +267,7 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
            recent_split: int | None = None, near_copy: float = NEAR_COPY, frontier: bool = False,
            extend: bool = False, per_size: int | None = None, weighting: str = "volatility", roles=None,
            calm_floor: float | None = None, room: float | None = None, rank: str = "score",
-           references: dict | None = None) -> dict:
+           references: dict | None = None, device=None) -> dict:
     """Stage 1 over every pair and triple of ``members``: the counts and the finalists (members, shares, development
     measures), best development excess first. ``taken``: blend hashes already registered (left out). ``recent_split``
     (2026-10-28, 第九輪: the index of RECENT_MONTH): the gate is beating 0050 from that month (time-weighted), the
@@ -254,7 +284,9 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
     also at most this much further than 0050 in each of its falls; ``room`` the frontier's drawdown room instead.
     第十三版: ``weighting`` "contribution" shares of equal parts in the blend's CVaR (contribution_shares).
     組合搜尋第十三輪: ``references`` (blend_references) join the pool on the frontier, and ``rank`` "frontier" ranks the
-    blends that stay by how far they push it out (reach) instead of the score."""
+    blends that stay by how far they push it out (reach) instead of the score. ``device`` (2026-10-29, 使用者：不是叫你
+    也要開 gpu 輔助嗎): a torch device — each block is blended and measured there (measure_torch), the rest unchanged;
+    shares of equal CVaR parts stay on the CPU."""
     from quant_platform.research.scan_full import EARLY_WEIGHT
 
     if not members:
@@ -290,6 +322,29 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
             front_money, front_gap = money[top], gaps[top]
     counted, passed = 0, 0
     width = 4 if extend else max(sizes)
+    on_device = device is not None and weighting != "contribution"
+    if on_device:
+        import torch
+
+        device_values = torch.as_tensor(values, dtype=torch.float64, device=device)
+        device_risk = torch.as_tensor(risk, dtype=torch.float64, device=device)
+
+    def blend_block(block: np.ndarray):
+        """The block's shares, money at the end and measures — on the device when there is one."""
+        if on_device:
+            index = torch.as_tensor(block, device=device)
+            weights = 1 / device_risk[index]
+            shares_on = weights / weights.sum(dim=1, keepdim=True)
+            blended_on = torch.einsum("km,kmt->kt", shares_on, device_values[index])
+            return shares_on.cpu().numpy(), blended_on[:, -1].cpu().numpy(), measure_torch(
+                blended_on, bench, paid, stretches, recent_split)
+        if weighting == "contribution":
+            shares_here = contribution_shares(returns[block])
+        else:
+            weights = 1 / risk[block]
+            shares_here = weights / weights.sum(axis=1, keepdims=True)
+        blended = np.einsum("km,kmt->kt", shares_here, values[block])
+        return shares_here, blended[:, -1], measure(blended, bench, paid, stretches, recent_split)
 
     def fresh() -> dict[str, list]:
         return {name: [] for name in ("score", "excess", "drawdown", "gap", "recent", "early", "combo", "shares")}
@@ -317,18 +372,13 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
         for left, right in itertools.combinations(range(size), 2):
             apart &= correlation[combos[:, left], combos[:, right]] <= near_copy
         combos = combos[apart]
-        for begin in range(0, len(combos), 20_000):                  # a block at a time (memory)
-            block = combos[begin:begin + 20_000]
-            if weighting == "contribution":
-                shares = contribution_shares(returns[block])
-            else:
-                weights = 1 / risk[block]
-                shares = weights / weights.sum(axis=1, keepdims=True)
-            blended = np.einsum("km,kmt->kt", shares, values[block])
-            found = measure(blended, bench, paid, stretches, recent_split)
+        step = GPU_BLOCK if on_device else 20_000
+        for begin in range(0, len(combos), step):                    # a block at a time (memory)
+            block = combos[begin:begin + step]
+            shares, money, found = blend_block(block)
             beat = found["recent"] if recent_split is not None else found["excess"]
             if frontier:
-                end, gap = blended[:, -1][:, None], found["gap"][:, None]
+                end, gap = money[:, None], found["gap"][:, None]
                 dominated = ((front_money[None, :] >= end) & (front_gap[None, :] >= gap)
                              & ((front_money[None, :] > end) | (front_gap[None, :] > gap))).any(axis=1)
                 keep = ((beat > 0) & (found["drawdown"] >= found["bench_drawdown"] - (FRONTIER_ROOM if room is None else room))
@@ -342,7 +392,7 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
                 continue
             passed += int(keep.sum())
             if rank == "frontier":
-                score = reach(blended[:, -1], found["gap"], front_money, front_gap, float(bench[-1]))
+                score = reach(money, found["gap"], front_money, front_gap, float(bench[-1]))
             else:
                 score = (EARLY_WEIGHT * found["early"] + (1 - EARLY_WEIGHT) * found["recent"]
                          if recent_split is not None else found["excess"])
@@ -673,7 +723,8 @@ def volatility_twin(members: list[dict], item: dict):
 def batch(research: str | Path = Path("instance") / "research", keep=None, recent: bool = False,
           near_copy: float = NEAR_COPY, frontier: bool = False, extend: bool = False,
           per_size: int | None = None, weighting: str = "volatility", roles=None, calm_floor: float | None = None,
-          room: float | None = None, count: int = FINALISTS, twins: bool = False, reach_out: bool = False) -> list:
+          room: float | None = None, count: int = FINALISTS, twins: bool = False, reach_out: bool = False,
+          device=None) -> list:
     """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json.
     ``keep``: which pool members to search over (all by default). 2026-10-29 (空頭防護第十二版): ``roles`` a function of
     the members giving (attackers, defenders); ``twins`` each finalist also at the usual shares (volatility_twin).
@@ -690,7 +741,7 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
                    extend=extend, per_size=per_size, weighting=weighting,
                    roles=roles(members) if roles is not None and members else None, calm_floor=calm_floor, room=room,
                    rank="frontier" if reach_out else "score",
-                   references=blend_references(research, members) if reach_out else None)
+                   references=blend_references(research, members) if reach_out else None, device=device)
     pairs, known_twins = [], []
     if twins:
         known = taken | {item["blend"].rule_hash for item in found["finalists"]}
@@ -766,8 +817,10 @@ def reach_batch(research: str | Path = Path("instance") / "research", today=None
     kept = DEV_END
     DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
     try:
+        from quant_platform.research.gpu import device
+
         return batch(research, recent=True, near_copy=FRONTIER_COPY, frontier=True, count=REACH_FINALISTS,
-                     reach_out=True)
+                     reach_out=True, device=device())
     finally:
         DEV_END = kept
 
