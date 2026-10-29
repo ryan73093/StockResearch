@@ -109,7 +109,8 @@
   <div class="card__head"><h2>每一筆交易 <span class="badge">買 {{ forward.buys }}・賣 {{ forward.sells }}</span></h2><span class="muted small">新的在上；費稅累計 {{ '{:,}'.format(latest.fees_total + latest.taxes_total) }} 元</span></div>
   {% set results = forward.results %}
   {% if results %}
-  <p class="small" style="margin:0 0 10px">已賣出 {{ results.sells }} 筆：賺 {{ results.wins }} 筆、賠 {{ results.losses }} 筆，合計 <strong class="{{ 'up' if results.realized >= 0 else 'down' }}">{{ '{:+,.0f}'.format(results.realized) }}</strong> 元；還拿著的 {{ results.positions|length }} 檔帳面 <strong class="{{ 'up' if results.unrealized >= 0 else 'down' }}">{{ '{:+,.0f}'.format(results.unrealized) }}</strong> 元（都已扣手續費和稅）。</p>
+  {% set got = forward.kept %}
+  <p class="small" style="margin:0 0 10px">已賣出 {{ results.sells }} 筆：賺 {{ results.wins }} 筆、賠 {{ results.losses }} 筆，合計 <strong class="{{ 'up' if results.realized >= 0 else 'down' }}">{{ '{:+,.0f}'.format(results.realized) }}</strong> 元（已扣手續費和稅）。{% if got %}還拿著的 {{ results.positions|length }} 檔：正在賠的照算 <strong class="down">{{ '{:+,.0f}'.format(got.held_loss) }}</strong> 元（今天賣掉、扣費稅後低於成本的部分）；帳面賺的 {{ '{:,.0f}'.format(got.paper) }} 元還沒拿到，<b>不算</b>。實際結果 <strong class="{{ 'up' if got.gain >= 0 else 'down' }}">{{ '{:+,.0f}'.format(got.gain) }}</strong> 元（含股利）。{% endif %}</p>
   {% endif %}
   {% if trades_chart %}
   <svg class="rule-chart trade-chart" viewBox="0 0 {{ trades_chart.width }} {{ trades_chart.height }}" preserveAspectRatio="none" role="img" aria-label="每一筆賣出的賺賠累積">
@@ -119,7 +120,7 @@
     <polyline class="paper" points="{{ trades_chart.paper }}"/>
     <circle class="paper-dot" cx="{{ trades_chart.paper_x }}" cy="{{ trades_chart.paper_y }}" r="4"/>
   </svg>
-  <div class="legend"><span><i class="swatch-gain"></i>這筆賺</span><span><i class="swatch-loss"></i>這筆賠</span><span><i style="background:var(--accent)"></i>賣出累計 {{ '{:+,.0f}'.format(trades_chart.realized) }}</span><span><i class="swatch-paper"></i>加上還拿著的帳面 {{ '{:+,.0f}'.format(trades_chart.final) }}</span><span>{{ trades_chart.first }}～{{ trades_chart.last }}，{{ trades_chart.sales }} 筆賣出；最高 {{ '{:+,.0f}'.format(trades_chart.high) }}、最低 {{ '{:+,.0f}'.format(trades_chart.low) }}</span></div>
+  <div class="legend"><span><i class="swatch-gain"></i>這筆賺</span><span><i class="swatch-loss"></i>這筆賠</span><span><i style="background:var(--accent)"></i>賣出累計 {{ '{:+,.0f}'.format(trades_chart.realized) }}</span><span><i class="swatch-paper"></i>{{ '加上股利與還拿著的虧損＝實際結果' if forward.kept else '加上還拿著的帳面' }} {{ '{:+,.0f}'.format(trades_chart.final) }}</span><span>{{ trades_chart.first }}～{{ trades_chart.last }}，{{ trades_chart.sales }} 筆賣出；最高 {{ '{:+,.0f}'.format(trades_chart.high) }}、最低 {{ '{:+,.0f}'.format(trades_chart.low) }}</span></div>
   {% endif %}
   {% if forward.trades %}
   {# 2026-10-28 (使用者：每一筆交易的紀錄都要顯示買入的價格跟賣出的價格，我怎麼驗證你買賣的正確性) #}
