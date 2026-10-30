@@ -7,7 +7,7 @@
              sub=rule.family ~ '・' ~ rule.source ~ '・每一次的模擬回測紀錄（' ~ rule_no(rule.spec_hash) ~ ' 是這個策略的固定編號，重跑也不變）') }}
 {% endblock %}
 {% block content %}
-{% include "v2/_research_tabs.html" %}
+{# 2026-10-30 (使用者：UI、UX 優化了嗎): no research navigation row here — the strategy head above has the way back #}
 
 <section class="card">
   <div class="card__head"><h2>規則內容</h2>
@@ -15,7 +15,7 @@
   </div>
   <ul class="reasons">{% for line in rule.description %}<li>{{ line }}</li>{% endfor %}</ul>
   {% if rule.forward %}
-  <p class="small" style="margin:10px 0 0">前向觀察：{{ rule.forward.since }} 起、已記錄 {{ rule.forward.sessions }} 個交易日{% if rule.forward.sessions %}，資產 {{ '{:,.0f}'.format(rule.forward.value) }} 元、同樣的錢買 0050 {{ '{:,.0f}'.format(rule.forward.benchmark_value) }} 元{% endif %}（<a href="/research/forward/{{ rule.spec_hash }}">看持股與每一筆交易</a>）。</p>
+  <p class="small" style="margin:10px 0 0">前向觀察：{{ rule.forward.since }} 起、已記錄 {{ rule.forward.sessions }} 個交易日{% if rule.forward.sessions and rule.forward.kept %}{% set got = rule.forward.kept %}，實際結果 <strong class="{{ 'up' if got.gain > 0 else ('down' if got.gain < 0 else '') }}">{{ '{:+,.0f}'.format(got.gain) }} 元</strong>（賺的只算賣掉的、賠的都算），比同樣的錢買 0050 <strong class="{{ 'up' if got.ahead > 0 else ('down' if got.ahead < 0 else '') }}">{{ '{:+,.0f}'.format(got.ahead) }} 元</strong>{% endif %}（<a href="/research/forward/{{ rule.spec_hash }}">看持股與每一筆交易</a>）。</p>
   {% endif %}
 </section>
 

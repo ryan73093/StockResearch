@@ -8,7 +8,7 @@
              sub='前向觀察：' ~ forward.item.since ~ ' 起、已記錄 ' ~ forward.sessions ~ ' 個交易日' ~ (('（最新 ' ~ latest.date ~ '）') if latest else '')) }}
 {% endblock %}
 {% block content %}
-{% include "v2/_research_tabs.html" %}
+{# 2026-10-30 (使用者：UI、UX 優化了嗎): no research navigation row here — the strategy head above has the way back #}
 {% set latest = forward.latest %}
 
 {% if latest %}

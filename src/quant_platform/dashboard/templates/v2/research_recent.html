@@ -10,7 +10,7 @@
 </header>
 {% endblock %}
 {% block content %}
-{% include "v2/_research_tabs.html" %}
+{# 2026-10-30 (使用者：UI、UX 優化了嗎): no research navigation row here — the strategy head above has the way back #}
 {% set all = recent.periods.all or {} %}
 <div class="kpis kpis--page kpis--four">
   <div class="kpi"><div class="kpi__label">這 3 個月報酬</div><div class="kpi__value {{ 'up' if (all['return'] or 0) > 0 else 'down' }}">{{ '{:+.2%}'.format(all['return'] or 0) }}</div></div>
