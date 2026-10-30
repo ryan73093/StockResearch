@@ -46,3 +46,27 @@ def test_the_forward_lock_lets_one_writer_in_at_a_time(tmp_path):
         thread.join()
     assert order in (["a-in", "a-out", "b-in", "b-out"], ["b-in", "b-out", "a-in", "a-out"])
     assert not (tmp_path / "forward.lock").exists()
+
+
+def test_two_processes_saving_at_once_keep_both(tmp_path):
+    """2026-10-30: saves from two processes at the same moment — each one's accounts are on the file afterwards."""
+    import multiprocessing
+
+    context = multiprocessing.get_context("spawn")
+    with context.Pool(2) as pool:
+        pool.starmap(_save_many, [(str(tmp_path), "a"), (str(tmp_path), "b")])
+    import json
+
+    kept = json.loads((tmp_path / "forward" / "stocks" / "decisions.json").read_text(encoding="utf-8"))
+    assert {name for name in kept} == {f"{side}{number}@2026-09-01" for side in "ab" for number in range(40)}
+
+
+def _save_many(research: str, side: str) -> None:
+    from datetime import date
+
+    from quant_platform.research.decisions import DecisionStore
+
+    for number in range(40):
+        store = DecisionStore(research)
+        store.keep(f"{side}{number}@2026-09-01", {date(2026, 9, 1): ["2330.TW"]}, None, date(2026, 9, 1))
+        store.save()

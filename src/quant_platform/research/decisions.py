@@ -80,9 +80,21 @@ class DecisionStore:
                             "days": {day.isoformat(): list(symbols) for day, symbols in sorted(ranks.items()) if day <= through},
                             "pending": pending or None, "why": reasons}
 
+    def _locked(self):
+        """2026-10-30: the file read, merged and written by one process at a time — two writers (the after-close orders
+        and a research flow's forward step, both at 13:5x) each read the file, merged their own and wrote it back, the
+        later one dropping what the earlier one had just written."""
+        from quant_platform.research.shared_steps import exclusive
+
+        return exclusive(self.path.with_name("decisions.json.lock"))
+
     def drop(self, names: set[str]) -> dict[str, dict]:
         """2026-10-21: take these accounts' decisions off the file (an account recorded again from its start with a
         retrained model); returns what was taken off, for the archive."""
+        with self._locked():
+            return self._drop(names)
+
+    def _drop(self, names: set[str]) -> dict[str, dict]:
         try:
             current = json.loads(self.path.read_text(encoding="utf-8")) if self.path.is_file() else {}
         except (OSError, ValueError):
@@ -111,6 +123,10 @@ class DecisionStore:
         """Merge what this run kept into the file as it is now (another process may have written meanwhile)."""
         if not self._kept:
             return
+        with self._locked():
+            self._save()
+
+    def _save(self) -> None:
         try:
             current = json.loads(self.path.read_text(encoding="utf-8")) if self.path.is_file() else {}
         except (OSError, ValueError):
