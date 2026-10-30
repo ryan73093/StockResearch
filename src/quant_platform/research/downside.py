@@ -130,8 +130,13 @@ def table(research: str | Path) -> list[dict[str, object]]:
         found = profile(report.get("curve") or {})
         if not found:
             continue
+        # 2026-10-30 (使用者：我拿到的才叫賺): the frontier's money is the money counted where the result has it (the
+        # paper value until a result is run again — the pool on engine 1.6.0, 10/31)
+        counted = record.metrics.get("counted_value")
         rows.append({"trial": record.trial_id, "rule_hash": record.spec_hash, "name": record.spec_name, "tier": grade,
-                     "final_value": record.metrics.get("final_value"), "max_drawdown": record.metrics.get("max_drawdown"),
+                     "final_value": counted if counted is not None else record.metrics.get("final_value"),
+                     "paper_value": record.metrics.get("final_value"), "counted": counted is not None,
+                     "max_drawdown": record.metrics.get("max_drawdown"),
                      "benchmark_max_drawdown": record.metrics.get("benchmark_max_drawdown"), **found})
     rows.sort(key=lambda row: -(row["final_value"] or 0))
     edge = frontier(rows, PASSING_TIERS)
