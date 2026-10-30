@@ -1132,8 +1132,12 @@ class StockForwardTracker:
             trade["open"], trade["close"] = quotes.get((trade["code"], trade["date"]), (None, None))
         adjustments = [{**entry, "date": record["date"]} for record in reversed(days)
                        for entry in record.get("adjustments_today") or []]
+        # 2026-10-30 (使用者：直接用兩種方式，一個是未實現一個是已實現): each day's money counted beside its value
+        counted = kept_by_day(days, self._costs) if item.get("kind") in ("daily", "blend") else {}
         series = [{"date": record["date"], "value": record["value"], "benchmark": record["benchmark_value"],
-                   "contributed": record["contributed"]} for record in days]
+                   "contributed": record["contributed"],
+                   **({"counted": counted[record["date"]]["cash_back"]} if record["date"] in counted else {})}
+                  for record in days]
         marks = self.rebases()
         problems = reconcile(days, marks).get(rule_hash, [])
         decisions = self.meta_decisions() if item.get("kind") == "meta-ai" else []

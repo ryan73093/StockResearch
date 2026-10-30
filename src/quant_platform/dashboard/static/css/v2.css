@@ -685,6 +685,10 @@ td.wrap { white-space: normal; min-width: 180px; }
 .rule-chart .line-rule { fill: none; stroke: var(--accent); stroke-width: 2; }
 .rule-chart .line-bench { fill: none; stroke: var(--warn); stroke-width: 2; }
 .rule-chart .line-put { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
+/* 2026-10-30: the money counted is the line; the value with gains on paper stays as a faint one */
+.rule-chart .line-kept { fill: none; stroke: var(--accent); stroke-width: 2.4; }
+.rule-chart .line-rule--paper { stroke-width: 1.5; opacity: .4; stroke-dasharray: 3 3; }
+.legend .i-paper { background: none; border-top: 2px dashed var(--accent); opacity: .5; height: 0; align-self: center; }
 /* 2026-10-23 研究儀表板 (templates/v2/_dashboard.html) */
 .dash-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .dash-kpis .kpi__value { font-size: 20px; }

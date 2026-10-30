@@ -1419,7 +1419,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         detail = StockForwardTracker(research_dir).detail(rule_hash)
         if detail is None:
             abort(404)
-        chart = value_chart({row["date"]: [row["value"], row["benchmark"], row["contributed"]] for row in detail["series"]})
+        chart = value_chart({row["date"]: [row["value"], row["benchmark"], row["contributed"]] for row in detail["series"]},
+                            counted={row["date"]: row["counted"] for row in detail["series"] if "counted" in row})
         from quant_platform.research.stock_forward import trade_chart
 
         # 2026-10-20: every sale, cumulated; 2026-10-29: ending on the result counted (gains once sold, every loss)

@@ -435,18 +435,26 @@ def describe_rule(spec: dict) -> list[str]:
     return lines
 
 
-def _svg(curve: dict[str, list[float]], width: int = 640, height: int = 220) -> dict[str, object] | None:
+def _svg(curve: dict[str, list[float]], width: int = 640, height: int = 220,
+         counted: dict[str, float] | None = None) -> dict[str, object] | None:
+    """The money chart: the rule (its value, gains on paper in), 0050 with the same money and the money put in;
+    ``counted`` (2026-10-30, 使用者：直接用兩種方式，一個是未實現一個是已實現): each point's money counted (a gain once
+    sold, every loss), drawn when every point has it."""
     if not curve or len(curve) < 2:
         return None
     months = list(curve)
-    peak = max(max(values) for values in curve.values()) or 1.0
+    peak = max(max(values[:3]) for values in curve.values()) or 1.0
+    x = {month: index * width / (len(months) - 1) for index, month in enumerate(months)}
 
     def points(column: int) -> str:
-        return " ".join(f"{index * width / (len(months) - 1):.1f},{height - curve[month][column] / peak * (height - 10):.1f}"
-                        for index, month in enumerate(months))
+        return " ".join(f"{x[month]:.1f},{height - curve[month][column] / peak * (height - 10):.1f}" for month in months)
 
-    return {"rule": points(0), "benchmark": points(1), "put_in": points(2), "width": width, "height": height,
-            "first": months[0], "last": months[-1], "peak": peak}
+    output = {"rule": points(0), "benchmark": points(1), "put_in": points(2), "width": width, "height": height,
+              "first": months[0], "last": months[-1], "peak": peak}
+    if counted and all(month in counted for month in months):
+        output["counted"] = " ".join(f"{x[month]:.1f},{height - counted[month] / peak * (height - 10):.1f}" for month in months)
+        output["counted_last"], output["value_last"] = counted[months[-1]], curve[months[-1]][0]
+    return output
 
 
 FLOW_WEIGHT = 0.8   # the month's contribution arrives on the 5th: invested for most of the month
@@ -543,7 +551,9 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
             "one": _window(metrics, "1y"), "since_2020_excess": metrics.get("since_2020_excess"),
             "yearly": {year: round(value, 4) for year, value in sorted(yearly.items())},
             "returns": yearly_returns(report.get("curve") or {}),
-            "chart": _svg(report.get("curve") or {}), "report_file": record.report_file,
+            "chart": _svg(report.get("curve") or {}, counted={month: row[0] for month, row in
+                                                              (report.get("counted_curve") or {}).items()}),
+            "report_file": record.report_file,
         })
     # 2026-10-17 (使用者：每個頁面都要合邏輯): within a period the newest engine's run first, the newest first — the
     # one the pool and the grades use ("current"); older engines' runs follow for the record

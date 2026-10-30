@@ -197,3 +197,17 @@ def test_variants_with_the_same_results_are_one_row():
     merged = merge_same(sorted(rows, key=lambda item: -item["final_value"]))
     assert [item["trial_id"] for item in merged] == [9000, 6890, 7200]
     assert [other["trial_id"] for other in merged[1]["same"]] == [7166, 7187] and merged[0]["same"] == []
+
+
+def test_the_money_chart_draws_the_money_counted_beside_the_value():
+    """2026-10-30 (使用者：直接用兩種方式，一個是未實現一個是已實現): with each point's money counted the chart has a
+    second line on the same scale, the last of both for the legend; without it (an older report) only the three."""
+    from quant_platform.research.pool import _svg
+
+    curve = {"2026-07": [100.0, 100.0, 100.0], "2026-08": [150.0, 110.0, 110.0], "2026-09": [200.0, 120.0, 120.0]}
+    plain = _svg(curve, width=200, height=110)
+    assert "counted" not in plain and plain["peak"] == 200.0
+    both = _svg(curve, width=200, height=110, counted={"2026-07": 100.0, "2026-08": 110.0, "2026-09": 120.0})
+    assert both["counted"] == "0.0,60.0 100.0,55.0 200.0,50.0"          # 110 - value / 200 * 100
+    assert both["rule"] == plain["rule"] and (both["counted_last"], both["value_last"]) == (120.0, 200.0)
+    assert "counted" not in _svg(curve, counted={"2026-09": 120.0})        # not every point: not drawn

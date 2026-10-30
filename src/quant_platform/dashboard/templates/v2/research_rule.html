@@ -52,9 +52,10 @@
   <svg class="rule-chart" viewBox="0 0 {{ run.chart.width }} {{ run.chart.height }}" preserveAspectRatio="none" role="img" aria-label="資產走勢">
     <polyline class="line-put" points="{{ run.chart.put_in }}"/>
     <polyline class="line-bench" points="{{ run.chart.benchmark }}"/>
-    <polyline class="line-rule" points="{{ run.chart.rule }}"/>
+    <polyline class="line-rule{% if run.chart.counted %} line-rule--paper{% endif %}" points="{{ run.chart.rule }}"/>
+    {% if run.chart.counted %}<polyline class="line-kept" points="{{ run.chart.counted }}"/>{% endif %}
   </svg>
-  <div class="legend"><span><i style="background:var(--accent)"></i>這個規則</span><span><i style="background:var(--warn)"></i>同樣的錢買 0050</span><span><i style="background:var(--muted)"></i>累計投入</span><span>{{ run.chart.first }}～{{ run.chart.last }}，最高 {{ '{:,.0f}'.format(run.chart.peak) }} 元</span></div>
+  <div class="legend">{% if run.chart.counted %}<span><i style="background:var(--accent)"></i>已實現：賺的只算賣掉的、賠的都算（最後 {{ '{:,.0f}'.format(run.chart.counted_last) }} 元）</span><span><i class="i-paper"></i>含帳面獲利（不算；最後 {{ '{:,.0f}'.format(run.chart.value_last) }} 元）</span>{% else %}<span><i style="background:var(--accent)"></i>這個規則</span>{% endif %}<span><i style="background:var(--warn)"></i>同樣的錢買 0050</span><span><i style="background:var(--muted)"></i>累計投入</span><span>{{ run.chart.first }}～{{ run.chart.last }}，最高 {{ '{:,.0f}'.format(run.chart.peak) }} 元</span></div>
   {% else %}
   <p class="muted small">這次回測在 2026-10-04 之前跑的，沒有存逐月資產；只有逐年差距。</p>
   {% endif %}

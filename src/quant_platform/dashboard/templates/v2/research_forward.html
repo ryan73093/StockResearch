@@ -72,9 +72,10 @@
   <svg class="rule-chart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" preserveAspectRatio="none" role="img" aria-label="前向觀察資產走勢">
     <polyline class="line-put" points="{{ chart.put_in }}"/>
     <polyline class="line-bench" points="{{ chart.benchmark }}"/>
-    <polyline class="line-rule" points="{{ chart.rule }}"/>
+    <polyline class="line-rule{% if chart.counted %} line-rule--paper{% endif %}" points="{{ chart.rule }}"/>
+    {% if chart.counted %}<polyline class="line-kept" points="{{ chart.counted }}"/>{% endif %}
   </svg>
-  <div class="legend"><span><i style="background:var(--accent)"></i>這個規則</span><span><i style="background:var(--warn)"></i>同樣的錢買 0050</span><span><i style="background:var(--muted)"></i>累計投入</span><span>{{ chart.first }}～{{ chart.last }}</span></div>
+  <div class="legend">{% if chart.counted %}<span><i style="background:var(--accent)"></i>已實現：賺的只算賣掉的、賠的都算（最後 {{ '{:,.0f}'.format(chart.counted_last) }} 元）</span><span><i class="i-paper"></i>含帳面獲利（不算；最後 {{ '{:,.0f}'.format(chart.value_last) }} 元）</span>{% else %}<span><i style="background:var(--accent)"></i>這個規則</span>{% endif %}<span><i style="background:var(--warn)"></i>同樣的錢買 0050</span><span><i style="background:var(--muted)"></i>累計投入</span><span>{{ chart.first }}～{{ chart.last }}</span></div>
 </section>
 {% endif %}
 
