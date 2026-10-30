@@ -2145,14 +2145,11 @@ RISK_WINDOW = 750                    # "risk_half": the market's predicted drop 
 RISK_TOP = 0.2                       # half while it is in this top share of them (known from 250 sessions)
 
 
-def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel) -> dict[date, float] | None:
-    """vol_scale "v1": for every session, the share of the stock part to hold — 1.25 times the usual
-    volatility of the rule's own stock account (the median of its 21-session volatility over the past 750
-    sessions) divided by its 21-session volatility now, at most 1, rounded down to a quarter: fully invested
-    in ordinary times, half at twice the usual volatility, a quarter at four times; the rest stays in cash.
-    Known at the close it is used on (the account without scaling, replayed from SHADOW_WARMUP). None when off."""
-    if getattr(rule, "vol_scale", "none") == "none":
-        return None
+MARKET_SCALES = ("taiex_half", "taiex_staged", "taiex_vol", "taiex_trend", "risk_half")
+
+
+def _market_exposure(fp: FactorPanel, rule: DailyRule) -> dict[date, float]:
+    """exposure_schedule for the settings read from TAIEX or the deep risk model alone (MARKET_SCALES)."""
     if rule.vol_scale in ("taiex_half", "taiex_staged"):   # 2026-10-24/25: by TAIEX against its average (and high)
         high = pd.Series(fp.market).rolling(MARKET_HIGH, min_periods=1).max().to_numpy()
 
@@ -2200,6 +2197,31 @@ def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs:
             later = dict(zip(fp.sessions, fp.sessions[1:]))
             output = {later[day]: value for day, value in output.items() if day in later}
         return output
+    if rule.vol_scale == "risk_half":             # 2026-10-25: the deep risk model's market-wide reading decides
+        risk = fp.matrix("dl_risk")
+        with np.errstate(all="ignore"):
+            median = pd.Series([float(np.nanmedian(column)) if np.isfinite(column).any() else np.nan for column in risk.T])
+        bar = median.rolling(RISK_WINDOW, min_periods=250).quantile(1 - RISK_TOP)
+        output = {day: MARKET_HALF if np.isfinite(now) and np.isfinite(top) and now > top else 1.0
+                  for day, now, top in zip(fp.sessions, median.to_numpy(), bar.to_numpy(), strict=True)}
+        if lag_of(rule):
+            later = dict(zip(fp.sessions, fp.sessions[1:]))
+            output = {later[day]: level for day, level in output.items() if day in later}
+        return output
+    raise ValueError(rule.vol_scale)
+
+
+def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel) -> dict[date, float] | None:
+    """vol_scale "v1": for every session, the share of the stock part to hold — 1.25 times the usual
+    volatility of the rule's own stock account (the median of its 21-session volatility over the past 750
+    sessions) divided by its 21-session volatility now, at most 1, rounded down to a quarter: fully invested
+    in ordinary times, half at twice the usual volatility, a quarter at four times; the rest stays in cash.
+    Known at the close it is used on (the account without scaling, replayed from SHADOW_WARMUP). None when off."""
+    if getattr(rule, "vol_scale", "none") == "none":
+        return None
+    if rule.vol_scale in MARKET_SCALES:           # 2026-10-30 (S9-W39): these read only TAIEX (or the risk model) and
+        # when the order is placed — the same for every account with the setting: computed once in a run that memoizes
+        return remember(fp, data, ("market exposure", rule.vol_scale, lag_of(rule)), lambda: _market_exposure(fp, rule))
     if rule.vol_scale in ("own_drawdown", "own_trend", "own_excess"):   # 2026-10-28 (第九～十一版): the half guard and the account
         guarded = rule.model_copy(update={"vol_scale": "taiex_half"})
         half = exposure_schedule(data, fp, guarded, costs)
@@ -2236,17 +2258,6 @@ def exposure_schedule(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs:
         if rule.vol_scale in ("own_trend", "own_excess"):
             return {day: level * own.get(day, 1.0) for day, level in half.items()}
         return {day: min(level, own.get(day, 1.0)) for day, level in half.items()}
-    if rule.vol_scale == "risk_half":             # 2026-10-25: the deep risk model's market-wide reading decides
-        risk = fp.matrix("dl_risk")
-        with np.errstate(all="ignore"):
-            median = pd.Series([float(np.nanmedian(column)) if np.isfinite(column).any() else np.nan for column in risk.T])
-        bar = median.rolling(RISK_WINDOW, min_periods=250).quantile(1 - RISK_TOP)
-        output = {day: MARKET_HALF if np.isfinite(now) and np.isfinite(top) and now > top else 1.0
-                  for day, now, top in zip(fp.sessions, median.to_numpy(), bar.to_numpy(), strict=True)}
-        if lag_of(rule):
-            later = dict(zip(fp.sessions, fp.sessions[1:]))
-            output = {later[day]: level for day, level in output.items() if day in later}
-        return output
     shadow = rule.model_copy(update={"vol_scale": "none", "core": 0.0, "account_filter": "none"})
     sessions = fp.sessions
     start, end = sessions[min(SHADOW_WARMUP, len(sessions) - 1)], sessions[-1]
