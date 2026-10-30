@@ -60,10 +60,18 @@ Write-PipelineRecord "running"
 $DeepTrainingGB = 24
 $WideTrainingGB = 40
 $StepGB = 16
+$DiskGB = 30                         # 2026-10-30: free space on C: a step needs before it starts
 function Get-CommitFreeGB { [math]::Round((Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory / 1MB, 1) }
 function Test-DeepTraining {
     [bool](Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
         $_.CommandLine -like "*quant_platform.research model --model-version dl-*" })
+}
+# 2026-10-30: the GPU's other users — the full search's stage one (its --part processes) and the blend searches' stage
+# one. dl-2.2.1's flow looked at the GPU once, at its start, in the minutes between the full search's phases a and b,
+# then waited a day for memory and trained beside phase b: CUDA out of memory at 04:13
+function Test-GpuSearch {
+    [bool](Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
+        $_.CommandLine -like "*scan-full*--part*" -or $_.CommandLine -match "quant_platform\.research daily --name blend" })
 }
 function Wait-ForMemory([string[]]$Arguments) {
     if ($Arguments.Count -lt 2 -or $Arguments[1] -ne "quant_platform.research") { return }
@@ -71,6 +79,11 @@ function Wait-ForMemory([string[]]$Arguments) {
     $wide = ($Arguments -join " ") -like "*--model-version dl-2.2.*"
     $need = if ($wide) { $WideTrainingGB } elseif ($deep) { $DeepTrainingGB } else { $StepGB }
     $other = if ($deep) { "另一個深度學習訓練" } else { "深度學習訓練" }
+    if ($deep) {          # 2026-10-30: the GPU looked at together with the memory, just before the step starts
+        Wait-While "等記憶體與顯示卡：這一步要約 $need GB 可用、沒有$($other)在跑、顯示卡沒有被大搜尋或組合搜尋佔用" {
+            (Get-CommitFreeGB) -lt $need -or (Test-DeepTraining) -or (Test-GpuSearch) } 60
+        return
+    }
     Wait-While "等記憶體：這一步要約 $need GB 可用，而且沒有$($other)在跑（10/28 記憶體用完七次）" {
         (Get-CommitFreeGB) -lt $need -or (Test-DeepTraining) } 60
 }
@@ -106,6 +119,10 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
         Wait-While "盤後單時段（13:30～14:40），這一步 14:40 再開始" {
             (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 120
     }
+    # 2026-10-30: at 05:41 the disk was full for a while (the full search's phase b stopped on "No space left on
+    # device"; 256 GB free again by 09:00, the writer unknown) — a step waits for room instead of failing half written
+    Wait-While "等磁碟空間：C 槽可用少於 $DiskGB GB" {
+        ((Get-PSDrive -Name C).Free / 1GB) -lt $DiskGB } 300
     Wait-ForSimulationSlot $Arguments
     Wait-ForMemory $Arguments
     $out = Join-Path $logs "$Name-$stamp-$Label.log"

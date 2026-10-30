@@ -512,6 +512,13 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
         checks.append(_check("桌面沒有本專案開出的視窗", "AGENTS.md：背景程式不開視窗（使用者 2026-10-20）", False,
                              f"沒辦法檢查：{str(exc)[:120]}"))
+    # 2026-10-30: at 05:41 the disk was full for a while and the full search stopped half written; room on C: for the
+    # data, the backups and the searches
+    import shutil
+
+    free = shutil.disk_usage(research.anchor or "C:\\").free / 2**30
+    checks.append(_check("C 槽至少 50 GB 可用", "開發歷程 2026-10-30：05:41 磁碟寫滿，全段大搜尋 b 段中斷", free >= 50,
+                         f"{free:,.0f} GB 可用"))
     # 2026-10-29: on 10-28 the machine ran out of memory seven times (a deep training and the forward accounts' replays
     # beside the engine); a forward, two boards, a training and the full search died, other programs with them
     name, source = "過去 24 小時記憶體沒有用完", "開發歷程 2026-10-29：記憶體用完七次，研究與其他程式被終止"
