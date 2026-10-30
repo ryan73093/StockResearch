@@ -320,3 +320,47 @@ def test_the_torch_blocks_give_the_numpy_results():
     for key in ("excess", "drawdown", "gap", "recent", "early"):
         assert torched[key] == pytest.approx(found[key], abs=1e-12)
     assert torched["bench_drawdown"] == pytest.approx(found["bench_drawdown"])
+
+
+def test_the_counted_search_ranks_on_the_money_counted_at_the_cutoff():
+    """2026-10-30 (組合搜尋第十四輪; 使用者：我拿到的才叫賺，拿到的才叫賠): with ``counted`` the frontier and the reach
+    read each member's money counted at the cutoff, added up by the shares — the same as the plain search when the money
+    counted is the month-end value, lower for a blend of a member whose gains are still on paper; on the GPU path too;
+    ``apart`` False keeps finalists that share two families."""
+    import torch
+
+    wild = [100, 118, 106, 90, 102, 120, 150, 190.0]
+    calm = [100, 103, 108, 104, 109, 112, 118, 134.0]
+    steady = [100, 104, 101, 98, 104, 110, 117, 128.0]
+    none = {"money": np.zeros(0), "gap": np.zeros(0)}
+    options = {"sizes": (2,), "frontier": True, "rank": "frontier", "recent_split": 4, "references": none}
+    members = [member(10, wild), member(12, calm), member(13, steady)]
+    plain = bs.search(members, **options)
+    same = bs.search([{**m, "counted": m["values"][-1], "bench_sold": BENCH[-1]} for m in members], counted=True, **options)
+    assert plain["finalists"] and same["money"] == "counted"
+    assert [(i["members"], i["score"]) for i in plain["finalists"]] == [(i["members"], i["score"]) for i in same["finalists"]]
+    # the wild member's gain still on paper: counted at 150 instead of 190
+    paper = [{**m, "counted": 150.0 if m["trial"] == 10 else m["values"][-1], "bench_sold": 129.0} for m in members]
+    found = bs.search(paper, counted=True, **options)
+    torched = bs.search(paper, counted=True, device=torch.device("cpu"), **options)
+    assert [(i["members"], i["shares"]) for i in found["finalists"]] == [(i["members"], i["shares"]) for i in torched["finalists"]]
+    for left, right in zip(found["finalists"], torched["finalists"]):
+        assert left["score"] == pytest.approx(right["score"], abs=1e-9)
+    money = {m["trial"]: m["counted"] for m in paper}
+    gaps = bs.measure(np.stack([m["values"] for m in paper]), BENCH, PAID, bs.falls(bs.month_returns(BENCH, PAID)))["gap"]
+    front = [(money[m["trial"]], gaps[n]) for n, m in enumerate(paper)
+             if not any(money[o["trial"]] >= money[m["trial"]] and gaps[k] >= gaps[n]
+                        and (money[o["trial"]] > money[m["trial"]] or gaps[k] > gaps[n]) for k, o in enumerate(paper))]
+    for item in found["finalists"]:
+        blended = sum(share * money[trial] for trial, share in zip(item["members"], item["shares"]))
+        values = sum(share * next(m["values"] for m in paper if m["trial"] == trial)
+                     for trial, share in zip(item["members"], item["shares"]))
+        gap = bs.measure(values[None], BENCH, PAID, bs.falls(bs.month_returns(BENCH, PAID)))["gap"]
+        by_hand = bs.reach(np.array([blended]), gap, np.array([f[0] for f in front]), np.array([f[1] for f in front]), 129.0)
+        assert item["score"] == pytest.approx(float(by_hand[0]), abs=2e-3)       # the shares are rounded in the finalist
+    more = [member(10, wild), member(12, calm), member(13, steady), member(14, [v * 1.01 for v in steady])]
+    for m in more:
+        m["counted"], m["bench_sold"] = m["values"][-1], BENCH[-1]
+    loose = dict(options, count=12, near_copy=0.9999)
+    assert len(bs.search(more, counted=True, apart=False, **loose)["finalists"]) >= \
+        len(bs.search(more, counted=True, **loose)["finalists"])

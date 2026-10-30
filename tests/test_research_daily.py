@@ -1066,3 +1066,31 @@ def test_a_backtest_keeps_both_the_money_counted_and_everything_sold():
         assert run.counted_value == pytest.approx(cash + min(basis, net))
         assert run.paper == pytest.approx(max(0.0, net - basis)) and (run.paper > 0) == up
         assert run.summary()["counted_value"] == round(run.counted_value, 2)
+
+
+def test_each_month_end_keeps_the_money_counted_there():
+    """2026-10-30: a search that stops at a cutoff month reads the money counted at that month's last session, not the
+    run's last day — checked by hand: 0050 bought in September at 50, at 60 on September's last session (a gain on
+    paper: counted at its cost) and at 40 on October's (a loss: counted at what selling brings)."""
+    from quant_platform.research.daily import counted_curve, simulate_daily
+
+    costs = CostModel(fee_rate=0.001425, minimum_fee=20, slippage_bps=10.0)
+    days = weekdays(date(2026, 9, 28), date(2026, 10, 2))
+    prices = [50.0, 50.0, 60.0, 40.0, 40.0]                     # 9/28, 9/29, 9/30, 10/1, 10/2
+    data = LegacyData(sessions=days, closes={"0050.TW": dict(zip(days, prices))},
+                      traded_value={"0050.TW": {day: 5e9 for day in days}}, factors={}, predictions={})
+    ledger = []
+    run = simulate_daily(data, None, costs, days[0], days[-1], plan=SeedPlan(300_000, 10_000), ledger=ledger)
+    assert sorted(run.counted_months) == ["2026-09", "2026-10"]
+    for month, close, index in (("2026-09", 60.0, 2), ("2026-10", 40.0, 4)):
+        bought = [entry for entry in ledger if entry["side"] == "BUY" and entry["day"] <= days[index]]
+        units = sum(entry["shares"] for entry in bought)
+        basis = sum(entry["shares"] * entry["price"] + entry["fee"] for entry in bought)
+        cash = run.values[index] - units * close
+        amount = units * close * (1 - 10 / 10_000)
+        net = amount - costs.fee(amount) - costs.tax(amount, "stock_etf", "SELL")
+        assert run.counted_months[month] == pytest.approx((cash + min(basis, net), cash + net))
+    assert run.counted_months["2026-09"][0] < run.counted_months["2026-09"][1]      # the gain on paper left out
+    assert run.counted_months["2026-10"] == (run.counted_value, run.sold_value)
+    assert counted_curve(run, run) == {month: [round(counted), round(sold)]
+                                       for month, (counted, sold) in run.counted_months.items()}

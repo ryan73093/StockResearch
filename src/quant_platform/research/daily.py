@@ -1828,6 +1828,20 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
             ledger.append({"day": day, "symbol": symbol, "side": "SELL", "shares": shares, "price": fill,
                            "fee": fee, "tax": tax, **({"why": why} if why else {})})
 
+    def counted_now(day: date, kept: float) -> tuple[float, float, float]:
+        counted = sold_all = kept
+        paper = 0.0
+        for symbol, count in owned.items():
+            amount = count * price(symbol, day) * (1 - costs.slippage_bps / 10_000)
+            if amount <= 0:
+                continue
+            net = amount - costs.fee(amount) - costs.tax(amount, _tax_kind(symbol), "SELL")
+            sold_all += net
+            counted += min(basis.get(symbol, 0.0), net)
+            paper += max(0.0, net - basis.get(symbol, 0.0))
+        return counted, sold_all, paper
+
+    month_ends = {day for day, after in zip(sessions, sessions[1:]) if after.month != day.month}
     for day in sessions:
         retry, blocked = blocked, False
         topping, short = short, set()
@@ -1985,18 +1999,13 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         result.flows.append(contribution)
         if snapshots is not None:
             snapshots[day] = (cash + receivable, owned)
+        if day in month_ends:                    # 2026-10-30: the money counted at each month's last session too,
+            counted, sold_all, _paper = counted_now(day, cash + receivable)   # so a search that stops at a cutoff
+            result.counted_months[f"{day:%Y-%m}"] = (counted, sold_all)        # reads the money counted there
     if sessions:                                 # 2026-10-30: both results at the last session (see RunResult)
-        counted = sold_all = cash + receivable
-        paper = 0.0
-        for symbol, count in owned.items():
-            amount = count * price(symbol, sessions[-1]) * (1 - costs.slippage_bps / 10_000)
-            if amount <= 0:
-                continue
-            net = amount - costs.fee(amount) - costs.tax(amount, _tax_kind(symbol), "SELL")
-            sold_all += net
-            counted += min(basis.get(symbol, 0.0), net)
-            paper += max(0.0, net - basis.get(symbol, 0.0))
+        counted, sold_all, paper = counted_now(sessions[-1], cash + receivable)
         result.counted_value, result.sold_value, result.paper = counted, sold_all, paper
+        result.counted_months[f"{sessions[-1]:%Y-%m}"] = (counted, sold_all)
     return result
 
 
@@ -2583,7 +2592,15 @@ def account_report(data: LegacyData, account, first: date, costs: CostModel,
                     for key, months in WINDOWS.items()},
         "monthly_active_returns": active, "yearly": {year: round(value, 4) for year, value in sorted(yearly.items())},
         "activity": activity(run), "curve": curve(run, benchmark),
+        **({"counted_curve": counted_curve(run, benchmark)} if run.counted_months else {}),
     }
+
+
+def counted_curve(run, benchmark) -> dict[str, list[int]]:
+    """2026-10-30 (使用者：我拿到的才叫賺，拿到的才叫賠): beside ``curve``, each month-end's money counted (a gain
+    once sold, every loss) and 0050 sold that day — what a search that stops at a cutoff month compares."""
+    return {month: [round(counted), round(benchmark.counted_months[month][1])]
+            for month, (counted, _sold) in run.counted_months.items() if month in benchmark.counted_months}
 
 
 INDUSTRY_FILE = Path("raw") / "finmind" / "TaiwanStockInfo.json"
@@ -3447,6 +3464,14 @@ def blend_reach_batch() -> list:
     from quant_platform.research.blend_scan import reach_batch
 
     return reach_batch()
+
+
+def blend_counted_reach_batch() -> list:
+    """2026-10-30: 第十三輪 on the money counted at the cutoff, finalists that may share families (blend_scan
+    .counted_reach_batch, 第十四輪)."""
+    from quant_platform.research.blend_scan import counted_reach_batch
+
+    return counted_reach_batch()
 
 
 def bear13_blend_batch() -> list:
@@ -5714,7 +5739,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "largecap2": large_cap_second_batch, "evidence": evidence_batch,
            "techbot": tech_bot_batch, "t0equal": t0_equal_batch,
            "techbot2": tech_bot_weekly_batch, "consensus": consensus_batch,
-           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "blendrecent": blend_recent_batch, "blendfrontier": blend_frontier_batch, "blendfour": blend_four_batch, "blendsize": blend_size_batch, "bear12": bear_blend_batch, "bear13": bear13_blend_batch, "blendreach": blend_reach_batch, "techsecond": tech_second_batch, "techveto": tech_veto_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "techdeep4": tech_deep4_batch, "deepregate": deep_regate_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
+           "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "blendrecent": blend_recent_batch, "blendfrontier": blend_frontier_batch, "blendfour": blend_four_batch, "blendsize": blend_size_batch, "bear12": bear_blend_batch, "bear13": bear13_blend_batch, "blendreach": blend_reach_batch, "blendreach14": blend_counted_reach_batch, "techsecond": tech_second_batch, "techveto": tech_veto_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "techdeep4": tech_deep4_batch, "deepregate": deep_regate_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
            "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear9": bear9_batch, "bear10": bear10_batch, "bear11": bear11_batch, "modelo": model_o_batch, "modelp": model_p_batch, "deepdirect": deep_direct_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,

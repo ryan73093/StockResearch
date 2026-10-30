@@ -56,9 +56,11 @@ def label(name: str) -> str:
     return head.replace("（25 個 T0 候選投票）", "")[:12]
 
 
-def pool(research: str | Path) -> list[dict]:
+def pool(research: str | Path, counted: bool = False) -> list[dict]:
     """Every newest-engine 100%-stock single rule graded T0 候選 (high-risk or not), T0 or T1, its account from START:
-    its month-end values to DEV_END, 0050's and the money put in."""
+    its month-end values to DEV_END, 0050's and the money put in. ``counted`` (2026-10-30, 組合搜尋第十四輪): only
+    the rules whose report has the money counted at DEV_END's month-end (``counted_curve``), kept as "counted" with
+    0050 sold that day as "bench_sold"."""
     from quant_platform.research.categories import uses_0050
     from quant_platform.research.daily import ENGINE_VERSION, PASSING_TIERS, DailyRule, tier
     from quant_platform.research.registry import TrialRegistry, newest
@@ -83,7 +85,11 @@ def pool(research: str | Path) -> list[dict]:
         months = [month for month in curve if month <= DEV_END]
         if not months or months[0] != START:
             continue
+        at_cutoff = (report.get("counted_curve") or {}).get(months[-1])
+        if counted and at_cutoff is None:
+            continue
         output.append({"trial": record.trial_id, "name": record.spec_name, "tier": grade, "rule": rule,
+                       **({"counted": float(at_cutoff[0]), "bench_sold": float(at_cutoff[1])} if counted else {}),
                        "months": months, "values": np.array([curve[month][0] for month in months], dtype=float),
                        "bench": np.array([curve[month][1] for month in months], dtype=float),
                        "paid": np.array([curve[month][2] for month in months], dtype=float)})
@@ -96,10 +102,11 @@ def pool(research: str | Path) -> list[dict]:
             and np.array_equal(item["paid"], common["paid"]) and np.allclose(item["bench"], common["bench"], rtol=0.005)]
 
 
-def blend_references(research: str | Path, members: list[dict]) -> dict[str, np.ndarray]:
+def blend_references(research: str | Path, members: list[dict], counted: bool = False) -> dict[str, np.ndarray]:
     """2026-10-29 (組合搜尋第十三輪): the registered blend accounts graded T0 候選 or T0 (the frontier's tiers), newest
     engine, on the members' months, money and 0050 — their money at the cutoff and worst gap in 0050's falls, so the
-    frontier stage 1 measures against holds the blends already on it (#12219, #9916, #7324, …), not single rules only."""
+    frontier stage 1 measures against holds the blends already on it (#12219, #9916, #7324, …), not single rules only.
+    ``counted`` (第十四輪): the money is the money counted at the cutoff's month-end; a blend without it is left out."""
     from quant_platform.research.categories import uses_0050
     from quant_platform.research.daily import ENGINE_VERSION, PASSING_TIERS, tier
     from quant_platform.research.registry import TrialRegistry, newest
@@ -111,7 +118,7 @@ def blend_references(research: str | Path, members: list[dict]) -> dict[str, np.
     records = newest([record for record in TrialRegistry(research / "trials.jsonl").records()
                       if record.kind == "candidate" and record.period == "recent"
                       and str(record.metrics.get("engine", "")).startswith(ENGINE_VERSION + "+blend")])
-    values, trials = [], []
+    values, trials, kept = [], [], []
     for record in sorted(records.values(), key=lambda record: record.trial_id):
         if tier(record.metrics)[0] not in PASSING_TIERS:
             continue
@@ -122,14 +129,18 @@ def blend_references(research: str | Path, members: list[dict]) -> dict[str, np.
         curve = report.get("curve") or {}
         if uses_0050(report.get("spec") or {}) or any(month not in curve for month in months):
             continue
+        at_cutoff = (report.get("counted_curve") or {}).get(months[-1])
+        if counted and at_cutoff is None:
+            continue
         rows = np.array([curve[month] for month in months], dtype=float)
         if np.array_equal(rows[:, 2], paid) and np.allclose(rows[:, 1], bench, rtol=0.005):
             values.append(rows[:, 0])
             trials.append(record.trial_id)
+            kept.append(float(at_cutoff[0]) if counted else float(rows[-1, 0]))
     if not values:
         return {"money": np.zeros(0), "gap": np.zeros(0), "trials": []}
     stacked = np.stack(values)
-    return {"money": stacked[:, -1], "gap": measure(stacked, bench, paid, falls(month_returns(bench, paid)))["gap"],
+    return {"money": np.array(kept), "gap": measure(stacked, bench, paid, falls(month_returns(bench, paid)))["gap"],
             "trials": trials}
 
 
@@ -267,7 +278,7 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
            recent_split: int | None = None, near_copy: float = NEAR_COPY, frontier: bool = False,
            extend: bool = False, per_size: int | None = None, weighting: str = "volatility", roles=None,
            calm_floor: float | None = None, room: float | None = None, rank: str = "score",
-           references: dict | None = None, device=None) -> dict:
+           references: dict | None = None, device=None, counted: bool = False, apart: bool = True) -> dict:
     """Stage 1 over every pair and triple of ``members``: the counts and the finalists (members, shares, development
     measures), best development excess first. ``taken``: blend hashes already registered (left out). ``recent_split``
     (2026-10-28, 第九輪: the index of RECENT_MONTH): the gate is beating 0050 from that month (time-weighted), the
@@ -286,7 +297,10 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
     組合搜尋第十三輪: ``references`` (blend_references) join the pool on the frontier, and ``rank`` "frontier" ranks the
     blends that stay by how far they push it out (reach) instead of the score. ``device`` (2026-10-29, 使用者：不是叫你
     也要開 gpu 輔助嗎): a torch device — each block is blended and measured there (measure_torch), the rest unchanged;
-    shares of equal CVaR parts stay on the CPU."""
+    shares of equal CVaR parts stay on the CPU. 組合搜尋第十四輪 (2026-10-30): ``counted`` the frontier's money and the
+    reach are the money counted at the cutoff (each member's "counted" added up by the shares: a blend is its members'
+    accounts added up, and so is the money counted, holding by holding), beyond the calmest point over 0050 sold that
+    day; ``apart`` False lets two finalists share two families (pick)."""
     from quant_platform.research.scan_full import EARLY_WEIGHT
 
     if not members:
@@ -307,9 +321,11 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
         return index
     for left, right in zip(*np.nonzero(np.triu(correlation > near_copy, 1))):
         family[root(int(left))] = root(int(right))
+    kept_money = np.array([member["counted"] for member in members]) if counted else None
+    floor = float(members[0]["bench_sold"]) if counted else float(bench[-1])
     if frontier:                                          # the pool's own frontier: money at the end, worst fall gap
         own = measure(values, bench, paid, stretches)
-        money, gaps = values[:, -1], own["gap"]
+        money, gaps = (kept_money if counted else values[:, -1]), own["gap"]
         beaten = [(money >= money[index]) & (gaps >= gaps[index]) & ((money > money[index]) | (gaps > gaps[index]))
                   for index in range(len(members))]
         top = np.array([not row.any() for row in beaten])
@@ -320,7 +336,7 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
             top = np.array([not ((money >= money[index]) & (gaps >= gaps[index])
                                  & ((money > money[index]) | (gaps > gaps[index]))).any() for index in range(len(money))])
             front_money, front_gap = money[top], gaps[top]
-    counted, passed = 0, 0
+    tried, passed = 0, 0
     width = 4 if extend else max(sizes)
     on_device = device is not None and weighting != "contribution"
     if on_device:
@@ -328,6 +344,7 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
 
         device_values = torch.as_tensor(values, dtype=torch.float64, device=device)
         device_risk = torch.as_tensor(risk, dtype=torch.float64, device=device)
+        device_kept = torch.as_tensor(kept_money, dtype=torch.float64, device=device) if counted else None
 
     def blend_block(block: np.ndarray):
         """The block's shares, money at the end and measures — on the device when there is one."""
@@ -336,7 +353,8 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
             weights = 1 / device_risk[index]
             shares_on = weights / weights.sum(dim=1, keepdim=True)
             blended_on = torch.einsum("km,kmt->kt", shares_on, device_values[index])
-            return shares_on.cpu().numpy(), blended_on[:, -1].cpu().numpy(), measure_torch(
+            end_on = (shares_on * device_kept[index]).sum(dim=1) if counted else blended_on[:, -1]
+            return shares_on.cpu().numpy(), end_on.cpu().numpy(), measure_torch(
                 blended_on, bench, paid, stretches, recent_split)
         if weighting == "contribution":
             shares_here = contribution_shares(returns[block])
@@ -344,7 +362,8 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
             weights = 1 / risk[block]
             shares_here = weights / weights.sum(axis=1, keepdims=True)
         blended = np.einsum("km,kmt->kt", shares_here, values[block])
-        return shares_here, blended[:, -1], measure(blended, bench, paid, stretches, recent_split)
+        end = (shares_here * kept_money[block]).sum(axis=1) if counted else blended[:, -1]
+        return shares_here, end, measure(blended, bench, paid, stretches, recent_split)
 
     def fresh() -> dict[str, list]:
         return {name: [] for name in ("score", "excess", "drawdown", "gap", "recent", "early", "combo", "shares")}
@@ -363,8 +382,8 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
         for name in store:
             store[name] = [joined[name][order]]
     def consider(combos: np.ndarray, size: int) -> None:
-        nonlocal counted, passed
-        counted += len(combos)
+        nonlocal tried, passed
+        tried += len(combos)
         store = store_of(size)
         count_of = tally.setdefault(size, {"candidates": 0, "passed": 0, "best": None})
         count_of["candidates"] += len(combos)
@@ -392,7 +411,7 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
                 continue
             passed += int(keep.sum())
             if rank == "frontier":
-                score = reach(money, found["gap"], front_money, front_gap, float(bench[-1]))
+                score = reach(money, found["gap"], front_money, front_gap, floor)
             else:
                 score = (EARLY_WEIGHT * found["early"] + (1 - EARLY_WEIGHT) * found["recent"]
                          if recent_split is not None else found["excess"])
@@ -439,13 +458,14 @@ def search(members: list[dict], sizes=(2, 3), count: int = FINALISTS, taken: set
                              float(store["early"][0][index])))
         return rows
     if per_size:
-        chosen = [item for size in sorted(stores) for item in pick(members, rows_of(stores[size]), root, per_size, taken)]
+        chosen = [item for size in sorted(stores) for item in pick(members, rows_of(stores[size]), root, per_size, taken,
+                                                                     apart)]
     else:
-        chosen = pick(members, rows_of(kept), root, count, taken)
+        chosen = pick(members, rows_of(kept), root, count, taken, apart)
     return {"version": SCAN_VERSION, "pool": len(members), "families": len({root(index) for index in range(len(members))}),
-            "ranking": "recent" if recent_split is not None else "excess", "candidates": counted, "passed": passed,
+            "ranking": "recent" if recent_split is not None else "excess", "candidates": tried, "passed": passed,
             "weighting": weighting, **({"roles": {"attack": len(roles[0]), "defense": len(roles[1])}} if roles is not None else {}),
-            **({"rank": rank} if rank != "score" else {}),
+            **({"rank": rank} if rank != "score" else {}), **({"money": "counted"} if counted else {}),
             **({"references": len(references["money"]), "frontier_points": len(front_money) if frontier else 0} if references is not None else {}),
             "bench_drawdown": round(float(measure(values[:1], bench, paid, stretches)["bench_drawdown"]), 4),
             "sizes": {str(size): {key: (round(value, 4) if isinstance(value, float) else value)
@@ -465,9 +485,9 @@ def make_blend(parts: list[dict], shares, prefix: str = "組合搜尋："):
     return blend, rounded
 
 
-def pick(members: list[dict], rows: list, root, count: int, taken: set[str] | None) -> list[dict]:
+def pick(members: list[dict], rows: list, root, count: int, taken: set[str] | None, apart: bool = True) -> list[dict]:
     """The finalists from ``rows`` (best score first): a family in at most MEMBER_LIMIT of them, none sharing two
-    families with one already taken, none registered before."""
+    families with one already taken (unless ``apart`` is False: 組合搜尋第十四輪), none registered before."""
     used: dict[int, int] = {}
     chosen: list[dict] = []
     for score, combo, shares, drawdown, gap, excess, recent, early in rows:
@@ -476,7 +496,7 @@ def pick(members: list[dict], rows: list, root, count: int, taken: set[str] | No
         groups = {root(member) for member in combo}
         if any(used.get(group, 0) >= MEMBER_LIMIT for group in groups):
             continue
-        if any(len(groups & item["groups"]) >= min(2, len(groups)) for item in chosen):
+        if apart and any(len(groups & item["groups"]) >= min(2, len(groups)) for item in chosen):
             continue
         parts = [members[member] for member in combo]
         blend, rounded = make_blend(parts, shares)
@@ -724,7 +744,7 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
           near_copy: float = NEAR_COPY, frontier: bool = False, extend: bool = False,
           per_size: int | None = None, weighting: str = "volatility", roles=None, calm_floor: float | None = None,
           room: float | None = None, count: int = FINALISTS, twins: bool = False, reach_out: bool = False,
-          device=None) -> list:
+          device=None, counted: bool = False, apart: bool = True) -> list:
     """The finalists as blends to run (daily --name blendscan); stage 1 written to research/blend_scan/<stamp>.json.
     ``keep``: which pool members to search over (all by default). 2026-10-29 (空頭防護第十二版): ``roles`` a function of
     the members giving (attackers, defenders); ``twins`` each finalist also at the usual shares (volatility_twin).
@@ -733,7 +753,10 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
 
     research = Path(research)
     taken = {record.spec_hash for record in TrialRegistry(research / "trials.jsonl").records()}
-    members = pool(research)
+    members = pool(research, counted=counted)
+    if counted:
+        print(f"  已實現：池裡 {len(pool(research))} 個規則有 {len(members)} 個記了截止月月底的已實現（沒有的不進這一輪）",
+              flush=True)
     if keep is not None:
         members = [member for member in members if keep(member)]
     split = members[0]["months"].index(RECENT_MONTH) if recent and members else None
@@ -741,7 +764,8 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
                    extend=extend, per_size=per_size, weighting=weighting,
                    roles=roles(members) if roles is not None and members else None, calm_floor=calm_floor, room=room,
                    rank="frontier" if reach_out else "score",
-                   references=blend_references(research, members) if reach_out else None, device=device)
+                   references=blend_references(research, members, counted) if reach_out else None, device=device,
+                   counted=counted, apart=apart)
     pairs, known_twins = [], []
     if twins:
         known = taken | {item["blend"].rule_hash for item in found["finalists"]}
@@ -763,6 +787,7 @@ def batch(research: str | Path = Path("instance") / "research", keep=None, recen
     summary = {**{key: value for key, value in found.items() if key != "finalists"}, "stamp": stamp,
                "dev_end": DEV_END, "calm_gap": CALM_GAP, "drawdown_room": DRAWDOWN_ROOM, "near_copy": near_copy,
                "frontier": frontier, "extend": extend, "per_size": per_size, "calm_floor": calm_floor, "room": room,
+               "counted": counted, "apart": apart,
                "twins": [{"of": pair["of"], "name": pair["blend"].name, "rule_hash": pair["blend"].rule_hash,
                           "shares": pair["shares"]} for pair in pairs] + known_twins,
                "finalists": [{key: value for key, value in item.items() if key not in ("blend", "combo", "groups")}
@@ -821,6 +846,25 @@ def reach_batch(research: str | Path = Path("instance") / "research", today=None
 
         return batch(research, recent=True, near_copy=FRONTIER_COPY, frontier=True, count=REACH_FINALISTS,
                      reach_out=True, device=device())
+    finally:
+        DEV_END = kept
+
+
+def counted_reach_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+    """2026-10-30 (research_method §7「組合搜尋第十四輪」; written before the run): round thirteen with the frontier's
+    money and the ranking on the money counted at the cutoff's month-end, and finalists that may share families."""
+    from datetime import date
+
+    from quant_platform.research.rolling import cutoff_for
+
+    global DEV_END
+    kept = DEV_END
+    DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
+    try:
+        from quant_platform.research.gpu import device
+
+        return batch(research, recent=True, near_copy=FRONTIER_COPY, frontier=True, count=REACH_FINALISTS,
+                     reach_out=True, device=device(), counted=True, apart=False)
     finally:
         DEV_END = kept
 

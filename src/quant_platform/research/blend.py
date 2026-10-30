@@ -117,6 +117,11 @@ def combine(name: str, runs: list[RunResult]) -> RunResult:
         combined.counted_value = sum(run.counted_value for run in runs)
         combined.sold_value = sum(run.sold_value for run in runs)
         combined.paper = sum(run.paper for run in runs)
+    if runs and all(run.counted_months for run in runs):
+        combined.counted_months = {month: (sum(run.counted_months[month][0] for run in runs),
+                                           sum(run.counted_months[month][1] for run in runs))
+                                   for month in runs[0].counted_months
+                                   if all(month in run.counted_months for run in runs)}
     return combined
 
 

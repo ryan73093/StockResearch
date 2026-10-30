@@ -329,6 +329,9 @@ class RunResult:
     counted_value: float | None = None
     sold_value: float | None = None
     paper: float | None = None
+    # 2026-10-30: the money counted and what selling everything brings at each month's last session (the last
+    # month at the run's last session), by "YYYY-MM"; empty when not computed
+    counted_months: dict[str, tuple[float, float]] = field(default_factory=dict)
 
     @property
     def final_value(self) -> float:
