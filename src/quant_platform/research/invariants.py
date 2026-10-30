@@ -66,8 +66,9 @@ def desktop_windows() -> list[dict[str, object]]:
 
 def own_windows(windows: list[dict[str, object]], root: Path) -> list[dict[str, object]]:
     """The windows this project opened: any of its own programs' (the .venv's python, quant-web/api/worker), or a
-    console window whose title names the project, its .venv or its research scripts."""
-    folder = str(root).lower()
+    console window whose title names the project, its .venv or its research scripts. 2026-10-30: the folder is the full
+    path — the 16:00 check passed "." (a relative research folder), which is in every title and command line."""
+    folder = str(Path(root).resolve()).lower()
     output = []
     for window in windows:
         path, title = str(window.get("path") or "").lower(), str(window.get("title") or "").lower()
@@ -134,13 +135,17 @@ def machine_processes() -> list[dict[str, object]]:
 
 def greedy(processes: list[dict[str, object]], root: Path) -> list[dict[str, object]]:
     """2026-10-29 (使用者：你他媽當我電腦資源很多是不是): this project's research and pipeline processes running above the
-    idle class — the SERVED ones are left normal."""
-    folder = str(root).lower()
+    idle class — the SERVED ones are left normal. 2026-10-30: a research process is one of the project's own programs
+    (its .venv's Python, a quant_platform module, the pipeline scripts), the folder as a full path — the folder anywhere
+    in the command line also caught the assistant's shells and the project's Tunnel (its credentials are in the
+    folder); the tests (pytest) are development, not research."""
+    folder = str(Path(root).resolve()).lower()
+    own = (str(Path(folder) / ".venv").lower(), "quant_platform", "research-pipeline.ps1", "start-research.ps1")
     output = []
     for item in processes:
         command = str(item.get("command") or "").lower()
-        if ((folder in command or "quant_platform" in command) and not any(mark in command for mark in SERVED)
-                and int(item.get("priority") or 0) > IDLE_PRIORITY):
+        if (any(mark in command for mark in own) and not any(mark in command for mark in SERVED)
+                and "-m pytest" not in command and int(item.get("priority") or 0) > IDLE_PRIORITY):
             output.append(item)
     return output
 

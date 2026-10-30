@@ -287,3 +287,28 @@ def test_a_day_the_machine_ran_out_of_memory_is_caught(tmp_path):
     found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 29), windows=[], memory=events)}[name]
     assert not found["ok"] and "PID 32120" in found["detail"] and "36.0 GB" in found["detail"]
     assert {item["name"]: item for item in invariants.run(tmp_path, date(2026, 10, 29), windows=[], memory=[])}[name]["ok"]
+
+
+def test_the_project_is_found_by_its_full_path_not_a_dot(monkeypatch, tmp_path):
+    """2026-10-30: the 16:00 check passed the project as "." (a relative research folder) — "." is in every title and
+    command line, so it flagged 202 of the machine's processes (sihost.exe, svchost.exe, …) and a PowerShell window
+    titled with powershell.exe. The folder is resolved; only the project's own programs count: not the assistant's
+    shells or the Tunnel whose credentials sit in the folder."""
+    project = tmp_path / "StockResearch"
+    (project / "instance" / "research").mkdir(parents=True)
+    monkeypatch.chdir(project)
+    relative = Path("instance/research").parent.parent                 # Path(".")
+    shell = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe"
+    windows = [{"pid": 9, "class": "ConsoleWindowClass", "title": shell, "path": shell}]
+    assert invariants.own_windows(windows, relative) == []
+    python = str(project / ".venv" / "Scripts" / "python.exe")
+    windows.append({"pid": 10, "class": "ConsoleWindowClass", "title": python, "path": ""})
+    assert [window["pid"] for window in invariants.own_windows(windows, relative)] == [10]
+    rows = [{"pid": 1, "priority": 8, "command": r"C:\WINDOWS\system32\svchost.exe -k UnistackSvcGroup -s CDPUserSvc"},
+            {"pid": 2, "priority": 8, "command": "sihost.exe"},
+            {"pid": 3, "priority": 8, "command": f"claude.exe --add-dir {project}"},
+            {"pid": 4, "priority": 8, "command": f"cloudflared.exe tunnel run --credentials-file {project / '.runtime' / 't.json'}"},
+            {"pid": 5, "priority": 8, "command": f"{python} -m pytest tests/test_x.py"},
+            {"pid": 6, "priority": 8, "command": f"{python} build/compare_replays.py out.json"},
+            {"pid": 7, "priority": 8, "command": f"powershell -File {project / 'scripts' / 'research-pipeline.ps1'} -Name fullscan"}]
+    assert [item["pid"] for item in invariants.greedy(rows, relative)] == [6, 7]
