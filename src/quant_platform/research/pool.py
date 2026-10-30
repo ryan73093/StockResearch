@@ -436,23 +436,38 @@ def describe_rule(spec: dict) -> list[str]:
 
 
 def _svg(curve: dict[str, list[float]], width: int = 640, height: int = 220,
-         counted: dict[str, float] | None = None) -> dict[str, object] | None:
+         counted: dict[str, float] | None = None, zoom: bool = False) -> dict[str, object] | None:
     """The money chart: the rule (its value, gains on paper in), 0050 with the same money and the money put in;
     ``counted`` (2026-10-30, 使用者：直接用兩種方式，一個是未實現一個是已實現): each point's money counted (a gain once
-    sold, every loss), drawn when every point has it."""
+    sold, every loss), drawn when every point has it. ``zoom`` (2026-10-30, a forward account of two months: from 0 its
+    lines sat in the top tenth, the gaps unseen): the height spans the lowest to the highest value only, the two
+    written as "floor" and "peak" for the axis."""
     if not curve or len(curve) < 2:
         return None
     months = list(curve)
-    peak = max(max(values[:3]) for values in curve.values()) or 1.0
+    drawn = [values[column] for values in curve.values() for column in range(3)]
+    if counted and all(month in counted for month in months):
+        drawn += [counted[month] for month in months]
+    else:
+        counted = None
+    peak = max(drawn) or 1.0
+    floor = min(drawn) if zoom else 0.0
+    if zoom:                                              # a little room above and below the lines
+        room = max((peak - floor) * 0.06, peak * 0.002)
+        floor, peak = max(0.0, floor - room), peak + room
+    span = (peak - floor) or 1.0
     x = {month: index * width / (len(months) - 1) for index, month in enumerate(months)}
 
+    def y(value: float) -> str:
+        return f"{height - (value - floor) / span * (height - 10):.1f}"
+
     def points(column: int) -> str:
-        return " ".join(f"{x[month]:.1f},{height - curve[month][column] / peak * (height - 10):.1f}" for month in months)
+        return " ".join(f"{x[month]:.1f},{y(curve[month][column])}" for month in months)
 
     output = {"rule": points(0), "benchmark": points(1), "put_in": points(2), "width": width, "height": height,
-              "first": months[0], "last": months[-1], "peak": peak}
-    if counted and all(month in counted for month in months):
-        output["counted"] = " ".join(f"{x[month]:.1f},{height - counted[month] / peak * (height - 10):.1f}" for month in months)
+              "first": months[0], "last": months[-1], "peak": peak, "floor": floor}
+    if counted:
+        output["counted"] = " ".join(f"{x[month]:.1f},{y(counted[month])}" for month in months)
         output["counted_last"], output["value_last"] = counted[months[-1]], curve[months[-1]][0]
     return output
 

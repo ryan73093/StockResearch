@@ -211,3 +211,17 @@ def test_the_money_chart_draws_the_money_counted_beside_the_value():
     assert both["counted"] == "0.0,60.0 100.0,55.0 200.0,50.0"          # 110 - value / 200 * 100
     assert both["rule"] == plain["rule"] and (both["counted_last"], both["value_last"]) == (120.0, 200.0)
     assert "counted" not in _svg(curve, counted={"2026-09": 120.0})        # not every point: not drawn
+
+
+def test_a_zoomed_money_chart_spans_the_values_only():
+    """2026-10-30: a forward account of two months sat in the chart's top tenth from 0; zoomed, the lowest value is near
+    the bottom and the highest near the top, the range given for the axis."""
+    from quant_platform.research.pool import _svg
+
+    curve = {"09-01": [300_000.0, 300_000.0, 300_000.0], "10-29": [342_000.0, 320_000.0, 310_000.0]}
+    chart = _svg(curve, width=100, height=110, counted={"09-01": 300_000.0, "10-29": 334_000.0}, zoom=True)
+    assert chart["floor"] < 300_000 < 342_000 < chart["peak"]
+    lows = [float(point.split(",")[1]) for point in chart["put_in"].split()]
+    highs = [float(point.split(",")[1]) for point in chart["rule"].split()]
+    assert lows[0] > 100 and highs[-1] < 20                    # near the bottom and the top of 110 (6% room)
+    assert _svg(curve)["floor"] == 0.0                          # the backtest chart still from 0
