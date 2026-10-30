@@ -150,14 +150,30 @@ def test_only_the_last_rules_switch_mappings_stay_in_memory(monkeypatch):
     and the machine ran out of memory seven times."""
     fp = market(stocks=30, first=date(2015, 1, 5), last=date(2021, 3, 31))
     monkeypatch.setattr(daily, "SWITCH_KEEP", 3)
-    rules = [DailyRule(name=str(top), factors={"momentum_3": 1.0}, top=top) for top in (5, 6, 7, 8)]
+    rules = [DailyRule(name=str(weight), factors={"momentum_3": 1.0, "reversal_1": weight}) for weight in (0.5, 1.0, 1.5, 2.0)]
     first = daily.switch_mapping(fp, rules[0])
     for rule in rules[1:3]:
         daily.switch_mapping(fp, rule)
     assert daily.switch_mapping(fp, rules[0]) is first                # used again: the most recent now
     daily.switch_mapping(fp, rules[3])
     kept = [name for name in fp._cache if name.startswith("__switch__")]
-    assert kept == [f"__switch__{rules[index].rule_hash}" for index in (2, 0, 3)]   # rules[1] the oldest, let go
+    assert len(kept) == 3 and all(f'"reversal_1", {weight}' in kept[number]                # rules[1] the oldest, let go
+                                  for number, weight in enumerate((1.5, 0.5, 2.0)))
+
+
+def test_variants_with_the_same_factors_share_one_switch_mapping():
+    """2026-10-30: the mapping is made of the factors, their weights, the smoothing and the stock filter only — a
+    variant holding differently, keeping another top or deciding weekly shares it (the same arrays); another weight or
+    filter does not."""
+    fp = market(stocks=30, first=date(2015, 1, 5), last=date(2021, 3, 31))
+    base = DailyRule(name="a", factors={"momentum_3": 1.0})
+    alone = daily.switch_mapping(market(stocks=30, first=date(2015, 1, 5), last=date(2021, 3, 31)), base)
+    found = daily.switch_mapping(fp, base)
+    for variant in (base.model_copy(update={"name": "b", "top": 7, "min_hold": 0}),
+                    base.model_copy(update={"name": "c", "hold": "trend", "check": "weekly"})):
+        assert daily.switch_mapping(fp, variant) is found
+    assert daily.switch_mapping(fp, base.model_copy(update={"min_price": 20.0})) is not found
+    assert np.array_equal(found[0], alone[0], equal_nan=True) and found[1](0.95) == alone[1](0.95)
 
 
 def test_the_minimum_holding_comparison_changes_only_the_holding():

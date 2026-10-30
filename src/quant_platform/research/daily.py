@@ -1286,7 +1286,13 @@ def switch_mapping(fp: FactorPanel, rule: DailyRule):
     made non-decreasing (a better rank never expects less)."""
     from quant_platform.research.consensus import member_percentiles
 
-    key = f"__switch__{rule.rule_hash}"
+    # 2026-10-30 (S9-W39): kept by what the mapping is made of — the factors and their weights, the smoothing and the
+    # stock filter (``member_percentiles``) — not by the rule: 1,594 forward accounts with this switch each ranked
+    # every session since 2013 again (427 of the after-close's 755 CPU seconds), most of them variants with the same
+    # factors (another holding style, a market filter)
+    made_of = json.dumps([list(rule.factors.items()), getattr(rule, "smooth", 0), rule.min_price, rule.min_turnover,
+                          rule.min_history, getattr(rule, "large_caps", 0)])
+    key = f"__switch__{made_of}"
     if key in fp._cache:
         fp._cache[key] = fp._cache.pop(key)              # the most recently used last
         return fp._cache[key]
