@@ -16,6 +16,13 @@ from html import escape
 SIZES = {"narrow": (360, 250), "mid": (760, 300), "wide": (1200, 320), "xwide": (1700, 340)}
 
 
+def text_width(text: str) -> float:
+    """2026-10-31 (使用者：你到底有沒有親自使用過系統): about how wide an axis label draws at the charts' 12px — a CJK
+    character a full em, the rest about 0.6 — so the left margin fits the longest one ("7,500 萬" was cut to ",500 萬"
+    on a phone)."""
+    return sum(12.0 if ord(char) >= 0x2E80 else 7.0 for char in text)
+
+
 def ticks(low: float, high: float, count: int = 5) -> list[float]:
     """Round axis values covering low..high."""
     span = high - low
@@ -64,6 +71,8 @@ def _line(points, lines, y_text, x_text, label, x_key, guides, band, step, marks
     low, high = low - pad, high + pad
     x0, x1 = min(xs), max(xs)
     x1 = x1 if x1 > x0 else x0 + 1
+    marks_y = [(value, y_text(value)) for value in ticks(low, high, 5 if wide else 4)]
+    left = max(left, 10 + max((text_width(words) for _value, words in marks_y), default=0.0))
 
     def sx(value: float) -> float:
         return left + (value - x0) / (x1 - x0) * (width - left - right)
@@ -72,9 +81,9 @@ def _line(points, lines, y_text, x_text, label, x_key, guides, band, step, marks
         return top + (high - value) / (high - low) * (height - top - bottom)
 
     parts = [f'<svg class="viz viz--{size}" viewBox="0 0 {width} {height}" role="img" aria-label="{escape(label)}">']
-    for value in ticks(low, high, 5 if wide else 4):
+    for value, words in marks_y:
         parts.append(f'<line class="grid" x1="{left}" x2="{width - right}" y1="{sy(value):.1f}" y2="{sy(value):.1f}"/>'
-                     f'<text x="{left - 6}" y="{sy(value) + 4:.1f}" text-anchor="end">{escape(y_text(value))}</text>')
+                     f'<text x="{left - 6}" y="{sy(value) + 4:.1f}" text-anchor="end">{escape(words)}</text>')
     shown, last_x = set(), -1e9
     for index in sorted({0, len(xs) - 1, *range(0, len(xs), max(1, len(xs) // max(3, width // 120)))}):
         text = x_text(points[index][x_key], False)
@@ -157,6 +166,7 @@ def _bars(groups, series, y_text, label, value_labels, size) -> str:
     low, high = min(values), max(values)
     pad = (high - low) * 0.08 or 1.0
     low, high = (low - pad if low < 0 else 0.0), (high + pad if high > 0 else 0.0)
+    left = max(left, 10 + max((text_width(y_text(value)) for value in ticks(low, high, 5 if wide else 4)), default=0.0))
 
     def sy(value: float) -> float:
         return top + (high - value) / (high - low) * (height - top - bottom)

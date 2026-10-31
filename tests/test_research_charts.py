@@ -24,3 +24,17 @@ def test_bars_hang_below_zero_and_carry_titles():
     assert svg.count("<svg") == 4 and "<title>0050 跌 -55%</title>" in svg and "<title>2022 策略：-25%</title>" in svg
     assert "撐過 0／20" in svg and 'class="zero"' in svg
     assert charts.bars([], [], str, "空") == "" and charts.ticks(0, 10, 5) == [0, 2, 4, 6, 8, 10]
+
+
+def test_the_left_margin_fits_the_longest_axis_label():
+    """2026-10-31: on a phone the family window's "7,500 萬" was cut to ",500 萬" (a fixed 46-unit margin)."""
+    import re
+
+    from quant_platform.research import charts
+
+    points = [{"x": f"2015-{month:02d}-01", "v": value} for month, value in ((1, 30.0), (6, 4000.0), (12, 8200.0))]
+    svg = charts._line(points, [{"key": "v", "label": "規則", "css": "a"}], lambda value: f"{value:,.0f} 萬",
+                       lambda value, wide: value, "錢", "x", [], None, False, [], "narrow")
+    labels = re.findall(r'<text x="([0-9.]+)" y="[0-9.]+" text-anchor="end">([^<]+)</text>', svg)
+    assert labels and all(float(x) >= charts.text_width(words) for x, words in labels)
+    assert any(words.startswith("7,") or words.startswith("8,") for _x, words in labels)
