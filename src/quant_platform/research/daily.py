@@ -124,6 +124,11 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 #     fields — they had been fixed in the engine;
 #   * the 20-session average turnover counts a session without a trade as nothing traded (it had skipped them).
 ENGINE_VERSION = "daily-1.5.0"
+# 2026-10-31 (使用者：你帳面數字都一樣是怎樣): eligibility "entry" is documented as "a holding no longer eligible is
+# not sold", but the day's ranking left such a holding out, so it fell out of the keep zone and was sold anyway in
+# every rule without a minimum hold (#7343 the same trades as #7024 to the yuan). From 1.6.0 a holding stays in the
+# ranking whatever its price, turnover and listing age (its factors still need values); on with the 1.6.0 switch
+ENTRY_RANKS_HELD = ENGINE_VERSION >= "daily-1.6.0"
 SAME_DAY_PARTICIPATION = 0.001              # an order's share of the stock's turnover that session, at most
 NEXT_DAY_PARTICIPATION = 0.005
 # 2026-10-22 (開盤賣做不做得到): a fill in the opening auction ("open", the sells of "split"), at most this share of the
@@ -1200,12 +1205,16 @@ class FactorPanel:
 
     def ranked(self, rule: DailyRule, position: int, held=None) -> list[str]:
         mask = self.eligible(rule, position)
-        if held and getattr(rule, "eligibility", "both") == "band":   # holdings within the band stay ranked
+        eligibility = getattr(rule, "eligibility", "both")
+        if held and (eligibility == "band" or (eligibility == "entry" and ENTRY_RANKS_HELD)):
             rows = [self.row[symbol] for symbol in held if symbol in self.row]
             if rows:
                 kept = np.zeros_like(mask)
                 kept[rows] = True
-                mask = mask | (kept & self.eligible(rule, position, ELIGIBILITY_BAND))
+                if eligibility == "band":                     # holdings within the band stay ranked
+                    mask = mask | (kept & self.eligible(rule, position, ELIGIBILITY_BAND))
+                else:                                         # 1.6.0: "entry" — the lines decide the buys only
+                    mask = mask | kept
         columns = {name: self.smoothed(name, getattr(rule, "smooth", 0))[:, position] for name in rule.factors}
         for values in columns.values():
             mask &= np.isfinite(values)
@@ -1526,7 +1535,8 @@ def _rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: d
         # 2026-10-28 (空頭防護第六版): below TAIEX's 200-session average the decision ranks by the defensive factors
         defensive = bear_rule is not None and not fp.risk_on(position)
         ranking_rule = bear_rule if defensive else rule
-        ranked = fp.ranked(ranking_rule, position, held=current) if banded else fp.ranked(ranking_rule, position)
+        ranked = (fp.ranked(ranking_rule, position, held=current) if banded or (entry_only and ENTRY_RANKS_HELD)
+                  else fp.ranked(ranking_rule, position))
         if exit_agent is not None and current:
             left = [symbol for symbol in current if symbol not in out]
             held_for = {symbol: count - bought[symbol] for symbol in left}

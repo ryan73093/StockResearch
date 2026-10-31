@@ -119,7 +119,7 @@ def test_the_cooldown_is_the_rules_choice():
 
 def test_eligibility_entry_leaves_the_holding_to_the_hold_rule():
     script = {DAYS[0]: ["A", "B", "C"], DAYS[1]: ["D", "E", "F", "B", "C"]}     # A no longer eligible (not ranked)
-    panel = Panel(DAYS, script, "ABCDEF", rising="A")
+    panel = HeldPanel(DAYS, script, "ABCDEF", rising="A")          # 1.6.0 asks for the held stocks' places too
     base = {"name": "x", "factors": {"trend_200": 1.0}, "top": 3, "keep": 1, "hold": "trend"}
     both = daily_rankings(panel, DailyRule(**base), DAYS[0], DAYS[1])
     entry = daily_rankings(panel, DailyRule(**base, eligibility="entry"), DAYS[0], DAYS[1])
@@ -367,3 +367,57 @@ def test_the_opening_auction_cap_tightens_only_the_open_side(monkeypatch):
     assert sold(plain, days[3]) == 10_000                                    # 0.5% of 20,000,000 at 9.8: all of it
     assert sold(tight, days[3]) == 4_081 and sold(tight, days[4]) == 4_081   # 0.2%: 40,000 at 9.8, the rest later
     assert any(row["side"] == "BLOCKED" and row["order"] == "SELL" and "0.2%" in row["reason"] for row in tight)
+
+
+class HeldPanel(Panel):
+    """Panel whose ranking also places the held stocks the lines leave out (``shadow``: symbol -> place), as
+    FactorPanel.ranked does for eligibility "band" and (1.6.0) "entry"."""
+
+    def __init__(self, *args, shadow=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.shadow = shadow or {}
+
+    def ranked(self, rule, position, held=None):
+        names = super().ranked(rule, position)
+        for symbol, place in sorted(self.shadow.items(), key=lambda item: item[1]):
+            if held and symbol in held and symbol not in names:
+                names.insert(place, symbol)
+        return names
+
+
+def test_eligibility_entry_keeps_a_holding_in_the_keep_zone_from_1_6_0(monkeypatch):
+    """2026-10-31 (使用者：你帳面數字都一樣是怎樣): "entry" is "a holding no longer eligible is not sold" — but without a
+    minimum hold the ranking left A out, so A fell out of the keep zone and was sold anyway (#7343 = #7024 to the
+    yuan). From 1.6.0 A stays ranked (second, within the keep zone of 3) and is kept; the usual rule sells it; B and C
+    leave by the keep zone either way."""
+    script = {DAYS[0]: ["A", "B", "C"], DAYS[1]: ["D", "E", "F", "B", "C"]}     # A no longer eligible
+    panel = HeldPanel(DAYS, script, "ABCDEF", shadow={"A": 1})
+    base = {"name": "x", "factors": {"trend_200": 1.0}, "top": 3, "keep": 1, "min_hold": 0, "check": "daily"}
+    both = daily_rankings(panel, DailyRule(**base), DAYS[0], DAYS[1])
+    monkeypatch.setattr(daily, "ENTRY_RANKS_HELD", False)
+    before = daily_rankings(panel, DailyRule(**base, eligibility="entry"), DAYS[0], DAYS[1])
+    monkeypatch.setattr(daily, "ENTRY_RANKS_HELD", True)
+    after = daily_rankings(panel, DailyRule(**base, eligibility="entry"), DAYS[0], DAYS[1])
+    assert both[DAYS[1]] == before[DAYS[1]] == ["D", "E", "F"]      # sold although second in the ranking
+    assert after[DAYS[1]] == ["A", "D", "E"]                        # 1.6.0: kept, as the setting says
+
+
+def test_eligibility_entry_ranks_a_holding_whatever_its_lines_from_1_6_0(monkeypatch):
+    """The FactorPanel side: with "entry" a held stock below the price and turnover lines stays ranked by its score
+    (C at 50% of the turnover line too, unlike "band"); a stock not held still needs the lines."""
+    from types import SimpleNamespace
+
+    fp = object.__new__(daily.FactorPanel)
+    fp.symbols, fp.row = ["A", "B", "C"], {"A": 0, "B": 1, "C": 2}
+    fp.panel = SimpleNamespace(close=np.array([[50.0], [50.0], [50.0]]))
+    fp.turnover_20 = np.array([[30_000_000.0], [15_000_000.0], [10_000_000.0]])
+    fp.age = np.array([[500], [500], [500]])
+    scores = np.array([[1.0], [3.0], [2.0]], dtype=np.float32)
+    fp.smoothed = lambda name, sessions: scores
+    entry = DailyRule(name="x", factors={"trend_200": 1.0}, top=5, eligibility="entry")
+    monkeypatch.setattr(daily, "ENTRY_RANKS_HELD", True)
+    assert fp.ranked(entry, 0) == ["A"]
+    assert fp.ranked(entry, 0, held=["B", "C"]) == ["B", "C", "A"]
+    assert fp.ranked(entry, 0, held=["C"]) == ["C", "A"]
+    monkeypatch.setattr(daily, "ENTRY_RANKS_HELD", False)
+    assert fp.ranked(entry, 0, held=["B", "C"]) == ["A"]            # before 1.6.0: as it was
