@@ -310,5 +310,6 @@ def test_the_project_is_found_by_its_full_path_not_a_dot(monkeypatch, tmp_path):
             {"pid": 4, "priority": 8, "command": f"cloudflared.exe tunnel run --credentials-file {project / '.runtime' / 't.json'}"},
             {"pid": 5, "priority": 8, "command": f"{python} -m pytest tests/test_x.py"},
             {"pid": 6, "priority": 8, "command": f"{python} build/compare_replays.py out.json"},
-            {"pid": 7, "priority": 8, "command": f"powershell -File {project / 'scripts' / 'research-pipeline.ps1'} -Name fullscan"}]
+            {"pid": 7, "priority": 8, "command": f"powershell -File {project / 'scripts' / 'research-pipeline.ps1'} -Name fullscan"},
+            {"pid": 8, "priority": 8, "command": f"{python} -m quant_platform.dashboard.warm instance/research"}]
     assert [item["pid"] for item in invariants.greedy(rows, relative)] == [6, 7]

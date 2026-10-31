@@ -110,7 +110,9 @@ IDLE_PRIORITY = 4          # Win32_Process.Priority of the idle class (below nor
 # the pages, their supervisor, the worker (the 13:50 table, the after-close records) and the market-hours capture keep
 # the normal priority: late, they would record the wrong moment (使用者 2026-10-29：不要為了省效能最後又給我錯的資料)
 SERVED = ("quant-web.exe", "quant-api.exe", "quant-worker.exe", "run_local_services.ps1", "research live-flow",
-          "-name liveflow")
+          "-name liveflow",
+          # 2026-10-31: the pages' background round (dashboard/warm.py, every 5 minutes) is the website's own work
+          "quant_platform.dashboard.warm")
 
 
 def machine_processes() -> list[dict[str, object]]:

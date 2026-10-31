@@ -72,7 +72,7 @@
   </form>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th>分類</th><th>等級</th><th>2015-06 起到 2026-09 有多少錢</th><th>2020-10 起到 2026-09</th><th class="num">贏 0050 的視窗比例</th><th class="num">最大跌幅</th><th>交易</th></tr></thead>
+      <thead><tr><th>規則</th><th style="min-width:9em">分類</th><th>等級</th><th>2015-06 起到 2026-09 有多少錢</th><th>2020-10 起到 2026-09</th><th class="num">贏 0050 的視窗比例</th><th class="num">最大跌幅</th><th style="min-width:10em">交易</th></tr></thead>
       <tbody>
       {% for row in daily_rows %}
         <tr data-name="{{ row.name }}" data-family="{{ row.category.family }}" data-tier="{{ '不採用' if row.uses_0050 else row.tier }}" data-traits="|{{ row.category.traits|join('|') }}|">
@@ -83,7 +83,7 @@
           <td data-label="2020-10 起" data-wide>{% if row.since_2020_final_value %}<strong>{{ wan(row.since_2020_final_value) }}</strong><br>{{ versus(row.since_2020_final_value, row.since_2020_benchmark_final_value) }}{% else %}—{% endif %}</td>
           <td class="num" data-label="贏 0050 的視窗">1 年 {{ '{:.0%}'.format(row.win_1y) if row.win_1y is not none else '—' }}・3 年 {{ '{:.0%}'.format(row.win_3y) if row.win_3y is not none else '—' }}</td>
           <td class="num" data-label="最大跌幅">{{ '{:.0%}'.format(-row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（0050 {{ '{:.0%}'.format(-row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
-          <td data-label="交易" data-wide>{% if row.orders_per_month %}每月 {{ '%.0f' % row.orders_per_month }} 筆{% endif %}{% if row.costs is not none and row.contributed %}・手續費與稅共 {{ wan(row.costs) }}（投入 {{ wan(row.contributed) }} 的 {{ '%.1f' % (row.costs / row.contributed) }} 倍）{% elif row.cost_share is not none %}・手續費與稅是投入的 {{ '%.1f' % row.cost_share }} 倍{% endif %}</td>
+          <td data-label="交易" data-wide>{% if row.orders_per_month %}每月 {{ '%.0f' % row.orders_per_month }} 筆<br>{% endif %}{% if row.costs is not none and row.contributed %}<span class="small">費稅 {{ wan(row.costs) }}（投入的 {{ '%.1f' % (row.costs / row.contributed) }} 倍）</span>{% elif row.cost_share is not none %}<span class="small">費稅是投入的 {{ '%.1f' % row.cost_share }} 倍</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
