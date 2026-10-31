@@ -448,6 +448,10 @@ td.wrap { white-space: normal; min-width: 180px; }
   }
   /* A long label wraps instead of widening the whole page on phones (10/01: 收盤資料時效 at 375 px). */
   .table--stack td::before { content: attr(data-label); color: var(--muted); font-size: 12px; text-align: left; flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  /* 2026-10-31 (使用者：你到底有沒有親自使用過系統): a short label stays on one line and the value moves under it
+     whole when both do not fit — 最大回撤, 5,828 萬, 勝率 were split across two lines at 375 px */
+  .table--stack td:not([data-wide]):not([data-primary]) { flex-wrap: wrap; row-gap: 2px; }
+  .table--stack td:not([data-wide]):not([data-primary])::before { flex: none; white-space: nowrap; overflow-wrap: normal; }
   /* 2026-10-18: the name and its marks (tier, high-risk, frontier) flow as text and wrap — as flex items the marks
      squeezed the name into a column two characters wide at 375 px. */
   .table--stack td[data-primary] { grid-column: 1 / -1; display: block; text-align: left; font-size: 15px; }

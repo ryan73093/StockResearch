@@ -588,6 +588,19 @@ EXECUTION_TEXT = {
 }
 
 
+def window_or_page(html: str, title: str):
+    """2026-10-31 (使用者：你到底有沒有親自使用過系統): the dashboard's windows (a family, the stress test, the eras, a
+    distribution, the searches, the checks) are fragments the overview fetches; opened by themselves — a new tab, a
+    shared link — they came without the site's styles (the charts drew as black stripes). A navigation (the browser
+    asks for a document) gets them inside the site's page, with the way back to the overview."""
+    if request.headers.get("Sec-Fetch-Dest") == "document" or request.args.get("page"):
+        from markupsafe import Markup
+
+        return render_template("v2/window_page.html", title=title, body=Markup(html), active_nav="research",
+                               research_tab="overview")
+    return html
+
+
 def execution_text(spec: dict) -> str:
     """2026-10-28 (使用者：我怎麼驗證你買賣的正確性): how this strategy's fills are priced, beside its trades."""
     if spec.get("kind") == "blend":
@@ -1258,10 +1271,13 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         basis = basis if basis in ("seed", "lump_sum", "dca") else "seed"
         view = ready(f"pool:{basis}", research_dir, lambda: pool_view(research_dir, basis=basis))
         picked = {key: (request.args.get(key) or "").strip() for key in POOL_FILTERS}
-        matched = [row for row in view["daily"] if pool_match(row, picked)]
+        # 2026-10-31 (使用者：你到底有沒有親自使用過系統): variants with the same results to the yuan are one row here
+        # too (merge_same), as on the overview — 421 rules in 192 groups were listed one by one
+        matched = merge_same([row for row in view["daily"] if pool_match(row, picked)])
         shown = matched if request.args.get("all") else matched[:POOL_ROWS]
         return render_template("v2/research_pool.html", active_nav="research", pool=view, daily_rows=shown,
                                daily_matched=len(matched), picked=picked, pool_rows=POOL_ROWS,
+                               distinct=len(merge_same(view["daily"])) if any(picked.values()) else len(matched),
                                research_tab="pool", jobs=JobLog(research_dir).jobs(), counts=basis_counts(research_dir),
                                generated=datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M"))
 
@@ -1288,9 +1304,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             abort(404)
         from quant_platform.research.dashboard import family_charts
 
-        return render_template("v2/research_family.html", family=found, labels=data["eras"]["labels"],
-                               benchmark=data["benchmark"], recent_benchmark=data["recent_benchmark"],
-                               charts=family_charts(research_dir, found, data["eras"]))
+        return window_or_page(render_template("v2/research_family.html", family=found, labels=data["eras"]["labels"],
+                                              benchmark=data["benchmark"], recent_benchmark=data["recent_benchmark"],
+                                              charts=family_charts(research_dir, found, data["eras"])), family)
 
     @blueprint.get("/research/stress")
     def research_stress():
@@ -1298,8 +1314,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         from quant_platform.research.stress import latest, protect_view
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        return render_template("v2/research_stress.html", report=latest(research_dir),
-                               protect=protect_view(latest(research_dir, "protect")), guards=latest(research_dir, "guards"))
+        return window_or_page(render_template("v2/research_stress.html", report=latest(research_dir),
+                                              protect=protect_view(latest(research_dir, "protect")),
+                                              guards=latest(research_dir, "guards")), "大空頭壓力測試（2007 起）")
 
     @blueprint.get("/research/eras")
     def research_eras():
@@ -1307,7 +1324,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         from quant_platform.research.eras import analyze
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        return render_template("v2/research_eras.html", era=analyze(research_dir))
+        return window_or_page(render_template("v2/research_eras.html", era=analyze(research_dir)), "各時期還適用嗎")
 
     @blueprint.get("/research/searches")
     def research_searches():
@@ -1317,8 +1334,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         from quant_platform.research.pool import pool_view
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        return render_template("v2/research_searches.html",
-                               f=funnel(research_dir, ready("pool:seed", research_dir, lambda: pool_view(research_dir, basis="seed"))["daily"]))
+        return window_or_page(render_template(
+            "v2/research_searches.html",
+            f=funnel(research_dir, ready("pool:seed", research_dir, lambda: pool_view(research_dir, basis="seed"))["daily"])),
+            "大搜尋：每一輪")
 
     @blueprint.get("/issues")
     def issues_page():
@@ -1373,8 +1392,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         family = request.args.get("family") or ""
         track = distribution.focus(whole, family) if whole and family else whole
         svg = distribution.charts({key: track}, with_dots=True)[key] if track else ""
-        return render_template("v2/research_distribution.html", key=key, track=track, whole=whole, family=family,
-                               svg=svg, tracks=distribution.TRACKS, sides=distribution.SIDES)
+        return window_or_page(render_template("v2/research_distribution.html", key=key, track=track, whole=whole,
+                                              family=family, svg=svg, tracks=distribution.TRACKS, sides=distribution.SIDES),
+                              "每個策略最後有多少錢" + (f"：{family}" if family else ""))
 
     @blueprint.get("/research/checks")
     def research_checks():
@@ -1382,7 +1402,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         from quant_platform.research.checks import correctness
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        return render_template("v2/research_checks.html", checks=correctness(research_dir))
+        return window_or_page(render_template("v2/research_checks.html", checks=correctness(research_dir)), "正確性核對")
 
     @blueprint.get("/research/rules/<spec_hash>")
     def research_rule(spec_hash: str):

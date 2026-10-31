@@ -1,0 +1,14 @@
+{% extends "v2/base.html" %}
+{# 2026-10-31: a dashboard window opened by itself (dashboard/v2.py window_or_page) — the same content in the site's page. #}
+{% block title %}{{ title }} · 研究 · 交易研究分析平台{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <p class="small" style="margin:0 0 4px"><a href="/research">研究總覽</a> ›</p>
+    <h1>{{ title }}</h1>
+  </div>
+</header>
+{% endblock %}
+{% block content %}
+<section class="card dash-window">{{ body }}</section>
+{% endblock %}

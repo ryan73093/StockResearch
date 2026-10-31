@@ -16,8 +16,8 @@
 <section class="card dash" id="dashboard" data-tab="儀表板" data-tab-default>
   <div class="dash-kpis">
     <div class="kpi"><div class="kpi__label">0050（同樣投入）</div><div class="kpi__value">{{ wan(d.benchmark) }}</div><div class="kpi__note">2015-06 起 30 萬＋每月 1 萬</div></div>
-    <div class="kpi"><div class="kpi__label">回測錢最多</div><div class="kpi__value">{{ wan(d.overall.final_value) if d.overall else '—' }}</div><div class="kpi__note">{% if d.overall and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.overall.final_value / d.benchmark) }} 倍・{{ d.overall.tier }}{% endif %}</div></div>
-    <div class="kpi"><div class="kpi__label">一般風險錢最多</div><div class="kpi__value">{{ wan(d.ordinary.final_value) if d.ordinary else '—' }}</div><div class="kpi__note">{% if d.ordinary and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.ordinary.final_value / d.benchmark) }} 倍・回撤不比 0050 深 5 點以上{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">回測錢最多</div><div class="kpi__value">{{ wan(d.overall.final_value) if d.overall else '—' }}</div><div class="kpi__note">{% if d.overall and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.overall.final_value / d.benchmark) }} 倍・{{ d.overall.tier }}・{{ '已實現' if d.overall.counted else '含帳面（今晚重跑後改已實現）' }}{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">一般風險錢最多</div><div class="kpi__value">{{ wan(d.ordinary.final_value) if d.ordinary else '—' }}</div><div class="kpi__note">{% if d.ordinary and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.ordinary.final_value / d.benchmark) }} 倍・回撤不比 0050 深 5 點以上・{{ '已實現' if d.ordinary.counted else '含帳面' }}{% endif %}</div></div>
     <div class="kpi"><div class="kpi__label">跌市最穩的錢最多</div><div class="kpi__value">{{ wan(d.steady.final_value) if d.steady else '—' }}</div><div class="kpi__note">{% if d.steady and d.steady.worst_fall %}#{{ d.steady.trial }}・0050 跌最多那次{{ '少跌' if d.steady.worst_fall.gap >= 0 else '多跌' }} {{ '%.1f'|format((d.steady.worst_fall.gap * 100)|abs) }} 點{% endif %}</div></div>
     <div class="kpi"><div class="kpi__label">前向：{{ fw.start[5:7]|int }}/{{ fw.start[8:10]|int }} 起照規則做</div><div class="kpi__value">{{ '{:.0%}'.format(fw.ahead_share) if fw.ahead_share is not none else '—' }} 贏 0050</div><div class="kpi__note">{{ '{:,}'.format(fw.accounts) }} 個帳戶，實際結果計算</div></div>
     <div class="kpi"><div class="kpi__label">第一個 T0 最快</div><div class="kpi__value">{{ first_t0[5:7]|int }}/{{ first_t0[8:10]|int }}</div><div class="kpi__note">前向已 {{ d.t0.sessions }}／{{ d.t0.needed }} 個交易日</div></div>
@@ -26,7 +26,7 @@
   <div class="dash-grid">
     {% for key in ('recent', 'full') if d.spread and d.spread[key] %}{% set sp = d.spread[key] %}
     <figure class="dash-panel{{ ' dash-panel--full' if key == 'recent' else '' }}">
-      <figcaption><h3>每個規則最後有多少錢：{{ sp.label }}</h3><span>{{ '{:,}'.format(sp.counts.lost + sp.counts.behind + sp.counts.ahead) }} 個完整回測過的規則・橫軸是期末全部賣掉的錢（萬元），縱軸是規則個數・投入的錢在正中間，左邊賠錢、右邊賺錢</span></figcaption>
+      <figcaption><h3>每個規則最後有多少錢：{{ sp.label }}</h3><span>{{ '{:,}'.format(sp.counts.lost + sp.counts.behind + sp.counts.ahead) }} 個完整回測過的規則・橫軸是期末的錢（萬元；已實現：賺的只算賣掉的、賠的都算，10/31 以前跑的還是含帳面，今晚重跑後全部換成已實現），縱軸是規則個數・投入的錢在正中間，左邊賠錢、右邊賺錢</span></figcaption>
       {{ sp.svg|safe }}
       <div class="legend"><span><i class="sw-v2bar"></i>賠錢 {{ '{:,}'.format(sp.counts.lost) }} 個</span><span><i class="sw-vputbar"></i>賺錢但輸 0050 {{ '{:,}'.format(sp.counts.behind) }} 個</span><span><i class="sw-v1bar"></i>贏 0050 {{ '{:,}'.format(sp.counts.ahead) }} 個</span><span>虛線：投入 {{ '{:,.0f}'.format(sp.invested / 10000) }} 萬、同樣的錢買 0050 {{ '{:,.0f}'.format(sp.bench / 10000) }} 萬</span><span><i class="sw-fmed"></i>每一類的中位數</span><span><i class="sw-fiqr"></i>中間一半</span></div>
       <p class="small muted" style="margin:4px 0 0">中位數 {{ '{:,.0f}'.format(sp.median) }} 萬；最多 #{{ sp.best.trial }} {{ '{:,.0f}'.format(sp.best.value / 10000) }} 萬（{{ sp.best.name[:30] }}）；最少 #{{ sp.worst.trial }} {{ '{:,.0f}'.format(sp.worst.value / 10000) }} 萬。下面每一列是一類策略（深度學習、RL 機器人、多因子、趨勢動能…）落在橫軸的哪裡：小柱子是這一類自己的分佈（60 個以下直接畫每一點），點一列只看這一類。</p>
@@ -122,7 +122,7 @@
         {% endif %}
       </ol>
       {% endif %}
-      {% if fn.biggest_blend %}<p class="small muted" style="margin:6px 0 0">組合搜尋（把已有的規則兩兩、三個一組，不是新策略，不算進上面的數字）：最大一輪 {{ '{:.2f}'.format(fn.biggest_blend.candidates / 100000000) }} 億種組合（{{ fn.biggest_blend.pool }} 個規則兩兩、三個一組）→ {{ '{:,.0f}'.format(fn.biggest_blend.passed / 10000) }} 萬過初篩 → 每輪最多 20 個完整回測，{{ fn.blends|length }} 輪共 {{ fn.blend_finalists }} 個。</p>{% endif %}
+      {% if fn.biggest_blend %}<p class="small muted" style="margin:6px 0 0">組合搜尋（把已有的規則兩兩、三個一組，不是新策略，不算進上面的數字）：最大一輪 {{ '{:.2f}'.format(fn.biggest_blend.candidates / 100000000) }} 億種組合（{{ fn.biggest_blend.pool }} 個規則兩兩、三個一組）→ {% if fn.biggest_blend.passed >= 100000 %}{{ '{:,.0f}'.format(fn.biggest_blend.passed / 10000) }} 萬{% else %}{{ '{:,}'.format(fn.biggest_blend.passed) }}{% endif %} 個過初篩 → 每輪最多 20 個完整回測，{{ fn.blends|length }} 輪共 {{ fn.blend_finalists }} 個。</p>{% endif %}
       <p class="dash-link"><button type="button" class="button-link" data-searches>每一輪搜了什麼、留下多少</button></p>
     </figure>
     {% endif %}

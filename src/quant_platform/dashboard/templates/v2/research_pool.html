@@ -50,13 +50,17 @@
     <a href="/research/forward/{{ ai.meta_hash }}">看持股與交易</a>{% if ai.forward and ai.forward.sessions %}（{{ ai.forward.sessions }} 天、相對 0050 {{ '{:+.2%}'.format(ai.forward.excess) if ai.forward.excess is not none else '—' }}）{% endif %}。
   </div>
 </section>
-<section class="card" id="daily" data-tab="全部規則（新設計，每天決策）">
-  <div class="card__head"><h2>新設計：2015-06 起、每天決策 <span class="badge">{{ pool.daily|length }} 個規則</span></h2></div>
+{% macro wan(value) %}{{ '{:,.0f}'.format(value / 10000) }} 萬{% endmacro %}
+{% macro versus(mine, theirs) %}{% if mine is not none and theirs %}<span class="muted small">0050 {{ wan(theirs) }}・</span><span class="small {{ 'up' if mine > theirs else 'down' }}">{{ '多' if mine >= theirs else '少' }} {{ wan((mine - theirs)|abs) }}（0050 的 {{ '%.1f' % (mine / theirs) }} 倍）</span>{% endif %}{% endmacro %}
+<section class="card" id="daily" data-tab="全部規則">
+  <div class="card__head"><h2>新設計：2015-06 起、每天決策 <span class="badge">{{ pool.daily|length }} 個規則・結果不同的 {{ distinct }} 個</span></h2></div>
   <div class="kpis kpis--four" style="margin-bottom:12px">
     {% for grade in ('T0', 'T0（高風險）', 'T0 候選', 'T0 候選（高風險）', 'T1', 'T2', 'T3') %}<div class="kpi"><div class="kpi__label">{{ grade }}</div><div class="kpi__value">{{ pool.daily_tiers[grade] }}</div></div>{% endfor %}
   </div>
+  <details class="dash-how" style="margin:0 0 10px"><summary>怎麼分級、錢怎麼算</summary>
   <p class="small" style="margin:0 0 10px">分級：<strong>T0</strong> 全部門檻都過，而且串接滾動前向紀錄（連續留在每月名單上的月份串起來）滿 60 個交易日仍不輸 0050，可以由你核准採用（最快 {{ first_t0 }}）；<strong>T0 候選</strong> 全部門檻都過，等前向觀察；<strong>T0 候選（高風險）</strong> 其他門檻都過，但回撤比 0050 深 5～15 個百分點；<strong>T1</strong> 2020-10 起贏、視窗勝率也夠，但回撤比 0050 深超過 15 個百分點（贏但波動大）；<strong>T2</strong> 2020-10 起贏，但 2020-11 以後的視窗勝率不夠；<strong>T3</strong> 2020-10 起輸 0050（門檻只看 2020-10 以後，2015-06 起只列出來參考）。T0 候選與 T1 自動進前向觀察。</p>
-  <p class="muted small" style="margin:0 0 10px">帳戶：啟動資金 30 萬、每月 5 日再投入 1 萬，整個帳戶都能買賣；每個交易日收盤後檢查，掉出保留區才賣、新進榜才買；比同樣的錢買 0050。門檻：2015-06 起與 2020-10 起都贏 0050、3 年視窗勝率 ≥ 60% 且中位為正、1 年視窗勝率 ≥ 50%、回撤不比 0050 深超過 5 個百分點。最後以 2026-10-05 起的前向觀察判斷。</p>
+  <p class="muted small" style="margin:0 0 10px">帳戶：啟動資金 30 萬、每月 5 日再投入 1 萬，整個帳戶都能買賣；比同樣的錢買 0050。門檻只看 2020-10 以後：2020-10 起贏 0050、2020-11 以後的 3 年視窗勝率 ≥ 60% 且中位為正、1 年視窗勝率 ≥ 50%、回撤不比 0050 深超過 5 個百分點（高風險 15 點）；2015-06 起只列出來參考。錢一律算<strong>已實現</strong>：賺的只算賣掉拿到的、賠的不管賣了沒都算，0050 用當天全部賣掉比；10/31 以前跑的結果還是含帳面（標「含帳面」），今晚引擎 1.6.0 重跑後全部換成已實現。前向觀察每月滾動，從截止日的隔天起算。</p>
+  </details>
   {% if pool.daily %}
   <form class="filters" id="daily-filters" method="get" action="/research/pool#daily">
     {% if pool.basis != 'seed' %}<input type="hidden" name="basis" value="{{ pool.basis }}">{% endif %}
@@ -64,29 +68,28 @@
     <select id="daily-family" name="family" aria-label="分類"><option value="">全部分類</option>{% for family in pool.category_order %}<option value="{{ family }}"{% if picked.family == family %} selected{% endif %}>{{ family }}</option>{% endfor %}</select>
     <select id="daily-tier" name="tier" aria-label="等級"><option value="">全部等級</option>{% for grade in ('T0', 'T0（高風險）', 'T0 候選', 'T0 候選（高風險）', 'T1', 'T2', 'T3') %}<option value="{{ grade }}"{% if picked.tier == grade %} selected{% endif %}>{{ grade }}</option>{% endfor %}<option value="不採用"{% if picked.tier == '不採用' %} selected{% endif %}>不採用（含 0050）</option></select>
     <select id="daily-trait" name="trait" aria-label="特性"><option value="">全部特性</option>{% for trait in pool.traits %}<option value="{{ trait }}"{% if picked.trait == trait %} selected{% endif %}>{{ trait }}</option>{% endfor %}</select>
-    <span class="muted small" id="daily-count">符合 {{ daily_matched }}／{{ pool.daily|length }} 個{% if daily_rows|length < daily_matched %}，列出前 {{ daily_rows|length }} 個・<a href="?{% for key, value in picked.items() if value %}{{ key }}={{ value|urlencode }}&amp;{% endfor %}all=1#daily">顯示全部</a>{% endif %}{% if picked.values()|select|list %}・<a href="/research/pool#daily">清除篩選</a>{% endif %}</span>
+    <span class="muted small" id="daily-count">符合 {{ daily_matched }} 個（結果完全相同的算一個）{% if daily_rows|length < daily_matched %}，列出前 {{ daily_rows|length }} 個・<a href="?{% for key, value in picked.items() if value %}{{ key }}={{ value|urlencode }}&amp;{% endfor %}all=1#daily">顯示全部</a>{% endif %}{% if picked.values()|select|list %}・<a href="/research/pool#daily">清除篩選</a>{% endif %}</span>
   </form>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th>分類</th><th>等級</th><th class="num">2015-06 起期末（0050）</th><th class="num">比 0050</th><th class="num">2020-10 起比 0050</th><th class="num">1 年／3 年視窗勝率</th><th class="num">最大回撤（0050）</th><th class="num">費稅佔投入・每月下單</th></tr></thead>
+      <thead><tr><th>規則</th><th>分類</th><th>等級</th><th>2015-06 起到 2026-09 有多少錢</th><th>2020-10 起到 2026-09</th><th class="num">贏 0050 的視窗比例</th><th class="num">最大跌幅</th><th>交易</th></tr></thead>
       <tbody>
       {% for row in daily_rows %}
         <tr data-name="{{ row.name }}" data-family="{{ row.category.family }}" data-tier="{{ '不採用' if row.uses_0050 else row.tier }}" data-traits="|{{ row.category.traits|join('|') }}|">
-          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a></strong>{{ risk_badge(row.spec_hash) }}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
+          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a></strong>{{ risk_badge(row.spec_hash) }}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}{% if row.same %}<br><span class="small muted">另外 {{ row.same|length }} 個結果完全相同（濾網或否決從沒觸發），只列這一個：{% for other in row.same[:6] %}<a href="/research/rules/{{ other.spec_hash }}">{{ rule_no(other.spec_hash) }}</a>{{ '、' if not loop.last else '' }}{% endfor %}{% if row.same|length > 6 %}…{% endif %}</span>{% endif %}</td>
           <td data-label="分類" data-wide><span class="badge">{{ row.category.family }}</span>{% if row.category.detail %} <span class="small">{{ row.category.detail }}</span>{% endif %}<br><span class="muted small">{{ row.category.traits|join('・') }}</span></td>
           <td data-label="等級" data-wide>{% if row.uses_0050 %}<span class="badge">不採用</span> <span class="small">含 0050（你自己另外持有 0050），回測等級 {{ row.tier }}</span>{% else %}<span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--warn' if row.tier == 'T1' else ('badge--bad' if row.tier == 'T3' or '高風險' in row.tier else '')) }}">{{ row.tier }}</span> <span class="small">{{ row.tier_reason }}</span>{% endif %}</td>
-          <td class="num" data-label="2015-06 起期末">{% if row.final_value %}{{ '{:,.0f}'.format(row.final_value / 10000) }} 萬<span class="muted small">（{{ '{:,.0f}'.format(row.benchmark_final_value / 10000) }} 萬）</span>{% else %}—{% endif %}</td>
-          <td class="num {{ 'up' if (row.excess or 0) > 0 else 'down' }}" data-label="比 0050">{{ '{:+.0%}'.format(row.excess) if row.excess is not none else '—' }}</td>
-          <td class="num {{ 'up' if (row.since_2020_excess or 0) > 0 else 'down' }}" data-label="2020-10 起">{{ '{:+.0%}'.format(row.since_2020_excess) if row.since_2020_excess is not none else '—' }}</td>
-          <td class="num" data-label="1 年／3 年勝率">{{ '{:.0%}'.format(row.win_1y) if row.win_1y is not none else '—' }}／{{ '{:.0%}'.format(row.win_3y) if row.win_3y is not none else '—' }}</td>
-          <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
-          <td class="num" data-label="費稅・下單">{{ '{:.0%}'.format(row.cost_share) if row.cost_share is not none else '—' }}{% if row.orders_per_month %}<span class="muted small">・{{ '%.0f' % row.orders_per_month }} 筆</span>{% endif %}</td>
+          <td data-label="2015-06 起" data-wide>{% if row.final_value %}<strong>{{ wan(row.final_value) }}</strong> <span class="muted small">{{ '已實現' if row.counted else '含帳面' }}</span><br>{{ versus(row.final_value, row.benchmark_final_value) }}{% else %}—{% endif %}</td>
+          <td data-label="2020-10 起" data-wide>{% if row.since_2020_final_value %}<strong>{{ wan(row.since_2020_final_value) }}</strong><br>{{ versus(row.since_2020_final_value, row.since_2020_benchmark_final_value) }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="贏 0050 的視窗">1 年 {{ '{:.0%}'.format(row.win_1y) if row.win_1y is not none else '—' }}・3 年 {{ '{:.0%}'.format(row.win_3y) if row.win_3y is not none else '—' }}</td>
+          <td class="num" data-label="最大跌幅">{{ '{:.0%}'.format(-row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（0050 {{ '{:.0%}'.format(-row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
+          <td data-label="交易" data-wide>{% if row.orders_per_month %}每月 {{ '%.0f' % row.orders_per_month }} 筆{% endif %}{% if row.costs is not none and row.contributed %}・手續費與稅共 {{ wan(row.costs) }}（投入 {{ wan(row.contributed) }} 的 {{ '%.1f' % (row.costs / row.contributed) }} 倍）{% elif row.cost_share is not none %}・手續費與稅是投入的 {{ '%.1f' % row.cost_share }} 倍{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="col-help"><b>欄位說明</b>　<b>等級</b>：T0 候選＝全部門檻都過；T0 候選（高風險）＝其他門檻都過，但回撤比 0050 深 5～15 個百分點（使用者 2026-10-18 放寬、標註高風險）；T1＝2020-10 起贏、視窗勝率夠，但回撤比 0050 深超過 15 個百分點；T2＝2020-10 起贏，但 2020-11 以後的 3 年或 1 年視窗勝率不夠；T3＝2020-10 起輸 0050。門檻只看 2020-10 以後（使用者 2026-10-26／27）；2015-06 起的數字只列出來參考。<b>期末</b>：2015-06 起 30 萬＋每月 1 萬的期末金額（括號是同樣的錢買 0050）。<b>比 0050</b>：（期末 − 0050 期末）÷ 投入的錢。<b>2020-10 起比 0050</b>：同樣算法，只看 2020-10 以後。<b>視窗勝率</b>：每個月開始的 1 年／3 年帳戶，贏 0050 的比例。<b>最大回撤</b>：期間內從高點的最大跌幅（括號是 0050）。<b>費稅佔投入・每月下單</b>：手續費加交易稅佔投入金額的比例、平均每月下單筆數。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>等級</b>：T0 候選＝全部門檻都過；T0 候選（高風險）＝其他門檻都過，但回撤比 0050 深 5～15 個百分點（使用者 2026-10-18 放寬、標註高風險）；T1＝2020-10 起贏、視窗勝率夠，但回撤比 0050 深超過 15 個百分點；T2＝2020-10 起贏，但 2020-11 以後的 3 年或 1 年視窗勝率不夠；T3＝2020-10 起輸 0050。門檻只看 2020-10 以後（使用者 2026-10-26／27）；2015-06 起的數字只列出來參考。<b>2015-06 起到 2026-09 有多少錢</b>：2015-06 起啟動 30 萬＋每月 1 萬，到 2026-09-30 帳戶有多少錢（已實現或含帳面），下面是同樣的錢買 0050 有多少、多或少幾萬、是 0050 的幾倍。<b>2020-10 起</b>：同樣的帳戶從 2020-10 開始。<b>贏 0050 的視窗比例</b>：每個月開始一個 1 年／3 年的帳戶，到期時贏 0050 的比例。<b>最大跌幅</b>：期間內從最高點跌最多的一段（括號是 0050）。<b>交易</b>：平均每月下單筆數；手續費與稅加起來多少萬、是投入的錢的幾倍（帳戶變大後每筆金額變大，費稅可以超過投入的錢）。結果完全相同的規則（濾網或否決從沒觸發）合併成一列。</p>
   {% else %}
   <p class="muted" style="margin:0">還沒有結果；回測在跑時看<a href="/research?tab=jobs">執行中的程式</a>。</p>
   {% endif %}

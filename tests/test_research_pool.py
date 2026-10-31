@@ -225,3 +225,23 @@ def test_a_zoomed_money_chart_spans_the_values_only():
     highs = [float(point.split(",")[1]) for point in chart["rule"].split()]
     assert lows[0] > 100 and highs[-1] < 20                    # near the bottom and the top of 110 (6% room)
     assert _svg(curve)["floor"] == 0.0                          # the backtest chart still from 0
+
+
+def test_an_every_day_rule_is_described_in_plain_words():
+    """2026-10-31 (使用者：你到底有沒有親自使用過系統): the rule page showed only the name of the new design's rules —
+    what it ranks by, which stocks, when it decides, how it holds, the veto and the fills are written out."""
+    from quant_platform.research.pool import describe_rule
+
+    spec = {"name": "x", "factors": {"high_52w": 1.0, "ml_deep2_top": 1.0}, "top": 20, "keep": 3, "check": "weekly",
+            "min_hold": 0, "industry_cap": 0.3, "exclude": "he", "execution": "split", "eligibility": "band",
+            "vol_scale": "taiex_half"}
+    lines = describe_rule(spec)
+    text = "\n".join(lines)
+    assert lines[0].startswith("排名依據：") and "深度模型2前一成" in lines[0] and "權重" not in lines[0]
+    assert "每週第一個交易日決策：持有前 20 名，已持有的跌出前 60 名才賣" in lines
+    assert "持有方式：不設最短持有，跌出保留名次就賣" in lines
+    assert "否決：不買股東大增或獲利衰退最多的五分之一" in lines and "同一產業最多佔 30% 的檔數" in lines
+    assert "減碼：加權指數跌破 200 日均線就減碼一半" in lines and "低於門檻的七成" in text
+    assert lines[-2] == "成交：收盤後決定：賣出在隔天開盤、買進在隔天收盤"
+    trend = describe_rule({"name": "y", "factors": {"trend_200": 2.0, "high_52w": 1.0}, "hold": "trend"})
+    assert "（權重 2）" in trend[0] and any("月線" in line for line in trend) and "每個交易日收盤後決策" in trend[2]

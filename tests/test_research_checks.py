@@ -79,6 +79,12 @@ def test_the_dashboard_windows_render(tmp_path):
     found = client.get("/research/searches")
     body = found.get_data(as_text=True)
     assert found.status_code == 200 and "1,000" in body and "兩階段" in body
+    # 2026-10-31: fetched by the overview it is a fragment; opened by itself (the browser asks for a document) it comes
+    # inside the site's page, with its title and the way back to the overview
+    assert "<html" not in body and "<html" not in client.get("/research/checks").get_data(as_text=True)
+    page = client.get("/research/checks", headers={"Sec-Fetch-Dest": "document"}).get_data(as_text=True)
+    assert "<html" in page and "<h1>正確性核對</h1>" in page and 'href="/research">研究總覽' in page
+    assert "成交價不是升降單位的整數倍" in page
 
 
 def test_funnel_counts_the_finalists_again_with_the_latest_engine(tmp_path):

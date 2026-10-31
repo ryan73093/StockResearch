@@ -358,6 +358,7 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
             "max_drawdown": metrics.get("max_drawdown"), "benchmark_max_drawdown": metrics.get("benchmark_max_drawdown"),
             "xirr": metrics.get("xirr"), "benchmark_xirr": metrics.get("benchmark_xirr"),
             "cost_share": metrics.get("cost_share"), "orders_per_month": metrics.get("orders_per_month"),
+            "contributed": metrics.get("contributed"), "costs": metrics.get("costs"),
             "forward_since": since.get(spec_hash), "report_file": record.report_file, "start": metrics.get("start"),
             "category": classify(_spec_of(base, record.report_file), origin.get(spec_hash, "")),
             "uses_0050": uses_0050(_spec_of(base, record.report_file)),
@@ -401,6 +402,99 @@ def basis_counts(research_dir: str | Path) -> dict[str, int]:
     return output
 
 
+CHECK_WORDS = {"daily": "每個交易日收盤後決策", "weekly": "每週第一個交易日決策", "monthly": "每月第一個交易日決策",
+               "revenue": "每月 10 日營收公布後決策"}
+EXECUTION_WORDS = {"same": "收盤後決定、當天盤後成交（收盤價 ±0.2%）", "next": "收盤後決定、隔天收盤成交",
+                   "open": "收盤後決定、隔天開盤成交", "split": "收盤後決定：賣出在隔天開盤、買進在隔天收盤"}
+WEIGHT_WORDS = {"equal": "每檔金額相同", "inverse_vol": "波動小的多買（依 60 日波動度的倒數分配）",
+                "inverse_risk": "依預估風險的倒數分配"}
+SCALE_WORDS = {"v1": "自己的帳戶波動變大就減碼（最多減到四分之一）", "taiex_half": "加權指數跌破 200 日均線就減碼一半",
+               "taiex_staged": "加權指數跌破 200 日均線減碼一半、離高點跌 20% 以上就不持股",
+               "risk_half": "深度風險模型看壞大盤時減碼一半", "taiex_vol": "加權指數跌破 200 日均線時依大盤波動減碼（最多一半）",
+               "taiex_trend": "加權指數跌破 200 日均線減碼一半、1 個月與 3 個月趨勢轉正就回補",
+               "own_drawdown": "減碼一半之外，自己的帳戶離高點每跌 7.5% 再少四分之一",
+               "own_trend": "減碼一半之外，自己的帳戶低於一年前時再減一半",
+               "own_excess": "減碼一半之外，自己的帳戶一年來輸 0050 時再減一半"}
+FILTER_WORDS = {"taiex_200": "加權指數跌破 200 日均線就不持股", "taiex_200s": "加權指數跌破下彎的 200 日均線就不持股",
+                "taiex_10m": "加權指數月底低於 10 個月均線就不持股", "taiex_12m": "加權指數月底低於 12 個月均線就不持股"}
+RISK_VETO_WORDS = {"dl1": "不買深度風險模型看下跌機率最高的一成", "dl1x": "不買下跌機率最高的一成、持股進到最高的 5% 就賣",
+                   "r3": "不買同波動群裡風險最高的一成", "meta1": "不買後設模型預期會輸 0050 的",
+                   "dl1m": "大盤在 200 日均線下時賣出下跌機率最高的 5%"}
+
+
+def describe_daily(spec: dict) -> list[str]:
+    """2026-10-31 (使用者：你到底有沒有親自使用過系統): an every-day-decision rule (research/daily.py DailyRule) in plain
+    words — what it ranks by, which stocks it may buy, when it decides, how it holds, sells and fills, and every extra
+    setting it has; the rule page showed only its name."""
+    from quant_platform.research.daily import FACTOR_LABELS, MODEL_FACTORS, VETO_WORDS
+    from quant_platform.research.scan import SHORT
+
+    def label(name: str) -> str:
+        if name in MODEL_FACTORS:                       # 模型C：機器學習綜合分數（35 個因子含財報…）
+            return f"{SHORT.get(name, name)}：{MODEL_FACTORS[name].replace('同上，', '')}"
+        return str(FACTOR_LABELS.get(name, SHORT.get(name, name)))
+
+    factors = spec.get("factors") or {}
+    weighted = len({abs(weight) for weight in factors.values()}) > 1     # equal weights say nothing
+    named = [label(name) + (f"（權重 {abs(weight):g}）" if weighted else "")
+             + ("（反向：越低越好）" if weight < 0 else "") for name, weight in factors.items()]
+    top, keep = int(spec.get("top", 20)), int(spec.get("keep", 3))
+    lines = ["排名依據：" + "＋".join(named) + ("（每個因子在當天合格股票裡的百分位相加）" if len(factors) > 1 else "")]
+    if spec.get("smooth"):
+        lines.append(f"分數用近 {spec['smooth']} 個交易日的平均，減少每天跳動")
+    pool_words = "上市＋上櫃股票" if spec.get("universe") == "all" else "上市股票"
+    if spec.get("large_caps"):
+        pool_words += f"裡市值前 {spec['large_caps']} 大"
+    lines.append(f"可以買的股票：{pool_words}，收盤 ≥ {spec.get('min_price', 10):g} 元、近 20 日平均成交值 ≥ "
+                 f"{spec.get('min_turnover', 2e7) / 1e4:,.0f} 萬元、上市滿 {spec.get('min_history', 252)} 個交易日")
+    eligibility = spec.get("eligibility", "both")
+    if eligibility == "entry":
+        lines.append("選股條件只管買進：已經持有的股票不符合條件也不因此賣出（引擎 1.6.0 起；之前沒設最短持有的規則照樣會賣）")
+    elif eligibility == "band":
+        lines.append("選股條件有緩衝：持有的股票股價或成交值低於門檻的七成才因此賣出")
+    lines.append(f"{CHECK_WORDS.get(spec.get('check', 'daily'), spec.get('check'))}：持有前 {top} 名，"
+                 + (f"已持有的跌出前 {top * keep} 名才賣" if keep > 1 else "跌出前 {top} 名就賣"))
+    if spec.get("hold") == "trend":
+        lines.append("持有方式：跌出保留名次後，股價還在月線（20 日均線）上就續抱")
+    elif spec.get("min_hold", 20):
+        lines.append(f"持有方式：這個策略設定買進後至少持有 {spec.get('min_hold', 20)} 個交易日")
+    else:
+        lines.append("持有方式：不設最短持有，跌出保留名次就賣")
+    lines.append("每檔金額：" + WEIGHT_WORDS.get(spec.get("weighting", "equal"), spec.get("weighting")))
+    if spec.get("industry_cap"):
+        lines.append(f"同一產業最多佔 {spec['industry_cap']:.0%} 的檔數")
+    if spec.get("cluster_cap"):
+        lines.append(f"走勢相近的一群最多佔 {spec['cluster_cap']:.0%} 的檔數")
+    if spec.get("switching") == "cost1":
+        lines.append("看成本才換股：要賣的持股，只有換成排名更前的股票扣掉一來一回的成本仍划算才換")
+    if spec.get("exclude", "none") != "none":
+        lines.append("否決：" + VETO_WORDS.get(spec["exclude"], "不買新聞事件排除的股票" if spec["exclude"] == "v1" else spec["exclude"]))
+    if spec.get("risk_veto", "none") != "none":
+        lines.append("風險否決：" + RISK_VETO_WORDS.get(spec["risk_veto"], spec["risk_veto"]))
+    if spec.get("news_veto", "none") == "v1":
+        lines.append("新聞否決：當天有重大負面新聞的股票不買")
+    if spec.get("stop_loss"):
+        lines.append(f"停損：從買進後的最高價跌超過 {spec['stop_loss']:.0%} 就賣，賣出後 {spec.get('cooldown', 20)} 個交易日內不再買回")
+    if spec.get("winner_hold"):
+        lines.append(f"贏家續抱：漲超過 {spec['winner_hold']:.0%} 而且在月線上的持股，跌出保留名次也不賣")
+    if spec.get("trim_above"):
+        lines.append(f"單一持股漲到目標金額的 {spec['trim_above']:g} 倍以上就賣掉多的部分")
+    if spec.get("market_filter", "none") != "none":
+        lines.append("大盤濾網：" + FILTER_WORDS.get(spec["market_filter"], spec["market_filter"]))
+    if spec.get("vol_scale", "none") != "none":
+        lines.append("減碼：" + SCALE_WORDS.get(spec["vol_scale"], spec["vol_scale"]))
+    if spec.get("account_filter", "none") == "own_200":
+        lines.append("自己的帳戶跌破 200 日均線就先不持股")
+    if spec.get("bear_factors"):
+        lines.append("大盤在 200 日均線下時改用：" + "＋".join(label(name) for name in spec["bear_factors"]) + " 排名")
+    if spec.get("exit_model", "none") != "none":
+        lines.append("出場：由學過的出場模型決定什麼時候賣（" + spec["exit_model"] + "）")
+    lines.append("成交：" + EXECUTION_WORDS.get(spec.get("execution", "same"), spec.get("execution")))
+    lines.append("帳戶：啟動資金 30 萬、每月 5 日投入 1 萬，" + ("錢進來先放著、決策日才買" if spec.get("reinvest", "decision") == "decision"
+                                                       else "錢一進來就照目前比重買"))
+    return lines
+
+
 def describe_rule(spec: dict) -> list[str]:
     """A stock rule in plain words (ETF specs: their name and assets)."""
     from quant_platform.research.stock_rules import FACTORS
@@ -414,6 +508,8 @@ def describe_rule(spec: dict) -> list[str]:
         if spec.get("core"):
             lines.append(f"{spec['core']:.0%}：0050（錢進來就買，不賣）")
         return lines
+    if "factors" in spec:                               # 2026-10-31: the new design's rules had only their name here
+        return describe_daily(spec)
     if "factor" not in spec:
         return [str(spec.get("description") or spec.get("name") or "")]
     factors = [FACTORS.get(spec["factor"], spec["factor"])] + [
