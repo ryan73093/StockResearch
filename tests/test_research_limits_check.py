@@ -48,7 +48,8 @@ def test_the_load_reads_the_overrides_only_with_the_switch_on(tmp_path, monkeypa
     (tmp_path / "limits").mkdir()
     pd.DataFrame([{"symbol": "3092.TW", "date": date(2021, 5, 14), "low": 9.2, "high": 11.2}]).to_parquet(
         tmp_path / "limits" / "official_overrides.parquet", index=False)
-    assert limits_check.OFFICIAL_LIMITS is False                       # on with engine 1.6.0, 2026-10-31
+    assert limits_check.OFFICIAL_LIMITS is True                        # on with engine 1.6.0, 2026-10-31
+    monkeypatch.setattr(limits_check, "OFFICIAL_LIMITS", False)       # the switch off: the engine's own reckoning
     plain = load_stock_data(tmp_path, 2021, 2021)
     before = stock_fingerprint(tmp_path, 2021, 2021)
     assert date(2021, 5, 14) not in (plain.notes["limits"].get("3092.TW") or {})

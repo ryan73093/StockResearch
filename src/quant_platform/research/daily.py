@@ -123,7 +123,15 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 #   * the cooldown after a stop-out (``cooldown``) and whether eligibility also sells (``eligibility``) are rule
 #     fields — they had been fixed in the engine;
 #   * the 20-session average turnover counts a session without a trade as nothing traded (it had skipped them).
-ENGINE_VERSION = "daily-1.5.0"
+# 1.6.0 (2026-10-31, switched before the November roll; the pool runs again with it):
+#   * the exchange's published daily price limits (limits_check.OFFICIAL_LIMITS: 16,091 stock-days from 2015-06
+#     differ from the engine's reckoning) instead of the reckoned ones;
+#   * eligibility "entry" keeps a holding in the day's ranking whatever its price, turnover and listing age
+#     (ENTRY_RANKS_HELD; 使用者 2026-10-31：你帳面數字都一樣是怎樣 — it had been sold anyway in every rule without a
+#     minimum hold);
+#   * every run also records the money counted at each month end (RunResult.counted_months, the report's
+#     counted_curve) — no decision changes.
+ENGINE_VERSION = "daily-1.6.0"
 # 2026-10-31 (使用者：你帳面數字都一樣是怎樣): eligibility "entry" is documented as "a holding no longer eligible is
 # not sold", but the day's ranking left such a holding out, so it fell out of the keep zone and was sold anyway in
 # every rule without a minimum hold (#7343 the same trades as #7024 to the yuan). From 1.6.0 a holding stays in the

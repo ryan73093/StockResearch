@@ -23,7 +23,7 @@ TOLERANCE = 1e-6
 # exchange's published limits on every stock-day they differ from the engine's own reckoning (16,091 of 2.64 million
 # from 2015-06) or the engine has none, kept as overrides (history/limits/official_overrides.parquet, built with the
 # switch off by ``build_overrides``) so the load stays small; days after the download keep the engine's reckoning.
-OFFICIAL_LIMITS = False
+OFFICIAL_LIMITS = True
 OVERRIDES = Path("limits") / "official_overrides.parquet"
 
 
