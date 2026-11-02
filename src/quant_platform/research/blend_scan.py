@@ -98,8 +98,24 @@ def pool(research: str | Path, counted: bool = False) -> list[dict]:
     # one cash flow and one 0050 account for all: the members whose money and 0050 match the most common ones
     common = max(output, key=lambda item: sum(np.array_equal(item["paid"], other["paid"])
                                               and np.allclose(item["bench"], other["bench"], rtol=0.005) for other in output))
-    return [item for item in output if len(item["months"]) == len(common["months"])
-            and np.array_equal(item["paid"], common["paid"]) and np.allclose(item["bench"], common["bench"], rtol=0.005)]
+    alike = [item for item in output if len(item["months"]) == len(common["months"])
+             and np.array_equal(item["paid"], common["paid"]) and np.allclose(item["bench"], common["bench"], rtol=0.005)]
+    return distinct(alike)
+
+
+def distinct(members: list[dict]) -> list[dict]:
+    """2026-11-02 (組合搜尋第十四輪 first run: five of eleven finalists were one blend — #14509, #14751, #15617, … with
+    #16436 at +1133.9% — their members variants with the same account to the yuan, a filter or veto that never acted):
+    members whose month-end values (and money counted, when kept) are all the same are one member, the first
+    registered; the others are named under "same"."""
+    kept: dict[tuple, dict] = {}
+    for item in sorted(members, key=lambda item: item["trial"]):
+        key = (tuple(np.round(item["values"], 0)), round(item.get("counted", 0.0)))
+        if key in kept:
+            kept[key].setdefault("same", []).append(item["trial"])
+        else:
+            kept[key] = item
+    return list(kept.values())
 
 
 def blend_references(research: str | Path, members: list[dict], counted: bool = False) -> dict[str, np.ndarray]:

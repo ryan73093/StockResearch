@@ -364,3 +364,15 @@ def test_the_counted_search_ranks_on_the_money_counted_at_the_cutoff():
     loose = dict(options, count=12, near_copy=0.9999)
     assert len(bs.search(more, counted=True, apart=False, **loose)["finalists"]) >= \
         len(bs.search(more, counted=True, **loose)["finalists"])
+
+
+def test_members_with_the_same_account_are_one_member():
+    """2026-11-02: round fourteen's first run picked one blend five times — its members were variants with the same
+    account to the yuan; the pool keeps the first registered and names the others."""
+    a = member(10, [100, 103, 108, 104, 109, 112, 118, 134.0])
+    twin = member(12, [100, 103, 108, 104, 109, 112, 118, 134.0])
+    other = member(13, [100, 104, 101, 98, 104, 110, 117, 128.0])
+    found = bs.distinct([twin, other, a])
+    assert [item["trial"] for item in found] == [10, 13] and found[0]["same"] == [12]
+    counted = [{**a, "counted": 120.0}, {**twin, "counted": 121.0}]
+    assert len(bs.distinct(counted)) == 2                    # the same values, a different money counted: two
