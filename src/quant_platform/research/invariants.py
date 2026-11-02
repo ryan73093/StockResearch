@@ -352,7 +352,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                          bool(found) and not found.get("differing_accounts") and when is not None
                          and (datetime.now() - when).days <= 8,
                          (f"{when:%m-%d %H:%M}：{found.get('accounts', 0)} 個帳戶、{found.get('checked_days', 0):,} 個決策日，"
-                          f"不一樣的帳戶 {found.get('differing_accounts', 0)} 個") if found else "還沒有核對紀錄"))
+                          f"不一樣的帳戶 {found.get('differing_accounts', 0)} 個" + _audit_split(found)) if found else "還沒有核對紀錄"))
 
     # 2026-10-28 (research_method §7「重現性」: 222 registered results stale for a week): the latest sample of the pool's
     # results run again by the engine, at most 8 days old, none with other money
@@ -693,6 +693,18 @@ def due_session(research: Path, today: date, now: datetime | None = None) -> dat
     now = now or datetime.now(ZoneInfo("Asia/Taipei"))
     after = today < now.date() or (now.hour, now.minute) >= (15, 45)
     return _calendar(research).previous_trading_day(today, inclusive=after)
+
+
+def _audit_split(found: dict) -> str:
+    """2026-11-03: of the accounts the forward audit found differing, those whose first different day the after-close
+    orders decided at 13:50 on numbers the close later changed (the audit's ``table``: 31 of 35 on 11-03) apart from
+    those with no such reason — the ones to look into."""
+    rows = [row for row in found.get("rows") or [] if row.get("differed")]
+    if not rows:
+        return ""
+    unexplained = [row for row in rows if not (row.get("first") or {}).get("table")]
+    return (f"：13:50 表和收盤資料不同 {len(rows) - len(unexplained)} 個、原因不明 {len(unexplained)} 個"
+            + (f"（{'、'.join(str((row.get('first') or {}).get('day')) for row in unexplained[:4])}）" if unexplained else ""))
 
 
 def collected_due(research: Path, today: date, now: datetime | None, runs: tuple[int, int]) -> date:
