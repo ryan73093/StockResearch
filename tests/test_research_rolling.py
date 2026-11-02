@@ -239,3 +239,17 @@ def test_a_rule_keeps_one_row_in_the_month_the_last(tmp_path):
     assert [item["key"] for item in list_items({"cutoff": "2026-08-31", "graded": rows})] == ["b"]
     path = _rolling.save(tmp_path, date(2026, 8, 31), {"cutoff": "2026-08-31", "graded": rows})
     assert [row["spec"]["name"] for row in _json.loads(path.read_text(encoding="utf-8"))["graded"]] == ["乙", "新"]
+
+
+def test_only_new_leaves_a_month_without_its_list_to_the_monthly_flow(monkeypatch, tmp_path):
+    """2026-11-02: a flow's ``--only-new`` on 11/01 found no 2026-09-30 list and graded all 7,912 rules, then the
+    monthly flow graded them again; a month without its list is the monthly flow's — nothing graded, no list made."""
+    import sys
+
+    from quant_platform.research import __main__ as cli
+
+    monkeypatch.setattr(cli, "RESEARCH", tmp_path)
+    monkeypatch.setattr(rolling, "select", lambda *args, **kwargs: pytest.fail("graded a month without its list"))
+    monkeypatch.setattr(sys, "argv", ["x", "rolling", "--step", "select", "--only-new", "--cutoff", "2026-09-30"])
+    assert cli.main() == 0
+    assert not (rolling.folder(tmp_path) / "2026-09-30.json").exists()

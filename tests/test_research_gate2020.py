@@ -29,6 +29,21 @@ def test_the_windows_from_2020_11_are_kept_beside_all_of_them(monkeypatch):
     assert found["since_2020"] == {"count": 27, "win_ratio": 1.0, "median_excess": 0.1, "worst_excess": 0.1, "best_excess": 0.1}
 
 
+def test_the_windows_keep_the_paper_result_beside_the_counted_one(monkeypatch):
+    """2026-11-02 (使用者 10/30：直接用兩種方式): a window whose account holds its gain unsold loses on the money counted
+    and wins with the gain at the close — both kept, the counted one judged."""
+    data = SimpleNamespace(sessions=_sessions(date(2021, 1, 1), date(2023, 12, 31)))
+    monkeypatch.setattr(daily, "simulate_daily", lambda *args, **kwargs: SimpleNamespace(
+        final_value=100.0, contributed=100.0, sold_value=100.0))
+
+    def account(first, last):
+        return SimpleNamespace(final_value=120.0, counted_value=98.0, contributed=100.0)
+    found = daily.account_windows(data, account, None, 12, date(2021, 1, 2), date(2023, 12, 31), {})
+    assert found["win_ratio"] == 0.0 and found["median_excess"] == -0.02
+    assert found["paper"]["win_ratio"] == 1.0 and found["paper"]["median_excess"] == 0.2
+    assert found["paper_since_2020"] == found["paper"]
+
+
 def test_2015_to_2020_is_no_gate_and_the_2020_windows_decide():
     windows = {"1y": {"count": 120, "win_ratio": 0.3, "since_2020": {"count": 59, "win_ratio": 0.7}},
                "3y": {"count": 100, "win_ratio": 0.2, "median_excess": -0.1,

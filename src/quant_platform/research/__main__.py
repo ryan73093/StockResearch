@@ -1218,6 +1218,12 @@ def main() -> int:
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         cutoff = _date.fromisoformat(args.cutoff) if args.cutoff else rolling.cutoff_for(_date.today())
         path = rolling.folder(RESEARCH) / f"{cutoff.isoformat()}.json"
+        if args.step == "select" and args.only_new and not path.is_file():
+            # 2026-11-02: blendreach14's --only-new on 11/01 found no 2026-09-30 list, graded all 7,912 rules (18.5
+            # hours) and opened the month's accounts before the month's models were refitted; the monthly flow then
+            # graded the same rules again. A month without its list is the monthly flow's (rolling, the 1st 22:30).
+            print(f"{cutoff} 的名單還沒建立：交給每月滾動（rolling）全部評，這一步不評", flush=True)
+            return 0
         payload = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {
             "version": rolling.ROLLING_VERSION, "cutoff": cutoff.isoformat(), "graded": [], "holdout": [], "models": []}
         if args.step == "select":

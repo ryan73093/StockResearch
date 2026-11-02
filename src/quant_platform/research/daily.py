@@ -2419,11 +2419,15 @@ def account_windows(data: LegacyData, account, costs: CostModel, months: int, st
         if (first, last) not in cache:
             cache[(first, last)] = simulate_daily(data, None, costs, first, last)
         if run.contributed:
-            pairs.append((first, _excess(run, cache[(first, last)])))
+            pairs.append((first, _excess(run, cache[(first, last)]), _paper_excess(run, cache[(first, last)])))
     if not pairs:
         return {"count": 0, "since_2020": {"count": 0}}
-    return {**window_summary([value for _first, value in pairs]),
-            "since_2020": window_summary([value for first, value in pairs if first >= REGIME_WINDOWS])}
+    # 2026-11-02 (使用者 10/30：直接用兩種方式，一個是未實現一個是已實現): the same windows with the held stocks at their
+    # close (``paper``) beside — the same runs, shown, never judged (the 2026-09-30 list: 3,051 of 3,541 dropped)
+    return {**window_summary([value for _first, value, _paper in pairs]),
+            "since_2020": window_summary([value for first, value, _paper in pairs if first >= REGIME_WINDOWS]),
+            "paper": window_summary([paper for _first, _value, paper in pairs]),
+            "paper_since_2020": window_summary([paper for first, _value, paper in pairs if first >= REGIME_WINDOWS])}
 
 
 # 2026-10-21 (使用者：繼續做你本來就應該要做的短歷史賽道；2015 到現在其實也很久了，評估長資料跟短歷史的權重): a rule
