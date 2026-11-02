@@ -181,3 +181,14 @@ def test_the_minimum_holding_comparison_changes_only_the_holding():
     assert len(rules) == 4 and all(rule.min_hold == 0 and rule.name.endswith("不設最短持有") for rule in rules)
     original = daily.BATCHES["consensus"]()[0]
     assert rules[0].model_copy(update={"min_hold": 20, "name": original.name}).rule_hash == original.rule_hash
+
+
+def test_the_switch_mapping_keeps_working_beside_other_cache_entries():
+    """2026-11-02: the 1.6.0 rebuild stopped 1,714 rules here — a factor-timing rule had left a tuple-keyed entry in the
+    same panel's cache and the eviction read every key as text."""
+    fp = market(stocks=30, first=date(2015, 1, 5), last=date(2021, 3, 31))
+    fp._cache[("__factor_spreads__", "momentum_3")] = object()
+    for weight in (1.0, 1.5, 2.0, 2.5, 3.0):
+        daily.switch_mapping(fp, DailyRule(name=f"w{weight}", factors={"momentum_3": weight, "trend_200": 1.0}))
+    assert ("__factor_spreads__", "momentum_3") in fp._cache
+    assert sum(isinstance(key, str) and key.startswith("__switch__") for key in fp._cache) <= daily.SWITCH_KEEP
