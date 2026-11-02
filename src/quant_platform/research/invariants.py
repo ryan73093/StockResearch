@@ -159,7 +159,7 @@ def _check(name: str, source: str, ok: bool, detail: str) -> dict[str, object]:
 def run(research: str | Path, today: date, backups: Path | None = None,
         windows: list[dict[str, object]] | None = None, site: str | None = None,
         memory: list[dict[str, object]] | None = None,
-        processes: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
+        processes: list[dict[str, object]] | None = None, now: datetime | None = None) -> list[dict[str, object]]:
     from quant_platform.research.categories import uses_0050
     from quant_platform.research.forward_board import common_start
     from quant_platform.research.rolling import cutoff_for, folder as rolling_folder
@@ -287,9 +287,16 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     broken = {key: value for key, value in problems.items() if any(item["rule_hash"] == key for item in live)}
     checks.append(_check("前向帳戶對帳 0 問題", "需求 §8 個股規則前向模擬：對帳", not broken,
                          f"有問題的帳戶 {len(broken)} 個"))
+    # 2026-11-03 (使用者：已經講幾次叫你要檢查、叫你要確認，就是不做): this check passed on any record at all — 11-02's
+    # records were never written and it said 通過 (最新紀錄 2026-10-30). The session due comes from the exchange's
+    # calendar, not from the research data (which had stopped too); the records and the closes must reach it
     latest = max((record["date"] for record in records), default=None)
-    checks.append(_check("前向紀錄記到最近的交易日", "需求 §8：每個交易日 15:30 記錄", latest is not None,
-                         f"最新紀錄 {latest}"))
+    due = due_session(research, today, now)
+    checks.append(_check("前向紀錄記到最近的交易日", "需求 §8：每個交易日 15:30 記錄",
+                         latest is not None and latest >= due.isoformat(), f"應記到 {due}；最新紀錄 {latest or '沒有'}"))
+    closes = _sessions(research)
+    checks.append(_check("研究資料的收盤價更新到最近的交易日", "需求 §8：每個交易日 15:15 補抓當天收盤",
+                         bool(closes) and closes[-1] >= due, f"應更新到 {due}；最新 {closes[-1] if closes else '沒有'}"))
 
     from quant_platform.research.daily import FORWARD_SESSIONS
 
@@ -377,9 +384,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                          month.get("cutoff") == wanted, f"應為截止 {wanted}；最新名單截止 {month.get('cutoff') or '沒有'}"))
     news = research / "history" / "raw" / "finmind" / "TaiwanStockNews"
     days = sorted(path.name for path in news.iterdir() if path.is_dir() and path.name.isdigit()) if news.is_dir() else []
-    sessions = _sessions(research)
-    before = [day for day in sessions if day < today]
-    due = before[-1].strftime("%Y%m%d") if before else None
+    due = _calendar(research).previous_trading_day(today, inclusive=False).strftime("%Y%m%d")    # 2026-11-03: the exchange's
     checks.append(_check("新聞收到前一個交易日", "需求 §8：每個交易日 14:40 收前一個交易日的新聞（新聞否決、LLM 交易員用）",
                          bool(due) and bool(days) and days[-1] >= due, f"應有 {due or '—'}；最新 {days[-1] if days else '沒有'}"))
     copies = [row for row in _jobs(research) if str(row.get("name", "")).startswith("研究資料第二份備份")]
@@ -435,6 +440,21 @@ def run(research: str | Path, today: date, backups: Path | None = None,
             stuck.append(f"{record.get('name')}（{'中斷' if status == 'interrupted' else '失敗' if status == 'failed' else '程序已不在'}，{str(record.get('started_at'))[:16]} 開始）")
     checks.append(_check("研究流程沒有中斷了沒恢復的", "AGENTS.md 長時間程式：重開機或關機後要接著跑", not stuck,
                          "；".join(stuck[:4]) if stuck else "沒有"))
+    # 2026-11-03: regate221 waited from 10-30 09:18 for 40 GB of memory free and nothing said so for three and a half
+    # days — a flow waiting more than a day is shown with what it waits for
+    waiting = []
+    for row in _jobs(research):
+        if not str(row.get("id", "")).endswith("-wait") or row.get("status") != "running":
+            continue
+        try:
+            began = datetime.fromisoformat(str(row.get("started_at")))
+        except ValueError:
+            continue
+        hours = ((now or datetime.now(began.tzinfo)) - began).total_seconds() / 3600
+        if hours > 24 and _alive(int(row.get("pid") or 0), began):
+            waiting.append(f"{str(row.get('command', '')).replace('research-pipeline.ps1 -Name ', '')} 等了 {hours:.0f} 小時：{row.get('current')}")
+    checks.append(_check("研究流程沒有等超過一天的", "開發歷程 2026-11-03：regate221 等記憶體 3 天半沒人發現", not waiting,
+                         "；".join(waiting[:4]) if waiting else "沒有"))
     # 2026-10-27 (使用者：現在是不是全部正確): the pool shows each rule's latest result — every 100%-stock one on the
     # current engine (#2189 stayed a T0 candidate from engine 1.2.0 while the list's 1.5.0 grading had it T3)
     from quant_platform.research.daily import ENGINE_VERSION, stale_engine
@@ -560,10 +580,7 @@ def paid_check(research: Path, today: date) -> dict[str, object]:
         plan = {}
     if not plan.get("limit") or int(plan["limit"]) <= 600 or str(plan.get("expires") or "") < today.isoformat():
         return _check(name, source, True, "付費方案沒有在用（或已到期），不檢查")
-    sessions = [day for day in _sessions(research) if day < today]
-    if not sessions:
-        return _check(name, source, True, "沒有交易日資料")
-    due = sessions[-1].isoformat()
+    due = _calendar(research).previous_trading_day(today, inclusive=False).isoformat()   # 2026-11-03: the exchange's
     try:
         covered = json.loads((history / "paid" / "through.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -649,6 +666,24 @@ def placement(root: Path, research: Path, home: str | None = None) -> list[str]:
     if status and not status.get("server"):
         found.append(f"知識庫向量還在專案內嵌的 Qdrant（{status.get('collection')}）")
     return found
+
+
+def _calendar(research: Path):
+    """The exchange's calendar (market_calendar: the packaged schedule, the official fetches, the typhoon days) — not
+    the research data's own dates, which stop when the data stops (2026-11-03)."""
+    from quant_platform.market_calendar.store import MarketCalendarStore
+
+    return MarketCalendarStore(research.parent).calendar("TW")
+
+
+def due_session(research: Path, today: date, now: datetime | None = None) -> date:
+    """The latest session whose closes and forward records are due: today's from 15:45 (the 15:15 and 15:30 jobs), else
+    the one before."""
+    from zoneinfo import ZoneInfo
+
+    now = now or datetime.now(ZoneInfo("Asia/Taipei"))
+    after = today < now.date() or (now.hour, now.minute) >= (15, 45)
+    return _calendar(research).previous_trading_day(today, inclusive=after)
 
 
 def _sessions(research: Path) -> list[date]:

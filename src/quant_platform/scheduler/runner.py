@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -399,6 +400,57 @@ def record_forward_simulation(container: "Container", now: datetime | None = Non
         except Exception:
             logger.exception("Forward board failed")
     return len(written)
+
+
+def latest_forward_day(research: Path) -> str | None:
+    """The day of the forward log's last record (records are appended in date order) — read from the file's end, not
+    its 200 MB."""
+    path = research / "forward" / "stocks" / "log.jsonl"
+    if not path.is_file():
+        return None
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        size = handle.tell()
+        handle.seek(max(0, size - 4_000_000))
+        lines = handle.read().splitlines()
+    for line in reversed(lines):
+        try:
+            return str(json.loads(line)["date"])
+        except (ValueError, KeyError, TypeError):
+            continue
+    return None
+
+
+def catch_up_close(container: "Container", now: datetime | None = None) -> dict[str, object] | None:
+    """2026-11-03 (使用者：已經講幾次叫你要檢查、叫你要確認，就是不做): 11-02's 15:15 refresh wrote no closes and its 15:30
+    records none (the research data stopped at 10-30; nothing noticed until the next night). At 07:55, 15:55 and 19:55:
+    when the closes or the forward records stop short of the session due (the exchange's calendar,
+    invariants.due_session), the two jobs run again for it."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import invariants
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    research = _instance_dir(container.settings.database_url) / "research"
+    if not (research / "history" / "manifest.json").is_file():
+        return None
+    due = invariants.due_session(research, local_now.date(), local_now)
+    at = datetime.combine(due, datetime.min.time(), zone)
+    found: dict[str, object] = {"due": due.isoformat()}
+    closes = invariants._sessions(research)
+    if not closes or closes[-1] < due:
+        logger.warning("Closes stop at %s, %s is due: the 15:15 refresh again", closes[-1] if closes else None, due)
+        found["refresh"] = refresh_research_history(container, now=at.replace(hour=15, minute=15))
+        closes = invariants._sessions(research)
+    latest = latest_forward_day(research)
+    if closes and closes[-1] >= due and (latest is None or latest < due.isoformat()):
+        logger.warning("Forward records stop at %s, %s is due: the 15:30 records again", latest, due)
+        found["records"] = record_forward_simulation(container, now=at.replace(hour=15, minute=30))
+    if len(found) > 1:
+        found["closes"] = closes[-1].isoformat() if closes else None
+        found["forward"] = latest_forward_day(research)
+        logger.info("Close catch-up: %s", found)
+    return found
 
 
 def update_chips(container: "Container", now: datetime | None = None) -> object | None:
@@ -950,7 +1002,7 @@ def check_invariants(container: "Container", now: datetime | None = None) -> obj
         logger.info("Skipping invariant checks: TW market closed (%s)", closure)
         return None
     checks = invariants.run(instance / "research", local.date(), instance / "backups" / "daily",
-                            site="http://127.0.0.1:5000")       # 2026-10-28: the research pages opened as the owner would
+                            site="http://127.0.0.1:5000", now=local)  # 2026-10-28: the research pages opened as the owner would
     invariants.save(instance / "research", checks, local)
     failed = [item for item in checks if not item["ok"]]
     if failed:
@@ -1321,6 +1373,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         trigger=CronTrigger(minute=45, timezone=timezone),
         id="knowledge_index",
         name="研究知識庫（每小時 45 分：紀錄有變就重建，新的紀錄編成 BGE-M3 向量進 Qdrant）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        catch_up_close,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour="7,15,19", minute=55, timezone=timezone),
+        id="close_catch_up",
+        name="收盤資料與前向紀錄沒跟上就補做（交易日 07:55、15:55、19:55 檢查）",
         replace_existing=True,
         coalesce=True,
         max_instances=1,

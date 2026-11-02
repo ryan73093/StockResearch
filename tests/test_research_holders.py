@@ -148,3 +148,47 @@ def test_the_paid_tables_are_brought_up_to_date_while_the_plan_lasts(tmp_path):
     later = datetime(2026, 11, 22, 7, 5, tzinfo=ZoneInfo("Asia/Taipei"))
     assert start_paid_daily(container, later, launch=started.append) is None                   # past the plan's end
     assert started == ["paiddaily"]
+
+
+def test_closes_and_records_short_of_the_session_due_are_made_again(tmp_path, monkeypatch):
+    """2026-11-03: 11-02's 15:15 refresh wrote no closes and the 15:30 job no records; nothing noticed for a night. The
+    catch-up runs them again for the session due — and nothing when both reach it."""
+    import json as _json
+
+    import pandas as pd
+
+    from quant_platform.config.settings import Settings
+    from quant_platform.container import build_container
+    from quant_platform.scheduler import runner
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'close.db'}"))
+    research = tmp_path / "research"
+    (research / "history" / "daily").mkdir(parents=True)
+    (research / "history" / "manifest.json").write_text("{}", encoding="utf-8")
+    (research / "forward" / "stocks").mkdir(parents=True)
+    log = research / "forward" / "stocks" / "log.jsonl"
+    log.write_text(_json.dumps({"date": "2026-10-30"}) + "\n", encoding="utf-8")
+
+    def closes(*days):
+        pd.DataFrame({"date": list(days), "close": 1.0}).to_parquet(research / "history" / "daily" / "TAIEX.parquet",
+                                                                     index=False)
+    calls = []
+
+    def refresh(container, now=None):
+        calls.append(("refresh", now.strftime("%m-%d %H:%M")))
+        closes(date(2026, 10, 30), date(2026, 11, 2))
+
+    def record(container, now=None):
+        calls.append(("records", now.strftime("%m-%d %H:%M")))
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write(_json.dumps({"date": "2026-11-02"}) + "\n")
+    monkeypatch.setattr(runner, "refresh_research_history", refresh)
+    monkeypatch.setattr(runner, "record_forward_simulation", record)
+    closes(date(2026, 10, 29), date(2026, 10, 30))
+    zone = ZoneInfo("Asia/Taipei")
+    found = runner.catch_up_close(container, datetime(2026, 11, 3, 1, 40, tzinfo=zone))   # the night after: 11-02 due
+    assert calls == [("refresh", "11-02 15:15"), ("records", "11-02 15:30")]
+    assert found["closes"] == "2026-11-02" and found["forward"] == "2026-11-02"
+    calls.clear()
+    assert runner.catch_up_close(container, datetime(2026, 11, 3, 7, 55, tzinfo=zone)) == {"due": "2026-11-02"}
+    assert calls == []

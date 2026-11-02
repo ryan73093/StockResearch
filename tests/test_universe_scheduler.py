@@ -371,6 +371,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "llm_trader",
             "finmind_paid",
             "paid_daily",
+            "close_catch_up",
             "knowledge_index",
             "live_flow",
             "trade_audit",

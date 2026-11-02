@@ -342,3 +342,67 @@ def test_the_paid_tables_must_cover_the_previous_session_while_the_plan_lasts(tm
     assert invariants.paid_check(research, _date(2026, 11, 2))["ok"]
     plan.write_text(_json.dumps({"limit": 6000, "expires": "2026-11-21"}), encoding="utf-8")
     assert invariants.paid_check(research, _date(2026, 11, 23))["ok"]               # past the plan's end: not checked
+
+
+def test_the_records_and_the_closes_must_reach_the_exchanges_latest_session(tmp_path):
+    """2026-11-03: 11-02's closes and forward records were never written; the check passed on any record at all
+    (最新紀錄 2026-10-30), and the session due came from the research data that had stopped too."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import pandas as pd
+
+    research = tmp_path / "research"
+    (research / "forward" / "stocks").mkdir(parents=True)
+    (research / "forward" / "stocks" / "tracked.json").write_text("[]", encoding="utf-8")
+    (research / "forward" / "stocks" / "log.jsonl").write_text(json.dumps(
+        {"rule_hash": "r", "since": "2026-10-01", "date": "2026-10-30", "cash": 0.0, "holdings": [], "value": 0.0,
+         "benchmark_value": 0.0, "contributed": 310000.0, "trades_today": []}) + "\n", encoding="utf-8")
+    (research / "history" / "daily").mkdir(parents=True)
+    pd.DataFrame({"date": [date(2026, 10, 29), date(2026, 10, 30)], "close": 1.0}).to_parquet(
+        research / "history" / "daily" / "TAIEX.parquet", index=False)
+    zone = ZoneInfo("Asia/Taipei")
+
+    def checked(now):
+        found = {item["name"]: item for item in invariants.run(research, now.date(), windows=[], now=now)}
+        return found["前向紀錄記到最近的交易日"], found["研究資料的收盤價更新到最近的交易日"]
+
+    records, closes = checked(datetime(2026, 11, 2, 16, 0, tzinfo=zone))
+    assert not records["ok"] and "應記到 2026-11-02" in records["detail"]
+    assert not closes["ok"] and "最新 2026-10-30" in closes["detail"]
+    records, closes = checked(datetime(2026, 11, 2, 10, 0, tzinfo=zone))     # before 15:45 the session before is due
+    assert records["ok"] and closes["ok"], records["detail"]
+    (tmp_path / "market_calendar").mkdir()                                  # the typhoon day, as the operator records it
+    (tmp_path / "market_calendar" / "manual_closures.json").write_text(json.dumps(
+        {"closures": [{"date": "2026-10-23", "name": "颱風休市"}]}), encoding="utf-8")
+    assert invariants.due_session(research, date(2026, 10, 26), datetime(2026, 10, 26, 17, 0, tzinfo=zone)) == \
+        date(2026, 10, 22)                                                   # 10/26 closed, 10/23 the typhoon
+
+
+def test_a_flow_waiting_more_than_a_day_is_shown(tmp_path, monkeypatch):
+    """2026-11-03: regate221 waited for 40 GB of memory from 10-30 09:18 and nothing said so for three and a half days."""
+    import os
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from quant_platform.research import jobs
+
+    monkeypatch.setattr(jobs, "_alive", lambda pid, started=None: pid == os.getpid())   # the waiting flow, alive
+    (tmp_path / "forward" / "stocks").mkdir(parents=True)
+    (tmp_path / "forward" / "stocks" / "tracked.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "jobs").mkdir()
+    now = datetime.now(ZoneInfo("Asia/Taipei"))
+
+    def wait(name, hours):
+        began = (now - __import__("datetime").timedelta(hours=hours)).isoformat(timespec="seconds")
+        (tmp_path / "jobs" / f"{name}-wait.json").write_text(json.dumps(
+            {"id": f"{name}-wait", "command": f"research-pipeline.ps1 -Name {name}", "pid": os.getpid(),
+             "status": "running", "started_at": began, "current": "等記憶體：這一步要約 40 GB 可用"}), encoding="utf-8")
+
+    def found():
+        return {item["name"]: item for item in invariants.run(tmp_path, now.date(), windows=[], now=now)}[
+            "研究流程沒有等超過一天的"]
+    wait("short", 3)
+    assert found()["ok"]
+    wait("regate221", 90)
+    assert not found()["ok"] and "regate221 等了 90 小時" in found()["detail"]

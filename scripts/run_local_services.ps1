@@ -122,6 +122,19 @@ function Start-StockResearchService {
     param([hashtable]$Definition)
 
     $name = $Definition.Name
+    # 2026-11-03: a restart overwrote the worker's log - what its 15:15 job did on 11-02 (the closes were never
+    # written) could not be found. The previous run's logs are kept in instance\logs\services, the last 50 of each
+    $kept = Join-Path $instanceRoot 'logs\services'
+    New-Item -ItemType Directory -Force -Path $kept | Out-Null
+    foreach ($stream in @('stdout', 'stderr')) {
+        $current = Join-Path $instanceRoot "$name.$stream.log"
+        if ((Test-Path -LiteralPath $current) -and (Get-Item -LiteralPath $current).Length -gt 0) {
+            $stamp = (Get-Item -LiteralPath $current).LastWriteTime.ToString('yyyyMMdd-HHmmss')
+            Move-Item -LiteralPath $current -Destination (Join-Path $kept "$name.$stream.$stamp.log") -Force -ErrorAction SilentlyContinue
+        }
+        Get-ChildItem -LiteralPath $kept -Filter "$name.$stream.*.log" | Sort-Object Name -Descending |
+            Select-Object -Skip 50 | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
     $startArguments = @{
         FilePath = $Definition.Executable
         WorkingDirectory = $projectRoot

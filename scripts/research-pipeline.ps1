@@ -2127,6 +2127,9 @@ switch ($Name) {
         # blend search on the whole pool (it refuses an incomplete one, daily.stale_results)
         Wait-While "等引擎 1.6.1 重跑選手池（rebuild161_a、_b）" { [bool](Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "research-pipeline\.ps1 -Name rebuild161_[ab]" }) } 300
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        # 2026-11-03: the models retrained to 9/30 here, before the list is graded (they were the rolling flow's step 2,
+        # which would have run beside this one; rolling was stopped with scripts/stop-research.ps1)
+        Invoke-Step "0-models" @("-m", "quant_platform.research", "rolling", "--step", "models")
         Invoke-Step "1-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
         Invoke-Step "2-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--all-rules", "--workers", "2", "--broker", "cathay")
         Invoke-Step "3-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
