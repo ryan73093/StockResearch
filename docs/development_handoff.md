@@ -13,6 +13,7 @@
 ## 11/02 的重點（先看這裡）
 
 - **付費資料每天更新**（11/02 起）：`paiddaily` 15:14 開始補 10/22 以後的資料（分點約 16:00 下載完，分點訊號等記憶體重建）。補齊後跑 `forward --restart-uses margin_safe,margin_in_profit,low_pledge_loan_20,block_premium_20,block_volume_20,broker_concentration_5,govbank_net_20,govbank_dip_buy_20,branch_informed_20,low_daytrade_5,ml_gbm_j,ml_gbm_k,ml_gbm_l,ml_gbm_m,ml_gbm_o,ml_gbm_p --reason ...`（147 個帳戶從 10/1 重記），再更新看板。11/03 16:00 的需求檢查要看到「付費資料每天更新」通過。
+- 下一步（付費資料）：官方漲跌停價（`TaiwanStockPriceLimit`，引擎 1.6.0 的 `limits/official_overrides.parquet`）也停在 10/22，照原設計之後的日子用引擎自己算的（和官方不同的約 0.6%）；方案到期前也加進 `paiddaily`（一天一個請求，建 overrides 要用引擎的漲跌停，放在分點訊號那一步一起載入）。月營收不用：每晚抓交易所的月營收表（`raw/official_revenue`，9 月營收已有）。
 - **選手池重跑補 1,714 個**（10/31 的錯誤，`3e6aa3c` 已修）：`rebuild160_a`／`_b`／`rebuild160end` 排隊中，等 11 月滾動的全部重評（`rolling`，7,912 個，約 23:37）讓出記憶體。補完後 `blendreach14`（合併相同成員的第二版）自動跑；之後「只管買進」55 個照 10/26 判定重判、組合第十三輪用已實現重判。
 - **13:50 收盤表的成交量不含零股**：前向核對 63 個不一樣全是這個；11/10 照 §7 判定（考慮盤後單改用「當下不知道的不算」的重算方式，或收盤表補零股量）。
 - **11 月名單只有 537 個過門檻**（10 月 3,541 個）：第一次用已實現算視窗，持有中的獲利不算；研究方法 §7「11 月名單」。`build/paper_vs_counted.py` 在背景等記憶體，跑完把結果與例子寫進那一節。每月滾動（`rolling`）正在重複評選（跑完名單一樣），之後重訓模型到 9/30、讀模型的帳戶從 10/1 重記。
