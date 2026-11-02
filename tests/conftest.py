@@ -15,6 +15,10 @@ from quant_platform.database import engine
 # 2026-10-28: the knowledge base's vectors go to the shared Qdrant server (C:\Dev\DBQdrant) when the project's .env
 # names it; a test indexing its own rows there would delete the real collection's points — tests use the embedded store
 os.environ["KNOWLEDGE_QDRANT_URL"] = ""
+# 2026-11-02: the Sunday suite runs inside the worker, whose environment points HOME_SSO_CONFIG at the live Home SSO —
+# every app a test built then sent its requests to the login page (302), and ten Access tests failed on 10/24 and 10/31
+# while passing from a shell. Tests build the app without the live sign-in.
+os.environ.pop("HOME_SSO_CONFIG", None)
 
 PRODUCTION_DATABASE = (Path(__file__).resolve().parents[1] / "instance" / "quant_platform.db").resolve()
 
