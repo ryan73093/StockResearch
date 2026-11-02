@@ -53,11 +53,16 @@ def raw_folder(base: str | Path) -> Path:
     return Path(base) / "raw" / "finmind" / "branches"
 
 
-def through(folder: Path) -> date | None:
+def through(folder: Path, codes: list[str] | None = None) -> date | None:
     """2026-11-02: the last day every stock's branches are stored for (a day still downloading, or not out yet for
-    some stocks, is not covered — those stocks would read as "no branch traded")."""
+    some stocks, is not covered — those stocks would read as "no branch traded"). 2026-11-03: only the stocks still
+    downloaded (``codes``, finmind_daily.branch_codes) — 6166 and 6861 left the list after 10-22 and held the signals
+    at 10-22 for every stock."""
     newest = []
+    wanted = set(codes) if codes is not None else None
     for stock in (path for path in folder.iterdir() if path.is_dir()) if folder.is_dir() else []:
+        if wanted is not None and stock.name not in wanted:
+            continue
         days = [name[:10] for name in os.listdir(stock) if name.endswith(".json.gz")]
         if days:
             newest.append(max(days))
@@ -400,7 +405,9 @@ def run(history: str | Path, research: str | Path, job=None) -> Path:
     partial = target.with_suffix(".partial")
     frame.to_parquet(partial, index=False)
     partial.replace(target)
-    covered = through(raw_folder(history))
+    from quant_platform.research.history.finmind_daily import branch_codes
+
+    covered = through(raw_folder(history), branch_codes(history))
     if covered is not None:           # 2026-11-02: the last day the signals cover (research/chips.py: unknown after it)
         from quant_platform.research.history.paid import write_through
 

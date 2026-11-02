@@ -406,3 +406,20 @@ def test_a_flow_waiting_more_than_a_day_is_shown(tmp_path, monkeypatch):
     assert found()["ok"]
     wait("regate221", 90)
     assert not found()["ok"] and "regate221 等了 90 小時" in found()["detail"]
+
+
+def test_the_news_and_paid_tables_are_due_once_their_runs_have_come(tmp_path):
+    """2026-11-03: checked at 02:40, the news (collected at 14:40) and the paid tables (07:05) are due for the session
+    before yesterday's run; at the 16:00 check, the session before today."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    research = tmp_path / "research"
+    research.mkdir()
+    zone = ZoneInfo("Asia/Taipei")
+    night = datetime(2026, 11, 3, 2, 40, tzinfo=zone)
+    assert invariants.collected_due(research, night.date(), night, (14, 45)) == date(2026, 10, 30)
+    assert invariants.collected_due(research, night.date(), night, (7, 30)) == date(2026, 10, 30)
+    four = datetime(2026, 11, 3, 16, 0, tzinfo=zone)
+    assert invariants.collected_due(research, four.date(), four, (14, 45)) == date(2026, 11, 2)
+    assert invariants.collected_due(research, four.date(), four, (7, 30)) == date(2026, 11, 2)

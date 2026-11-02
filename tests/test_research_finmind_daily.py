@@ -115,3 +115,29 @@ def test_adding_the_new_days_to_a_table_is_the_same_as_building_it_again(tmp_pat
     assert added["TaiwanStockBlockTrade"]["volume"].tolist() == [1.0, 3.0, 4.0]
     assert through == json.loads((tmp_path / "paid" / "through.json").read_text(encoding="utf-8"))
     assert through["TaiwanStockBlockTrade"] == "2026-10-23" and through[paid.GOVBANK] == "2026-10-22"
+
+
+def test_a_stock_empty_on_a_day_others_have_is_stored_and_the_signals_count_only_listed_stocks(tmp_path):
+    """2026-11-03: eight stocks suspended after 10-28 came back empty on the last two sessions every run and were never
+    stored, and 6166 and 6861, off the list since 10-22, held the branch signals at 10-22: a day another stock has is
+    published (an empty stock did not trade), and the coverage counts only the stocks still downloaded."""
+    from quant_platform.research import branches
+
+    rows = [{"date": "2026-10-30", "securities_trader": "X", "securities_trader_id": "1", "price": 10.0, "buy": 1000.0,
+             "sell": 0.0}]
+
+    def get(token, params):
+        return rows if params["data_id"] == "2330" else []
+    tasks = [("2330", date(2026, 10, 30)), ("2888", date(2026, 10, 30)), ("2888", date(2026, 11, 2))]
+    found = finmind_daily.download(tmp_path, "t", tasks, "branches", 3600, get=get, sleep=lambda seconds: None,
+                                   fresh=date(2026, 10, 30), published=set())
+    assert found["asked"] == 2 and found["waiting"] == 1          # 2888's 10-30 stored (2330 has it), 11-02 waits
+    folder = tmp_path / "raw" / "finmind" / "branches"
+    assert (folder / "2888" / "2026-10-30.json.gz").is_file() and not (folder / "2888" / "2026-11-02.json.gz").exists()
+    stored = finmind_daily.download(tmp_path, "t", [("2888", date(2026, 11, 2))], "branches", 3600, get=get,
+                                    sleep=lambda seconds: None, fresh=date(2026, 10, 30), published={date(2026, 11, 2)})
+    assert stored["asked"] == 1                                    # 11-02 stored once others are seen with it
+    (folder / "6166").mkdir()
+    (folder / "6166" / "2026-10-22.json.gz").write_bytes(b"")
+    assert branches.through(folder) == date(2026, 10, 22)
+    assert branches.through(folder, ["2330", "2888"]) == date(2026, 10, 30)    # 6166 is off the list

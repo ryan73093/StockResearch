@@ -120,12 +120,17 @@ def _store(path: Path, payload: dict) -> None:
 
 def download(base: str | Path, token: str, tasks: list[tuple[str, date]], kind: str, per_hour: int, job=None,
              get: Callable[[str, dict], list[dict]] = _get, sleep: Callable[[float], None] = time.sleep,
-             now: Callable[[], datetime] = lambda: datetime.now(TAIPEI), fresh: date | None = None) -> dict[str, int]:
+             now: Callable[[], datetime] = lambda: datetime.now(TAIPEI), fresh: date | None = None,
+             published: set[date] | None = None) -> dict[str, int]:
     """``tasks``: (code, day) — the code "" for a whole-market day (the government banks, PAID_BY_DATE). Each stored
     once. 2026-11-02: ``fresh`` — a day on or after it that comes back empty is not stored (FinMind may not have it
-    yet; a stored day is never asked again) and is asked on the next run."""
+    yet; a stored day is never asked again) and is asked on the next run. 2026-11-03: ``published`` — a stock's days
+    another stock already has (stored, or came back with rows in this run): FinMind has that day, and a stock
+    coming back empty on it did not trade (eight stocks suspended after 10-28 held the branch signals two sessions
+    behind every day)."""
     base = Path(base)
     asked = skipped = errors = waiting = 0
+    seen = set(published) if published is not None else None
     interval = 3600.0 / per_hour
     for number, (code, day) in enumerate(tasks):
         path = task_path(base, kind, code, day)
@@ -142,7 +147,9 @@ def download(base: str | Path, token: str, tasks: list[tuple[str, date]], kind: 
             try:
                 rows = get(token, params)
                 rows = [row for row in rows if str(row.get("date") or "")[:10] == day.isoformat()]
-                if not rows and fresh is not None and day >= fresh:
+                if rows and seen is not None:
+                    seen.add(day)
+                if not rows and fresh is not None and day >= fresh and not (seen is not None and day in seen):
                     waiting += 1
                     break
                 if kind in PAID_BY_DATE:

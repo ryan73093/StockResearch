@@ -1489,7 +1489,9 @@ def main() -> int:
         if args.only_new:                   # 2026-11-02 (paiddaily, twice a day): nothing to do without a new branch day
             from quant_platform.research.history.paid import THROUGH, folder
 
-            covered = branches.through(branches.raw_folder(Path(args.base)))
+            from quant_platform.research.history.finmind_daily import branch_codes
+
+            covered = branches.through(branches.raw_folder(Path(args.base)), branch_codes(Path(args.base)))
             try:
                 done = json.loads((folder(Path(args.base)) / THROUGH).read_text(encoding="utf-8")).get(branches.SIGNALS)
             except (OSError, ValueError):

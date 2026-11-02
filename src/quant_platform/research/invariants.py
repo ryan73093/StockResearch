@@ -384,7 +384,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                          month.get("cutoff") == wanted, f"應為截止 {wanted}；最新名單截止 {month.get('cutoff') or '沒有'}"))
     news = research / "history" / "raw" / "finmind" / "TaiwanStockNews"
     days = sorted(path.name for path in news.iterdir() if path.is_dir() and path.name.isdigit()) if news.is_dir() else []
-    due = _calendar(research).previous_trading_day(today, inclusive=False).strftime("%Y%m%d")    # 2026-11-03: the exchange's
+    due = collected_due(research, today, now, (14, 45)).strftime("%Y%m%d")      # 2026-11-03: the exchange's calendar
     checks.append(_check("新聞收到前一個交易日", "需求 §8：每個交易日 14:40 收前一個交易日的新聞（新聞否決、LLM 交易員用）",
                          bool(due) and bool(days) and days[-1] >= due, f"應有 {due or '—'}；最新 {days[-1] if days else '沒有'}"))
     copies = [row for row in _jobs(research) if str(row.get("name", "")).startswith("研究資料第二份備份")]
@@ -515,8 +515,17 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                              f"沒辦法檢查：{str(exc)[:120]}"))
     # 2026-10-28 (使用者：研究的載入也太慢了吧；每個策略給個編號；每一筆交易都要顯示買入的價格跟賣出的價格): the worker
     # passes the local site; the pages are opened as the owner would
+    # 2026-11-03: the page check opened the first account — the LLM trader's news experiment, which has no number and no
+    # rule page (404), so the check failed every day on that and said nothing of the numbered rules' pages. The pages
+    # of a numbered rule are opened; the accounts without a number are their own check
+    from quant_platform.research.numbers import numbers as strategy_numbers
+
+    numbered = strategy_numbers(research)
+    unnumbered = [item["name"] for item in live if item["rule_hash"] not in numbered]
+    checks.append(_check("每個前向帳戶都有策略編號", "使用者 2026-10-28：麻煩每個策略給個編號", not unnumbered,
+                         f"沒有編號的 {len(unnumbered)} 個" + (f"：{unnumbered[:4]}" if unnumbered else "")))
     if site:
-        live_hashes = [item["rule_hash"] for item in live if item.get("kind") == "daily"]
+        live_hashes = [item["rule_hash"] for item in live if item.get("kind") == "daily" and item["rule_hash"] in numbered]
         slow = research_pages(site, live_hashes[0] if live_hashes else None)
         checks.append(_check("研究頁 5 秒內打開、規則有編號、每一筆交易有買進價與賣出價",
                              "使用者 2026-10-28：研究的載入也太慢了吧；每個策略給個編號；每一筆交易都要顯示買入的價格跟賣出的價格",
@@ -558,14 +567,14 @@ def run(research: str | Path, today: date, backups: Path | None = None,
         checks.append(_check(name, source, False, f"沒辦法檢查：{str(exc)[:120]}"))
     # 2026-11-02: the paid tables were downloaded once and stopped on 10-21/22; 147 forward accounts read them (directly
     # or through models J-P) and decided on "no block trade, no branch buying" for eight sessions before anyone saw it
-    checks.append(paid_check(research, today))
+    checks.append(paid_check(research, today, now))
     # 2026-10-29 (使用者：你他媽當我電腦資源很多是不是): the research took the whole CPU and another project's UE build ran
     # 9% in 8 hours; research, pipelines and the worker run at the idle priority so other work goes first
     checks.append(priority_check(processes, research.parent.parent))
     return checks
 
 
-def paid_check(research: Path, today: date) -> dict[str, object]:
+def paid_check(research: Path, today: date, now: datetime | None = None) -> dict[str, object]:
     """While the FinMind plan (plan.json) is paid and not past its end, every paid table covers the previous session
     (paid/through.json) — what today's 13:50 orders read (paiddaily runs at 22:05 and 07:05)."""
     import json
@@ -580,7 +589,7 @@ def paid_check(research: Path, today: date) -> dict[str, object]:
         plan = {}
     if not plan.get("limit") or int(plan["limit"]) <= 600 or str(plan.get("expires") or "") < today.isoformat():
         return _check(name, source, True, "付費方案沒有在用（或已到期），不檢查")
-    due = _calendar(research).previous_trading_day(today, inclusive=False).isoformat()   # 2026-11-03: the exchange's
+    due = collected_due(research, today, now, (7, 30)).isoformat()             # 2026-11-03: the exchange's calendar
     try:
         covered = json.loads((history / "paid" / "through.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -684,6 +693,17 @@ def due_session(research: Path, today: date, now: datetime | None = None) -> dat
     now = now or datetime.now(ZoneInfo("Asia/Taipei"))
     after = today < now.date() or (now.hour, now.minute) >= (15, 45)
     return _calendar(research).previous_trading_day(today, inclusive=after)
+
+
+def collected_due(research: Path, today: date, now: datetime | None, runs: tuple[int, int]) -> date:
+    """The session a job collecting the previous session's data must have reached: the news (14:40) and the paid
+    tables (07:05) collect, each day, the session before it. Before that hour today's run has not come yet — the
+    session before yesterday's is due. At the 16:00 check both are the session before today."""
+    from zoneinfo import ZoneInfo
+
+    now = now or datetime.now(ZoneInfo("Asia/Taipei"))
+    ran = today if (today < now.date() or (now.hour, now.minute) >= runs) else today - timedelta(days=1)
+    return _calendar(research).previous_trading_day(ran, inclusive=False)
 
 
 def _sessions(research: Path) -> list[date]:

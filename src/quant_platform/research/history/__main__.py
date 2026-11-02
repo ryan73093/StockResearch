@@ -324,19 +324,22 @@ def main() -> int:
         plans = [("govbank", [("", day) for day in days])]
         plans += [(dataset, [("", day) for day in days if day >= finmind_daily.BY_DATE_FROM])
                   for dataset in finmind_daily.PAID_BY_DATE]
-        branch_tasks = []
+        branch_tasks, branch_days = [], set()
         for code in finmind_daily.branch_codes(base):
             folder = base / "raw" / "finmind" / "branches" / code
             stored = {name[:10] for name in os.listdir(folder)} if folder.is_dir() else set()
+            branch_days.update(stored)
             branch_tasks += [(code, day) for day in days if day.isoformat() not in stored]
         plans.append(("branches", branch_tasks))
+        published = {day for day in days if day.isoformat() in branch_days}     # 2026-11-03: a day others have
         found = {}
         with JobLog(base.parent).start("付費資料每天補到最新（八大行庫、融資維持率、借券擔保、鉅額交易、主力集中度、分點）",
                                        "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
             for kind, tasks in plans:
                 missing = [(code, day) for code, day in tasks if not finmind_daily.task_path(base, kind, code, day).is_file()]
                 job.update(current=f"{kind}：{len(missing):,} 個要抓", force=True)
-                found[kind] = finmind_daily.download(base, token, missing, kind, per_hour, job, fresh=fresh)
+                found[kind] = finmind_daily.download(base, token, missing, kind, per_hour, job, fresh=fresh,
+                                                     published=published if kind == "branches" else None)
             found["tables"] = paid.update(base)
             covered = json.loads((paid.folder(base) / paid.THROUGH).read_text(encoding="utf-8"))
             asked = "、".join(f"{kind} {item['asked']:,}" for kind, item in found.items() if kind != "tables" and item["asked"])
