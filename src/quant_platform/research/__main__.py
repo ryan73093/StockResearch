@@ -270,6 +270,10 @@ def _daily(args, registry: TrialRegistry) -> int:
     if args.name not in daily_research.BATCHES:
         raise SystemExit(f"未知批次：{args.name}；可用：{', '.join(daily_research.BATCHES)}")
     rules = daily_research.BATCHES[args.name]()
+    # 2026-11-02: a twin of the rule without the setting is not run — a rerun of what is registered runs it all
+    rules, idle = (rules, []) if args.name.startswith("rerun") else daily_research.drop_inert(rules)
+    for rule, why in idle:
+        print(f"不跑（設定不可能起作用）：{rule.name}：{why}", flush=True)
     from quant_platform.research.pool import record_sources
 
     record_sources(RESEARCH, rules, f"每天決策批次 {args.name}")       # 2026-10-21: the pool reads it
@@ -285,7 +289,10 @@ def _daily(args, registry: TrialRegistry) -> int:
             yield from rules
             if args.no_half or args.name.startswith(daily_research.NO_HALF_TWINS):
                 return
-            twins = daily_research.half_twins(passing, {record.spec_hash for record in registry.records()})
+            twins, idle_twins = daily_research.drop_inert(
+                daily_research.half_twins(passing, {record.spec_hash for record in registry.records()}))
+            for rule, why in idle_twins:
+                print(f"不跑（設定不可能起作用）：{rule.name}：{why}", flush=True)
             if twins:
                 print(f"過門檻的 {len(passing)} 個規則補評「跌破 200 日均線就減碼一半」版本 {len(twins)} 個", flush=True)
                 job.update(total=len(rules) + len(twins), force=True)

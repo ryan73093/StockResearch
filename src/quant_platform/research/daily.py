@@ -5402,6 +5402,31 @@ def strongest_rules(count: int = 8) -> list:
     return [base for _value, base in sorted(picked, key=lambda item: -item[0])[:count]]
 
 
+# 2026-11-02 (research_method §7「結果完全相同的規則」; 使用者 10/31：你帳面數字都一樣是怎樣): settings that cannot
+# change one trade of the rule they are put on, by their own definition — such a run registers a twin of the rule
+# without them (421 rules of the pool were twins to the yuan)
+BELOW_LINE_SCALES = ("taiex_half", "taiex_staged", "taiex_vol", "taiex_trend")
+
+
+def inert_reason(rule) -> str | None:
+    """Why a setting of ``rule`` can never act (None when every setting can): a winner kept above its 20-session
+    average on a rule that already keeps every holding above it (hold "trend"); a cut below TAIEX's 200-session
+    average on a rule that already holds nothing there (market_filter "taiex_200")."""
+    if getattr(rule, "kind", None) == "blend":
+        return None
+    if getattr(rule, "winner_hold", 0) and getattr(rule, "hold", "days") == "trend":
+        return "贏家續抱：月線上續抱的規則本來就留著月線上的持股"
+    if getattr(rule, "market_filter", "none") == "taiex_200" and getattr(rule, "vol_scale", "none") in BELOW_LINE_SCALES:
+        return "減碼只在加權指數跌破 200 日均線時作用，但這個規則那時已經不持股"
+    return None
+
+
+def drop_inert(rules: list) -> tuple[list, list]:
+    """``rules`` without the ones whose setting cannot act, and those with the reason (printed, not run)."""
+    idle = [(rule, inert_reason(rule)) for rule in rules if inert_reason(rule)]
+    return [rule for rule in rules if not inert_reason(rule)], idle
+
+
 def _variant(base, word: str, **update):
     name = f"{base.name[: 79 - len(word) - 1]}＋{word}"
     return DailyRule.model_validate({**base.model_dump(), "name": name, **update})

@@ -1094,3 +1094,20 @@ def test_each_month_end_keeps_the_money_counted_there():
     assert run.counted_months["2026-10"] == (run.counted_value, run.sold_value)
     assert counted_curve(run, run) == {month: [round(counted), round(sold)]
                                        for month, (counted, sold) in run.counted_months.items()}
+
+
+def test_a_setting_that_cannot_act_is_not_run():
+    """2026-11-02 (研究方法 §7「結果完全相同的規則」): a winner kept above the 20-session average on a trend-holding rule
+    and a cut below TAIEX's 200-session average on a rule out of stocks there trade like the rule without them."""
+    from quant_platform.research.daily import DailyRule, drop_inert, inert_reason
+
+    base = {"name": "x", "factors": {"trend_200": 1.0}}
+    plain = DailyRule(**base)
+    trend_winner = DailyRule(**base, hold="trend", winner_hold=0.5)
+    days_winner = DailyRule(**base, winner_hold=0.5)
+    filtered_half = DailyRule(**base, market_filter="taiex_200", vol_scale="taiex_half")
+    own = DailyRule(**base, market_filter="taiex_200", vol_scale="own_drawdown")
+    assert inert_reason(trend_winner).startswith("贏家續抱") and inert_reason(filtered_half).startswith("減碼")
+    assert inert_reason(plain) is inert_reason(days_winner) is inert_reason(own) is None
+    kept, idle = drop_inert([plain, trend_winner, days_winner, filtered_half, own])
+    assert kept == [plain, days_winner, own] and [rule for rule, _why in idle] == [trend_winner, filtered_half]
