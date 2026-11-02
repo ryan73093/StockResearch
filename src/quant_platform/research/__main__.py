@@ -1486,6 +1486,17 @@ def main() -> int:
         from quant_platform.research import branches
         from quant_platform.research.jobs import JobLog
 
+        if args.only_new:                   # 2026-11-02 (paiddaily, twice a day): nothing to do without a new branch day
+            from quant_platform.research.history.paid import THROUGH, folder
+
+            covered = branches.through(branches.raw_folder(Path(args.base)))
+            try:
+                done = json.loads((folder(Path(args.base)) / THROUGH).read_text(encoding="utf-8")).get(branches.SIGNALS)
+            except (OSError, ValueError):
+                done = None
+            if covered is not None and done == covered.isoformat():
+                print(f"分點訊號已經涵蓋到 {done}，沒有新的分點資料", flush=True)
+                return 0
         with JobLog(RESEARCH).start("分點：挑出跟著買與隔日沖的分點、做成個股訊號",
                                     "python -m quant_platform.research branches") as job:
             path = branches.run(Path(args.base), RESEARCH, job=job)

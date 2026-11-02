@@ -666,6 +666,42 @@ def start_finmind_paid(container: "Container", now: datetime | None = None, laun
     return "finmind-paid"
 
 
+def start_paid_daily(container: "Container", now: datetime | None = None, launch=None) -> str | None:
+    """2026-11-02 (the paid tables had stopped on 10-21/22 — downloaded once, nothing daily — and the forward accounts
+    reading them decided on "no block trade, no branch buying" since): at 07:05 and 22:05 while the FinMind plan the
+    hourly check found (plan.json) is paid and not past its end, the paid tables' missing days and the branch signals
+    (scripts/start-research.ps1 -Name paiddaily); nothing while one runs. The evening run gets most of the day's
+    tables, the morning one what FinMind put out late — both before the 13:50 orders read them."""
+    import json
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    research = _instance_dir(container.settings.database_url) / "research"
+    try:
+        found = json.loads((research / "history" / "raw" / "finmind" / "plan.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not found.get("limit") or int(found["limit"]) <= 600 or str(found.get("expires") or "") < local_now.date().isoformat():
+        return None
+    try:
+        if json.loads((research / "pipelines" / "paiddaily.json").read_text(encoding="utf-8")).get("status") == "running":
+            return None
+    except (OSError, ValueError):
+        pass
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch("paiddaily")
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Name",
+                        "paiddaily"], check=False, timeout=120)
+    logger.info("Paid tables' daily download started")
+    return "paiddaily"
+
+
 def start_trade_audit(container: "Container", now: datetime | None = None, launch=None) -> str | None:
     """2026-10-21 (使用者 2026-10-14：確實檢查每個時期都照當時的台股規則；稽核：10/17 之後沒再稽核、排程裡沒有): every
     Sunday 06:00, every rule the forward accounts and the month's list track, order by order (scripts/start-research.ps1
@@ -1267,6 +1303,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=2 * 3600,
+    )
+    scheduler.add_job(
+        start_paid_daily,
+        args=[container],
+        trigger=CronTrigger(hour="7,22", minute=5, timezone=timezone),
+        id="paid_daily",
+        name="付費資料每天補到最新（07:05、22:05，方案有效期間：八大行庫、融資維持率、借券擔保、鉅額交易、主力集中度、分點）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3 * 3600,
     )
     scheduler.add_job(
         start_knowledge_index,

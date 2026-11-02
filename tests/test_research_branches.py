@@ -97,3 +97,39 @@ def test_a_stock_read_once_is_kept_in_one_file_until_a_day_is_added(tmp_path):
     assert days == ["2026-10-01", "2026-10-02"] and names == ["A", "B"] and bought.tolist() == [[100.0, 0.0], [0.0, 50.0]]
     loaded = list(branches.stocks(folder.parent, ["2330"]))
     assert loaded[0][0] == "2330" and loaded[0][1][0] == days
+
+
+def test_a_new_day_reads_only_its_file_and_matches_reading_them_all(tmp_path):
+    """2026-11-02 (the nightly paid download adds a day to 555 stocks): only the days after the cache's last are read,
+    the same as reading every file again (as the cache keeps it, float32); a day older than the cache's last, or a
+    changed file count before it, reads them all."""
+    folder = tmp_path / "raw" / "finmind" / "branches" / "2330"
+    folder.mkdir(parents=True)
+
+    def day(name, rows):
+        (folder / f"{name}.json.gz").write_bytes(gzip.compress(json.dumps({"date": name, "rows": rows}).encode()))
+    day("2026-10-01", [["A", 1, 2, 100.1, 200.2]])
+    day("2026-10-02", [["B", 1, 0, 50.3, 0.0], ["A", 0, 1, 0.0, 33.3]])
+    cache = branches.cache_path(folder)
+    branches.load_stock(folder, cache)
+    (folder / "2026-10-01.json.gz").write_bytes(b"not read again")
+    day("2026-10-05", [["C", 2, 0, 70.7, 0.0], ["A", 1, 0, 9.9, 0.0]])
+    days, names, bought, sold = branches.load_stock(folder, cache)                  # 10-01 not read: it would fail
+    assert days == ["2026-10-01", "2026-10-02", "2026-10-05"] and names == ["A", "B", "C"]
+    day("2026-10-01", [["A", 1, 2, 100.1, 200.2]])
+    whole = branches.load_stock(folder, None)                                         # every file, no cache
+    assert whole[0] == days and whole[1] == names
+    assert np.array_equal(bought, whole[2].astype(np.float32).astype(float))
+    assert np.array_equal(sold, whole[3].astype(np.float32).astype(float))
+    day("2026-09-30", [["D", 1, 0, 1.0, 0.0]])                                        # an older day: all read again
+    again = branches.load_stock(folder, cache)
+    assert again[0][0] == "2026-09-30" and again[1][0] == "D"
+
+
+def test_the_signals_cover_the_last_day_every_stock_has(tmp_path):
+    folder = tmp_path / "branches"
+    for code, last in (("2330", "2026-10-23"), ("2317", "2026-10-22")):
+        (folder / code).mkdir(parents=True)
+        for name in ("2026-10-21", "2026-10-22", last):
+            (folder / code / f"{name}.json.gz").write_bytes(b"")
+    assert branches.through(folder) == date(2026, 10, 22)                # 2317's 10-23 not stored yet

@@ -134,3 +134,22 @@ def test_a_stock_without_block_trades_yet_is_zero_with_the_history_cut_too(tmp_p
     assert whole[1, 25] == pytest.approx(0.0) and cut[1, 25] == pytest.approx(0.0)
     assert whole[0, 22] == pytest.approx(cut[0, 22]) == pytest.approx(1000 / 1_000_000)
     assert np.isnan(whole[1, 2]) and np.isnan(cut[1, 2])                       # before the table starts: unknown
+
+
+def test_a_paid_table_is_unknown_after_the_last_day_it_covers(tmp_path):
+    """2026-11-02: the paid tables stopped on 10-21 and every later session read as "no block trade" (0); the day a
+    table covers is written by its builder (paid/through.json) — after it the factor is unknown, before it a session
+    without a row is still 0."""
+    sessions = weekdays(date(2024, 1, 1), 40)
+    (tmp_path / "paid").mkdir()
+    (tmp_path / "chips").mkdir()
+    pd.DataFrame({"date": sessions, "code": "1101", "NumberOfSharesIssued": 1_000_000.0}).to_parquet(
+        tmp_path / "chips" / "TaiwanStockShareholding.parquet", index=False)
+    pd.DataFrame({"date": [sessions[2]], "code": ["1101"], "volume": [1000.0], "trading_money": [44_000.0]}).to_parquet(
+        tmp_path / "paid" / "TaiwanStockBlockTrade.parquet", index=False)
+    (tmp_path / "paid" / "through.json").write_text(json.dumps({"TaiwanStockBlockTrade": sessions[30].isoformat()}),
+                                                    encoding="utf-8")
+    close = np.full((1, len(sessions)), 40.0)
+    volume = ChipStore(tmp_path, sessions, ["1101.TW"], close).paid_matrix("block_volume_20")
+    assert volume[0, 22] == pytest.approx(1000 / 1_000_000) and volume[0, 31] == pytest.approx(0.0)  # covered: 0
+    assert np.isnan(volume[0, 32]) and np.isnan(volume[0, 39])          # the 31st session's table, then unknown

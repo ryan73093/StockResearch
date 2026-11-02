@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -53,7 +54,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
                                             "chips", "tpex", "fundamentals", "alerts", "reductions", "insider", "buyback", "pledge", "tdcc",
-                                            "holders", "paid", "finmind-daily"))
+                                            "holders", "paid", "finmind-daily", "paid-daily"))
     parser.add_argument("--kind", choices=("govbank", "branches"), default="govbank", help="finmind-daily：八大行庫或分點")
     parser.add_argument("--part", help="finmind-daily --kind branches：第幾份／共幾份（例如 0/2），兩個下載分工")
     parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報；paid＝付費方案的資料集")
@@ -300,6 +301,47 @@ def main() -> int:
         with JobLog(base.parent).start(title, "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
             found = finmind_daily.download(base, token, tasks, args.kind, per_hour, job)
             job.payload["summary"] = f"請求 {found['asked']:,} 次、已有 {found['skipped']:,}、錯誤 {found['errors']}"
+        print(json.dumps(found, ensure_ascii=False), flush=True)
+        return 0
+
+    if args.command == "paid-daily":
+        # 2026-11-02: the paid tables had stopped on 10-21/22 (downloaded once, nothing daily) and the forward accounts
+        # reading them decided on "no block trade, no branch buying" since: every day the plan lasts, what is missing —
+        # the government banks' and the four tables' days (one request each, every stock), the branches' stock-days —
+        # then the tables (history/paid.py; paid/through.json, the last day each covers)
+        from quant_platform.research.history import finmind_daily, paid
+        from quant_platform.research.history.finmind import PAID_SHARE, env_token, request_limit
+        from quant_platform.research.jobs import JobLog
+
+        token = env_token(Path.cwd())
+        limit = request_limit(token) if token else None
+        if not limit or limit <= 600:
+            print("FinMind 不是付費方案，沒有下載", file=sys.stderr)
+            return 3
+        days = finmind_daily.sessions(base)
+        fresh = days[-2] if len(days) >= 2 else (days[-1] if days else None)    # the last two sessions may not be out
+        per_hour = min(int(limit * PAID_SHARE), args.per_hour or limit)
+        plans = [("govbank", [("", day) for day in days])]
+        plans += [(dataset, [("", day) for day in days if day >= finmind_daily.BY_DATE_FROM])
+                  for dataset in finmind_daily.PAID_BY_DATE]
+        branch_tasks = []
+        for code in finmind_daily.branch_codes(base):
+            folder = base / "raw" / "finmind" / "branches" / code
+            stored = {name[:10] for name in os.listdir(folder)} if folder.is_dir() else set()
+            branch_tasks += [(code, day) for day in days if day.isoformat() not in stored]
+        plans.append(("branches", branch_tasks))
+        found = {}
+        with JobLog(base.parent).start("付費資料每天補到最新（八大行庫、融資維持率、借券擔保、鉅額交易、主力集中度、分點）",
+                                       "python -m quant_platform.research.history " + " ".join(sys.argv[1:])) as job:
+            for kind, tasks in plans:
+                missing = [(code, day) for code, day in tasks if not finmind_daily.task_path(base, kind, code, day).is_file()]
+                job.update(current=f"{kind}：{len(missing):,} 個要抓", force=True)
+                found[kind] = finmind_daily.download(base, token, missing, kind, per_hour, job, fresh=fresh)
+            found["tables"] = paid.update(base)
+            covered = json.loads((paid.folder(base) / paid.THROUGH).read_text(encoding="utf-8"))
+            asked = "、".join(f"{kind} {item['asked']:,}" for kind, item in found.items() if kind != "tables" and item["asked"])
+            job.payload["summary"] = (f"請求 {asked}" if asked else "沒有缺的日子") + (
+                f"；各表涵蓋到 {min(covered.get(name, '') for name in (*paid.TABLES, paid.GOVBANK))}")
         print(json.dumps(found, ensure_ascii=False), flush=True)
         return 0
 

@@ -118,3 +118,33 @@ def test_a_reached_limit_waits_until_finmind_frees_it():
     assert finmind.quota_wait("x", moment, get=lambda: {"api_request_limit": 6000, "next_available_time": ""}) == 900.0
     late = {"api_request_limit": 6000, "next_available_time": "2026-10-21 23:59:00"}
     assert finmind.quota_wait("x", moment, get=lambda: late) == 60.0
+
+
+def test_the_paid_tables_are_brought_up_to_date_while_the_plan_lasts(tmp_path):
+    """2026-11-02: the paid tables had stopped on 10-21/22; twice a day while the plan the hourly check found is paid
+    and not past its end, the missing days (paiddaily) — not while one runs, not on a free plan or after the end."""
+    import json as _json
+
+    from quant_platform.config.settings import Settings
+    from quant_platform.container import build_container
+    from quant_platform.scheduler.runner import start_paid_daily
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'paid.db'}", finmind_token="t"))
+    research = tmp_path / "research"
+    plan = research / "history" / "raw" / "finmind" / "plan.json"
+    started = []
+    now = datetime(2026, 11, 2, 22, 5, tzinfo=ZoneInfo("Asia/Taipei"))
+    assert start_paid_daily(container, now, launch=started.append) is None                     # no plan read yet
+    plan.parent.mkdir(parents=True)
+    plan.write_text(_json.dumps({"limit": 600, "expires": "2026-11-21"}), encoding="utf-8")
+    assert start_paid_daily(container, now, launch=started.append) is None                     # free
+    plan.write_text(_json.dumps({"limit": 6000, "expires": "2026-11-21"}), encoding="utf-8")
+    assert start_paid_daily(container, now, launch=started.append) == "paiddaily"
+    record = research / "pipelines" / "paiddaily.json"
+    record.parent.mkdir(parents=True)
+    record.write_text(_json.dumps({"status": "running"}), encoding="utf-8")
+    assert start_paid_daily(container, now, launch=started.append) is None                     # one runs
+    record.write_text(_json.dumps({"status": "done"}), encoding="utf-8")
+    later = datetime(2026, 11, 22, 7, 5, tzinfo=ZoneInfo("Asia/Taipei"))
+    assert start_paid_daily(container, later, launch=started.append) is None                   # past the plan's end
+    assert started == ["paiddaily"]

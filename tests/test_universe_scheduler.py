@@ -370,6 +370,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "invariant_checks",
             "llm_trader",
             "finmind_paid",
+            "paid_daily",
             "knowledge_index",
             "live_flow",
             "trade_audit",

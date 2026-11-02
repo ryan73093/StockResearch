@@ -30,6 +30,19 @@ from quant_platform.research.history.finmind import TAIPEI, URL, QuotaReached, q
 
 FIRST = date(2021, 6, 30)
 TOP = 300
+# 2026-11-02: the four paid tables FinMind gave per stock (history/paid.py, downloaded 10-21/22, through 10-21) are
+# asked a session at a time for every stock from then on — one request a table a session (probed: 2,043 to 2,734 stocks)
+PAID_BY_DATE = ("TaiwanStockMarginMaintenance", "TaiwanStockLoanCollateralBalance", "TaiwanStockBlockTrade",
+                "TaiwanStockBrokerDailyConcentration")
+BY_DATE_FROM = date(2026, 10, 22)
+
+
+def task_path(base: Path, kind: str, code: str, day: date) -> Path:
+    if kind == "govbank":
+        return base / "raw" / "finmind" / "govbank" / f"{day.isoformat()}.json.gz"
+    if kind in PAID_BY_DATE:
+        return base / "raw" / "finmind" / kind / "days" / f"{day.isoformat()}.json.gz"
+    return base / "raw" / "finmind" / "branches" / code / f"{day.isoformat()}.json.gz"
 
 
 def sessions(base: str | Path, start: date = FIRST, end: date | None = None) -> list[date]:
@@ -107,27 +120,36 @@ def _store(path: Path, payload: dict) -> None:
 
 def download(base: str | Path, token: str, tasks: list[tuple[str, date]], kind: str, per_hour: int, job=None,
              get: Callable[[str, dict], list[dict]] = _get, sleep: Callable[[float], None] = time.sleep,
-             now: Callable[[], datetime] = lambda: datetime.now(TAIPEI)) -> dict[str, int]:
-    """``tasks``: (code, day) — the code "" for the government banks' whole-market day. Each stored once."""
+             now: Callable[[], datetime] = lambda: datetime.now(TAIPEI), fresh: date | None = None) -> dict[str, int]:
+    """``tasks``: (code, day) — the code "" for a whole-market day (the government banks, PAID_BY_DATE). Each stored
+    once. 2026-11-02: ``fresh`` — a day on or after it that comes back empty is not stored (FinMind may not have it
+    yet; a stored day is never asked again) and is asked on the next run."""
     base = Path(base)
-    asked = skipped = errors = 0
+    asked = skipped = errors = waiting = 0
     interval = 3600.0 / per_hour
     for number, (code, day) in enumerate(tasks):
-        path = (base / "raw" / "finmind" / "govbank" / f"{day.isoformat()}.json.gz" if kind == "govbank"
-                else base / "raw" / "finmind" / "branches" / code / f"{day.isoformat()}.json.gz")
+        path = task_path(base, kind, code, day)
         if path.is_file():
             skipped += 1
             continue
         if job and number % 20 == 0:
             job.update(done=number, total=len(tasks), current=f"{code or '全市場'} {day}")
-        params = ({"dataset": "TaiwanStockGovernmentBankBuySell", "start_date": day.isoformat()} if kind == "govbank"
-                  else {"dataset": "TaiwanStockTradingDailyReport", "data_id": code, "start_date": day.isoformat()})
+        when = {"start_date": day.isoformat(), "end_date": day.isoformat()}
+        params = ({"dataset": "TaiwanStockGovernmentBankBuySell", **when} if kind == "govbank"
+                  else {"dataset": kind, **when} if kind in PAID_BY_DATE
+                  else {"dataset": "TaiwanStockTradingDailyReport", "data_id": code, **when})
         for attempt in range(3):
             try:
                 rows = get(token, params)
                 rows = [row for row in rows if str(row.get("date") or "")[:10] == day.isoformat()]
-                _store(path, {"date": day.isoformat(), "code": code,
-                              "rows": govbank_rows(rows) if kind == "govbank" else branch_rows(rows)})
+                if not rows and fresh is not None and day >= fresh:
+                    waiting += 1
+                    break
+                if kind in PAID_BY_DATE:
+                    _store(path, {"date": day.isoformat(), "dataset": kind, "data": rows})
+                else:
+                    _store(path, {"date": day.isoformat(), "code": code,
+                                  "rows": govbank_rows(rows) if kind == "govbank" else branch_rows(rows)})
                 asked += 1
                 break
             except QuotaReached:
@@ -142,4 +164,4 @@ def download(base: str | Path, token: str, tasks: list[tuple[str, date]], kind: 
         sleep(interval)
     if job:
         job.update(done=len(tasks), total=len(tasks), force=True)
-    return {"asked": asked, "skipped": skipped, "errors": errors, "tasks": len(tasks)}
+    return {"asked": asked, "skipped": skipped, "errors": errors, "waiting": waiting, "tasks": len(tasks)}

@@ -26,6 +26,7 @@ from __future__ import annotations
 import gzip
 import json
 import math
+import os
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -52,6 +53,17 @@ def raw_folder(base: str | Path) -> Path:
     return Path(base) / "raw" / "finmind" / "branches"
 
 
+def through(folder: Path) -> date | None:
+    """2026-11-02: the last day every stock's branches are stored for (a day still downloading, or not out yet for
+    some stocks, is not covered — those stocks would read as "no branch traded")."""
+    newest = []
+    for stock in (path for path in folder.iterdir() if path.is_dir()) if folder.is_dir() else []:
+        days = [name[:10] for name in os.listdir(stock) if name.endswith(".json.gz")]
+        if days:
+            newest.append(max(days))
+    return date.fromisoformat(min(newest)) if newest else None
+
+
 def cache_path(folder: Path) -> Path:
     """history/branches/<code>.npz beside history/raw: one stock's day files in one file (2026-10-23: the 720,000
     small files took about 30 s a stock to read cold, 10 hours for the two passes)."""
@@ -62,14 +74,23 @@ def load_stock(folder: Path, cache: Path | None = None) -> tuple[list[str], list
     """One stock's day files as (days ISO, branch names, money bought, money sold — days × branches, days ascending),
     from ``cache`` when it was written from as many day files as there are now, else read and the cache written."""
     files = sorted(folder.glob("*.json.gz"))
+    kept = None
     if cache is not None and cache.is_file():
         try:
             with np.load(cache, allow_pickle=False) as stored:
-                if int(stored["files"]) == len(files):
-                    return ([str(day) for day in stored["days"]], [str(name) for name in stored["names"]],
-                            stored["bought"].astype(float), stored["sold"].astype(float))
+                kept = (int(stored["files"]), [str(day) for day in stored["days"]], [str(name) for name in stored["names"]],
+                        stored["bought"].astype(float), stored["sold"].astype(float))
         except (OSError, ValueError, KeyError):
-            pass
+            kept = None
+    if kept is not None and kept[0] == len(files):
+        return kept[1], kept[2], kept[3], kept[4]
+    # 2026-11-02 (the nightly paid download adds a day): only the days after the cache's last one are read, when
+    # every file up to it is the cache's — the same as reading them all, as the cache keeps it (float32)
+    if kept is not None and kept[1]:
+        last = max(kept[1])
+        older = [path.name[:10] for path in files if path.name[:10] <= last]
+        if len(older) == kept[0] and older == kept[1]:
+            return _extend(files, cache, kept[1:], [path for path in files if path.name[:10] > last])
     days, rows = [], []
     for path in files:
         try:
@@ -100,6 +121,38 @@ def load_stock(folder: Path, cache: Path | None = None) -> tuple[list[str], list
                             sold=sold.astype(np.float32))
         partial.replace(cache)
     return days, list(local), bought, sold
+
+
+def _extend(files: list[Path], cache: Path, kept, new: list[Path]):
+    """The cached stock with the ``new`` day files (all after its last day) appended; the cache written again."""
+    days, names, bought, sold = kept
+    local = {name: number for number, name in enumerate(names)}
+    rows = []
+    for path in new:
+        try:
+            date.fromisoformat(path.name[:10])
+        except ValueError:
+            continue
+        rows.append((path.name[:10], json.loads(gzip.decompress(path.read_bytes())).get("rows") or []))
+    for _day, day_rows in rows:
+        for row in day_rows:
+            local.setdefault(str(row[0]), len(local))
+    width = len(local)
+    more_bought, more_sold = np.zeros((len(rows), width)), np.zeros((len(rows), width))
+    for number, (_day, day_rows) in enumerate(rows):
+        if day_rows:
+            at = np.fromiter((local[str(row[0])] for row in day_rows), dtype=np.int64, count=len(day_rows))
+            more_bought[number, at] = [float(row[3]) for row in day_rows]
+            more_sold[number, at] = [float(row[4]) for row in day_rows]
+    pad = ((0, 0), (0, width - bought.shape[1]))
+    bought = np.vstack([np.pad(bought, pad), more_bought]).astype(np.float32)
+    sold = np.vstack([np.pad(sold, pad), more_sold]).astype(np.float32)
+    days = days + [day for day, _rows in rows]
+    partial = cache.with_name(cache.stem + ".partial.npz")
+    np.savez_compressed(partial, files=len(files), days=np.array(days, dtype="U10"), names=np.array(list(local), dtype="U16"),
+                        bought=bought, sold=sold)
+    partial.replace(cache)
+    return days, list(local), bought.astype(float), sold.astype(float)
 
 
 def place(loaded, index: dict[date, int], names: dict[str, int]):
@@ -347,6 +400,11 @@ def run(history: str | Path, research: str | Path, job=None) -> Path:
     partial = target.with_suffix(".partial")
     frame.to_parquet(partial, index=False)
     partial.replace(target)
+    covered = through(raw_folder(history))
+    if covered is not None:           # 2026-11-02: the last day the signals cover (research/chips.py: unknown after it)
+        from quant_platform.research.history.paid import write_through
+
+        write_through(history, {SIGNALS: covered})
     ids_named = {number: name for name, number in names.items()}
     month_names = {offset: f"{(start_key + offset) // 12}-{(start_key + offset) % 12 + 1:02d}" for offset in range(months)}
     report = {

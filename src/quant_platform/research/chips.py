@@ -577,6 +577,21 @@ class ChipStore:
     def paid_available(self, factor: str) -> bool:
         return (self._folder.parent / "paid" / f"{PAID_SOURCES[factor]}.parquet").is_file()
 
+    def _paid_through(self, dataset: str):
+        """The last day a paid table covers: ``paid/through.json`` (history/paid.py and research/branches.py write it —
+        a table of events, the block trades, has no row on a day without one, so its newest row is not its end); the
+        day before ``until`` when the history is cut there; None (no end) without either."""
+        path = self._folder.parent / "paid" / "through.json"
+        try:
+            known = json.loads(path.read_text(encoding="utf-8")).get(dataset) if path.is_file() else None
+        except (OSError, ValueError):
+            known = None
+        last = pd.Timestamp(known) if known else None
+        if self.until is not None:                               # the history cut there: nothing known after
+            cut = pd.Timestamp(self.until) - pd.Timedelta(days=1)
+            last = cut if last is None else min(last, cut)
+        return last
+
     def _paid(self, dataset: str, field: str, fill: int = 10, zero: bool = False) -> pd.DataFrame:
         """sessions × codes from history/paid: the value known on each session (the day before's table), carried
         up to ``fill`` sessions over gaps; ``zero``: a session without a row is 0 once the data starts."""
@@ -595,10 +610,15 @@ class ChipStore:
                 # the whole history and missing with the history cut there (whether a stock would ever have a block
                 # trade leaked into block_volume_20 and model J)
                 first = frame.index.min() if len(frame) else None
+                last = self._paid_through(dataset)
                 frame = frame.reindex(index=sessions, columns=list(dict.fromkeys(self._codes)))
                 frame = frame.fillna(0.0) if first is not None else frame
                 if first is not None:
                     frame.loc[frame.index < first] = np.nan
+                if first is not None and last is not None:
+                    # 2026-11-02: and unknown after the table's last day — the paid tables stopped on 10-21/22 (no
+                    # daily download) and every later session read as "no block trade, no branch buying"
+                    frame.loc[frame.index > last] = np.nan
             elif fill:
                 frame = frame.reindex(sessions.union(frame.index)).ffill(limit=fill).reindex(sessions)
             else:
