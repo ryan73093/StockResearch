@@ -15,7 +15,7 @@
   </div>
   <ul class="reasons">{% for line in rule.description %}<li>{{ line }}</li>{% endfor %}</ul>
   {% if rule.forward %}
-  <p class="small" style="margin:10px 0 0">前向觀察：{{ rule.forward.since }} 起、已記錄 {{ rule.forward.sessions }} 個交易日{% if rule.forward.sessions and rule.forward.kept %}{% set got = rule.forward.kept %}，實際結果 <strong class="{{ 'up' if got.gain > 0 else ('down' if got.gain < 0 else '') }}">{{ '{:+,.0f}'.format(got.gain) }} 元</strong>（賺的只算賣掉的、賠的都算），比同樣的錢買 0050 <strong class="{{ 'up' if got.ahead > 0 else ('down' if got.ahead < 0 else '') }}">{{ '{:+,.0f}'.format(got.ahead) }} 元</strong>{% endif %}（<a href="/research/forward/{{ rule.spec_hash }}">看持股與每一筆交易</a>）。</p>
+  <p class="small" style="margin:10px 0 0">前向觀察：{{ rule.forward.since }} 起、已記錄 {{ rule.forward.sessions }} 個交易日{% if rule.forward.sessions and rule.forward.kept %}{% set got = rule.forward.kept %}，實際結果 <strong class="{{ 'up' if got.gain > 0 else ('down' if got.gain < 0 else '') }}">{{ '{:+,.0f}'.format(got.gain) }} 元</strong>（賺的只算賣掉的、賠的都算）；同樣的錢買 0050 今天全部賣掉 {{ '{:+,.0f}'.format(got.bench_gain) }} 元，這個策略<strong class="{{ 'up' if got.ahead > 0 else ('down' if got.ahead < 0 else '') }}">{{ '多' if got.ahead >= 0 else '少' }} {{ '{:,.0f}'.format(got.ahead|abs) }} 元</strong>{% endif %}（<a href="/research/forward/{{ rule.spec_hash }}">看持股與每一筆交易</a>）。</p>
   {% endif %}
 </section>
 
