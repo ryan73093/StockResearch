@@ -253,3 +253,25 @@ def test_only_new_leaves_a_month_without_its_list_to_the_monthly_flow(monkeypatc
     monkeypatch.setattr(sys, "argv", ["x", "rolling", "--step", "select", "--only-new", "--cutoff", "2026-09-30"])
     assert cli.main() == 0
     assert not (rolling.folder(tmp_path) / "2026-09-30.json").exists()
+
+
+def test_a_cutoff_at_the_backtests_end_takes_the_pools_run(monkeypatch, tmp_path):
+    """2026-11-02: the 2026-09-30 list ran its 7,912 rules for 18 hours, twice, beside the pool's rerun of the same rules
+    to the same day — a cutoff at daily.RECENT_END reads the pool's run (run_trial: the registry's report, or run and
+    registered there); another cutoff runs to it."""
+    from quant_platform.research import daily as _daily
+
+    report = {"start": "2015-06-02", "full_period_excess": 0.5, "since_2020": {"excess": 0.4, "strategy": {"final_value": 9.0},
+                                                                              "benchmark": {"final_value": 5.0}},
+              "windows": {}, "strategy": {"max_drawdown": -0.3, "final_value": 10.0, "xirr": 0.2},
+              "benchmark": {"max_drawdown": -0.3, "final_value": 6.0, "xirr": 0.1}}
+    asked = []
+    monkeypatch.setattr(_daily, "fingerprint", lambda base, universe: f"print-{universe}")
+    monkeypatch.setattr(_daily, "run_trial", lambda rule, *args: asked.append(args[6]) or (None, report))
+    monkeypatch.setattr(_daily, "evaluate", lambda *args, **kwargs: pytest.fail("ran to the cutoff instead"))
+    rolling._worker.clear()
+    rolling._worker.update(base=str(tmp_path), research=str(tmp_path), panels={"twse": (None, None)}, costs=None, cache={})
+    spec = DailyRule(name="x", factors={"trend_200": 1.0}).canonical()
+    row = rolling._grade({"trial": 1, "spec": spec}, _daily.RECENT_END.isoformat())
+    assert asked == ["print-twse"] and row["metrics"]["since_2020_excess"] == 0.4
+    rolling._worker.clear()

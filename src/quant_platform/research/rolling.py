@@ -68,12 +68,31 @@ def rules(research: str | Path) -> list[dict]:
     return output
 
 
-def _init(base: str, broker: str) -> None:
+def _init(base: str, broker: str, research: str | None = None) -> None:
     from quant_platform.research import daily
     from quant_platform.research.costs import broker_costs
 
     data, fp = daily.load(Path(base))
-    _worker.update(base=str(base), panels={"twse": (data, fp)}, data=data, fp=fp, costs=broker_costs(broker), cache={})
+    _worker.update(base=str(base), panels={"twse": (data, fp)}, data=data, fp=fp, costs=broker_costs(broker), cache={},
+                   research=research)
+
+
+def pool_run(rule, data, fp) -> dict:
+    """2026-11-02: a month whose cutoff is the backtest's end (daily.RECENT_END): the rule's run in the pool — the
+    same engine, data and inputs give the same report — read from the registry, or run and registered there (the
+    2026-09-30 list had run its 7,912 rules for 18 hours, twice, beside the pool's own rerun of the same rules)."""
+    from quant_platform.research.blend import BlendRule, run_blend_trial
+    from quant_platform.research.daily import fingerprint, run_trial
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path(_worker["research"])
+    prints = _worker.setdefault("fingerprints", {})
+    if rule.universe not in prints:
+        prints[rule.universe] = fingerprint(Path(_worker["base"]), rule.universe)
+    runner = run_blend_trial if isinstance(rule, BlendRule) else run_trial
+    _record, report = runner(rule, _worker["base"], TrialRegistry(research / "trials.jsonl"), research / "reports",
+                             _worker["costs"], data, fp, prints[rule.universe], _worker["cache"])
+    return report
 
 
 def panel(worker: dict, universe: str):
@@ -104,11 +123,16 @@ def _grade(item: dict, cutoff: str) -> dict:
     from quant_platform.research.blend import BlendRule, evaluate_blend, parse_spec
     from quant_platform.research.daily import PASSING_TIERS, evaluate, gate, tier
 
+    from quant_platform.research.daily import RECENT_END
+
     rule = parse_spec(item["spec"])
     run = evaluate_blend if isinstance(rule, BlendRule) else evaluate
     try:
         data, fp = panel(_worker, rule.universe)
-        report = run(data, fp, rule, _worker["costs"], _worker["cache"], end=date.fromisoformat(cutoff))
+        if _worker.get("research") and cutoff == RECENT_END.isoformat():
+            report = pool_run(rule, data, fp)
+        else:
+            report = run(data, fp, rule, _worker["costs"], _worker["cache"], end=date.fromisoformat(cutoff))
     except Exception as error:  # noqa: BLE001 - one rule's failure is recorded, the month goes on
         return {"trial": item["trial"], "name": rule.name, "error": str(error)[:200]}
     metrics = grade_metrics(report)
@@ -127,7 +151,8 @@ def select(base: str | Path, research: str | Path, cutoff: date, broker: str = "
 
     items = [item for item in rules(research) if parse_spec(item["spec"]).rule_hash not in (skip or set())]
     output = []
-    with ProcessPoolExecutor(max_workers=max(1, workers), initializer=_init, initargs=(str(base), broker)) as pool:
+    with ProcessPoolExecutor(max_workers=max(1, workers), initializer=_init,
+                             initargs=(str(base), broker, str(research))) as pool:
         for done, row in enumerate(pool.map(_grade, items, [cutoff.isoformat()] * len(items), chunksize=4), start=1):
             output.append(row)
             if progress:

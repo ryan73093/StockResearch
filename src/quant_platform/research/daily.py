@@ -131,7 +131,14 @@ RECENT_END = date(2026, 9, 30)       # forward observation starts after this
 #     minimum hold);
 #   * every run also records the money counted at each month end (RunResult.counted_months, the report's
 #     counted_curve) — no decision changes.
-ENGINE_VERSION = "daily-1.6.0"
+# 1.6.1 (2026-11-02, 使用者：你抱的時間長最後賣出也是賺啊，調出個毛啊): no decision changes; a backtest is judged at
+#   cut points the owner did not choose to sell at (each 1- and 3-year window's end, the cutoff), so at each of them
+#   the account and 0050 are both sold that day, fees, tax and slippage paid (RunResult.sold_value) — a winner still
+#   held counts at what selling it that day brings. 1.6.0 had counted only the gains already sold there (and 0050
+#   whole), which dropped 3,051 of October's 3,541 passing rules from November's list, 527 of the 542 that hold
+#   while above the 20-day line. The money counted (gains once sold, every loss) stays beside, and is what the forward
+#   accounts' "today" is ranked by (使用者 2026-10-29).
+ENGINE_VERSION = "daily-1.6.1"
 # 2026-10-31 (使用者：你帳面數字都一樣是怎樣): eligibility "entry" is documented as "a holding no longer eligible is
 # not sold", but the day's ranking left such a holding out, so it fell out of the keep zone and was sold anyway in
 # every rule without a minimum hold (#7343 the same trades as #7024 to the yuan). From 1.6.0 a holding stays in the
@@ -2373,16 +2380,25 @@ def account_parking(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: C
 
 
 def _excess(run: RunResult, benchmark: RunResult) -> float:
-    """Beating 0050, per NT$ put in. 2026-10-30 (使用者：我拿到的才叫賺，拿到的才叫賠；未實現損益你也算賺錢哦): the
-    money counted (RunResult.counted_value: a gain once sold, every loss) against 0050 sold that day (0050 is the
-    owner's own holding and never sells) — the gate, the windows and the rankings all read this. A run without them
-    (an older result) keeps the value with the held stocks at their close (``_paper_excess``)."""
+    """Beating 0050, per NT$ put in, at a backtest's cut point (a window's end, the cutoff). 2026-11-02 (engine 1.6.1;
+    使用者：你抱的時間長最後賣出也是賺啊): both sold that day, fees, tax and slippage paid (RunResult.sold_value) — the
+    gate, the windows and the rankings read this. A run without it (an older result) keeps the value with the held
+    stocks at their close (``_paper_excess``)."""
     if not run.contributed:
         return 0.0
-    counted, sold = getattr(run, "counted_value", None), getattr(benchmark, "sold_value", None)
-    if counted is not None and sold is not None:
-        return (counted - sold) / run.contributed
+    sold, benchmark_sold = getattr(run, "sold_value", None), getattr(benchmark, "sold_value", None)
+    if sold is not None and benchmark_sold is not None:
+        return (sold - benchmark_sold) / run.contributed
     return _paper_excess(run, benchmark)
+
+
+def _counted_excess(run: RunResult, benchmark: RunResult) -> float | None:
+    """2026-10-30 (使用者：我拿到的才叫賺，拿到的才叫賠): the money counted (a gain once sold, every loss) against 0050
+    sold that day — shown beside, never judged in a backtest (1.6.1); None for an older result."""
+    counted, sold = getattr(run, "counted_value", None), getattr(benchmark, "sold_value", None)
+    if not run.contributed or counted is None or sold is None:
+        return None
+    return (counted - sold) / run.contributed
 
 
 def _paper_excess(run: RunResult, benchmark: RunResult) -> float:
@@ -2419,15 +2435,17 @@ def account_windows(data: LegacyData, account, costs: CostModel, months: int, st
         if (first, last) not in cache:
             cache[(first, last)] = simulate_daily(data, None, costs, first, last)
         if run.contributed:
-            pairs.append((first, _excess(run, cache[(first, last)]), _paper_excess(run, cache[(first, last)])))
+            pairs.append((first, _excess(run, cache[(first, last)]), _counted_excess(run, cache[(first, last)])))
     if not pairs:
         return {"count": 0, "since_2020": {"count": 0}}
-    # 2026-11-02 (使用者 10/30：直接用兩種方式，一個是未實現一個是已實現): the same windows with the held stocks at their
-    # close (``paper``) beside — the same runs, shown, never judged (the 2026-09-30 list: 3,051 of 3,541 dropped)
-    return {**window_summary([value for _first, value, _paper in pairs]),
-            "since_2020": window_summary([value for first, value, _paper in pairs if first >= REGIME_WINDOWS]),
-            "paper": window_summary([paper for _first, _value, paper in pairs]),
-            "paper_since_2020": window_summary([paper for first, _value, paper in pairs if first >= REGIME_WINDOWS])}
+    # 2026-11-02 (使用者 10/30：直接用兩種方式): the same windows on the money counted (gains once sold) beside — the
+    # same runs, shown, never judged (1.6.1: the window's end is a cut point, both sold there)
+    counted = [(first, value) for first, _value, value in pairs if value is not None]
+    return {**window_summary([value for _first, value, _counted in pairs]),
+            "since_2020": window_summary([value for first, value, _counted in pairs if first >= REGIME_WINDOWS]),
+            **({"counted": window_summary([value for _first, value in counted]),
+                "counted_since_2020": window_summary([value for first, value in counted if first >= REGIME_WINDOWS])}
+               if counted else {})}
 
 
 # 2026-10-21 (使用者：繼續做你本來就應該要做的短歷史賽道；2015 到現在其實也很久了，評估長資料跟短歷史的權重): a rule
@@ -2607,9 +2625,13 @@ def account_report(data: LegacyData, account, first: date, costs: CostModel,
         "strategy": run.summary(), "benchmark": benchmark.summary(),
         "full_period_excess": round(_excess(run, benchmark), 6),
         "full_period_paper_excess": round(_paper_excess(run, benchmark), 6),
+        **({"full_period_counted_excess": round(_counted_excess(run, benchmark), 6)}
+           if _counted_excess(run, benchmark) is not None else {}),
         "since_2020": {"start": REGIME_START.isoformat(), "strategy": regime_run.summary(),
                        "benchmark": regime_benchmark.summary(), "excess": round(_excess(regime_run, regime_benchmark), 6),
-                       "paper_excess": round(_paper_excess(regime_run, regime_benchmark), 6)},
+                       "paper_excess": round(_paper_excess(regime_run, regime_benchmark), 6),
+                       **({"counted_excess": round(_counted_excess(regime_run, regime_benchmark), 6)}
+                          if _counted_excess(regime_run, regime_benchmark) is not None else {})},
         "windows": {key: account_windows(data, account, costs, months, max(first, windows_from or first), end,
                                          cache.setdefault(key, {}))
                     for key, months in WINDOWS.items()},
@@ -2960,8 +2982,13 @@ def report_metrics(report: dict, engine: str, plan: dict) -> dict[str, object]:
         "full_period_excess": report["full_period_excess"], "since_2020_excess": report["since_2020"]["excess"],
         "since_2020_final_value": report["since_2020"]["strategy"]["final_value"],
         "since_2020_benchmark_final_value": report["since_2020"]["benchmark"]["final_value"],
-        # 2026-10-30 (使用者：直接用兩種方式，一個是未實現一個是已實現): both kept; the excess above is the counted one
+        # 2026-10-30 (使用者：直接用兩種方式，一個是未實現一個是已實現): both kept; 2026-11-02 (1.6.1): the excess above is
+        # both sold at the cut point (sold_value), the money counted beside
         "counted_value": strategy.get("counted_value"), "benchmark_sold_value": benchmark.get("sold_value"),
+        "sold_value": strategy.get("sold_value"),
+        "since_2020_sold_value": report["since_2020"]["strategy"].get("sold_value"),
+        "full_period_counted_excess": report.get("full_period_counted_excess"),
+        "since_2020_counted_excess": report["since_2020"].get("counted_excess"),
         "paper": strategy.get("paper"),
         "since_2020_counted_value": report["since_2020"]["strategy"].get("counted_value"),
         "since_2020_benchmark_sold_value": report["since_2020"]["benchmark"].get("sold_value"),
@@ -3494,7 +3521,23 @@ def blend_counted_reach_batch() -> list:
     .counted_reach_batch, 第十四輪)."""
     from quant_platform.research.blend_scan import counted_reach_batch
 
+    pending = stale_results()
+    if pending:                 # 2026-11-02: its first run (11/01) had a pool of 396 — the rest not rerun yet
+        print(f"選手池還有 {pending} 個規則不是引擎 {ENGINE_VERSION} 的結果：重跑完才跑第十四輪", flush=True)
+        return []
     return counted_reach_batch()
+
+
+def stale_results() -> int:
+    """The rules (blends too) whose latest result is not on the current engine (rerun_all_batch reruns them)."""
+    from pathlib import Path as _Path
+
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    latest = newest(TrialRegistry(_Path("instance") / "research" / "trials.jsonl").records(),
+                    lambda record: record.kind == "candidate" and record.period == "recent")
+    return sum(1 for record in latest.values()
+               if str((record.metrics or {}).get("engine") or "").split("+")[0] != ENGINE_VERSION)
 
 
 def bear13_blend_batch() -> list:
