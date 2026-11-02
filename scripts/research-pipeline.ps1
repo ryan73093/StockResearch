@@ -1202,6 +1202,7 @@ switch ($Name) {
         # branches, the tables with the last day each covers, then the branch signals when there are new branch days
         Invoke-Step "1-download" @("-m", "quant_platform.research.history", "paid-daily", "--per-hour", "2900")
         Invoke-Step "2-signals" @("-m", "quant_platform.research", "branches", "--only-new")
+        Invoke-Step "3-limits" @("-m", "quant_platform.research", "limits-overrides", "--only-new")
     }
     "branchrefit" {
         # 2026-10-31 (the 10/31 forward audit: 29 accounts reading models K, M and O differ from 9/1, 9/7 and 10/12; the

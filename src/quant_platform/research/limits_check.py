@@ -28,18 +28,35 @@ OVERRIDES = Path("limits") / "official_overrides.parquet"
 
 
 def official(base: str | Path, codes: list[str]) -> dict[str, dict[str, tuple[float, float]]]:
-    """code -> day -> (limit-down, limit-up) from the stored files; 0 means no limit that day (left out)."""
-    from quant_platform.research.history.finmind import read_rows
+    """code -> day -> (limit-down, limit-up) from the stored files; 0 means no limit that day (left out). 2026-11-02:
+    and the whole-market day files (history/finmind_daily.py, from 10-22 on), which replace the stocks' rows of their
+    day."""
+    import gzip
 
+    from quant_platform.research.history.finmind import read_rows
+    from quant_platform.research.history.paid import day_files
+
+    wanted = set(codes)
+    days = day_files(base, DATASET)
+    replaced = {day.isoformat() for day in days}
     output: dict[str, dict[str, tuple[float, float]]] = {}
+
+    def take(code: str, row: dict) -> None:
+        try:
+            low, high = float(row["limit_down"]), float(row["limit_up"])
+        except (KeyError, TypeError, ValueError):
+            return
+        if low > 0 and high > 0:
+            output.setdefault(code, {})[str(row["date"])[:10]] = (low, high)
+
     for code in codes:
         for row in read_rows(Path(base), DATASET, code):
-            try:
-                low, high = float(row["limit_down"]), float(row["limit_up"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if low > 0 and high > 0:
-                output.setdefault(code, {})[str(row["date"])[:10]] = (low, high)
+            if str(row.get("date") or "")[:10] not in replaced:
+                take(code, row)
+    for path in days.values():
+        for row in json.loads(gzip.decompress(path.read_bytes()).decode("utf-8")).get("data") or []:
+            if str(row.get("stock_id")) in wanted:
+                take(str(row["stock_id"]), row)
     return output
 
 
@@ -135,8 +152,25 @@ def build_overrides(base: str | Path) -> dict[str, object]:
     path = Path(base) / OVERRIDES
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows, columns=["symbol", "date", "low", "high"]).to_parquet(path, index=False)
+    covered = max((day for days in exchange.values() for day in days), default=None)
+    path.with_suffix(".json").write_text(json.dumps({"exchange_through": covered}), encoding="utf-8")
     return {"path": str(path), "rows": len(rows), "stocks": len({row["symbol"] for row in rows}),
-            "from": start.isoformat(), "through": fp.sessions[-1].isoformat()}
+            "from": start.isoformat(), "through": fp.sessions[-1].isoformat(), "exchange_through": covered}
+
+
+def overrides_current(base: str | Path) -> bool:
+    """2026-11-02 (paiddaily, twice a day): the overrides were built from the newest exchange day stored."""
+    from quant_platform.research.history.paid import day_files
+
+    marker = (Path(base) / OVERRIDES).with_suffix(".json")
+    days = day_files(base, DATASET)
+    if not marker.is_file() or not days:
+        return False
+    try:
+        built = json.loads(marker.read_text(encoding="utf-8")).get("exchange_through")
+    except ValueError:
+        return False
+    return built == max(days).isoformat()
 
 
 def read_overrides(base: str | Path, first_year: int = 0) -> dict[str, dict[date, tuple[float, float]]]:

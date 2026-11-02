@@ -33,7 +33,7 @@ TOP = 300
 # 2026-11-02: the four paid tables FinMind gave per stock (history/paid.py, downloaded 10-21/22, through 10-21) are
 # asked a session at a time for every stock from then on — one request a table a session (probed: 2,043 to 2,734 stocks)
 PAID_BY_DATE = ("TaiwanStockMarginMaintenance", "TaiwanStockLoanCollateralBalance", "TaiwanStockBlockTrade",
-                "TaiwanStockBrokerDailyConcentration")
+                "TaiwanStockBrokerDailyConcentration", "TaiwanStockPriceLimit")     # the last: engine 1.6.0's limits
 BY_DATE_FROM = date(2026, 10, 22)
 
 

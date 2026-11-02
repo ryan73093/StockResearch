@@ -1563,6 +1563,9 @@ def main() -> int:
         from quant_platform.research.jobs import JobLog
 
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        if args.only_new and limits_check.overrides_current(Path(args.base)):      # 2026-11-02: paiddaily
+            print("覆寫表已經用到最新一天的交易所漲跌停價", flush=True)
+            return 0
         with JobLog(RESEARCH).start("引擎 1.6.0：交易所漲跌停價和引擎推算不同的日子（覆寫表）", command) as job:
             found = limits_check.build_overrides(Path(args.base))
             job.payload["summary"] = f"{found['rows']:,} 個股票×交易日、{found['stocks']} 檔（{found['from']}～{found['through']}）"
