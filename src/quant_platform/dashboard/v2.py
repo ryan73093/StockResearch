@@ -411,7 +411,9 @@ def ml_view(research_dir: Path) -> dict[str, object]:
     """2026-10-06: the walk-forward models' out-of-sample diagnostics and the RL overlay's report."""
     models, tech = [], []
     folder = research_dir / "models"
-    for path in sorted(folder.glob("*/meta.json")) if folder.is_dir() else []:
+    # 2026-11-02: by version number — by name gbm-2.10.0 and gbm-2.11.0 came before gbm-2.2.0
+    for path in sorted(folder.glob("*/meta.json"), key=lambda found: [(0, int(part)) if part.isdigit() else (1, part)
+                                                                      for part in re.split(r"[.-]", found.parent.name)])             if folder.is_dir() else []:
         try:
             meta = json.loads(path.read_text(encoding="utf-8"))
         except ValueError:
