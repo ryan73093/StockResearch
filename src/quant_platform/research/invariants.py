@@ -536,10 +536,41 @@ def run(research: str | Path, today: date, backups: Path | None = None,
             if events else "沒有"))
     except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
         checks.append(_check(name, source, False, f"沒辦法檢查：{str(exc)[:120]}"))
+    # 2026-11-02: the paid tables were downloaded once and stopped on 10-21/22; 147 forward accounts read them (directly
+    # or through models J-P) and decided on "no block trade, no branch buying" for eight sessions before anyone saw it
+    checks.append(paid_check(research, today))
     # 2026-10-29 (使用者：你他媽當我電腦資源很多是不是): the research took the whole CPU and another project's UE build ran
     # 9% in 8 hours; research, pipelines and the worker run at the idle priority so other work goes first
     checks.append(priority_check(processes, research.parent.parent))
     return checks
+
+
+def paid_check(research: Path, today: date) -> dict[str, object]:
+    """While the FinMind plan (plan.json) is paid and not past its end, every paid table covers the previous session
+    (paid/through.json) — what today's 13:50 orders read (paiddaily runs at 22:05 and 07:05)."""
+    import json
+
+    from quant_platform.research.chips import PAID_SOURCES
+
+    name, source = "付費資料每天更新", "開發歷程 2026-11-02：付費資料 10/21 起沒更新，147 個前向帳戶用假資料決定"
+    history = research / "history"
+    try:
+        plan = json.loads((history / "raw" / "finmind" / "plan.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        plan = {}
+    if not plan.get("limit") or int(plan["limit"]) <= 600 or str(plan.get("expires") or "") < today.isoformat():
+        return _check(name, source, True, "付費方案沒有在用（或已到期），不檢查")
+    sessions = [day for day in _sessions(research) if day < today]
+    if not sessions:
+        return _check(name, source, True, "沒有交易日資料")
+    due = sessions[-1].isoformat()
+    try:
+        covered = json.loads((history / "paid" / "through.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        covered = {}
+    late = {table: covered.get(table, "沒有") for table in sorted(set(PAID_SOURCES.values())) if covered.get(table, "") < due}
+    return _check(name, source, not late, f"應涵蓋到 {due}" + ("；落後：" + "、".join(f"{table} {day}" for table, day in late.items())
+                                                            if late else "，全部涵蓋"))
 
 
 def priority_check(processes: list[dict[str, object]] | None, root: Path) -> dict[str, object]:

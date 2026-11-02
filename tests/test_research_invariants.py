@@ -313,3 +313,32 @@ def test_the_project_is_found_by_its_full_path_not_a_dot(monkeypatch, tmp_path):
             {"pid": 7, "priority": 8, "command": f"powershell -File {project / 'scripts' / 'research-pipeline.ps1'} -Name fullscan"},
             {"pid": 8, "priority": 8, "command": f"{python} -m quant_platform.dashboard.warm instance/research"}]
     assert [item["pid"] for item in invariants.greedy(rows, relative)] == [6, 7]
+
+
+def test_the_paid_tables_must_cover_the_previous_session_while_the_plan_lasts(tmp_path):
+    """2026-11-02: the paid tables stopped on 10-21 and nothing caught it for eight sessions."""
+    import json as _json
+    from datetime import date as _date
+
+    import pandas as pd
+
+    from quant_platform.research import invariants
+
+    research = tmp_path / "research"
+    (research / "history" / "daily").mkdir(parents=True)
+    pd.DataFrame({"date": [_date(2026, 10, 29), _date(2026, 10, 30), _date(2026, 11, 2)], "close": 1.0}).to_parquet(
+        research / "history" / "daily" / "TAIEX.parquet", index=False)
+    plan = research / "history" / "raw" / "finmind" / "plan.json"
+    plan.parent.mkdir(parents=True)
+    plan.write_text(_json.dumps({"limit": 6000, "expires": "2026-11-21"}), encoding="utf-8")
+    through = research / "history" / "paid" / "through.json"
+    through.parent.mkdir(parents=True)
+    tables = ["BranchSignals", "TaiwanStockBlockTrade", "TaiwanStockBrokerDailyConcentration",
+              "TaiwanStockGovernmentBankBuySell", "TaiwanStockLoanCollateralBalance", "TaiwanStockMarginMaintenance"]
+    through.write_text(_json.dumps({name: "2026-10-21" for name in tables}), encoding="utf-8")
+    stale = invariants.paid_check(research, _date(2026, 11, 2))
+    assert not stale["ok"] and "應涵蓋到 2026-10-30" in stale["detail"]
+    through.write_text(_json.dumps({name: "2026-10-30" for name in tables}), encoding="utf-8")
+    assert invariants.paid_check(research, _date(2026, 11, 2))["ok"]
+    plan.write_text(_json.dumps({"limit": 6000, "expires": "2026-11-21"}), encoding="utf-8")
+    assert invariants.paid_check(research, _date(2026, 11, 23))["ok"]               # past the plan's end: not checked
