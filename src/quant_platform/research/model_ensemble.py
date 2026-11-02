@@ -97,6 +97,17 @@ def fit_year(x: np.ndarray, y20: np.ndarray, rank20: np.ndarray, y60: np.ndarray
     return Ensemble(members)
 
 
+# 2026-11-02: every gradient boosting model's registered gate in one place — the version it must beat and the years
+# (research/scan.failed_models and the model page read it; the page showed "—" from model H on)
+RECENT_YEARS = (2021, 2022, 2023, 2024, 2025)
+GATES = {"gbm-2.0.0": ("gbm-1.4.0", GATE_YEARS), "gbm-2.2.0": ("gbm-2.0.0", GATE_YEARS),
+         "gbm-2.3.0": ("gbm-2.2.0", GATE_YEARS), "gbm-2.4.0": ("gbm-2.2.0", GATE_YEARS),
+         "gbm-2.5.0": ("gbm-2.3.0", GATE_YEARS), "gbm-2.6.0": ("gbm-2.5.0", GATE_YEARS),
+         "gbm-2.7.0": ("gbm-2.6.0", GATE_YEARS), "gbm-2.8.0": ("gbm-2.7.0", RECENT_YEARS),
+         "gbm-2.9.0": ("gbm-2.7.0", RECENT_YEARS), "gbm-2.10.0": ("gbm-2.9.0", RECENT_YEARS),
+         "gbm-2.11.0": ("gbm-2.10.0", RECENT_YEARS), "dl-1.0.0": ("gbm-2.0.0", GATE_YEARS)}
+
+
 def gate(models_root, version: str = "gbm-2.0.0", against: str = "gbm-1.4.0", years=GATE_YEARS) -> dict[str, object]:
     """The registered gate: the development years' average top-20 gain of the ensemble against gbm-1.4.0's
     (``years``: 2026-10-28, gbm-2.8.0 is judged on 2021-2025)."""

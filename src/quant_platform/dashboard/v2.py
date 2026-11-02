@@ -508,14 +508,17 @@ def _model_gate(folder: Path, version: str, meta: dict) -> dict[str, object] | N
             if check.get("auc") is None:
                 return None
             return {"passed": check["passed"], "text": f"AUC {check['auc']:.3f} 對波動 {check['auc_volatility']:.3f}（要高 0.02）"}
-        against = {"gbm-2.0.0": "gbm-1.4.0", "gbm-2.2.0": "gbm-2.0.0", "dl-1.0.0": "gbm-2.0.0"}.get(version)
-        if against:
-            from quant_platform.research.model_ensemble import gate as top_gate
+        from quant_platform.research.model_ensemble import GATES
+        from quant_platform.research.model_ensemble import gate as top_gate
 
-            check = top_gate(folder, version, against)
+        if version in GATES:
+            against, years = GATES[version]
+            check = top_gate(folder, version, against, years)
             if check.get("top20_gain") is None or check.get("against_top20_gain") is None:
                 return None
-            return {"passed": check["passed"], "text": f"{check['top20_gain']:+.2%} 對 {against} {check['against_top20_gain']:+.2%}"}
+            span = f"（{years[0]}～{years[-1]}）" if tuple(years) != tuple(GATES["gbm-2.0.0"][1]) else ""
+            return {"passed": check["passed"],
+                    "text": f"{check['top20_gain']:+.2%} 對 {against} {check['against_top20_gain']:+.2%}{span}"}
     except (OSError, ValueError, KeyError, TypeError):      # one model's gate must not take the research pages down
         return None
     return None
