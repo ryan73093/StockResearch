@@ -1,4 +1,4 @@
-﻿param([ValidateSet("data-a", "board", "modelp", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "robustfront", "exec_a", "exec_b", "llmreplay", "monthmodels", "next10blend", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind", "finmind-paid", "finmind-paid-b", "finmind-paid-c", "paid-factors", "newdata", "intraday", "limitscheck", "finmind-paid-c2", "newdata-now", "finmind-paid-rest", "holders2", "holders3", "liveflow", "modeli", "monthfill", "deep27", "modelj", "jdeep", "split", "split_a", "split_b", "splitblend", "splitblends", "splitblends_a", "splitblends_b", "bigscan3", "fmdaily_a", "fmdaily_b", "openfeas", "opentight", "govbank", "engine160", "veto2", "knowledge", "veto3_a", "veto3_b", "vetoblends_a", "vetoblends_b", "veto4", "veto5", "forwardrepair", "veto6", "blendroll", "bigscanroll", "govbank2", "branches", "robot35", "paidveto", "robot35s", "deephalf", "blendsteady", "stress", "protect", "bearguard_a", "bearguard_b", "bearguardpost", "bearguard", "bearguard3", "bearguard4", "bearguard5", "blendguard", "forwardfix", "forwardaudit", "forwardwhy", "entryonly", "leakfix", "fullscan", "modelk", "leakfixend", "spreadwatch", "halftwins_a", "halftwins_b", "halftwinsend", "gate2020", "band", "issues", "bandsells", "reproduce", "reproducecheck", "bear6", "modell", "stalefix", "rl4", "bear7", "modelm", "bear8", "blendrecent", "fwdminutes", "rebuild160_a", "rebuild160_b", "rebuild160end", "forwardaudit2", "techdeep4", "deepregate", "t2half_a", "t2half_b", "t2halfend", "blendfrontier", "bear9", "earnings", "surpriseswap", "blendfour", "bear10", "modelo", "deepdirect", "regate221", "blendsize", "techsecond", "bear11", "techveto", "techresid", "bear12", "bear13", "blendreach", "blendreach14", "branchrefit", "paiddaily", "paidrestart", "rebuild161_a", "rebuild161_b", "rebuild161end")][string]$Name = "daily")
+﻿param([ValidateSet("data-a", "board", "modelp", "daily", "model", "statements", "statements-refresh", "rl", "turnover", "exits", "execution", "blends", "rl-sleeves", "model-60", "t0hunt", "ai-researcher", "news-events", "lowdd", "largecap", "largecap2", "evidence", "scan", "scan4", "robots", "resume4", "robot2", "wide4", "consensus", "trials", "leakcheck", "devconsensus", "modelf", "costswitch", "rawv2", "techmodel", "hypotheses", "minhold", "engine13", "engine131", "dividends", "engine140", "t0scan5", "timefactors", "factormom", "audit", "robot20", "shortdata", "shortfactors", "alerts", "robot21", "rebuild141", "lendingdata", "lendingfactors", "rebuild142", "corporate", "issuance", "dealermodel", "robot30", "robot40", "rebuild143", "dealer2", "deep1", "robot41", "reductions", "robot31", "rebuild150", "worst", "dlrisk", "riskrules", "dealer3", "scan4gpu", "timing", "rolling", "rolling-holdout", "forward-rolling", "deep2a", "deep2b", "deep2cost", "deep2leak", "deep2risk", "deep2cluster", "deep2r3", "deep2scan", "deep2large", "exit2", "coresat", "deep3", "deep2wide", "robustness", "rolling-regrade", "rolling-blends", "spread", "deep2timing", "trim", "blendscan", "insiderdata", "buybackdata", "disclosurestudy", "factorcorr", "modelh", "deep2neutral", "deep24", "deep2top10", "costall", "pledgestudy", "threefam", "industry", "techdeep", "robot32", "robot33", "meta1", "winner", "deep26", "modelgm", "rolesplit", "robot34", "holding", "holding2_a", "holding2_b", "holding3", "holding4_a", "holding4_b", "top10blend", "bigscan", "bigscan2", "listupdate", "robustfront", "exec_a", "exec_b", "llmreplay", "monthmodels", "next10blend", "llmtrader", "scancalm", "factors-recent", "archive", "seed", "factors", "finmind", "finmind-paid", "finmind-paid-b", "finmind-paid-c", "paid-factors", "newdata", "intraday", "limitscheck", "finmind-paid-c2", "newdata-now", "finmind-paid-rest", "holders2", "holders3", "liveflow", "modeli", "monthfill", "deep27", "modelj", "jdeep", "split", "split_a", "split_b", "splitblend", "splitblends", "splitblends_a", "splitblends_b", "bigscan3", "fmdaily_a", "fmdaily_b", "openfeas", "opentight", "govbank", "engine160", "veto2", "knowledge", "veto3_a", "veto3_b", "vetoblends_a", "vetoblends_b", "veto4", "veto5", "forwardrepair", "veto6", "blendroll", "bigscanroll", "govbank2", "branches", "robot35", "paidveto", "robot35s", "deephalf", "blendsteady", "stress", "protect", "bearguard_a", "bearguard_b", "bearguardpost", "bearguard", "bearguard3", "bearguard4", "bearguard5", "blendguard", "forwardfix", "forwardaudit", "forwardwhy", "entryonly", "leakfix", "fullscan", "modelk", "leakfixend", "spreadwatch", "halftwins_a", "halftwins_b", "halftwinsend", "gate2020", "band", "issues", "bandsells", "reproduce", "reproducecheck", "bear6", "modell", "stalefix", "rl4", "bear7", "modelm", "bear8", "blendrecent", "fwdminutes", "rebuild160_a", "rebuild160_b", "rebuild160end", "forwardaudit2", "techdeep4", "deepregate", "t2half_a", "t2half_b", "t2halfend", "blendfrontier", "bear9", "earnings", "surpriseswap", "blendfour", "bear10", "modelo", "deepdirect", "regate221", "blendsize", "techsecond", "bear11", "techveto", "techresid", "bear12", "bear13", "blendreach", "blendreach14", "branchrefit", "paiddaily", "paidrestart", "rebuild161_a", "rebuild161_b", "rebuild161end", "regate221b")][string]$Name = "daily")
 # Long research runs, detached from any terminal or assistant session (使用者 2026-10-04):
 # start with scripts\start-research.ps1 -Name <name> (outside the assistant's process tree, 2026-10-06).
 # Progress shows on the website (研究 › 執行中的程式); each step's output goes to instance\research\logs.
@@ -73,6 +73,15 @@ function Test-GpuSearch {
     [bool](Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
         $_.CommandLine -like "*scan-full*--part*" -or $_.CommandLine -match "quant_platform\.research daily --name blend" })
 }
+# 2026-11-04: what the GPU has free, by the driver (nvidia-smi) - dl-2.2.1 died of CUDA out of memory on 11-03 01:54
+# while the month's list and the worker held 13 GB of the 16, though no search was running
+function Get-GpuFreeGB {
+    try {
+        $line = & nvidia-smi --query-gpu=memory.total,memory.used --format=csv,noheader,nounits | Select-Object -First 1
+        $parts = $line -split ','
+        return [math]::Round(([double]$parts[0] - [double]$parts[1]) / 1024, 1)
+    } catch { return 0 }
+}
 function Wait-ForMemory([string[]]$Arguments) {
     if ($Arguments.Count -lt 2 -or $Arguments[1] -ne "quant_platform.research") { return }
     $deep = ($Arguments -join " ") -like "*--model-version dl-*"
@@ -140,6 +149,16 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
     if ($process.ExitCode -in @(1073807364, -1073741510, -1073741502, -1073741205)) {
         Write-Note "步驟 $Label 被系統結束（關機、重開機或主控台關閉）：流程標成中斷，服務下次啟動時自動重開"
         Write-PipelineRecord "interrupted"
+        exit 1
+    }
+    # 2026-11-04: regate221's training died on 11-03 01:54 (CUDA out of memory) and its refit at 19:43 (MemoryError);
+    # the flow went on with its rules, statistics and lists on a model never made. A step that ended on an error (not
+    # zero, and Python's traceback in its error log - an audit's "found differences" is a 1 without one) stops the
+    # flow as "failed": the 16:00 check shows it, nothing restarts it by itself
+    if ($process.ExitCode -ne 0 -and (Test-Path -LiteralPath $err) -and
+            (Select-String -LiteralPath $err -Pattern "Traceback \(most recent call last\)" -Quiet)) {
+        Write-Note "步驟 $Label 出錯（結束碼 $($process.ExitCode)，錯誤在 $err）：流程停在這裡、標成失敗，後面的步驟不跑"
+        Write-PipelineRecord "failed"
         exit 1
     }
 }
@@ -2120,6 +2139,24 @@ switch ($Name) {
         Wait-While "等引擎 1.6.0 的選手池重跑結束（rebuild160_a、_b）" { [bool](Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "research-pipeline\.ps1 -Name rebuild160_[ab]" }) } 300
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
         Invoke-Step "1-rerun" @("-m", "quant_platform.research", "daily", "--name", "rerun_all_b", "--broker", "cathay")
+    }
+    "regate221b" {
+        # 2026-11-04: regate221's dl-2.2.1 training died on CUDA out of memory (11-03 01:54) and the flow went on
+        # without its model. Trained again once the list's regrading (rebuild161end) and regate221 are done, no other
+        # research step runs, and the GPU has 8 GB free by the driver - then the same steps as regate221
+        Wait-While "等 11 月名單重評（rebuild161end）與 regate221 結束" { [bool](Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match "research-pipeline\.ps1 -Name (rebuild161end|regate221)( |$)" }) } 300
+        Wait-While "等其他研究步驟結束、顯示卡空出 8 GB（目前 $(Get-GpuFreeGB) GB）" {
+            [bool](Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
+                $_.CommandLine -match "quant_platform\.research" -and $_.CommandLine -notmatch "live-flow" }) -or (Get-GpuFreeGB) -lt 8 } 300
+        Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
+        Invoke-Step "1-train" @("-m", "quant_platform.research", "model", "--model-version", "dl-2.2.1")
+        Invoke-Step "2-rules" @("-m", "quant_platform.research", "daily", "--name", "deepregate", "--broker", "cathay")
+        Invoke-Step "3-stats" @("-m", "quant_platform.research", "stats", "--family", "daily")
+        Invoke-Step "4-refit" @("-m", "quant_platform.research", "rolling", "--step", "models", "--missing-only")
+        Invoke-Step "5-select" @("-m", "quant_platform.research", "rolling", "--step", "select", "--only-new", "--workers", "2", "--broker", "cathay")
+        Invoke-Step "6-holdout" @("-m", "quant_platform.research", "rolling", "--step", "holdout", "--broker", "cathay")
+        Invoke-Step "7-forward" @("-m", "quant_platform.research", "forward")
+        Invoke-Step "8-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "rebuild161end" {
         # after both halves: November's list graded again (its cutoff is the pool's end: the pool's runs are read,

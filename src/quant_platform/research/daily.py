@@ -3528,16 +3528,11 @@ def blend_counted_reach_batch() -> list:
     return counted_reach_batch()
 
 
-def stale_results() -> int:
-    """The rules (blends too) whose latest result is not on the current engine (rerun_all_batch reruns them)."""
-    from pathlib import Path as _Path
-
-    from quant_platform.research.registry import TrialRegistry, newest
-
-    latest = newest(TrialRegistry(_Path("instance") / "research" / "trials.jsonl").records(),
-                    lambda record: record.kind == "candidate" and record.period == "recent")
-    return sum(1 for record in latest.values()
-               if str((record.metrics or {}).get("engine") or "").split("+")[0] != ENGINE_VERSION)
+def stale_results(research=None) -> int:
+    """The 100%-stock rules (blends too) whose latest result is not on the current engine — the ones rerun_all_batch
+    reruns (stale_engine). 2026-11-04: it counted every rule, the 72 holding 0050 too, which are never run again —
+    round fourteen would have waited for them forever."""
+    return len(stale_engine(research))
 
 
 def bear13_blend_batch() -> list:

@@ -224,6 +224,9 @@ def test_a_rule_whose_latest_result_is_an_older_engine_is_listed(tmp_path):
         registry.register(kind="candidate", period="recent", spec_hash=rule.rule_hash, spec_name=rule.name,
                           input_hash=f"i{number}", data_fingerprint="f", metrics={"engine": engine}, report_file=f"r{number}.json")
     assert [rule.name for rule in stale_engine(tmp_path)] == ["規則0"]               # the 0050 half is not a strategy
+    from quant_platform.research.daily import stale_results
+
+    assert stale_results(tmp_path) == 1          # 2026-11-04: round fourteen's guard waits for 規則0 only, never the half
     registry.register(kind="candidate", period="recent", spec_hash=stale_engine(tmp_path)[0].rule_hash, spec_name="規則0",
                       input_hash="i9", data_fingerprint="f", metrics={"engine": ENGINE_VERSION}, report_file="r0.json")
     assert stale_engine(tmp_path) == []
