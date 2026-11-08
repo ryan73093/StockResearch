@@ -424,3 +424,5 @@ def test_the_news_and_paid_tables_are_due_once_their_runs_have_come(tmp_path):
     four = datetime(2026, 11, 3, 16, 0, tzinfo=zone)
     assert invariants.collected_due(research, four.date(), four, (14, 45)) == date(2026, 11, 2)
     assert invariants.collected_due(research, four.date(), four, (7, 30)) == date(2026, 11, 2)
+    monday = datetime(2026, 11, 9, 0, 40, tzinfo=zone)                # 2026-11-09: Friday's run collected Thursday's
+    assert invariants.collected_due(research, monday.date(), monday, (14, 45)) == date(2026, 11, 5)

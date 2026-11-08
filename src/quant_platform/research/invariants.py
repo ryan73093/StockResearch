@@ -726,7 +726,8 @@ def collected_due(research: Path, today: date, now: datetime | None, runs: tuple
 
     now = now or datetime.now(ZoneInfo("Asia/Taipei"))
     ran = today if (today < now.date() or (now.hour, now.minute) >= runs) else today - timedelta(days=1)
-    return _calendar(research).previous_trading_day(ran, inclusive=False)
+    calendar = _calendar(research)                       # 2026-11-09: the last session it ran on (a weekend has none)
+    return calendar.previous_trading_day(calendar.previous_trading_day(ran), inclusive=False)
 
 
 def _sessions(research: Path) -> list[date]:
