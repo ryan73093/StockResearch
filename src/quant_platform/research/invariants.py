@@ -442,17 +442,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                          "；".join(stuck[:4]) if stuck else "沒有"))
     # 2026-11-03: regate221 waited from 10-30 09:18 for 40 GB of memory free and nothing said so for three and a half
     # days — a flow waiting more than a day is shown with what it waits for
-    waiting = []
-    for row in _jobs(research):
-        if not str(row.get("id", "")).endswith("-wait") or row.get("status") != "running":
-            continue
-        try:
-            began = datetime.fromisoformat(str(row.get("started_at")))
-        except ValueError:
-            continue
-        hours = ((now or datetime.now(began.tzinfo)) - began).total_seconds() / 3600
-        if hours > 24 and _alive(int(row.get("pid") or 0), began):
-            waiting.append(f"{str(row.get('command', '')).replace('research-pipeline.ps1 -Name ', '')} 等了 {hours:.0f} 小時：{row.get('current')}")
+    waiting = long_waits(research, now)
     checks.append(_check("研究流程沒有等超過一天的", "開發歷程 2026-11-03：regate221 等記憶體 3 天半沒人發現", not waiting,
                          "；".join(waiting[:4]) if waiting else "沒有"))
     # 2026-10-27 (使用者：現在是不是全部正確): the pool shows each rule's latest result — every 100%-stock one on the
@@ -693,6 +683,25 @@ def due_session(research: Path, today: date, now: datetime | None = None) -> dat
     now = now or datetime.now(ZoneInfo("Asia/Taipei"))
     after = today < now.date() or (now.hour, now.minute) >= (15, 45)
     return _calendar(research).previous_trading_day(today, inclusive=after)
+
+
+def long_waits(research: Path, now: datetime | None = None) -> list[str]:
+    """The flows waiting more than a day, with what they wait for (a wait's record has the status "waiting"; 2026-11-08:
+    this looked for "running", and passed while regate221b waited four days for the GPU)."""
+    from quant_platform.research import jobs
+
+    found = []
+    for row in _jobs(research):
+        if not str(row.get("id", "")).endswith("-wait") or row.get("status") != "waiting":
+            continue
+        try:
+            began = datetime.fromisoformat(str(row.get("started_at")))
+        except ValueError:
+            continue
+        hours = ((now or datetime.now(began.tzinfo)) - began).total_seconds() / 3600
+        if hours > 24 and jobs._alive(int(row.get("pid") or 0), began):
+            found.append(f"{str(row.get('command', '')).replace('research-pipeline.ps1 -Name ', '')} 等了 {hours:.0f} 小時：{row.get('current')}")
+    return found
 
 
 def _audit_split(found: dict) -> str:

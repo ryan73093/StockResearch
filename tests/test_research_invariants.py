@@ -391,8 +391,6 @@ def test_a_flow_waiting_more_than_a_day_is_shown(tmp_path, monkeypatch):
     from quant_platform.research import jobs
 
     monkeypatch.setattr(jobs, "_alive", lambda pid, started=None: pid == os.getpid())   # the waiting flow, alive
-    (tmp_path / "forward" / "stocks").mkdir(parents=True)
-    (tmp_path / "forward" / "stocks" / "tracked.json").write_text("[]", encoding="utf-8")
     (tmp_path / "jobs").mkdir()
     now = datetime.now(ZoneInfo("Asia/Taipei"))
 
@@ -400,15 +398,15 @@ def test_a_flow_waiting_more_than_a_day_is_shown(tmp_path, monkeypatch):
         began = (now - __import__("datetime").timedelta(hours=hours)).isoformat(timespec="seconds")
         (tmp_path / "jobs" / f"{name}-wait.json").write_text(json.dumps(
             {"id": f"{name}-wait", "command": f"research-pipeline.ps1 -Name {name}", "pid": os.getpid(),
-             "status": "running", "started_at": began, "current": "等記憶體：這一步要約 40 GB 可用"}), encoding="utf-8")
+             "status": "waiting", "started_at": began, "current": "等記憶體：這一步要約 40 GB 可用"}), encoding="utf-8")
 
-    def found():
-        return {item["name"]: item for item in invariants.run(tmp_path, now.date(), windows=[], now=now)}[
-            "研究流程沒有等超過一天的"]
     wait("short", 3)
-    assert found()["ok"]
+    assert invariants.long_waits(tmp_path, now) == []
     wait("regate221", 90)
-    assert not found()["ok"] and "regate221 等了 90 小時" in found()["detail"]
+    assert ["regate221 等了 90 小時" in line for line in invariants.long_waits(tmp_path, now)] == [True]
+    done = json.loads((tmp_path / "jobs" / "regate221-wait.json").read_text(encoding="utf-8"))
+    (tmp_path / "jobs" / "regate221-wait.json").write_text(json.dumps({**done, "status": "done"}), encoding="utf-8")
+    assert invariants.long_waits(tmp_path, now) == []
 
 
 def test_the_news_and_paid_tables_are_due_once_their_runs_have_come(tmp_path):

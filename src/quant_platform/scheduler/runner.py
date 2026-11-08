@@ -1682,6 +1682,11 @@ def run_scheduler_worker(container: "Container | None" = None) -> None:
         return
     dependencies.automation_service.recover_stale_runs(booted_at=booted_at())
     scheduler = BlockingScheduler(timezone=dependencies.settings.scheduler_timezone)
+    from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
+
+    from quant_platform.research.gpu import release as release_gpu
+
+    scheduler.add_listener(lambda _event: release_gpu(), EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)  # 2026-11-08: gpu.release
     job_count = configure_scheduler(scheduler, dependencies)
     _add_maintenance_jobs(scheduler, dependencies)
     timezone = dependencies.settings.scheduler_timezone

@@ -426,10 +426,11 @@ class StockForwardTracker:
         with open(self._folder / "log-archive.jsonl", "a", encoding="utf-8") as handle:
             for record in moved:
                 handle.write(json.dumps({**record, "archived_at": moment}, ensure_ascii=False, default=str) + "\n")
-        kept = [record for record in records if record["rule_hash"] not in hashes]
         partial = self.log_path.with_suffix(".partial")
-        partial.write_text("".join(json.dumps(record, ensure_ascii=False, default=str) + "\n" for record in kept),
-                           encoding="utf-8")
+        with open(partial, "w", encoding="utf-8") as handle:         # 2026-11-08: a line at a time (one joined string:
+            for record in records:                                   # MemoryError on 11-03, regate221's refit)
+                if record["rule_hash"] not in hashes:
+                    handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
         files.replace(partial, self.log_path, wait=300.0)       # 2026-10-29: a page reading it (research/files.py)
         marks = self.rebases()
         if any(key in marks for key in hashes):
@@ -1523,6 +1524,12 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
                              "return": round(rule_units - 1, 6), "benchmark_return": round(base_units - 1, 6),
                              "excess": round(rule_units - base_units, 6)}
     return output
+
+
+def unexplained(rows: list[dict]) -> set[str]:
+    """2026-11-08: the accounts a forward audit found differing with no 13:50-table reason on their first different day
+    (``audit_decisions``: ``first["table"]``, the after-close orders' numbers against the day's data)."""
+    return {row["rule_hash"] for row in rows if row.get("differed") and not (row.get("first") or {}).get("table")}
 
 
 def reconcile(records: list[dict[str, object]], rebased: dict[str, dict[str, str]] | None = None) -> dict[str, list[str]]:

@@ -21,6 +21,19 @@ def device():
     return torch.device("cuda")
 
 
+def release() -> None:
+    """2026-11-08: what PyTorch keeps reserved after a job, given back — the worker (13:50 orders, 15:30 records) held
+    9.7 GB of the card for days, and dl-2.2.1's retraining waited four days for 8 GB free. Only when a job loaded PyTorch."""
+    import gc
+    import sys
+
+    torch = sys.modules.get("torch")
+    if torch is None or not torch.cuda.is_available():
+        return
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
 def name() -> str:
     import torch
 
