@@ -1502,7 +1502,9 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
         if not run:
             continue
         rule_units, base_units, sessions = 1.0, 1.0, 0
+        parts = []
         for position, month in enumerate(run):
+            units_before, base_before, sessions_before, first_day, last_day = rule_units, base_units, sessions, None, None
             cutoff = cutoff_for(date(int(month[:4]), int(month[5:]), 1))
             since = (cutoff + timedelta(days=1)).isoformat()
             days = dict(by_account.get((rule_hash, since), {}))
@@ -1520,9 +1522,14 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
                     rule_units *= (float(now["value"]) - flow) / float(before["value"])
                     base_units *= (float(now["benchmark_value"]) - flow) / float(before["benchmark_value"])
                     sessions += 1
+                    first_day, last_day = first_day or day, day
+            if sessions > sessions_before:           # 2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果)
+                parts.append({"list": month, "since": since, "from": first_day, "to": last_day,
+                              "sessions": sessions - sessions_before, "return": round(rule_units / units_before - 1, 6),
+                              "benchmark_return": round(base_units / base_before - 1, 6)})
         output[rule_hash] = {"sessions": sessions, "months": run, "start": run[0],
                              "return": round(rule_units - 1, 6), "benchmark_return": round(base_units - 1, 6),
-                             "excess": round(rule_units - base_units, 6)}
+                             "excess": round(rule_units - base_units, 6), "parts": parts}
     return output
 
 

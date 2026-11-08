@@ -625,3 +625,23 @@ def test_the_t0_chain_counts_the_money_kept_against_0050_sold():
     assert counted["return"] == pytest.approx(-0.10) and counted["benchmark_return"] == pytest.approx(0.02)
     mid = chain(records[:2], lists, date(2026, 10, 5), costs)["A"]
     assert mid["return"] == pytest.approx(0.0) and chain(records[:2], lists, date(2026, 10, 5))["A"]["return"] == pytest.approx(0.30)
+
+
+def test_the_chain_lists_each_months_part_with_its_days_and_returns():
+    """2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果): 9-01 account 100 -> 110 (0050 100 -> 105), then
+    October's list's account, in November only, 200 -> 190 (0050 200 -> 210)."""
+    from quant_platform.research.stock_forward import chain
+
+    def row(rule, since, day, value, bench):
+        return {"rule_hash": rule, "since": since, "date": day, "value": value, "benchmark_value": bench, "contributed": 100.0}
+    records = [row("A", "2026-09-01", "2026-09-01", 100.0, 100.0), row("A", "2026-09-01", "2026-10-30", 110.0, 105.0),
+               row("A", "2026-10-01", "2026-10-30", 200.0, 200.0), row("A", "2026-10-01", "2026-11-02", 190.0, 210.0)]
+    lists = {"2026-08-31": {"A"}, "2026-09-30": {"A"}}
+    found = chain(records, lists, date(2026, 11, 3))["A"]
+    assert [part["list"] for part in found["parts"]] == ["2026-10", "2026-11"]
+    first, second = found["parts"]
+    assert (first["since"], first["from"], first["to"], first["sessions"]) == ("2026-09-01", "2026-09-01", "2026-10-30", 2)
+    assert first["return"] == pytest.approx(0.10) and first["benchmark_return"] == pytest.approx(0.05)
+    assert (second["since"], second["from"], second["to"], second["sessions"]) == ("2026-10-01", "2026-11-02", "2026-11-02", 1)
+    assert second["return"] == pytest.approx(-0.05) and second["benchmark_return"] == pytest.approx(0.05)
+    assert found["return"] == pytest.approx(1.10 * 0.95 - 1) and found["excess"] == pytest.approx(1.10 * 0.95 - 1.05 * 1.05)

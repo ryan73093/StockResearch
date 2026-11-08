@@ -115,6 +115,21 @@ def family_log(rows: list[dict], family: str, count: int = 6) -> list[dict]:
     return picked[:count]
 
 
+def chain_summary(chained: dict[str, dict], names: dict[str, str], top: int = 5) -> dict[str, object] | None:
+    """2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果): the rules with the longest run on the monthly
+    lists — how many are ahead of 0050 on the money counted, the middle one and the best."""
+    if not chained:
+        return None
+    longest = max(row["sessions"] for row in chained.values())
+    rows = [{**row, "rule_hash": key, "name": names.get(key, "")} for key, row in chained.items() if row["sessions"] == longest and row.get("parts")]
+    if not rows:
+        return None
+    gaps = sorted(row["excess"] for row in rows)
+    return {"start": min(row["parts"][0]["from"] for row in rows), "end": max(row["parts"][-1]["to"] for row in rows), "rules": len(rows),
+            "sessions": longest, "ahead": sum(gap > 0 for gap in gaps), "median": gaps[len(gaps) // 2],
+            "benchmark": rows[0]["benchmark_return"], "top": sorted(rows, key=lambda row: -row["excess"])[:top]}
+
+
 def view(research: str | Path, start: str, optimizations: list[dict], gates: dict[str, object]) -> dict[str, object]:
     """The dashboard (kept until the files it reads change: about 7 s to build)."""
     research = Path(research)
@@ -433,5 +448,6 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
             "charts": charts(research, start, overall, ordinary, steady, benchmark, periods),
             "recent": recent_all, "forward": forward, "scale": search_scale(research),
             "t0": toward_t0(tracker.chained(date.today()), pool["daily"], summary, count=0),
+            "chain": chain_summary(tracker.chained(date.today()), {item["rule_hash"]: item["name"] for item in tracker.tracked()}),
             "families": families, "eras": periods, "passing": sum(row["tier"] in PASSING_TIERS for row in main),
             "rules": len(main)}

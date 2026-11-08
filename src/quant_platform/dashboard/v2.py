@@ -306,7 +306,8 @@ def ready_views(research_dir: Path) -> dict[str, object]:
     from quant_platform.research.pool import pool_view
     from quant_platform.research.status import overview as research_status
 
-    return {"pool:seed": lambda: pool_view(research_dir, basis="seed"), "dashboard": lambda: dashboard_data(research_dir),
+    return {"chained": lambda: StockForwardTracker(research_dir).chained(datetime.now(TAIPEI).date()),
+            "pool:seed": lambda: pool_view(research_dir, basis="seed"), "dashboard": lambda: dashboard_data(research_dir),
             "downside": lambda: downside_table(research_dir), "forward": lambda: StockForwardTracker(research_dir).summary(),
             "status": lambda: research_status(research_dir), "scale": lambda: search_scale(research_dir),
             "roles": lambda: roles_view(research_dir)}
@@ -1427,6 +1428,11 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         from quant_platform.research.numbers import spec_of
 
         if number is None:
+            from quant_platform.research.numbers import experiment_spec
+
+            experiment = experiment_spec(request.args.get("n") or "")      # 2026-11-08: E1, E2, … have only a forward page
+            if experiment:
+                return redirect(url_for("v2.research_forward", rule_hash=experiment))
             typed = "".join(ch for ch in (request.args.get("n") or "") if ch.isdigit())
             if not typed:
                 return redirect(url_for("v2.research_pool"))
@@ -1455,8 +1461,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         board_row = next((row for row in board.get("rows") or [] if row.get("rule_hash") == rule_hash), None)
         if board.get("common_start") != forward_common_start(datetime.now(TAIPEI).date()).isoformat():
             board_row = None                                    # 2026-10-17: last month's start line is not shown
+        from quant_platform.research.daily import FORWARD_SESSIONS
+
+        chained = ready("chained", research_dir, dict)      # the warm-up's; computed here it held the page over two minutes
         return render_template("v2/research_forward.html", active_nav="research", forward=detail, chart=chart,
                                trades_chart=trades_chart, board=board, board_row=board_row, research_tab="overview",
+                               chain=(chained or {}).get(rule_hash), chain_needed=FORWARD_SESSIONS,
                                family=rule_family((detail["item"].get("rule") if detail["item"].get("kind") in ("daily", "blend")
                                                    else None)),
                                execution=execution_text(detail["item"].get("rule") or {}),

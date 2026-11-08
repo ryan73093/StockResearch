@@ -63,6 +63,16 @@
       {{ legend([{'css': 'v1', 'label': '帳戶的中位數'}, {'css': 'band', 'label': '中間一半的帳戶'}, {'css': 'vref', 'label': '0050 同樣的錢'}]) }}
     </figure>
     {% endif %}
+    {% if d.chain %}
+    {# 2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果): the record that decides T0, from its first day #}
+    <figure class="dash-panel dash-panel--full">
+      <figcaption><h3>連續上名單的前向紀錄（{{ d.chain.start[5:7]|int }}/{{ d.chain.start[8:10]|int }}～{{ d.chain.end[5:7]|int }}/{{ d.chain.end[8:10]|int }}，{{ d.chain.sessions }} 個交易日）</h3><span>{{ '{:,}'.format(d.chain.rules) }} 個規則連續留在每月名單上；報酬只算賣掉拿到的、賠的都算；0050 同期 {{ '{:+.1%}'.format(d.chain.benchmark) }}（當天賣掉）</span></figcaption>
+      <div class="kpis kpis--page"><div class="kpi"><div class="kpi__label">贏 0050</div><div class="kpi__value">{{ '{:,}'.format(d.chain.ahead) }}<small> 個，共 {{ '{:,}'.format(d.chain.rules) }} 個</small></div></div><div class="kpi"><div class="kpi__label">中間那個規則比 0050</div><div class="kpi__value {{ 'up' if d.chain.median > 0 else 'down' }}">{{ '{:+.1f}'.format(d.chain.median * 100) }}<small> 個百分點</small></div></div></div>
+      <table class="table--stack dash-chain"><thead><tr><th>贏最多的規則</th><th>報酬</th><th>比 0050</th></tr></thead><tbody>
+      {% for row in d.chain.top %}<tr><td data-primary><a href="/research/forward/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }} {{ row.name[:60] }}</a></td><td data-label="報酬" class="{{ 'up' if row['return'] > 0 else 'down' }}">{{ '{:+.1%}'.format(row['return']) }}</td><td data-label="比 0050" class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '{:+.1f}'.format(row.excess * 100) }} 個百分點</td></tr>{% endfor %}
+      </tbody></table>
+    </figure>
+    {% endif %}
     {% set fs = d.spread.forward if d.spread else none %}{% if fs %}
     {# 2026-10-27 (使用者：獲益的那些分佈圖我也要看): the forward accounts' money if all sold, each category a row #}
     <figure class="dash-panel dash-panel--full">

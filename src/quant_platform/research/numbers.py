@@ -49,7 +49,26 @@ def spec_of(research: str | Path, number: int) -> str | None:
     return (_CACHE.get("by_number") or {}).get(number)  # type: ignore[union-attr]
 
 
+def experiments() -> dict[str, str]:
+    """2026-11-08 (16:00 需求檢查：每個前向帳戶都有策略編號): the forward-only experiments (the news veto, the LLM trader and
+    their controls) have no backtest and so no trial: rule hash -> "E1", "E2", … in the order stock_forward.forward_only
+    lists them. Fixed like a trial's number: a new experiment goes at the end of that list."""
+    if "experiments" not in _CACHE:
+        from quant_platform.research.stock_forward import forward_only
+
+        _CACHE["experiments"] = {rule.rule_hash: f"E{number}" for number, (rule, _reason) in enumerate(forward_only(), start=1)}
+    return dict(_CACHE["experiments"])  # type: ignore[arg-type]
+
+
+def experiment_spec(code: str) -> str | None:
+    """The rule hash of "E3" (None when there is no such experiment)."""
+    return next((spec for spec, name in experiments().items() if name == code.strip().lstrip("#").upper()), None)
+
+
 def label(research: str | Path, spec_hash: str | None) -> str:
-    """"#7339" or "" (a forward-only account, e.g. the AI researcher's, has no number)."""
+    """"#7339", "#E3" for a forward-only experiment, or "" (an account with no rule behind it, e.g. the AI researcher's)."""
     found = number_of(research, spec_hash)
-    return f"#{found}" if found is not None else ""
+    if found is not None:
+        return f"#{found}"
+    name = experiments().get(spec_hash or "")
+    return f"#{name}" if name else ""

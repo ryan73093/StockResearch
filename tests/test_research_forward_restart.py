@@ -37,3 +37,31 @@ def test_the_gpu_is_given_back_only_when_a_job_loaded_pytorch(monkeypatch):
     monkeypatch.delitem(sys.modules, "torch")
     gpu.release()
     assert calls == []
+
+
+def test_a_forward_only_experiment_has_a_fixed_number(tmp_path):
+    """2026-11-08: 8 forward accounts (the news veto, the LLM trader, their controls) had no number."""
+    from quant_platform.research import numbers
+    from quant_platform.research.stock_forward import forward_only
+
+    rules = [rule for rule, _reason in forward_only()]
+    assert len(rules) >= 8 and len({rule.rule_hash for rule in rules}) == len(rules)
+    assert numbers.label(tmp_path, rules[0].rule_hash) == "#E1" and numbers.label(tmp_path, rules[3].rule_hash) == "#E4"
+    assert numbers.experiment_spec("#e4") == rules[3].rule_hash and numbers.experiment_spec("E99") is None
+    assert numbers.label(tmp_path, "no-such-rule") == ""
+
+
+def test_the_overview_summarises_the_longest_run_on_the_lists():
+    """2026-11-08: the rules with the most sessions on the lists: how many ahead of 0050, the middle one, the best first."""
+    from quant_platform.research.dashboard import chain_summary
+
+    part = {"from": "2026-09-01", "to": "2026-11-06"}
+    chained = {"a": {"sessions": 44, "excess": 0.10, "return": 0.02, "benchmark_return": -0.08, "parts": [part]},
+               "b": {"sessions": 44, "excess": -0.02, "return": -0.10, "benchmark_return": -0.08, "parts": [part]},
+               "c": {"sessions": 44, "excess": -0.05, "return": -0.13, "benchmark_return": -0.08, "parts": [part]},
+               "d": {"sessions": 5, "excess": 0.30, "return": 0.20, "benchmark_return": -0.10, "parts": [part]}}
+    found = chain_summary(chained, {"a": "甲"}, top=2)
+    assert (found["rules"], found["sessions"], found["ahead"], found["median"]) == (3, 44, 1, -0.02)
+    assert (found["start"], found["end"], found["benchmark"]) == ("2026-09-01", "2026-11-06", -0.08)
+    assert [row["rule_hash"] for row in found["top"]] == ["a", "b"] and found["top"][0]["name"] == "甲"
+    assert chain_summary({}, {}) is None

@@ -4,7 +4,7 @@
 {% block title %}{{ rule_no(forward.item.rule_hash) }} {{ forward.item.name }} · 前向觀察{% endblock %}
 {% block heading %}
 {% set latest = forward.latest %}
-{{ rule_head(forward.item.rule_hash, forward.item.name, family, 'forward', has_backtest=rule_no(forward.item.rule_hash) != '',
+{{ rule_head(forward.item.rule_hash, forward.item.name, family, 'forward', has_backtest=rule_no(forward.item.rule_hash) != '' and not rule_no(forward.item.rule_hash).startswith('#E'),
              sub='前向觀察：' ~ forward.item.since ~ ' 起、已記錄 ' ~ forward.sessions ~ ' 個交易日' ~ (('（最新 ' ~ latest.date ~ '）') if latest else '')) }}
 {% endblock %}
 {% block content %}
@@ -27,6 +27,22 @@
 </div>
 {% if got %}
 <p class="small" style="margin:0 0 12px"><b>怎麼算</b>：投入 {{ '{:,.0f}'.format(latest.contributed) }} 元。賺的只算已經賣掉、拿到手的錢（含股利）；賠的不管賣了沒都算——還拿著的股票如果今天賣掉（扣手續費、證交稅、滑價）會低於成本，差額算進虧損（{{ '{:,.0f}'.format(got.held_loss) }} 元）；還拿著、帳面賺的 {{ '{:,.0f}'.format(got.paper) }} 元還沒拿到，不算。0050 是你自己的部位、從來不賣，用同樣的錢今天全部賣掉的結果比。{% set out = forward.sell_all %}{% if out %}<span class="muted">參考（不算成績）：今天全部賣掉拿回 {{ '{:,.0f}'.format(out.cash_back) }} 元、扣掉的費稅與滑價 {{ '{:,.0f}'.format(out.costs) }} 元；帳上總值 {{ '{:,.0f}'.format(latest.value) }} 元。</span>{% endif %}</p>
+{% endif %}
+
+{% if chain and chain.parts %}
+{# 2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果): the months this rule stayed on the lists, chained #}
+<section class="card">
+  <div class="card__head"><h2>連續上名單的前向紀錄</h2><span class="muted small">{{ chain.parts[0].from }}～{{ chain.parts[-1].to }}，{{ chain.sessions }}／{{ chain_needed }} 個交易日</span></div>
+  <dl class="facts">
+    <div><dt>這個策略</dt><dd class="{{ 'up' if chain['return'] > 0 else 'down' }}">{{ '{:+.2%}'.format(chain['return']) }}</dd></div>
+    <div><dt>同期 0050（當天賣掉）</dt><dd class="{{ 'up' if chain.benchmark_return > 0 else 'down' }}">{{ '{:+.2%}'.format(chain.benchmark_return) }}</dd></div>
+    <div><dt>比 0050</dt><dd class="{{ 'up' if chain.excess > 0 else 'down' }}">{{ '{:+.2f}'.format(chain.excess * 100) }} 個百分點</dd></div>
+  </dl>
+  <table class="table--stack"><thead><tr><th>名單</th><th>帳戶起算</th><th>這段期間</th><th>交易日</th><th>策略</th><th>0050</th></tr></thead><tbody>
+  {% for part in chain.parts %}<tr><td data-primary>{{ part.list[5:7]|int }} 月名單</td><td data-label="帳戶起算">{{ part.since }}</td><td data-label="這段期間">{{ part.from }}～{{ part.to }}</td><td data-label="交易日">{{ part.sessions }} 天</td><td data-label="策略" class="{{ 'up' if part['return'] > 0 else 'down' }}">{{ '{:+.2%}'.format(part['return']) }}</td><td data-label="0050" class="{{ 'up' if part.benchmark_return > 0 else 'down' }}">{{ '{:+.2%}'.format(part.benchmark_return) }}</td></tr>{% endfor %}
+  </tbody></table>
+  <p class="col-help">報酬是每天的實際結果（賺的只算賣掉拿到的、賠的連還拿著的都算）扣掉當天投入的錢後連乘。滿 {{ chain_needed }} 個交易日、不輸 0050、對帳正常才可能升 T0，第一次可能是 2026-11-30。</p>
+</section>
 {% endif %}
 
 {% if board_row %}

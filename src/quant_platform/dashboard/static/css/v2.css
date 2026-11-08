@@ -829,6 +829,10 @@ td.wrap { white-space: normal; min-width: 180px; }
 .dash-panel--full { grid-column: 1 / -1; }
 .dash-panel figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .dash-panel figcaption h3 { font-size: 16px; margin: 0; }
+.dash-chain { width: 100%; table-layout: fixed; }  /* 2026-11-09: long rule names wrap; the panel does not widen the page */
+.dash-chain th, .dash-chain td { white-space: normal; }
+.dash-chain th:nth-child(2) { width: 72px; }
+.dash-chain th:nth-child(3) { width: 124px; }
 .dash-panel figcaption span { font-size: 12.5px; color: var(--muted); }
 @media (max-width: 1000px) { .dash-grid { grid-template-columns: minmax(0, 1fr); } }
 .dash-link { margin: 6px 0 0; }

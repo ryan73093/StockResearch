@@ -508,10 +508,12 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     # 2026-11-03: the page check opened the first account — the LLM trader's news experiment, which has no number and no
     # rule page (404), so the check failed every day on that and said nothing of the numbered rules' pages. The pages
     # of a numbered rule are opened; the accounts without a number are their own check
+    from quant_platform.research.numbers import experiments as forward_experiments
     from quant_platform.research.numbers import numbers as strategy_numbers
 
     numbered = strategy_numbers(research)
-    unnumbered = [item["name"] for item in live if item["rule_hash"] not in numbered]
+    experiment_numbers = forward_experiments()        # 2026-11-08: E1, E2, …; they have no rule page to open below
+    unnumbered = [item["name"] for item in live if item["rule_hash"] not in numbered and item["rule_hash"] not in experiment_numbers]
     checks.append(_check("每個前向帳戶都有策略編號", "使用者 2026-10-28：麻煩每個策略給個編號", not unnumbered,
                          f"沒有編號的 {len(unnumbered)} 個" + (f"：{unnumbered[:4]}" if unnumbered else "")))
     if site:
