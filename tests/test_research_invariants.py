@@ -486,3 +486,31 @@ def test_a_step_that_died_of_memory_in_the_last_day_is_red(tmp_path):
     assert not found["ok"] and "regate221-20261103-1-train.err.log（CUDA out of memory）" in found["detail"]
     (logs / "regate221-20261103-1-train.err.log").unlink()
     assert {item["name"]: item for item in invariants.run(tmp_path, date(2026, 11, 12), windows=[], memory=[])}[name]["ok"]
+
+
+def test_a_red_check_says_how_many_days_it_has_been_red(tmp_path):
+    """2026-11-12 (problem register P6; AGENTS.md 「16:00 沒過的項目當天處理」): each run replaced the last one's file, so
+    nothing said a check had been red for a week — the forward audit's 69 accounts were red from 11-09 and read the
+    same every day. Each run is kept (one line) and a red check says since when."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo("Asia/Taipei")
+    red = {"name": "前向帳戶照規則交易", "source": "x", "ok": False, "detail": "69 個"}
+    other = {"name": "判讀", "source": "x", "ok": False, "detail": "過期"}
+    green = {"name": "備份", "source": "x", "ok": True, "detail": "有"}
+    for day, checks in ((9, [red, green]), (10, [red, dict(other, ok=True), green]), (10, [red, green]),      # twice on the 10th
+                        (11, [red, other, green]), (12, [red, other, green])):
+        invariants.save(tmp_path, [dict(item) for item in checks], datetime(2026, 11, day, 16, 0, tzinfo=zone))
+    payload = invariants.latest(tmp_path)
+    found = {item["name"]: item for item in payload["checks"]}
+    assert (found["前向帳戶照規則交易"]["red_days"], found["前向帳戶照規則交易"]["red_since"]) == (4, "2026-11-09")
+    assert (found["判讀"]["red_days"], found["判讀"]["red_since"]) == (2, "2026-11-11")       # green on the 10th
+    assert "red_days" not in found["備份"]
+    assert len((tmp_path / "invariants-history.jsonl").read_text(encoding="utf-8").splitlines()) == 5
+    assert "連續 4 天" in invariants.tile(payload)["detail"]
+    # the first run ever (no history): red for one day
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    invariants.save(fresh, [dict(red)], datetime(2026, 11, 12, 16, 0, tzinfo=zone))
+    assert invariants.latest(fresh)["checks"][0]["red_days"] == 1

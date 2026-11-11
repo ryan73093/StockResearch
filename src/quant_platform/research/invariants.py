@@ -78,6 +78,19 @@ def own_windows(windows: list[dict[str, object]], root: Path) -> list[dict[str, 
     return output
 
 
+def notification_channel() -> str | None:
+    """Where a failure notification would go out, by the settings: "line", "email", or None (2026-11-12; the same rule
+    as ``NotificationService.failure_channel`` — a mail host alone is not a channel)."""
+    from quant_platform.config import settings as settings_module
+
+    settings = settings_module.get_settings()
+    if settings.line_enabled and settings.line_channel_access_token and settings.line_to:
+        return "line"
+    if settings.email_enabled and settings.smtp_host and settings.smtp_from and settings.report_email_to:
+        return "email"
+    return None
+
+
 def memory_errors(research: str | Path, hours: int = 24, now: datetime | None = None) -> list[dict[str, str]]:
     """2026-11-12 (the memory answer of 11-11): the research steps and worker jobs whose error log of the last ``hours``
     says they ran out of memory. Windows' own event (``memory_events``) is written only when the whole machine runs out;
@@ -589,6 +602,23 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     checks.append(_check("過去 24 小時沒有步驟因為記憶體不足而失敗", "docs/problem_register_2026-11-11.md P5：7 個步驟記憶體錯誤，檢查卻是綠的",
                          not died, (f"{len(died)} 個：" + "；".join(f"{item['log']}（{item['what']}）" for item in died[:3]))
                          if died else "沒有"))
+    # 2026-11-12: the worker's jobs that ended on an error (scheduler/failures.py)
+    from quant_platform.scheduler import failures as job_failures
+
+    failed_jobs = job_failures.recent(research.parent, now=now)
+    checks.append(_check("過去 24 小時排程工作沒有失敗", "docs/problem_register_2026-11-11.md P6：模型重訓連續九晚失敗沒有人知道",
+                         not failed_jobs, (f"{len(failed_jobs)} 個：" + "；".join(
+                             f"{item['name']}（{item['at'][5:10].replace('-', '/')} {item['at'][11:16]}）：{item['error'][:80]}"
+                             + (f"（{item['times']} 次）" if int(item["times"]) > 1 else "") for item in failed_jobs[:3]))
+                         if failed_jobs else "沒有"))
+    # 2026-11-12: with no channel every failure notification ended as "disabled" — red until LINE or the mail is set
+    try:
+        channel = notification_channel()
+        checks.append(_check("失敗通知有管道可以送出", "docs/problem_register_2026-11-11.md P6：失敗通知沒有管道",
+                             channel is not None, {"line": "LINE", "email": "信箱"}.get(channel or "",
+                             "LINE 與信箱都沒有設定：.env 要填 EMAIL_ENABLED、SMTP_HOST、SMTP_FROM、REPORT_EMAIL_TO（與帳號密碼），或 LINE 的三項")))
+    except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
+        checks.append(_check("失敗通知有管道可以送出", "docs/problem_register_2026-11-11.md P6", False, f"沒辦法檢查：{str(exc)[:120]}"))
     # 2026-11-02: the paid tables were downloaded once and stopped on 10-21/22; 147 forward accounts read them (directly
     # or through models J-P) and decided on "no block trade, no branch buying" for eight sessions before anyone saw it
     checks.append(paid_check(research, today, now))
@@ -803,7 +833,43 @@ def _jobs(research: Path) -> list[dict[str, object]]:
     return rows
 
 
+HISTORY = "invariants-history.jsonl"
+
+
+def _red_days(research: Path, checks: list[dict[str, object]], now: datetime) -> None:
+    """2026-11-12 (problem register P6): how many days in a row each red check has been red, written on the check
+    (``red_days``, ``red_since``) — the days are the days a run was kept (``HISTORY``, one line a run, the day's last
+    run counting), today's included. Every run replaced the last one's file and nothing said a check had been red for
+    a week."""
+    days: dict[str, set[str]] = {}
+    path = research / HISTORY
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+                days[str(row["at"])[:10]] = set(row["red"])
+            except (ValueError, KeyError, TypeError):
+                continue
+    today = now.date().isoformat()
+    days[today] = {str(item["name"]) for item in checks if not item["ok"]}
+    earlier = sorted((day for day in days if day < today), reverse=True)
+    for item in checks:
+        if item["ok"]:
+            continue
+        since = today
+        for day in earlier:
+            if item["name"] not in days[day]:
+                break
+            since = day
+        item["red_days"] = 1 + sum(1 for day in earlier if day >= since)
+        item["red_since"] = since
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"at": now.isoformat(timespec="seconds"), "red": sorted(days[today])}, ensure_ascii=False) + chr(10))
+
+
 def save(research: str | Path, checks: list[dict[str, object]], now: datetime) -> Path:
+    Path(research).mkdir(parents=True, exist_ok=True)
+    _red_days(Path(research), checks, now)
     path = Path(research) / "invariants.json"
     path.write_text(json.dumps({"at": now.isoformat(timespec="seconds"), "checks": checks}, ensure_ascii=False, indent=1),
                     encoding="utf-8")
@@ -824,4 +890,8 @@ def tile(payload: dict[str, object] | None) -> dict[str, str]:
     return {"label": "需求檢查", "state": "全部符合" if not failed else f"{len(failed)} 項不符",
             "badge": "badge--ok" if not failed else "badge--bad",
             "detail": f"{str(payload['at'])[5:16].replace('T', ' ')}・{len(payload['checks'])} 項"
-                      + (f"・{'；'.join(item['name'] for item in failed[:2])}" if failed else "")}
+                      + (f"・{'；'.join(item['name'] + _since(item) for item in failed[:2])}" if failed else "")}
+
+
+def _since(item: dict[str, object]) -> str:
+    return f"（連續 {item['red_days']} 天）" if int(item.get("red_days") or 0) > 1 else ""

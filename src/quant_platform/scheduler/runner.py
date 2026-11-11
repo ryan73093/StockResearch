@@ -138,11 +138,32 @@ def _notify_failure(container: "Container", key: str, what: str, error: str | No
     from quant_platform.application.notifications import failure_text
 
     try:
-        container.notification_service.send(
+        # 2026-11-12: LINE when it is on, else email when it is set (NotificationService.send_failure)
+        service = container.notification_service
+        (getattr(service, "send_failure", None) or service.send)(
             key, f"{what}失敗", failure_text(what, error, container.settings.public_url)
         )
     except Exception:  # a notification problem must not hide the original failure
         logger.exception("Failure notification %s could not be sent", key)
+
+
+def failure_listener(container: "Container", scheduler):
+    """2026-11-12 (problem register P6): what the scheduler calls when a job ends on an error — the failure written
+    down (scheduler/failures.py: the status command, the 16:00 check and the Today page read it) and sent on whatever
+    notification channel is set. The nightly model refit raised nine nights and only the worker's log knew."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.scheduler import failures
+
+    def listen(event) -> None:
+        try:
+            job = scheduler.get_job(event.job_id)
+            name = getattr(job, "name", None) or event.job_id
+            row = failures.record(_instance_dir(container.settings.database_url), event.job_id, name, event.exception)
+            _notify_failure(container, f"job:{event.job_id}:{row['at'][:10]}", name, row["error"])
+        except Exception:      # the listener must never take the scheduler down
+            logger.exception("Could not write down the failure of %s", getattr(event, "job_id", "?"))
+
+    return listen
 
 
 def refresh_market_calendar(container: "Container") -> object | None:
@@ -1719,6 +1740,7 @@ def run_scheduler_worker(container: "Container | None" = None) -> None:
     from quant_platform.research.gpu import release as release_gpu
 
     scheduler.add_listener(lambda _event: release_gpu(), EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)  # 2026-11-08: gpu.release
+    scheduler.add_listener(failure_listener(dependencies, scheduler), EVENT_JOB_ERROR)       # 2026-11-12
     job_count = configure_scheduler(scheduler, dependencies)
     _add_maintenance_jobs(scheduler, dependencies)
     timezone = dependencies.settings.scheduler_timezone

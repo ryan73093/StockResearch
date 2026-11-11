@@ -713,6 +713,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             started = run.started_at if run.started_at.tzinfo else run.started_at.replace(tzinfo=UTC)
             if run.status.value == "failed" and started.astimezone(TAIPEI).date() == local.date():
                 alerts.append(f"{JOB_LABELS.get(job, job)}（{market}）今天執行失敗")
+        # 2026-11-12 (problem register P6): the worker's jobs that ended on an error in the last 24 hours
+        from quant_platform.scheduler import failures as job_failures
+
+        failed_jobs = job_failures.recent(_instance_dir(dependencies.settings.database_url), now=local)
+        if failed_jobs:
+            alerts.append(f"排程工作最近 24 小時失敗 {len(failed_jobs)} 個：" + "、".join(row["name"] for row in failed_jobs[:2]))
         calendar = dependencies.market_calendar.calendar("TW")
         if (
             calendar.is_trading_day(local.date()) and local.time() >= time(15, 0)

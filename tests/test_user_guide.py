@@ -49,6 +49,12 @@ def test_today_page_shows_one_line_when_the_system_has_a_problem(setup, monkeypa
 
     body = client.get("/").get_data(as_text=True)
     assert 'class="alert-line"' in body and "台股籌碼與基本面（TW）今天執行失敗" in body and "看系統頁" in body
+    # 2026-11-12: a worker job that ended on an error in the last 24 hours is on the same line
+    from quant_platform.container import _instance_dir
+    from quant_platform.scheduler import failures
+
+    failures.record(_instance_dir(container.settings.database_url), "model_retrain", "模型重訓（交易日 22:45）", KeyError("x"))
+    assert "排程工作最近 24 小時失敗 1 個：模型重訓（交易日 22:45）" in client.get("/").get_data(as_text=True)
 
 
 def test_onboarding_checklist_follows_the_real_setup(setup):

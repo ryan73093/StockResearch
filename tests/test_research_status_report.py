@@ -142,3 +142,12 @@ def test_a_job_that_failed_in_the_last_day_is_listed_until_the_same_job_succeeds
     text = status.render(state)
     assert "最近 24 小時失敗、之後沒有成功過的工作 1 個" in text
     assert "失敗：重訓機器學習模型（dl-2.6.0，2026 年 11 月）（2026-11-29 22:45）：KeyError: '2026-10-29'" in text
+
+
+def test_a_red_check_shows_how_long_it_has_been_red(tmp_path):
+    research = _research(tmp_path)
+    (research / "invariants.json").write_text(json.dumps({"at": "2026-11-30T16:00:00+08:00", "checks": [
+        {"name": "前向帳戶照規則交易", "ok": False, "detail": "69 個", "red_days": 4, "red_since": "2026-11-25"},
+        {"name": "備份", "ok": True, "detail": "有"}]}), encoding="utf-8")
+    text = status.render(status.collect(research, NOW))
+    assert "✗ 前向帳戶照規則交易（連續 4 天，2026-11-25 起）：69 個" in text

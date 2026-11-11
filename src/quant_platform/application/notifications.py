@@ -102,7 +102,12 @@ class LineMessagingClient:
 
 
 class NotificationService:
-    def __init__(self, settings, repository, client: LineMessagingClient | None = None) -> None:
+    def __init__(self, settings, repository, client: LineMessagingClient | None = None, email=None) -> None:
+        if email is None:              # 2026-11-12: the failures' second channel (send_failure)
+            from quant_platform.application.automation import SmtpEmailNotifier
+
+            email = SmtpEmailNotifier(settings)
+        self._email = email
         self._configured = bool(settings.line_channel_access_token and settings.line_to)
         self._enabled = bool(settings.line_enabled and self._configured)
         self._repository = repository
@@ -144,6 +149,33 @@ class NotificationService:
             logger.warning("LINE notification %s failed: %s", key, exc)
         self._repository.save_delivery(NotificationDelivery(
             id=None, channel="line", recipient="LINE", subject=f"{key}｜{title}"[:240], status=status,
+            related_run_id=None, attempted_at=datetime.now(UTC), error=error,
+        ))
+        return status
+
+
+    def failure_channel(self) -> str | None:
+        """Where a failure would go out now: "line", "email", or None when neither is set."""
+        if self._enabled and self._client is not None:
+            return "line"
+        return "email" if self._email.configured else None
+
+    def send_failure(self, key: str, title: str, text: str) -> str:
+        """sent | duplicate | disabled | failed. 2026-11-12 (problem register P6): a failure goes out on LINE when LINE
+        is on, else by email when the SMTP settings are filled in (EMAIL_ENABLED, SMTP_HOST, SMTP_FROM,
+        REPORT_EMAIL_TO; the user name and password where the server asks) — LINE was the only channel and was never
+        set up, so every failure notification ended as "disabled"."""
+        channel = self.failure_channel()
+        if channel == "line":
+            return self.send(key, title, text)
+        if channel is None:
+            return "disabled"
+        if any(item.channel == "email" and item.status == "sent" and item.subject.split("｜", 1)[0] == key
+               for item in self._repository.list_deliveries(200)):
+            return "duplicate"
+        status, error = self._email.send(f"【交易研究分析平台】{title}", text)
+        self._repository.save_delivery(NotificationDelivery(
+            id=None, channel="email", recipient="email", subject=f"{key}｜{title}"[:240], status=status,
             related_run_id=None, attempted_at=datetime.now(UTC), error=error,
         ))
         return status

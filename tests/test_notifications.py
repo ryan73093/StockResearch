@@ -201,3 +201,50 @@ def test_system_page_shows_line_status_and_test_button(tmp_path):
     assert "LINE 通知尚未設定或未啟用" in response.get_data(as_text=True)
     guide = app.get("/system/docs/line")
     assert guide.status_code == 200 and "Messaging API" in guide.get_json()["markdown"]
+
+
+def test_a_failure_goes_out_by_email_when_line_is_not_set(tmp_path):
+    """2026-11-12 (problem register P6): failures were sent on LINE only, LINE was never set up, and every failure
+    notification ended as "disabled" — nine failed nights of the model refit reached nobody. A failure goes out on
+    LINE when LINE is on, else by email when the SMTP settings are filled in; once a key, and written down."""
+    from types import SimpleNamespace
+
+    from quant_platform.application.notifications import NotificationService
+    from quant_platform.domain.entities import NotificationDelivery
+
+    class Repository:
+        def __init__(self):
+            self.rows: list[NotificationDelivery] = []
+
+        def list_deliveries(self, limit):
+            return list(reversed(self.rows))[:limit]
+
+        def save_delivery(self, delivery):
+            self.rows.append(delivery)
+
+    class Email:
+        def __init__(self, configured=True, result=("sent", None)):
+            self.configured, self.result, self.sent = configured, result, []
+
+        def send(self, subject, body):
+            self.sent.append((subject, body))
+            return self.result
+
+    settings = SimpleNamespace(line_channel_access_token="", line_to="", line_enabled=False)
+    repository, email = Repository(), Email()
+    service = NotificationService(settings, repository, email=email)
+    assert service.enabled is False                                    # LINE's own switch is as it was
+    assert service.send_failure("job:model_retrain:2026-11-12", "模型重訓失敗", "KeyError") == "sent"
+    assert email.sent == [("【交易研究分析平台】模型重訓失敗", "KeyError")]
+    assert service.send_failure("job:model_retrain:2026-11-12", "模型重訓失敗", "KeyError") == "duplicate"
+    assert [(row.channel, row.status) for row in repository.rows] == [("email", "sent")]
+    assert service.status()["last"] is None                            # the LINE history does not count the email
+    assert service.failure_channel() == "email"
+    # nothing set: the failure is still written down once, as not delivered
+    nothing = NotificationService(settings, Repository(), email=Email(configured=False))
+    assert nothing.send_failure("k", "需求檢查失敗", "x") == "disabled" and nothing.failure_channel() is None
+    # an SMTP error is recorded as failed and may be tried again
+    broken = Email(result=("failed", "auth"))
+    failing = NotificationService(settings, repository, email=broken)
+    assert failing.send_failure("job:other:2026-11-12", "其他失敗", "x") == "failed"
+    assert failing.send_failure("job:other:2026-11-12", "其他失敗", "x") == "failed" and len(broken.sent) == 2

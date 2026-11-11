@@ -2,6 +2,18 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-11-12 02:40 — S11-B P6：失敗看得到——排程工作失敗的紀錄、紅燈連續幾天、失敗通知可以走信箱
+
+- 依據：`docs/problem_register_2026-11-11.md` P6（失敗沒有人知道）。每一項先寫會失敗的測試。
+- **排程工作失敗的紀錄**（`scheduler/failures.py`、`runner.failure_listener`）：worker 的任何排程工作以錯誤結束，就在 `instance\worker-failures.jsonl` 加一行（工作、時間、錯誤的最後一行），並送失敗通知。讀它的有三處：狀態指令（「排程工作最近 24 小時失敗 N 個」）、16:00 新檢查「過去 24 小時排程工作沒有失敗」、今日頁的警示列。原本這類失敗只在 worker 的紀錄檔裡，模型重訓連續九晚失敗沒有任何人看的地方顯示。
+- **紅燈連續幾天**（`invariants._red_days`）：每次 16:00 的結果原本直接蓋掉上一次的檔案。現在每次留一行在 `instance\research\invariants-history.jsonl`，紅的檢查寫上 `red_days` 與 `red_since`；狀態指令與系統頁的需求檢查方塊顯示「連續 N 天」。同一天跑兩次算一天。
+- **失敗通知走信箱**（`NotificationService.send_failure`）：失敗通知原本只走 LINE，LINE 從來沒設定，每一則都是「disabled」。現在 LINE 開著就走 LINE，否則信箱設好就寄信，一個 key 只寄一次、寄出與失敗都記在通知紀錄（channel `email`）。LINE 自己的開關、計畫建議的通知不變。
+- **現況（要使用者動手）**：`.env` 的信箱只填了 `SMTP_HOST`；`EMAIL_ENABLED`、`SMTP_FROM`、`REPORT_EMAIL_TO`、`SMTP_USERNAME`、`SMTP_PASSWORD` 是空的，LINE 也沒設定——所以現在仍然沒有任何管道。新增 16:00 檢查「失敗通知有管道可以送出」，設定好之前每天是紅的；狀態指令也寫「失敗通知：沒有管道 ✗」。密碼由使用者自己填（助理不輸入密碼）。11/11 交接檔寫「已設定的信箱」是錯的，實際只設了主機。
+- 16:00 需求檢查從 36 項變成 40 項（加：沒有步驟因記憶體不足失敗、排程工作沒有失敗、失敗通知有管道；文件守門在 D 已加）。
+- 測試：主線完整測試 1,201 個通過、0 個失敗、1 個略過（669 秒，`build/full_tests_b5.log`）；文件守門通過。
+- 部署：`scripts\deploy.ps1` 11/12 02:11:45 結束碼 0（web PID 31484、api PID 41412 健康檢查 200，worker PID 41964，tunnel PID 27028）；`scripts\check-public.ps1` 通過；今日頁與系統頁 200；已安裝的套件有 `send_failure`、`_red_days`，`notification_channel()` 回 None（沒有管道，和 `.env` 的現況一致）。`invariants-history.jsonl` 用 11/11 16:00 那一次的結果起頭（紅的 2 項），今天 16:00 起會顯示連續天數。
+- 回復：revert 這個 commit 後部署；`worker-failures.jsonl`、`invariants-history.jsonl` 是只增的紀錄，留著不影響。
+
 ## 2026-11-12 02:00 — S11-B 第 5～7 項（記憶體）：worker 的重工作另開程序、記憶體預留、記憶體錯誤的檢查
 
 - 依據：`docs/problem_register_2026-11-11.md` P5；11/11 回答「這個專案有記憶體不足的問題嗎」時列的四個洞（沒有預留、每步一律 16 GB、worker 不在管制內而且不釋放、40 GB 門檻幾乎到不了）。這一包補第一個與第三個，加上「檢查看不到」。每一項先寫會失敗的測試。

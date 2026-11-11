@@ -150,6 +150,7 @@ def chain(research: Path, months: list[dict[str, object]], through: date | None)
 
 def collect(research: str | Path, now: datetime | None = None) -> dict[str, object]:
     from quant_platform.research.invariants import due_session
+    from quant_platform.scheduler import failures
 
     research = Path(research)
     now = now or datetime.now(TAIPEI)
@@ -159,10 +160,21 @@ def collect(research: str | Path, now: datetime | None = None) -> dict[str, obje
     return {"at": now.isoformat(timespec="minutes"), "due": due.isoformat(),
             "close": (last_close(research) or "").__str__(), "forward": (forward or "").__str__(),
             "flows": flows(research, now), "checks": checks(research, now),
+            "job_failures": failures.recent(research.parent, now=now),        # 2026-11-12: the worker's failed jobs
+            "channel": _channel(),
             "list": {"wanted": month["wanted"],
                      "latest": ({key: value for key, value in month["months"][-1].items() if key != "passed"}
                                 | {"passed": len(month["months"][-1]["passed"])}) if month["months"] else None},
             "chain": chain(research, month["months"], forward)}
+
+
+def _channel() -> str | None:
+    from quant_platform.research import invariants
+
+    try:
+        return invariants.notification_channel()
+    except Exception:              # noqa: BLE001 - the report is printed whatever the settings say
+        return None
 
 
 def _mark(ok: bool) -> str:
@@ -185,6 +197,12 @@ def render(state: dict[str, object]) -> str:
         lines.append(f"  等待：{row['name']}（{str(row['since'])[:16].replace('T', ' ')} 起）：{row['reason']}")
     for row in flow["broken"]:
         lines.append(f"  {row['status']}：{row['name']}（{str(row['since'])[:16].replace('T', ' ')} 開始）")
+    lines.append("  失敗通知：" + {"line": "LINE", "email": "信箱"}.get(state.get("channel") or "",
+                                                                   "沒有管道（LINE 與信箱都沒設定，失敗不會通知）✗"))
+    if state.get("job_failures"):
+        lines.append(f"  排程工作最近 24 小時失敗 {len(state['job_failures'])} 個")
+        lines += [f"  失敗：{row['name']}（{row['at'][5:16].replace('T', ' ')}）：{row['error']}"
+                  + (f"（{row['times']} 次）" if int(row["times"]) > 1 else "") for row in state["job_failures"]]
     if flow.get("failed"):
         lines.append(f"  最近 24 小時失敗、之後沒有成功過的工作 {len(flow['failed'])} 個")
     for row in flow.get("failed") or []:
@@ -195,7 +213,9 @@ def render(state: dict[str, object]) -> str:
     else:
         stale = "" if found["today"] in (None, True) else "；✗ 今天 16:00 的還沒有"
         lines += ["", f"16:00 需求檢查（{found['at'][:16].replace('T', ' ')}，{found['count']} 項）：紅燈 {len(found['red'])} 項{stale}"]
-        lines += [f"  ✗ {item['name']}：{item.get('detail', '')}" for item in found["red"]]
+        lines += [f"  ✗ {item['name']}" + (f"（連續 {item['red_days']} 天，{item['red_since']} 起）"
+                                         if int(item.get("red_days") or 0) > 1 else "") + f"：{item.get('detail', '')}"
+                  for item in found["red"]]
     month = state["list"]
     lines += ["", "當月名單"]
     if month["latest"]:
