@@ -2,6 +2,17 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-11-11 23:30 — S11-D 部署與主線驗證；96 GB 記憶體已下單
+
+- commit ab1d0e1 推上 GitHub（23:16）。23:24:40 主線快轉到 ab1d0e1，`scripts\deploy.ps1` 23:25:35 結束碼 0：web PID 38024（健康檢查 200）、api PID 44984（200）、worker PID 18120、tunnel PID 45704。避開每小時 20 分的 FinMind 偵測與 45 分的知識庫索引；部署時沒有研究流程在跑。
+- 本機驗收（23:26）：`/project/decisions`、`/project/research_method`、`/project/research_criteria`、`/project/research_results`、`/project/agents`、`/project/handoff` 都是 200，內容端點 `/system/docs/<名稱>` 回 6 KB～952 KB（決定登記簿含 D-042）；研究總覽 200、最佳化紀錄 128 項、連到「現行結論與淘汰方向」；研究總覽重啟後第一次 26 秒（背景還沒算好）、第二次 0.39 秒。
+- 外網：`scripts\check-public.ps1` 通過（tunnel PID 45704、4 條連線；沒登入的資料請求被拒）。
+- 主線重跑先前失敗的三個測試檔加狀態指令的測試：40 個通過（文件守門含「落後 commit 數」、`test_research_tpex`、`test_research_issues`、`test_research_status_report`）。
+- 狀態指令在主線從工具執行正常（資料與前向到 11/11、流程 0 個在跑、16:00 紅燈 2 項）。
+- 使用者 23:27：已買 96 GB 記憶體、等到貨。到貨安裝後要做的寫在交接檔；在那之前 B 的記憶體項目（預留、worker 重工作另開程序）照做，不因為要加記憶體而跳過。
+- 沒處理：21:34 那次背景測試的程序（PID 41780、30060）還在，只佔 `build/pytest-full`（工作樹裡）；身分和卡死對不上，沒有結束。
+- 回復：同上一筆（revert ab1d0e1 後部署）。
+
 ## 2026-11-11 23:00 — S11-D 文件與工作方式重整：決定登記簿、AGENTS 1,846 字、規則分檔、交接三欄、定義只一處、狀態指令、文件守門
 
 - 使用者 11/11：先優化 D；D 要能確保後續文件開發後也要能維持文件的穩定、AI 要能讀對資料、省 token。規格是 `docs/problem_register_2026-11-11.md` 的 P8、P9 與「D 的設計」。這一包只動文件、測試、狀態指令與檢查（加上網站讀新檔位置的幾行），沒動研究引擎與前向帳戶，沒停或啟動任何研究流程。
