@@ -2,6 +2,20 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-11-12 02:00 — S11-B 第 5～7 項（記憶體）：worker 的重工作另開程序、記憶體預留、記憶體錯誤的檢查
+
+- 依據：`docs/problem_register_2026-11-11.md` P5；11/11 回答「這個專案有記憶體不足的問題嗎」時列的四個洞（沒有預留、每步一律 16 GB、worker 不在管制內而且不釋放、40 GB 門檻幾乎到不了）。這一包補第一個與第三個，加上「檢查看不到」。每一項先寫會失敗的測試。
+- **worker 的重工作另開程序**（`scheduler/child.py`）：前向紀錄（15:30）、盤後單（13:50）、模型重訓（22:45）、個股快照（15:45）、研究資料補抓（15:15）原本在 worker 自己的程序裡跑，載入整個行情表後 Python 不把記憶體還給系統——重啟兩天後、什麼都沒在跑時 worker 佔 11.8 GB。改成排程啟動 `python -m quant_platform.scheduler.child <工作>`（不開視窗、同樣的優先權與環境）並等它結束：同時只跑一個、子程序失敗就是這個工作失敗，跑完記憶體還給系統。輸出在 `instance\worker-jobs.log`。
+  - 盤後單每分鐘被叫一次（13:00～14:59），不能每分鐘開一個程序：把「這一分鐘有沒有事要做」（13:50～14:25、交易日、今天的表到了、今天還沒做完）拆成 `runner.after_close_due`，worker 先看，有事才開子程序。
+  - 真實環境驗證：`python -m quant_platform.scheduler.child retrain_models` 4.8 秒、結束碼 0、回傳 `[]`（這個月已訓練）。其餘四個工作要到今天 13:50、15:15、15:30、15:45 才會第一次走這條路——**還沒有在真實排程上驗證**，13:50 後要看 `instance\worker-jobs.log` 與盤後單。
+- **記憶體預留**（`scripts/research-pipeline.ps1` `Request-Memory`、`Get-ReservedGB`）：原本每一步開始前看一次可用記憶體，不預留——兩個流程同一分鐘都看到有空就都開跑（10/28：訓練加重播 48～57 GB）。現在放行的那一步寫下它要的量（`instance\research\memory\<流程 PID>.json`，10 分鐘，之後它自己用掉的會出現在系統數字裡），下一個流程把別人預留的扣掉再比；看與寫用一個 mutex 包起來。流程結束或時間到，預留自動消失。測試用 PowerShell 實際執行（放行、被擋、自己的不算、已結束的流程不算、過期的不算）。
+  - 真實流程驗證：`knowledge` 01:32:33 啟動，預留檔寫了 16 GB 到 01:42:33，01:33:15 結束碼 0、紀錄 `done`。
+- **記憶體錯誤的檢查**（`invariants.memory_errors`，16:00 新增「過去 24 小時沒有步驟因為記憶體不足而失敗」）：原本只看 Windows 的事件 2004（整台機器用完才有），七個步驟因為 MemoryError／CUDA out of memory 失敗的那些天檢查是綠的。現在讀最近 24 小時的步驟錯誤紀錄與 `worker-jobs.log`。真實資料：往回看 30 天找到的正好是 11/11 查到的那 7 個步驟（10/28 四個、10/29 一個、10/30 一個、11/02 一個），最近 24 小時 0 個。
+- **沒做（限制）**：每一步的需求量還是固定值（一般 16 GB、深度訓練 24 GB、含上櫃的 40 GB），沒有照量到的尖峰；96 GB 記憶體到貨後量一次再重設（交接檔）。worker 的子程序不經過預留（它們有固定時間，不能等）。
+- 測試：主線完整測試 1,193 個通過、0 個失敗、1 個略過（653 秒，`build/full_tests_b4.log`）；文件守門通過。
+- 部署：`scripts\deploy.ps1` 11/12 01:48:07 結束碼 0（web PID 46136、api PID 28708 健康檢查 200，worker PID 29884，tunnel PID 25540；避開 01:45 的知識庫索引）；`scripts\check-public.ps1` 通過；研究總覽 200；已安裝的套件有 `scheduler/child.py`，從安裝好的套件跑 `child retrain_models` 結束碼 0。架構文件補了 `scheduler/child.py` 與流程腳本的 step-helpers 兩列。
+- 回復：revert 這個 commit 後部署；`instance\research\memory\` 可以整個刪掉（只有暫時的預留檔）。
+
 ## 2026-11-12 01:30 — S11-B 第 2～4 項：決策檔讀不到不再當成空的、流程參數加引號、步驟沒做完的流程不標完成
 
 - 依據：`docs/system_review_2026-11-10.md` 根本原因 5、`docs/problem_register_2026-11-11.md` P5。每一項先寫會失敗的測試。

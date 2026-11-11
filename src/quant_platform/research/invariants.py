@@ -78,6 +78,33 @@ def own_windows(windows: list[dict[str, object]], root: Path) -> list[dict[str, 
     return output
 
 
+def memory_errors(research: str | Path, hours: int = 24, now: datetime | None = None) -> list[dict[str, str]]:
+    """2026-11-12 (the memory answer of 11-11): the research steps and worker jobs whose error log of the last ``hours``
+    says they ran out of memory. Windows' own event (``memory_events``) is written only when the whole machine runs out;
+    seven steps died of MemoryError or CUDA out of memory between 10-20 and 11-03 on days it stayed silent."""
+    import re
+
+    research = Path(research)
+    since = (now or datetime.now()).timestamp() - hours * 3600
+    pattern = re.compile(r"CUDA out of memory|Unable to allocate|ArrayMemoryError|WinError 1455|(?<![A-Za-z_])MemoryError")
+    paths = list((research / "logs").glob("*.err.log")) if (research / "logs").is_dir() else []
+    paths.append(research.parent / "worker-jobs.log")
+    found = []
+    for path in sorted(paths):
+        try:
+            if path.stat().st_mtime < since:
+                continue
+            with path.open("rb") as handle:                 # the end is where a step dies
+                handle.seek(max(0, path.stat().st_size - (1 << 20)))
+                text = handle.read().decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        match = pattern.search(text)
+        if match:
+            found.append({"log": path.name, "what": match.group(0)})
+    return found
+
+
 def memory_events(hours: int = 24) -> list[dict[str, object]]:
     """2026-10-29: the times Windows ran out of memory to commit in the last ``hours`` (Resource-Exhaustion-Detector,
     event 2004), each with the program that held the most (Taipei time; Windows only, read with no window)."""
@@ -557,6 +584,11 @@ def run(research: str | Path, today: date, backups: Path | None = None,
             if events else "沒有"))
     except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
         checks.append(_check(name, source, False, f"沒辦法檢查：{str(exc)[:120]}"))
+    # 2026-11-12: the check above was green on the days seven steps died of MemoryError or CUDA out of memory
+    died = memory_errors(research, now=now.replace(tzinfo=None) if now is not None and now.tzinfo else now)
+    checks.append(_check("過去 24 小時沒有步驟因為記憶體不足而失敗", "docs/problem_register_2026-11-11.md P5：7 個步驟記憶體錯誤，檢查卻是綠的",
+                         not died, (f"{len(died)} 個：" + "；".join(f"{item['log']}（{item['what']}）" for item in died[:3]))
+                         if died else "沒有"))
     # 2026-11-02: the paid tables were downloaded once and stopped on 10-21/22; 147 forward accounts read them (directly
     # or through models J-P) and decided on "no block trade, no branch buying" for eight sessions before anyone saw it
     checks.append(paid_check(research, today, now))

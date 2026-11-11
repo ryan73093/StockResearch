@@ -882,6 +882,31 @@ def fetch_official_close(container: "Container", now: datetime | None = None) ->
     return count
 
 
+def after_close_due(container: "Container", now: datetime | None = None) -> bool:
+    """Whether the after-close orders have work to do this minute: 13:50–14:25 on a trading day, today's TWSE table in,
+    and no run of today done or being written. 2026-11-12: apart from the job — the worker looks (cheap, every minute)
+    and starts the job's child process only then (scheduler/child.py)."""
+    from datetime import time as clock
+
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import after_close
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if not clock(13, 50) <= local_now.time() <= clock(14, 25):
+        return False
+    if _exchange_closure(container, "TW", local_now) is not None:
+        return False
+    base = _instance_dir(container.settings.database_url) / "research" / "history"
+    today = local_now.date()
+    existing = after_close.load(base.parent, today)
+    if existing is not None and (existing.get("finished_at") or
+                                 local_now - datetime.fromisoformat(existing["started_at"]) < timedelta(minutes=10)):
+        return False                                  # done, or being written (a run that died is started again)
+    # the close job (every minute from 13:49) has not got the table yet
+    return (base / "raw" / "twse_stock_all" / f"{today:%Y}" / f"{today:%Y%m%d}.json").is_file()
+
+
 def prepare_after_close_orders(container: "Container", now: datetime | None = None) -> object | None:
     """2026-10-14 (使用者：要在 14:30 前算出建議): once TWSE's table of today is in (13:49–14:01 measured), today's
     orders of every board rule for the after-hours sessions that close at 14:30 (research/after_close.py)."""
@@ -893,20 +918,12 @@ def prepare_after_close_orders(container: "Container", now: datetime | None = No
 
     zone = ZoneInfo(container.settings.scheduler_timezone)
     local_now = (now or datetime.now(zone)).astimezone(zone)
-    if not clock(13, 50) <= local_now.time() <= clock(14, 25):
-        return None
-    if _exchange_closure(container, "TW", local_now) is not None:
+    if not after_close_due(container, local_now):
         return None
     base = _instance_dir(container.settings.database_url) / "research" / "history"
     research = base.parent
     today = local_now.date()
-    existing = after_close.load(research, today)
-    if existing is not None and (existing.get("finished_at") or
-                                 local_now - datetime.fromisoformat(existing["started_at"]) < timedelta(minutes=10)):
-        return None                                   # done, or being written (a run that died is started again)
     raw = base / "raw" / "twse_stock_all" / f"{today:%Y}" / f"{today:%Y%m%d}.json"
-    if not raw.is_file():
-        return None                                   # the close job (every minute from 13:49) has not got it yet
     payload = _json.loads(raw.read_text(encoding="utf-8"))
     report = after_close.prepare(base, research, today, payload.get("payload", payload), now=local_now)
     if report:
@@ -1203,6 +1220,9 @@ def probe_close_availability(container: "Container") -> object:
 
 
 def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") -> None:
+    # 2026-11-12: the heavy jobs run in a child process, their memory back to the system at the end (scheduler/child.py)
+    from quant_platform.scheduler.child import in_child
+
     """Nightly prediction archive (02:30) and database backup (03:00), the
     close-availability probe (trading days 13:30–14:45, S1-W05), plus the
     TWSE calendar refresh shortly after start and then at most once per day.
@@ -1248,7 +1268,7 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         misfire_grace_time=6 * 60 * 60,
     )
     scheduler.add_job(
-        refresh_research_history,
+        in_child(refresh_research_history),
         args=[container],
         trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=15, timezone=timezone),
         id="research_history_refresh",
@@ -1270,7 +1290,7 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         misfire_grace_time=50,
     )
     scheduler.add_job(
-        prepare_after_close_orders,
+        in_child(prepare_after_close_orders, when=after_close_due),
         args=[container],
         trigger=CronTrigger(day_of_week="mon-fri", hour="13-14", minute="*", timezone=timezone),
         id="after_close_orders",
@@ -1446,7 +1466,7 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         misfire_grace_time=3 * 3600,
     )
     scheduler.add_job(
-        record_forward_simulation,
+        in_child(record_forward_simulation),
         args=[container],
         trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=30, timezone=timezone),
         id="forward_simulation",
@@ -1479,7 +1499,7 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
-        retrain_models,
+        in_child(retrain_models),
         args=[container],
         trigger=CronTrigger(day_of_week="mon-fri", hour=22, minute=45, timezone=timezone),
         id="model_retrain",
@@ -1512,7 +1532,7 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         misfire_grace_time=6 * 3600,
     )
     scheduler.add_job(
-        build_stock_snapshot,
+        in_child(build_stock_snapshot),
         args=[container],
         trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=45, timezone=timezone),
         id="stock_snapshot",

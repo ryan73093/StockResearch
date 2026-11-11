@@ -462,3 +462,27 @@ def test_the_documents_guard_is_a_daily_check(tmp_path):
     (research / "forward" / "stocks").mkdir(parents=True)
     names = [item["name"] for item in invariants.run(research, date(2026, 11, 11), windows=[], memory=[], processes=[])]
     assert found["name"] in names
+
+
+def test_a_step_that_died_of_memory_in_the_last_day_is_red(tmp_path):
+    """2026-11-12: Windows' out-of-memory event is written only when the whole machine runs out; seven steps died of
+    MemoryError or CUDA out of memory on days the memory check was green."""
+    import os
+    import time
+
+    name = "過去 24 小時沒有步驟因為記憶體不足而失敗"
+    logs = tmp_path / "logs"
+    logs.mkdir(parents=True)
+    assert invariants.memory_errors(tmp_path) == []
+    (logs / "regate221-20261103-1-train.err.log").write_text(
+        "Traceback (most recent call last):" + chr(10) + "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB",
+        encoding="utf-8")
+    (logs / "fine-20261103-1-step.err.log").write_text("UserWarning: something harmless", encoding="utf-8")
+    old = logs / "old-20261020-1-step.err.log"
+    old.write_text("MemoryError", encoding="utf-8")
+    os.utime(old, (time.time() - 3 * 86400,) * 2)
+    assert invariants.memory_errors(tmp_path) == [{"log": "regate221-20261103-1-train.err.log", "what": "CUDA out of memory"}]
+    found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 11, 12), windows=[], memory=[])}[name]
+    assert not found["ok"] and "regate221-20261103-1-train.err.log（CUDA out of memory）" in found["detail"]
+    (logs / "regate221-20261103-1-train.err.log").unlink()
+    assert {item["name"]: item for item in invariants.run(tmp_path, date(2026, 11, 12), windows=[], memory=[])}[name]["ok"]

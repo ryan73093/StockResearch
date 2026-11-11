@@ -85,19 +85,25 @@ function Get-GpuFreeGB {
         return [math]::Round(([double]$parts[0] - [double]$parts[1]) / 1024, 1)
     } catch { return 0 }
 }
+$script:ReservationFolder = Join-Path $root "instance\research\memory"
 function Wait-ForMemory([string[]]$Arguments) {
     if ($Arguments.Count -lt 2 -or $Arguments[1] -ne "quant_platform.research") { return }
     $deep = ($Arguments -join " ") -like "*--model-version dl-*"
     $wide = ($Arguments -join " ") -like "*--model-version dl-2.2.*"
     $need = if ($wide) { $WideTrainingGB } elseif ($deep) { $DeepTrainingGB } else { $StepGB }
     $other = if ($deep) { "另一個深度學習訓練" } else { "深度學習訓練" }
+    # 2026-11-12: the memory is taken, not only looked at (Request-Memory): the last of the conditions, so nothing is
+    # reserved while the step still waits for something else
+    # (the blocks below run inside Wait-While and read $need and $label from here, as the old ones read $need)
+    $label = ($Arguments | Select-Object -Skip 2) -join " "
     if ($deep) {          # 2026-10-30: the GPU looked at together with the memory, just before the step starts
-        Wait-While "等記憶體與顯示卡：這一步要約 $need GB 可用、沒有$($other)在跑、顯示卡沒有被大搜尋或組合搜尋佔用" {
-            (Get-CommitFreeGB) -lt $need -or (Test-DeepTraining) -or (Test-GpuSearch) } 60
+        Wait-While "等記憶體與顯示卡：這一步要約 $need GB 可用（扣掉別的流程剛預留的）、沒有$($other)在跑、顯示卡沒有被大搜尋或組合搜尋佔用" {
+            (Test-DeepTraining) -or (Test-GpuSearch) -or
+                -not (Request-Memory $script:ReservationFolder $PID $label $need (Get-CommitFreeGB)) } 60
         return
     }
-    Wait-While "等記憶體：這一步要約 $need GB 可用，而且沒有$($other)在跑（10/28 記憶體用完七次）" {
-        (Get-CommitFreeGB) -lt $need -or (Test-DeepTraining) } 60
+    Wait-While "等記憶體：這一步要約 $need GB 可用（扣掉別的流程剛預留的），而且沒有$($other)在跑（10/28 記憶體用完七次）" {
+        (Test-DeepTraining) -or -not (Request-Memory $script:ReservationFolder $PID $label $need (Get-CommitFreeGB)) } 60
 }
 
 # 2026-10-29 (AGENTS.md 研究規範：逐筆模擬的批次同時最多兩個程序): a batch of rules (daily --name) waits while two
@@ -133,6 +139,42 @@ function Get-StepVerdict([int]$ExitCode, [string]$ErrorLog) {
     if ($ExitCode -eq 2 -and (& $has "^usage: ")) { return "stop" }
     if ($ExitCode -eq 1) { return "noted" }
     return "unfinished"
+}
+# 2026-11-12 (the memory answer of 11-11, hole 1: no reservation): two flows that looked at the free memory in the same
+# minute both saw it and both started (10-28: a training and the replays, 48-57 GB). A step that is let in writes down
+# what it needs for its first minutes — until its own memory shows in the system's numbers — and the next one counts
+# it. One reservation a flow (its steps run one at a time); gone when its time is up or its flow is.
+function Get-ReservedGB([string]$Folder, [int]$Except = 0) {
+    $total = 0.0
+    if (-not (Test-Path -LiteralPath $Folder)) { return $total }
+    foreach ($file in Get-ChildItem -LiteralPath $Folder -Filter *.json) {
+        try { $record = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json } catch { continue }
+        $alive = [bool](Get-Process -Id ([int]$record.pid) -ErrorAction SilentlyContinue)
+        if (-not $alive -or ([datetime]$record.until) -lt (Get-Date)) {
+            Remove-Item -LiteralPath $file.FullName -ErrorAction SilentlyContinue
+            continue
+        }
+        if ([int]$record.pid -ne $Except) { $total += [double]$record.gb }
+    }
+    return $total
+}
+# True and the reservation written when the free memory, less what the other flows reserved, covers the need; one
+# flow at a time looks and writes (a mutex), so two cannot both take the same room
+function Request-Memory([string]$Folder, [int]$Owner, [string]$Label, [double]$NeedGB, [double]$FreeGB, [int]$Minutes = 10) {
+    $mutex = New-Object System.Threading.Mutex($false, "Global\StockResearchMemoryReservation")
+    $held = $false
+    try {
+        try { $held = $mutex.WaitOne(30000) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+        if (($FreeGB - (Get-ReservedGB $Folder $Owner)) -lt $NeedGB) { return $false }
+        New-Item -ItemType Directory -Force -Path $Folder | Out-Null
+        $record = [ordered]@{ pid = $Owner; label = $Label; gb = $NeedGB; until = (Get-Date).AddMinutes($Minutes).ToString("s") }
+        [System.IO.File]::WriteAllText((Join-Path $Folder "$Owner.json"), ($record | ConvertTo-Json -Compress),
+                                       (New-Object System.Text.UTF8Encoding($false)))
+        return $true
+    } finally {
+        if ($held) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
 }
 #endregion step-helpers
 $script:NotedSteps = @()

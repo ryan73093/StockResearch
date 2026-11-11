@@ -76,3 +76,34 @@ def test_the_flow_uses_the_helpers_and_ends_failed_when_a_step_could_not_do_its_
     assert "-ArgumentList (Join-Arguments $Arguments)" in text and "-ArgumentList $Arguments" not in text
     assert "Get-StepVerdict $process.ExitCode $err" in text
     assert text.rstrip().splitlines()[-1].startswith("Complete-Pipeline")
+
+
+def test_memory_another_flow_has_just_reserved_is_not_free(tmp_path):
+    """2026-11-12 (the memory answer of 11-11): the wait looked at the free memory once and reserved nothing — two flows
+    in the same minute both saw 30 GB free and both started. What a flow is let in for is counted by the next one until
+    its time is up or its flow has ended; a flow's own earlier reservation is not counted against it."""
+    import os
+
+    folder = tmp_path / "memory"
+    out = _helpers(tmp_path, f"""
+$folder = '{folder}'
+$a = Request-Memory $folder {os.getpid()} 'flow a' 16 30
+$b = Request-Memory $folder $PID 'flow b' 16 30
+$reserved = Get-ReservedGB $folder
+$again = Request-Memory $folder {os.getpid()} 'flow a, next step' 16 30
+$small = Request-Memory $folder $PID 'flow b' 14 30
+$gone = Request-Memory $folder 999999 'a flow that ended' 4 100
+$afterGone = Get-ReservedGB $folder
+$expired = Request-Memory $folder $PID 'flow b' 14 30 -Minutes -1
+$afterExpired = Get-ReservedGB $folder
+"$a,$b,$reserved,$again,$small,$afterGone,$expired,$afterExpired"
+""")
+    # a in (30 >= 16); b refused (30 - 16 < 16); a's next step counts only the others; b fits 14; the dead flow's
+    # 4 GB is dropped (16 + 14 left); b's reservation already expired is dropped (16 left)
+    assert out.strip() == "True,False,16,True,True,30,True,16"
+
+
+def test_the_memory_wait_reserves_what_it_lets_in():
+    text = (ROOT / "scripts" / "research-pipeline.ps1").read_text(encoding="utf-8-sig")
+    body = text[text.index("function Wait-ForMemory"):text.index("function Wait-ForSimulationSlot")]
+    assert "Request-Memory $script:ReservationFolder $PID" in body and "(Get-CommitFreeGB) -lt $need" not in body
