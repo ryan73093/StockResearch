@@ -645,3 +645,56 @@ def test_the_chain_lists_each_months_part_with_its_days_and_returns():
     assert (second["since"], second["from"], second["to"], second["sessions"]) == ("2026-10-01", "2026-11-02", "2026-11-02", 1)
     assert second["return"] == pytest.approx(-0.05) and second["benchmark_return"] == pytest.approx(0.05)
     assert found["return"] == pytest.approx(1.10 * 0.95 - 1) and found["excess"] == pytest.approx(1.10 * 0.95 - 1.05 * 1.05)
+
+
+def test_a_months_list_opens_no_account_until_its_models_are_refitted(tmp_path):
+    """2026-11-12 (problem register P4, the month's release): the month's list was graded first and the models
+    retrained to the cutoff afterwards — and only the models that accounts already open read. So every month the
+    accounts opened on the old models and were recorded again after the refit (10/21: 403 accounts, 11/08: 77). A list
+    graded for a new month is held until the refit ends: nothing opens, nothing stops, last month's accounts go on."""
+    from quant_platform.research import rolling
+    from quant_platform.research.daily import DailyRule
+
+    days = weekdays(date(2024, 1, 1), date(2026, 11, 13))
+    build(tmp_path, days)
+    rule = DailyRule(name="每天 3 個月動能：前 3 名", factors={"momentum_3": 1.0}, top=3)
+    other = DailyRule(name="每天 6 個月動能：前 3 名", factors={"momentum_6": 1.0}, top=3)
+    folder = tmp_path / "rolling"
+    folder.mkdir()
+    (folder / "2026-08-31.json").write_text(json.dumps({"cutoff": "2026-08-31", "graded": [
+        {"passed": True, "tier": "T0 候選", "spec": rule.canonical()}]}, ensure_ascii=False), encoding="utf-8")
+    tracker = StockForwardTracker(tmp_path, min_quotes=1, experiments=False)
+    tracker.record(date(2026, 10, 30), now=at(date(2026, 10, 30)))
+    assert [(item["since"], item.get("stopped")) for item in tracker.tracked()] == [("2026-09-01", None)]
+    # November's list is graded (the other rule passes, this one does not) and held for the models
+    november = {"cutoff": "2026-09-30", "released": False, "graded": [
+        {"passed": False, "tier": "T3", "spec": rule.canonical()},
+        {"passed": True, "tier": "T1", "spec": other.canonical()}]}
+    (folder / "2026-09-30.json").write_text(json.dumps(november, ensure_ascii=False), encoding="utf-8")
+    assert rolling.released(november) is False
+    assert tracker.sync(date(2026, 11, 2)) == []
+    assert [(item["since"], item.get("stopped")) for item in tracker.tracked()] == [("2026-09-01", None)]   # goes on
+    # the refit ends: the list is released, the new account opens from the day after the cutoff and the old one stops
+    assert rolling.release(tmp_path, date(2026, 9, 30))["released"] is True
+    added = tracker.sync(date(2026, 11, 2))
+    assert [item["name"] for item in added] == [other.name] and added[0]["since"] == "2026-10-01"
+    assert tracker.tracked()[0]["stopped"] == "2026-11-02"
+
+
+def test_what_a_months_list_will_open_and_a_list_without_the_mark_is_released():
+    from quant_platform.research import rolling
+    from quant_platform.research.daily import DailyRule
+
+    passing = DailyRule(name="深度", factors={"ml_deep2_top": 1.0}, top=3)
+    first_tier = DailyRule(name="動能", factors={"momentum_3": 1.0}, top=3)
+    failing = DailyRule(name="六個月動能", factors={"momentum_6": 1.0}, top=3)
+    payload = {"cutoff": "2026-10-31", "graded": [
+        {"passed": True, "tier": "T0 候選", "spec": passing.canonical()}, {"passed": False, "tier": "T1", "spec": first_tier.canonical()},
+        {"passed": False, "tier": "T3", "spec": failing.canonical()}, {"passed": True, "tier": "T2", "spec": {"broken": 1}}]}
+    items = rolling.opening(payload)
+    assert [(item["kind"], set(item["rule"]["factors"])) for item in items] == [("daily", {"ml_deep2_top"}), ("daily", {"momentum_3"})]
+    assert rolling.released(payload) is True                      # the lists before 2026-11-12 carry no mark
+    assert rolling.released({"cutoff": "2026-10-31", "graded": []}) is False        # nothing graded yet
+    held = rolling.hold({"cutoff": "2026-10-31", "graded": []})
+    assert held["released"] is False and rolling.released({**held, "graded": payload["graded"]}) is False
+    assert rolling.hold(payload) is payload and "released" not in payload           # a list already graded is not held

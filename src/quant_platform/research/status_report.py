@@ -130,7 +130,7 @@ def lists(research: Path, today: date) -> dict[str, object]:
         months.append({"cutoff": payload.get("cutoff") or path.stem, "graded": len(graded),
                        "passed": {str(row.get("rule_hash")) for row in graded if row.get("passed")},
                        "usable": sum(1 for row in payload.get("holdout") or [] if row.get("usable")),
-                       "data_through": payload.get("data_through")})
+                       "data_through": payload.get("data_through"), "released": payload.get("released", True)})
     return {"wanted": cutoff_for(today).isoformat(), "months": months}
 
 
@@ -223,6 +223,8 @@ def render(state: dict[str, object]) -> str:
         lines.append(f"  應為截止 {month['wanted']}；最新名單截止 {latest['cutoff']} {_mark(latest['cutoff'] == month['wanted'])}："
                      f"評 {latest['graded']:,} 個、過門檻 {latest['passed']:,} 個、當月可用 {latest['usable']:,} 個"
                      + (f"（資料到 {latest['data_through']}）" if latest.get("data_through") else ""))
+        if latest.get("released") is False:
+            lines.append("  名單已評、還沒發布：等模型重訓到截止日，發布後才開前向帳戶")
     else:
         lines.append(f"  應為截止 {month['wanted']}；沒有名單 ✗")
     linked = state["chain"]

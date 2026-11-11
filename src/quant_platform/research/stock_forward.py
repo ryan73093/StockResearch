@@ -322,7 +322,7 @@ class StockForwardTracker:
         experiments (FORWARD_ONLY) start from the month's start too."""
         from quant_platform.research.blend import BlendRule, parse_spec
         from quant_platform.research.categories import NO_0050, uses_0050
-        from quant_platform.research.rolling import cutoff_for, folder as rolling_folder
+        from quant_platform.research.rolling import cutoff_for, folder as rolling_folder, released
 
         cutoff = cutoff_for(today)
         start = (cutoff.fromordinal(cutoff.toordinal() + 1)).isoformat()
@@ -350,7 +350,9 @@ class StockForwardTracker:
             except ValueError:
                 month = None
         target: dict[str, tuple] = {}
-        if month and month.get("graded"):
+        # 2026-11-12 (the month's release): a list held for its models opens and stops nothing yet (rolling.released)
+        ready = released(month)
+        if ready:
             for row in month["graded"]:
                 # 2026-10-21 (REQUIREMENTS 選手池分級，使用者 2026-10-04：T1 與 T0 候選自動進入前向觀察): T1 too
                 if not row.get("passed") and row.get("tier") != "T1":
@@ -373,7 +375,7 @@ class StockForwardTracker:
             if item.get("kind") not in ("daily", "blend") or item["rule_hash"] == META_AI["rule_hash"]:
                 continue
             if item["rule_hash"] not in target:
-                if live and month and month.get("graded"):
+                if live and ready:
                     item.update(stopped=today.isoformat(), stop_reason=f"不在 {cutoff.isoformat()} 的每月滾動名單")
                     changed = True
                 continue

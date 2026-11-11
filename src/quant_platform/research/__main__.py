@@ -1254,6 +1254,9 @@ def main() -> int:
         payload = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {
             "version": rolling.ROLLING_VERSION, "cutoff": cutoff.isoformat(), "graded": [], "holdout": [], "models": []}
         if args.step == "select":
+            # 2026-11-12 (the month's release): a month's first grading is held until the models step has refitted the
+            # models its rules read — the forward accounts open after that, not between the two steps
+            rolling.hold(payload)
             with JobLog(RESEARCH).start(f"每月滾動：用 {cutoff} 以前的資料挑策略（全部規則回測到截止日）", command) as job:
                 def progress(done, total, row):
                     job.update(done=done, total=total, current=f"{row.get('name', '')[:40]}：{'過' if row.get('passed') else '沒過'}")
@@ -1288,6 +1291,10 @@ def main() -> int:
             # accounts read, refitted to the cutoff too (monthly-refit versions refit themselves)
             tracker = StockForwardTracker(RESEARCH)
             read = set().union(*[tracker.uses(item) for item in tracker.tracked() if not item.get("stopped")] or [set()])
+            # 2026-11-12: and the models the month's list is about to open accounts on (rolling.opening) — it read only
+            # the accounts already open, so a list's new rules opened first and were recorded again after the refit
+            held = payload.get("released") is False
+            read |= set().union(*[tracker.uses(item) for item in rolling.opening(payload)] or [set()])
             deep = sorted({spec["version"] for factor, spec in research_model.MODELS.items()
                            if spec["label"] == "deep2" and factor in read and spec["version"] not in model_deep2.MONTHLY
                            and research_model.model_dir(Path(args.base), spec["version"]).is_dir()})
@@ -1359,10 +1366,15 @@ def main() -> int:
                 # robots' 8/31 refit came at 04:37 from a --missing-only step, the accounts kept the old decisions): a
                 # model refitted only now was read without its refit by any account already open, so --missing-only
                 # always records those accounts again from their start
+                # 2026-11-12: a held list's accounts are not open yet — released below, they all start from the month's
+                # start on the refitted models; nothing of last month's is recorded again for it
                 again = (tracker.refit(retrained, f"模型重訓到 {cutoff}（每月滾動），從起算日重新記錄")
-                         if args.refit_accounts or args.missing_only else [])
+                         if (args.refit_accounts or args.missing_only) and not held else [])
+                if held:
+                    rolling.release(RESEARCH, cutoff)
                 job.payload["summary"] = (f"{len(trained)} 個模型重訓到 {cutoff}（深度學習 {len(deep)} 個）"
-                                          + (f"；{len(again)} 個前向帳戶重新記錄" if again else ""))
+                                          + (f"；{len(again)} 個前向帳戶重新記錄" if again else "")
+                                          + ("；名單發布，前向帳戶從截止日隔天開" if held else ""))
             print(job.payload["summary"])
             return 0
         with JobLog(RESEARCH).start(f"每月滾動：{cutoff} 之後的前向測試（過門檻的策略各用新的 30 萬帳戶）", command) as job:

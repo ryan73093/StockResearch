@@ -61,7 +61,7 @@ def test_the_month_list_and_the_chain(tmp_path):
     state = status.collect(research, NOW)
     assert state["list"]["wanted"] == "2026-09-30"
     assert state["list"]["latest"] == {"cutoff": "2026-09-30", "graded": 4, "passed": 2, "usable": 1,
-                                       "data_through": "2026-11-27"}
+                                       "data_through": "2026-11-27", "released": True}
     assert state["chain"]["start"] == "2026-09-01" and state["chain"]["sessions"] == 60
     assert state["chain"]["rules"] == 1 and state["chain"]["lists"] == 2 and state["chain"]["needed"] == 60
     text = status.render(state)
@@ -151,3 +151,11 @@ def test_a_red_check_shows_how_long_it_has_been_red(tmp_path):
         {"name": "備份", "ok": True, "detail": "有"}]}), encoding="utf-8")
     text = status.render(status.collect(research, NOW))
     assert "✗ 前向帳戶照規則交易（連續 4 天，2026-11-25 起）：69 個" in text
+
+
+def test_a_list_held_for_its_models_is_said_to_be_not_released(tmp_path):
+    research = _research(tmp_path)
+    path = research / "rolling" / "2026-09-30.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**payload, "released": False}), encoding="utf-8")
+    assert "名單已評、還沒發布：等模型重訓到截止日" in status.render(status.collect(research, NOW))

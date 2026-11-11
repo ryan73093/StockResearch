@@ -260,6 +260,55 @@ def save(research: str | Path, cutoff: date, payload: dict) -> Path:
     return target
 
 
+# --- the month's release (2026-11-12; problem register P4) ----------------------------------------------------
+# The month's list was graded first and the models retrained to the cutoff afterwards — and only the models that
+# accounts already open read. So every month the accounts opened on the old models and were recorded again after the
+# refit (10/21: 403 accounts; 11/08: 77). A list graded for a new month is held (``released`` false) until the models
+# its rules read are refitted; the forward accounts follow a list only once it is released.
+
+def released(payload: dict | None) -> bool:
+    """Whether the forward accounts may follow this list: graded, and not held for its models (a list written before
+    2026-11-12 carries no mark and is released)."""
+    return bool(payload and payload.get("graded") and payload.get("released", True))
+
+
+def hold(payload: dict) -> dict:
+    """Before a month's first grading: the list is held until the models are refitted (``release``). A list already
+    graded — rules added to it later in the month — stays as it is."""
+    if not payload.get("graded"):
+        payload["released"] = False
+    return payload
+
+
+def release(research: str | Path, cutoff: date, now: datetime | None = None) -> dict:
+    """The models are refitted: the list on the file as it is now (another step may have added rules meanwhile) is
+    released."""
+    path = folder(research) / f"{cutoff.isoformat()}.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("released") is False:
+        payload.update(released=True, released_at=(now or datetime.now()).isoformat(timespec="seconds"))
+        save(research, cutoff, payload)
+    return {**payload, "released": payload.get("released", True)}
+
+
+def opening(payload: dict | None) -> list[dict]:
+    """The accounts the forward tracker opens from this list (the rows that pass, and T1), as tracked items — so the
+    models they read are refitted before they open, not only the ones the accounts of last month read."""
+    from quant_platform.research.blend import BlendRule, parse_spec
+
+    items = []
+    for row in (payload or {}).get("graded") or []:
+        if not row.get("passed") and row.get("tier") != "T1":
+            continue
+        try:
+            rule = parse_spec(row["spec"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        items.append({"rule_hash": rule.rule_hash, "rule": rule.model_dump(mode="json"),
+                      "kind": "blend" if isinstance(rule, BlendRule) else "daily"})
+    return items
+
+
 def latest(research: str | Path) -> dict | None:
     """The newest month's result (the page reads this)."""
     found = sorted(folder(research).glob("*.json")) if folder(research).is_dir() else []
