@@ -2749,16 +2749,16 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
         from quant_platform.research.model import MODELS, digest, model_dir
 
         if veto in ("dl1", "dl1x", "dl1m") or weighting == "inverse_risk" or getattr(rule, "vol_scale", "none") == "risk_half":
-            payload["dl_risk"] = digest(model_dir(history, MODELS["dl_risk"]["version"]))
+            payload["dl_risk"] = digest(model_dir(history, MODELS["dl_risk"]["version"]), until=RECENT_END)
         if veto == "r3":
-            payload["dl_risk2"] = digest(model_dir(history, MODELS["dl_risk2"]["version"]))
+            payload["dl_risk2"] = digest(model_dir(history, MODELS["dl_risk2"]["version"]), until=RECENT_END)
         if veto == "meta1":                                      # 2026-10-20: the meta-label model it reads
             from quant_platform.research.meta_label import VERSION as META_VERSION
             from quant_platform.research.meta_label import digest as meta_digest
             from quant_platform.research.model import models_root
 
             payload["meta1"] = meta_digest(models_root(history) / META_VERSION)
-            payload["meta1_primary"] = digest(model_dir(history, MODELS["ml_deep2_top"]["version"]))
+            payload["meta1_primary"] = digest(model_dir(history, MODELS["ml_deep2_top"]["version"]), until=RECENT_END)
     delisted = sorted((code, day.isoformat()) for code, days in (data.notes.get("delisted") or {}).items()
                       for day in days if day <= RECENT_END)
     payload["delisted"] = hashlib.sha256(json.dumps(delisted).encode()).hexdigest()   # 1.3.1: the list it read
@@ -2856,7 +2856,7 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         from quant_platform.research.rl_timing import digest as robot_digest
 
         payload.setdefault("statements", statements_digest(history, RECENT_END))
-        payload["models_all"] = {name: digest(model_dir(history, MODELS[name]["version"])) for name in MODEL_FACTORS}
+        payload["models_all"] = {name: digest(model_dir(history, MODELS[name]["version"]), until=RECENT_END) for name in MODEL_FACTORS}
         if "rl_all" in factor_names:
             payload["robot_all"] = robot_digest(models_root(history) / ALL_VERSION)
     if "rl_free" in factor_names or "rl_free41" in factor_names:    # 2026-10-16: the robots 4.0 and 4.1's weights
@@ -2872,7 +2872,7 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         from quant_platform.research.rl_timing import BLOCK_VERSION
         from quant_platform.research.rl_timing import digest as robot_digest
 
-        payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]))
+        payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]), until=RECENT_END)
         if "rl_blocks" in factor_names:
             payload["robot_blocks"] = robot_digest(models_root(history) / BLOCK_VERSION)
     if "rl_worst" in factor_names:                               # 2026-10-16: the reverse robot, model F
@@ -2880,14 +2880,14 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         from quant_platform.research.rl_timing import WORST_VERSION
         from quant_platform.research.rl_timing import digest as robot_digest
 
-        payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]))
+        payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]), until=RECENT_END)
         payload["robot_worst"] = robot_digest(models_root(history) / WORST_VERSION)
     if any(name in ("rl_rolling", "rolling_equal") for name in factor_names):   # 2026-10-16: the robot 3.1, model F
         from quant_platform.research.model import MODELS, digest, model_dir, models_root
         from quant_platform.research.rl_timing import ROLLING_VERSION
         from quant_platform.research.rl_timing import digest as robot_digest
 
-        payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]))
+        payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]), until=RECENT_END)
         payload["robot_rolling"] = robot_digest(models_root(history) / ROLLING_VERSION)    # the yardstick reads it too
     for pair, key in ((("rl_rolling32", "rolling32_equal"), "32"), (("rl_rolling33", "rolling33_equal"), "33"),
                       (("rl_rolling34", "rolling34_equal"), "34"), (("rl_rolling35", "rolling35_equal"), "35")):
@@ -2899,7 +2899,7 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
             from quant_platform.research.rl_timing import digest as robot_digest
 
             for factor in ("ml_gbm_ens", "ml_gbm_ext", "ml_deep2_top") + (("ml_gbm_i", "ml_gbm_j") if key == "35" else ()):
-                payload[f"model_{factor}"] = digest(model_dir(history, MODELS[factor]["version"]))
+                payload[f"model_{factor}"] = digest(model_dir(history, MODELS[factor]["version"]), until=RECENT_END)
             if key == "35":                                      # 2026-10-23: its paid slots read these tables
                 from quant_platform.research.chips import PAID_SOURCES
                 from quant_platform.research.history.paid import digest as paid_digest
@@ -2923,10 +2923,10 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         used = [name for name in factor_names if name in MODEL_FACTORS]
         if used == ["ml_gbm"]:                   # the form the gbm-1.0.0 trials were registered with
             payload["model"] = {"version": MODELS["ml_gbm"]["version"],
-                                "digest": digest(model_dir(history, MODELS["ml_gbm"]["version"]))}
+                                "digest": digest(model_dir(history, MODELS["ml_gbm"]["version"]), until=RECENT_END)}
         else:
             payload["model"] = {name: {"version": MODELS[name]["version"],
-                                       "digest": digest(model_dir(history, MODELS[name]["version"]))} for name in used}
+                                       "digest": digest(model_dir(history, MODELS[name]["version"]), until=RECENT_END)} for name in used}
     return payload
 
 

@@ -101,9 +101,9 @@ def scores(fp, factor: str = "t0_consensus") -> np.ndarray:
 
 def digest(history, factor: str = "t0_consensus") -> dict[str, object]:
     """The members and every trained model they read (part of a consensus rule's trial input)."""
-    from quant_platform.research.daily import MODEL_FACTORS
+    from quant_platform.research.daily import MODEL_FACTORS, RECENT_END
     from quant_platform.research.model import MODELS, digest as model_digest, model_dir
 
     used = sorted({name for _trial, _name, rule in members(factor) for name in rule.factors if name in MODEL_FACTORS})
     return {"version": VERSIONS[factor], "members": members_digest(factor),
-            "models": {name: model_digest(model_dir(history, MODELS[name]["version"])) for name in used}}
+            "models": {name: model_digest(model_dir(history, MODELS[name]["version"]), until=RECENT_END) for name in used}}

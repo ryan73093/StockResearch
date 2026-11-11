@@ -19,7 +19,7 @@ import hashlib
 import json
 import os
 import pickle
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -645,9 +645,21 @@ def _learned_until(key):
     return key if isinstance(key, _date) else _date(key, 1, 1) - _timedelta(days=1)
 
 
-def digest(out_dir: str | Path) -> str:
-    """The saved models' hash (part of a model rule's trial input)."""
+DIGEST_LEGACY_UNTIL = date(2026, 9, 30)      # the end the pool ran to when the digest below was changed
+
+
+def digest(out_dir: str | Path, until: date | None = None) -> str:
+    """The saved models' hash (part of a model rule's trial input). ``until``: the run's last day.
+
+    2026-11-12 (problem register P4): the hash took every file, the monthly refits too. A refit to a cutoff scores only
+    the sessions after the cutoff, yet the hash of every run ending at or before it changed — under engine 1.6.1, 5,743
+    rules were run twice or more with the same result, and each month's refit ran the pool again. For a run ending
+    after ``DIGEST_LEGACY_UNTIL`` the hash takes what the run can read (``_digest_read``). Up to that day it is the hash
+    as it was, byte for byte: the results registered so far keep their hash, and the change costs no run of its own —
+    it begins when the pool's end next moves and every rule runs on the new month anyway."""
     folder = Path(out_dir)
+    if until is not None and until > DIGEST_LEGACY_UNTIL:
+        return _digest_read(folder, until)
     output = hashlib.sha256()
     monthly = sorted((folder / MONTHLY).glob("*.pkl")) if (folder / MONTHLY).is_dir() else []
     for path in (sorted(folder.glob("*.pkl")) if folder.is_dir() else []) + monthly:
@@ -662,6 +674,66 @@ def digest(out_dir: str | Path) -> str:
     for path in sorted(deep, key=lambda path: path.relative_to(folder).as_posix()):
         output.update(path.relative_to(folder).as_posix().encode())
         output.update(hashlib.sha256(path.read_bytes()).digest())
+    return output.hexdigest()
+
+
+def _digest_read(folder: Path, until: date) -> str:
+    """The files a run ending on ``until`` reads, and of a scores file the days it reads:
+
+    - a yearly model of a year not after the end's year;
+    - a monthly refit whose cutoff is before the end (it scores the sessions after its cutoff);
+    - kept scores (``.npz``: days, symbols, scores) — the days up to the end; a file kept in another form, whole;
+    - a deep model's networks of the year (``<year>-<seed>.pt``) only when the kept scores stop before the end: the
+      later sessions are scored with them when read (model_deep2.scores). A version refitted every month writes them
+      again each month, and its kept scores reach the end.
+    """
+    output = hashlib.sha256()
+    limit = until.isoformat()
+
+    def whole(path: Path) -> None:
+        output.update(path.relative_to(folder).as_posix().encode())
+        output.update(hashlib.sha256(path.read_bytes()).digest())
+
+    def scores(path: Path) -> str:
+        """Hash the days up to the end; the last day the file keeps ("" when it is not a scores file)."""
+        try:
+            kept = np.load(path, allow_pickle=False)
+            days, values, symbols = kept["days"].tolist(), kept["scores"], kept["symbols"].tolist()
+        except (OSError, ValueError, KeyError):
+            whole(path)
+            return ""
+        rows = [index for index, day in enumerate(days) if day <= limit]
+        output.update(path.relative_to(folder).as_posix().encode())
+        output.update(json.dumps([symbols, [days[index] for index in rows]], ensure_ascii=False).encode())
+        output.update(np.ascontiguousarray(values[rows]).tobytes())
+        return max(days) if days else ""
+
+    def before_end(path: Path) -> bool:
+        try:
+            return date.fromisoformat(path.stem[:10]) < until
+        except ValueError:
+            return True                                   # not named by a cutoff: taken
+
+    if not folder.is_dir():
+        return output.hexdigest()
+    for path in sorted(folder.glob("*.pkl")):
+        if not path.stem.isdigit() or int(path.stem) <= until.year:
+            whole(path)
+    reach = ""
+    for path in sorted(folder.glob("*.npz")):
+        if ".partial" not in path.name:
+            reach = max(reach, scores(path))
+    if reach < limit:
+        for path in sorted(folder.glob("*.pt")):
+            whole(path)
+    place = folder / MONTHLY
+    for path in sorted(place.iterdir(), key=lambda path: path.name) if place.is_dir() else []:
+        if path.suffix not in (".pkl", ".pt", ".npz") or ".partial" in path.name or not before_end(path):
+            continue
+        if path.suffix == ".npz":
+            scores(path)
+        else:
+            whole(path)
     return output.hexdigest()
 
 
