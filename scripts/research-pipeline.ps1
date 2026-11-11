@@ -44,6 +44,9 @@ $recordPath = Join-Path $records "$Name.json"
 $pipelineStarted = (Get-Date).ToString("s")
 function Write-PipelineRecord([string]$Status) {
     $record = [ordered]@{ name = $Name; pid = $PID; started_at = $pipelineStarted; status = $Status }
+    # 2026-11-12: the steps that ended on a code other than 0 and did not stop the flow
+    if ($script:UnfinishedSteps) { $record.unfinished = @($script:UnfinishedSteps) }
+    if ($script:NotedSteps) { $record.noted = @($script:NotedSteps) }
     if ($Status -ne "running") { $record.finished_at = (Get-Date).ToString("s") }
     [System.IO.File]::WriteAllText($recordPath, ($record | ConvertTo-Json -Compress), (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -107,6 +110,33 @@ function Wait-ForSimulationSlot([string[]]$Arguments) {
             $_.ExecutablePath -eq $launcher -and $_.CommandLine -like "*quant_platform.research daily --name*" }).Count -ge 2 } 60
 }
 
+#region step-helpers
+# 2026-11-12 (system review of 11-10, root cause 5): kept apart so the tests can run them (tests/test_research_pipeline_script.py)
+# Start-Process joins -ArgumentList with spaces: an argument with a space became two (refitfix's --reason, 11-08).
+# Quoted as Windows reads a command line: in quotes when empty or with a space or a quote; a quote as \", the
+# backslashes before a quote and at the end doubled
+function Join-Arguments([string[]]$Arguments) {
+    ($Arguments | ForEach-Object {
+        if ($_ -ne '' -and $_ -notmatch '[\s"]') { $_ }
+        else { '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"' }
+    }) -join ' '
+}
+# What a step's exit code does to the flow. "stop": the step never ran (the command line refused: 2 with argparse's
+# usage in the error log) or ended on Python's traceback — the flow stops as failed. "unfinished": it ran and could not
+# do its work (2, 3: a source refused, no token, no data; or a crash without a traceback) — the flow goes on as before
+# and ends as failed, not done. "noted": 1 without a traceback (an audit that found differences, a batch with a rule
+# that failed) — written in the flow's record, the flow can end done
+function Get-StepVerdict([int]$ExitCode, [string]$ErrorLog) {
+    if ($ExitCode -eq 0) { return "ok" }
+    $has = { param($pattern) (Test-Path -LiteralPath $ErrorLog) -and (Select-String -LiteralPath $ErrorLog -Pattern $pattern -Quiet) }
+    if (& $has "Traceback \(most recent call last\)") { return "stop" }
+    if ($ExitCode -eq 2 -and (& $has "^usage: ")) { return "stop" }
+    if ($ExitCode -eq 1) { return "noted" }
+    return "unfinished"
+}
+#endregion step-helpers
+$script:NotedSteps = @()
+$script:UnfinishedSteps = @()
 function Invoke-Step([string]$Label, [string[]]$Arguments) {
     # 2026-10-29 (使用者：是你的程式太肥、架構太肥；不要為了省效能最後又給我錯的資料): when the step is asked for — every
     # earlier step of the flow has ended — handed to it (research/shared_steps.py): a run of the same step that started
@@ -137,7 +167,7 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
     $out = Join-Path $logs "$Name-$stamp-$Label.log"
     $err = Join-Path $logs "$Name-$stamp-$Label.err.log"
     Write-Note "步驟 $Label 開始：python $($Arguments -join ' ')（輸出：$out）"
-    $process = Start-Process -FilePath $python -ArgumentList $Arguments -WorkingDirectory $root -NoNewWindow -Wait -PassThru `
+    $process = Start-Process -FilePath $python -ArgumentList (Join-Arguments $Arguments) -WorkingDirectory $root -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput $out -RedirectStandardError $err
     Remove-Item Env:RESEARCH_STEP_ASKED -ErrorAction SilentlyContinue     # not for a command the flow runs on its own
     Write-Note "步驟 $Label 結束（結束碼 $($process.ExitCode)）"
@@ -152,15 +182,31 @@ function Invoke-Step([string]$Label, [string[]]$Arguments) {
         exit 1
     }
     # 2026-11-04: regate221's training died on 11-03 01:54 (CUDA out of memory) and its refit at 19:43 (MemoryError);
-    # the flow went on with its rules, statistics and lists on a model never made. A step that ended on an error (not
-    # zero, and Python's traceback in its error log - an audit's "found differences" is a 1 without one) stops the
-    # flow as "failed": the 16:00 check shows it, nothing restarts it by itself
-    if ($process.ExitCode -ne 0 -and (Test-Path -LiteralPath $err) -and
-            (Select-String -LiteralPath $err -Pattern "Traceback \(most recent call last\)" -Quiet)) {
+    # the flow went on with its rules, statistics and lists on a model never made. A step that ended on an error stops
+    # the flow as "failed": the 16:00 check shows it, nothing restarts it by itself.
+    # 2026-11-12: also a step that never ran (argparse refused its command line — refitfix, 11-08, went on and was
+    # marked done); a step that ran and could not do its work is remembered and the flow ends as failed (Get-StepVerdict)
+    $verdict = Get-StepVerdict $process.ExitCode $err
+    if ($verdict -eq "stop") {
         Write-Note "步驟 $Label 出錯（結束碼 $($process.ExitCode)，錯誤在 $err）：流程停在這裡、標成失敗，後面的步驟不跑"
         Write-PipelineRecord "failed"
         exit 1
     }
+    if ($verdict -eq "unfinished") {
+        Write-Note "步驟 $Label 沒有做完它的工作（結束碼 $($process.ExitCode)，說明在 $err）：後面的步驟照跑，流程結束時標成失敗"
+        $script:UnfinishedSteps += "$Label（結束碼 $($process.ExitCode)）"
+    }
+    if ($verdict -eq "noted") { $script:NotedSteps += "$Label（結束碼 1）" }
+}
+
+# 2026-11-12: the flow's end — "done" only when every step did its work
+function Complete-Pipeline {
+    if ($script:UnfinishedSteps.Count -gt 0) {
+        Write-Note "流程結束，但有步驟沒有做完：$($script:UnfinishedSteps -join '、')；標成失敗"
+        Write-PipelineRecord "failed"
+        exit 1
+    }
+    Write-PipelineRecord "done"
 }
 
 switch ($Name) {
@@ -2708,4 +2754,4 @@ switch ($Name) {
         Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
 }
-Write-PipelineRecord "done"
+Complete-Pipeline

@@ -70,3 +70,50 @@ def _save_many(research: str, side: str) -> None:
         store = DecisionStore(research)
         store.keep(f"{side}{number}@2026-09-01", {date(2026, 9, 1): ["2330.TW"]}, None, date(2026, 9, 1))
         store.save()
+
+
+def _two_accounts(tmp_path):
+    store = DecisionStore(tmp_path)
+    store.keep("a@2026-09-01", {date(2026, 9, 1): ["1101.TW"]}, None, date(2026, 11, 10))
+    store.keep("b@2026-09-01", {date(2026, 9, 1): ["2330.TW"]}, None, date(2026, 11, 10))
+    store.save()
+    return tmp_path / "forward" / "stocks" / "decisions.json"
+
+
+def test_a_file_that_cannot_be_read_is_not_an_empty_file(tmp_path):
+    """2026-11-12 (system review of 11-10, root cause 5): a read that failed was taken as "no decisions yet" — the
+    replay then decided every recorded day again with today's data and the save wrote the file back with this run's
+    accounts only, every other account's decisions gone. A file that is there and cannot be read stops the run."""
+    import pytest
+
+    from quant_platform.research.decisions import DecisionsUnreadable
+
+    path = _two_accounts(tmp_path)
+    writer = DecisionStore(tmp_path)                                   # read while the file was whole
+    writer.keep("a@2026-09-01", {date(2026, 9, 1): ["1101.TW"], date(2026, 11, 11): ["2317.TW"]}, None, date(2026, 11, 11))
+    path.write_text('{"a@2026-09-01": {"through": "2026-11-1', encoding="utf-8")      # half a file
+    broken = path.read_bytes()
+    with pytest.raises(DecisionsUnreadable):
+        DecisionStore(tmp_path)
+    with pytest.raises(DecisionsUnreadable):
+        writer.save()
+    with pytest.raises(DecisionsUnreadable):
+        writer.drop({"b@2026-09-01"})
+    assert path.read_bytes() == broken                                 # nothing was written over it
+
+
+def test_a_file_held_by_another_process_for_a_moment_is_read_again(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    path = _two_accounts(tmp_path)
+    real, calls = Path.read_text, []
+
+    def held(self, *args, **kwargs):
+        if self == path:
+            calls.append(1)
+            if len(calls) <= 2:
+                raise PermissionError(13, "held by another process")
+        return real(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", held)
+    store = DecisionStore(tmp_path)
+    assert len(calls) == 3 and store.fixed("b@2026-09-01")["days"][date(2026, 9, 1)] == ["2330.TW"]

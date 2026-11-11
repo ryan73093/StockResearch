@@ -29,15 +29,36 @@ def key(rule_hash: str, start: date, sleeve: int | None = None) -> str:
     return f"{rule_hash}@{start.isoformat()}" + (f"#{sleeve}" if sleeve is not None else "")
 
 
+class DecisionsUnreadable(RuntimeError):
+    """The decisions file is there and could not be read (held by another process past the wait, or not JSON)."""
+
+
 class DecisionStore:
     def __init__(self, research: str | Path) -> None:
         self.path = Path(research) / "forward" / "stocks" / "decisions.json"
         self._kept: dict[str, dict] = {}
         self._loaded_at = time.time()            # 2026-10-22: what was dropped after this is not written back
-        try:
-            self._data = json.loads(self.path.read_text(encoding="utf-8")) if self.path.is_file() else {}
-        except (OSError, ValueError):
-            self._data = {}
+        self._data = self._read()
+
+    def _read(self, wait: float = 60.0) -> dict:
+        """The file's accounts; none only when there is no file. 2026-11-12 (system review of 11-10, root cause 5): a
+        read that failed was taken as an empty file in three places — the replay then decided the recorded days again
+        with today's data, and ``_save`` and ``_drop`` wrote the file back without the other accounts. A file held by
+        another process (a writer putting the new one in its place) is read again for up to ``wait`` seconds; one that
+        still cannot be read, or is not JSON, stops the run (``DecisionsUnreadable``) and nothing is written over it."""
+        deadline = time.monotonic() + wait
+        while True:
+            if not self.path.is_file():
+                return {}
+            try:
+                return json.loads(self.path.read_text(encoding="utf-8"))
+            except OSError as error:
+                if time.monotonic() >= deadline:
+                    raise DecisionsUnreadable(f"{self.path} 讀不到（{error}）；沒有寫入任何東西") from error
+                time.sleep(0.05)
+            except ValueError as error:
+                raise DecisionsUnreadable(
+                    f"{self.path} 不是完整的 JSON（{error}）；沒有寫入任何東西，請從備份或 decisions-archive.json 檢查") from error
 
     def fixed(self, name: str) -> dict | None:
         """The decisions kept for an account: through (last day), days (day -> symbols), again_after."""
@@ -95,10 +116,7 @@ class DecisionStore:
             return self._drop(names)
 
     def _drop(self, names: set[str]) -> dict[str, dict]:
-        try:
-            current = json.loads(self.path.read_text(encoding="utf-8")) if self.path.is_file() else {}
-        except (OSError, ValueError):
-            current = {}
+        current = self._read()
         taken = {name: current.pop(name) for name in list(current) if name in names}
         if taken:
             partial = self.path.with_suffix(".partial")
@@ -127,10 +145,7 @@ class DecisionStore:
             self._save()
 
     def _save(self) -> None:
-        try:
-            current = json.loads(self.path.read_text(encoding="utf-8")) if self.path.is_file() else {}
-        except (OSError, ValueError):
-            current = {}
+        current = self._read()
         dropped = self._dropped()
         for name, entry in self._kept.items():
             # 2026-10-22 (194 accounts out of step): decisions read before the account was dropped and started again
