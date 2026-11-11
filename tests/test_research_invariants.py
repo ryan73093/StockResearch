@@ -514,3 +514,17 @@ def test_a_red_check_says_how_many_days_it_has_been_red(tmp_path):
     fresh.mkdir()
     invariants.save(fresh, [dict(red)], datetime(2026, 11, 12, 16, 0, tzinfo=zone))
     assert invariants.latest(fresh)["checks"][0]["red_days"] == 1
+
+
+def test_the_pools_end_is_the_months_cutoff(tmp_path, monkeypatch):
+    """2026-11-12 (system review of 11-10, root cause 3): the end the pool's backtests run to (daily.RECENT_END) is a
+    constant somebody moves by hand each month; left on last month's cutoff, the pool and the month's list are run on
+    different periods and nothing says so."""
+    from quant_platform.research import daily
+
+    name = "選手池的回測終點是當月的截止日"
+    monkeypatch.setattr(daily, "RECENT_END", date(2026, 9, 30))
+    found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 11, 12), windows=[], memory=[])}[name]
+    assert found["ok"] and found["detail"] == "2026-09-30"
+    found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 12, 1), windows=[], memory=[])}[name]
+    assert not found["ok"] and "回測終點 2026-09-30，當月截止日 2026-10-31" in found["detail"]

@@ -611,6 +611,14 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                              f"{item['name']}（{item['at'][5:10].replace('-', '/')} {item['at'][11:16]}）：{item['error'][:80]}"
                              + (f"（{item['times']} 次）" if int(item["times"]) > 1 else "") for item in failed_jobs[:3]))
                          if failed_jobs else "沒有"))
+    # 2026-11-12: the pool's end is a constant moved by hand each month (daily.RECENT_END)
+    from quant_platform.research import daily as daily_module
+
+    wanted_end = cutoff_for(today)
+    checks.append(_check("選手池的回測終點是當月的截止日", "docs/system_review_2026-11-10.md 根本原因 3：RECENT_END 寫死",
+                         daily_module.RECENT_END == wanted_end,
+                         wanted_end.isoformat() if daily_module.RECENT_END == wanted_end else
+                         f"回測終點 {daily_module.RECENT_END}，當月截止日 {wanted_end}：改 daily.RECENT_END 並部署（選手池會跑新的一個月）"))
     # 2026-11-12: with no channel every failure notification ended as "disabled" — red until LINE or the mail is set
     try:
         channel = notification_channel()
