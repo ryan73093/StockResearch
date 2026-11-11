@@ -96,11 +96,29 @@ def pool(research: str | Path, counted: bool = False) -> list[dict]:
     if not output:
         return output
     # one cash flow and one 0050 account for all: the members whose money and 0050 match the most common ones
-    common = max(output, key=lambda item: sum(np.array_equal(item["paid"], other["paid"])
-                                              and np.allclose(item["bench"], other["bench"], rtol=0.005) for other in output))
+    common = most_common_account(output)
     alike = [item for item in output if len(item["months"]) == len(common["months"])
              and np.array_equal(item["paid"], common["paid"]) and np.allclose(item["bench"], common["bench"], rtol=0.005)]
     return distinct(alike)
+
+
+def most_common_account(members: list[dict]) -> dict:
+    """The member whose cash flow equals, and whose 0050 account is within 0.5% of, the most members (the first such
+    member). 2026-11-12: it compared every member with every member — tens of millions of np.allclose with November's
+    8,159 rules, an hour and more; the accounts are a handful of distinct ones, so each distinct one is compared with
+    the distinct ones and the counts added. The same member as the pair-by-pair comparison finds."""
+    keys = [(item["paid"].tobytes(), item["bench"].tobytes()) for item in members]
+    first: dict[tuple[bytes, bytes], dict] = {}
+    count: dict[tuple[bytes, bytes], int] = {}
+    for key, item in zip(keys, members, strict=True):
+        first.setdefault(key, item)
+        count[key] = count.get(key, 0) + 1
+    score = {key: sum(number for other, number in count.items()
+                      if np.array_equal(item["paid"], first[other]["paid"])
+                      and np.allclose(item["bench"], first[other]["bench"], rtol=0.005))
+             for key, item in first.items()}
+    best = max(score.values())
+    return next(item for key, item in zip(keys, members, strict=True) if score[key] == best)
 
 
 def distinct(members: list[dict]) -> list[dict]:

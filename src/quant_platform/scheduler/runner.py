@@ -789,7 +789,7 @@ def retrain_models(container: "Container", now: datetime | None = None) -> objec
     base = research / "history"
     used = {name for item in StockForwardTracker(research).tracked() if item.get("kind") == "daily"
             for name in (item.get("rule") or {}).get("factors", {}) if name in MODEL_FACTORS}
-    trained = []
+    trained, failed = [], []
     import json
 
     from quant_platform.research.model_deep2 import MONTHLY as DEEP_MONTHLY
@@ -815,13 +815,25 @@ def retrain_models(container: "Container", now: datetime | None = None) -> objec
         elif this_year:
             continue
         label = f"{local_now.year} 年" + (f" {local_now.month} 月" if months else "")
-        with JobLog(research).start(f"重訓機器學習模型（{version}，{label}）", "scheduler retrain_models",
-                                    total=1) as job:
-            meta = train_year(base, version, local_now.year, job=job, **({"months": months} if months else {}))
-            job.payload["summary"] = f"{local_now.year} 年模型：訓練 {meta['years'].get(str(local_now.year), {}).get('train_rows')} 筆"
+        # 2026-11-11: one model's failure no longer stops the others (dl-2.6.0 failed nine nights; the models after it
+        # in the order were never looked at); the first error is raised after the last model, so the run still fails
+        try:
+            with JobLog(research).start(f"重訓機器學習模型（{version}，{label}）", "scheduler retrain_models",
+                                        total=1) as job:
+                meta = train_year(base, version, local_now.year, job=job, **({"months": months} if months else {}))
+                item = meta["years"].get(str(local_now.year), {})
+                rows = item.get("train_rows") if item.get("train_rows") is not None else item.get("train_days")
+                job.payload["summary"] = (f"{local_now.year} 年模型：訓練 {rows} "
+                                          + ("筆" if item.get("train_rows") is not None else "個交易日"))
+        except Exception as error:
+            logger.exception("Retraining %s failed", version)
+            failed.append((version, error))
+            continue
         trained.append(version)
     if trained:
         logger.info("Models retrained for %s: %s", local_now.year, trained)
+    if failed:
+        raise failed[0][1]
     return trained
 
 

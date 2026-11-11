@@ -109,8 +109,8 @@ def test_the_direct_version_trains_on_pairs_a_week_apart(monkeypatch, tmp_path):
     assert meta["loss"] == "direct" and meta["years"]["2017"]["top20_gain"] is not None
 
 
-def _panel():
-    days = weekdays(date(2015, 1, 1), date(2018, 12, 31))
+def _panel(until=date(2018, 12, 31)):
+    days = weekdays(date(2015, 1, 1), until)
     rng = np.random.default_rng(7)
     closes = {f"{1101 + n}.TW": dict(zip(days, np.maximum(30 * np.cumprod(1 + rng.normal(0.0002 * n, 0.012, len(days))), 11.0)))
               for n in range(60)}
@@ -401,6 +401,45 @@ def test_the_monthly_version_refits_every_month_on_labels_ended_before_it(monkey
     assert len(fits) == 1 and fits[0][1] + model.HORIZON < firsts[-1]
     earlier = [day for day in before if day < fp.sessions[firsts[-1]].isoformat()]
     assert earlier and all(np.array_equal(before[day], after[day], equal_nan=True) for day in earlier)
+
+
+def test_a_month_fitted_before_it_ended_is_fitted_again_with_the_next_month(monkeypatch, tmp_path):
+    """2026-11-11: dl-2.6.0's October was fitted on 10/20, so the kept scores ended that day (the later sessions are
+    scored when read, never kept). From 11/03 the nightly November refit died on ``KeyError: '2026-10-29'`` — the
+    year's report asks for every weekly session — after writing the new networks and before saving anything: nine
+    nights, six minutes each, nothing kept. A month with a session not kept is fitted again with the new month."""
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "GATE_YEARS", (2017,))
+    snapshot = tmp_path / "gbm-2.2.0"
+    snapshot.mkdir()
+    (snapshot / "meta.json").write_text(json.dumps({"version": "gbm-2.2.0", "features": ["momentum_3"]}), encoding="utf-8")
+    fits = []
+    real_fit = model_deep2._fit
+
+    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None):
+        fits.append(max(held_days))
+        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+    monkeypatch.setattr(model_deep2, "_fit", spy)
+    folder = tmp_path / "dl-2.6.0"
+    _data, short = _panel(until=date(2017, 10, 20))                       # the day October was fitted
+    model.train(short, folder, years=[2017], label="deep2", version="dl-2.6.0")
+    before = model_deep2._load_scores(folder, short.symbols)
+    assert max(before) == "2017-10-20"
+    _data, fp = _panel(until=date(2017, 12, 29))                          # November, with October's labels known
+    fits.clear()
+    meta = model.train(fp, folder, years=[2017], label="deep2", version="dl-2.6.0", months=[11])
+    after = model_deep2._load_scores(folder, fp.symbols)
+    wanted = [day.isoformat() for day in fp.sessions if day.year == 2017 and day.month in (10, 11)]
+    assert all(day in after for day in wanted)                            # October's later sessions and November
+    first = {month: next(index for index, day in enumerate(fp.sessions) if (day.year, day.month) == (2017, month))
+             for month in (10, 11)}
+    assert len(fits) == 2 and fits[0] + model.HORIZON < first[10] and fits[1] + model.HORIZON < first[11]
+    assert meta["years"]["2017"]["top20_gain"] is not None and meta["trained_at"]
+    earlier = [day for day in before if day < "2017-10-01"]
+    assert earlier and all(np.array_equal(before[day], after[day], equal_nan=True) for day in earlier)
+    assert not any(day.startswith("2017-12") for day in after)            # December was not asked for
 
 
 def test_a_monthly_cutoff_refit_scores_every_session_after_it(monkeypatch, tmp_path):

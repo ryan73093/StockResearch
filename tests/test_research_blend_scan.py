@@ -376,3 +376,30 @@ def test_members_with_the_same_account_are_one_member():
     assert [item["trial"] for item in found] == [10, 13] and found[0]["same"] == [12]
     counted = [{**a, "counted": 120.0}, {**twin, "counted": 121.0}]
     assert len(bs.distinct(counted)) == 2                    # the same values, a different money counted: two
+
+
+def test_the_most_common_account_is_found_without_comparing_every_pair():
+    """2026-11-12: the pool's "most common cash flow and 0050 account" compared every member with every member
+    (np.allclose each) — with the 8,159 rules of November that is tens of millions of calls: the research page's test
+    ran an hour on the real pool and did not end. The same member is found from the distinct accounts and their counts."""
+    import numpy as np
+
+    from quant_platform.research import blend_scan
+
+    rng = np.random.default_rng(3)
+    paid = [np.arange(1.0, 13.0), np.arange(1.0, 13.0) * 2, np.arange(1.0, 9.0)]
+    bench = [np.linspace(100, 130, 12), np.linspace(100, 130, 12) * 1.002, np.linspace(100, 130, 12) * 1.02,
+             np.linspace(90, 150, 12), np.linspace(100, 130, 8)]
+    members = []
+    for number in range(300):
+        money = paid[rng.integers(0, 3)]
+        account = bench[4] if len(money) == 8 else bench[rng.integers(0, 4)]
+        members.append({"name": str(number), "paid": money, "bench": account.copy()})
+
+    def slow(output):                                                    # the comparison as it was, pair by pair
+        return max(output, key=lambda item: sum(np.array_equal(item["paid"], other["paid"])
+                                                and np.allclose(item["bench"], other["bench"], rtol=0.005) for other in output))
+    for order in range(5):
+        shuffled = [members[index] for index in rng.permutation(len(members))]
+        assert blend_scan.most_common_account(shuffled) is slow(shuffled)
+    assert blend_scan.most_common_account(members[:1]) is members[0]

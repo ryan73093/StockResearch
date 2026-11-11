@@ -245,3 +245,20 @@ def test_an_every_day_rule_is_described_in_plain_words():
     assert lines[-2] == "成交：收盤後決定：賣出在隔天開盤、買進在隔天收盤"
     trend = describe_rule({"name": "y", "factors": {"trend_200": 2.0, "high_52w": 1.0}, "hold": "trend"})
     assert "（權重 2）" in trend[0] and any("月線" in line for line in trend) and "每個交易日收盤後決策" in trend[2]
+
+
+def test_every_batch_that_runs_a_blend_search_is_left_out_of_the_sources_rebuild():
+    """2026-11-12: SEARCH_BATCHES is kept by hand and four searches added since 10/29 (bear12, bear13, blendreach,
+    blendreach14) were not on it — a pool without its sources snapshot (every test's fresh folder; the site, should the
+    snapshot be lost) ran those searches on the real pool: the research page's test did not end in an hour."""
+    import inspect
+
+    from quant_platform.research import blend_scan, pool
+    from quant_platform.research.daily import BATCHES
+
+    searches = {name for name, value in vars(blend_scan).items()
+                if callable(value) and (name == "batch" or name.endswith("_batch")) and name != "role_blends"}
+    running = sorted(name for name, batch in BATCHES.items()
+                     if any(f"import {search}" in inspect.getsource(batch) for search in searches))
+    assert len(running) >= 12 and "bear13" in running
+    assert [name for name in running if name not in pool.SEARCH_BATCHES] == []

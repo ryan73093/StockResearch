@@ -120,3 +120,25 @@ def test_the_report_prints_where_the_console_is_not_utf8():
     status.emit("研究資料到 2026-11-11 ✓\n紅燈 ✗", stream)
     stream.flush()
     assert raw.getvalue().decode("utf-8").splitlines() == ["研究資料到 2026-11-11 ✓", "紅燈 ✗"]
+
+
+def test_a_job_that_failed_in_the_last_day_is_listed_until_the_same_job_succeeds(tmp_path, monkeypatch):
+    """2026-11-11: the nightly model refit failed nine nights (KeyError) and the report said 中斷或失敗沒恢復的 0 個 —
+    it looked at the flows only, not at the worker's jobs."""
+    research = _research(tmp_path)
+    monkeypatch.setattr(jobs, "_alive", lambda pid, started=None: False)
+    (research / "jobs").mkdir()
+    rows = [("a", "重訓機器學習模型（dl-2.6.0，2026 年 11 月）", "failed", "2026-11-29T22:45:00+08:00", "KeyError: '2026-10-29'"),
+            ("b", "新聞收集", "failed", "2026-11-30T14:40:00+08:00", "TimeoutError"),
+            ("c", "新聞收集", "done", "2026-11-30T15:40:00+08:00", "12 則"),               # the same job, later, worked
+            ("d", "很久以前失敗的", "failed", "2026-11-20T10:00:00+08:00", "x")]
+    for name, label, state, started, summary in rows:
+        (research / "jobs" / f"{name}.json").write_text(json.dumps(
+            {"id": name, "name": label, "command": "x", "pid": 1, "status": state, "started_at": started,
+             "finished_at": started, "summary": summary}), encoding="utf-8")
+    state = status.collect(research, NOW)
+    assert state["flows"]["failed"] == [{"name": "重訓機器學習模型（dl-2.6.0，2026 年 11 月）",
+                                         "since": "2026-11-29T22:45:00+08:00", "summary": "KeyError: '2026-10-29'"}]
+    text = status.render(state)
+    assert "最近 24 小時失敗、之後沒有成功過的工作 1 個" in text
+    assert "失敗：重訓機器學習模型（dl-2.6.0，2026 年 11 月）（2026-11-29 22:45）：KeyError: '2026-10-29'" in text

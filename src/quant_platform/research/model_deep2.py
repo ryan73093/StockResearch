@@ -745,7 +745,13 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
         # the periods refitted: the year (one fit) or each month of it (MONTHLY); the last period's networks are kept
         months = sorted({fp.sessions[column].month for column in session_columns}) if version in MONTHLY else [None]
         if only_months and version in MONTHLY:
-            months = [month for month in months if month in only_months]
+            # 2026-11-11: a month fitted before it ended (October on 10/20) kept no scores for its later sessions —
+            # they are scored when read — and the year's report below asks for every weekly one: from 11/03 the
+            # nightly November refit died on KeyError '2026-10-29', after writing the networks and before saving.
+            # Such a month is fitted again (on the labels ended before it, as the first time) with the months asked
+            unkept = {fp.sessions[column].month for column in session_columns
+                      if fp.sessions[column].isoformat() not in stored and fp.sessions[column].month <= max(only_months)}
+            months = [month for month in months if month in only_months or month in unkept]
         train_days, held_days, curves = [], [], []
         for month in months:
             period = [column for column in session_columns if month is None or fp.sessions[column].month == month]
@@ -780,7 +786,11 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
         if not train_days:
             continue
         ics, top20 = [], []
-        for column in [column for column in session_columns if column in weekly and column in report_labels]:
+        # the report covers the months fitted so far: a month after the ones asked has no scores kept yet
+        through = max(only_months) if only_months and version in MONTHLY else 12
+        reported = [column for column in session_columns
+                    if column in weekly and column in report_labels and fp.sessions[column].month <= through]
+        for column in reported:
             ic, gain = _top20(stored[fp.sessions[column].isoformat()], ranks[column], report_labels[column])
             if ic is not None:
                 ics.append(ic)
@@ -791,9 +801,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                                     "top20_gain": round(float(np.mean(top20)), 5) if top20 else None,
                                     "held_curves": curves}
         if version in RESIDUAL_OF:
-            weeks = [column for column in session_columns if column in weekly and column in report_labels]
             meta["years"][str(year)]["residual"] = residual_check(
-                {column: stored[fp.sessions[column].isoformat()] for column in weeks}, fp.matrix(RESIDUAL_OF[version]),
+                {column: stored[fp.sessions[column].isoformat()] for column in reported}, fp.matrix(RESIDUAL_OF[version]),
                 report_labels, eligible)
         _save_scores(out, stored, fp.symbols)
         meta["trained_at"] = datetime.now(UTC).isoformat(timespec="seconds")

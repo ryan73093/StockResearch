@@ -63,7 +63,8 @@ def flows(research: Path, now: datetime) -> dict[str, list[dict[str, object]]]:
     from quant_platform.research.jobs import JobLog, _alive
 
     running, waiting = [], []
-    for row in JobLog(research).jobs(limit=400):
+    rows = JobLog(research).jobs(limit=400)
+    for row in rows:
         if row["status"] == "running":
             running.append({"name": row.get("name"), "since": row.get("started_at"), "percent": row.get("percent"),
                             "eta": row.get("eta"), "current": row.get("current")})
@@ -85,7 +86,21 @@ def flows(research: Path, now: datetime) -> dict[str, list[dict[str, object]]]:
         if status in ("interrupted", "failed") or (status == "running" and not _alive(int(record.get("pid") or 0), started)):
             broken.append({"name": record.get("name") or path.stem, "status": status if status != "running" else "程序已不在",
                            "since": record.get("started_at")})
-    return {"running": running, "waiting": waiting, "broken": broken}
+    # 2026-11-11: the worker's and the flows' jobs that failed in the last 24 hours and that no later run of the same job
+    # (the same name) has done since — the nightly model refit failed nine nights and nothing here said so
+    failed, done = {}, set()
+    for row in sorted(rows, key=lambda row: str(row.get("started_at") or ""), reverse=True):
+        try:
+            began = datetime.fromisoformat(str(row.get("started_at")))
+        except ValueError:
+            continue
+        began = began if began.tzinfo else began.replace(tzinfo=TAIPEI)
+        name = str(row.get("name"))
+        if row["status"] == "done":
+            done.add(name)
+        elif row["status"] == "failed" and name not in done and name not in failed and now - began <= timedelta(hours=24):
+            failed[name] = {"name": name, "since": row.get("started_at"), "summary": row.get("summary")}
+    return {"running": running, "waiting": waiting, "broken": broken, "failed": list(failed.values())}
 
 
 def checks(research: Path, now: datetime) -> dict[str, object]:
@@ -170,6 +185,10 @@ def render(state: dict[str, object]) -> str:
         lines.append(f"  等待：{row['name']}（{str(row['since'])[:16].replace('T', ' ')} 起）：{row['reason']}")
     for row in flow["broken"]:
         lines.append(f"  {row['status']}：{row['name']}（{str(row['since'])[:16].replace('T', ' ')} 開始）")
+    if flow.get("failed"):
+        lines.append(f"  最近 24 小時失敗、之後沒有成功過的工作 {len(flow['failed'])} 個")
+    for row in flow.get("failed") or []:
+        lines.append(f"  失敗：{row['name']}（{str(row['since'])[:16].replace('T', ' ')}）：{row['summary']}")
     found = state["checks"]
     if not found["at"]:
         lines += ["", "16:00 需求檢查：還沒有結果"]

@@ -51,3 +51,31 @@ def test_the_monthly_deep_model_refits_only_the_new_month_once(tmp_path, monkeyp
     assert calls == []                                                   # October's month already fitted
     runner.retrain_models(container, datetime(2026, 11, 2, 22, 45, tzinfo=ZoneInfo("Asia/Taipei")))
     assert calls == [(version, 2026, [11])]                              # November: that month only
+
+
+def test_one_models_failure_does_not_stop_the_others_and_the_run_still_fails(tmp_path, monkeypatch):
+    # 2026-11-11: dl-2.6.0's refit raised nine nights in a row; the models after it in the order were never looked at
+    import pytest
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'retrain.db'}"))
+    research = tmp_path / "research"
+    rules = [DailyRule(name="深度每月", factors={"ml_deep2_monthly": 1.0}), DailyRule(name="深度", factors={"ml_deep2_top": 1.0})]
+    (research / "forward" / "stocks").mkdir(parents=True)
+    (research / "forward" / "stocks" / "tracked.json").write_text(json.dumps([
+        {"rule_hash": rule.rule_hash, "name": rule.name, "kind": "daily", "rule": rule.canonical()} for rule in rules]),
+        encoding="utf-8")
+    monthly, yearly = model.MODELS["ml_deep2_monthly"]["version"], model.MODELS["ml_deep2_top"]["version"]
+    calls = []
+
+    def train_year(base, version, year, job=None, months=None):
+        calls.append(version)
+        if version == monthly:
+            raise KeyError("2026-10-29")
+        return {"years": {"2026": {"train_days": 2000}}}
+    monkeypatch.setattr(model, "train_year", train_year)
+    with pytest.raises(KeyError):
+        runner.retrain_models(container, datetime(2026, 11, 3, 22, 45, tzinfo=ZoneInfo("Asia/Taipei")))
+    assert calls == [monthly, yearly]                                    # the one after the failure was still trained
+    from quant_platform.research.jobs import JobLog
+    states = {item["name"].split("（")[1].split("，")[0]: (item["status"], item.get("summary")) for item in JobLog(research).jobs()}
+    assert states[monthly][0] == "failed" and states[yearly] == ("done", "2026 年模型：訓練 2000 個交易日")

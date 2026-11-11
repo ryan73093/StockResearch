@@ -93,7 +93,10 @@ SOURCES_FILE = "pool_sources.json"      # every batch's rules, built once (_ever
 # for many minutes, these four 10 s each, whenever a research folder had no snapshot yet (the page tests hung on it);
 # their runs are written down in SOURCES_LOG as they start (record_sources) and the earlier ones are in the snapshot
 SEARCH_BATCHES = ("blendscan", "blendroll", "blendsteady", "blendguard", "blendrecent", "blendfrontier", "blendfour", "blendsize", "next10blend", "rolesplit", "splitblend",
-                  "top10blend")
+                  "top10blend",
+                  # 2026-11-12: the four searches added since 10/29 were not here; a pool without its snapshot ran them
+                  # on the real pool (tests/test_research_pool.py now finds every batch that runs a search)
+                  "bear12", "bear13", "blendreach", "blendreach14")
 SOURCES_LOG = "sources.jsonl"           # the rules each daily batch run went through, appended by the CLI
 
 

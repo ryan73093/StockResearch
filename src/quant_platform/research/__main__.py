@@ -405,6 +405,8 @@ def main() -> int:
     # 2026-10-20: every registered version (a hand-kept list left gbm-2.3.0 and dl-2.4.0 out and their runs failed)
     parser.add_argument("--model-version", default="gbm-1.2.0", choices=sorted(MODEL_VERSIONS),
                         help="model：要訓練的模型版本（標籤寫在 research/model.py MODELS）")
+    parser.add_argument("--this-month", action="store_true",
+                        help="model：只重訓今年的模型——每月重訓的深度模型只訓這個月（和每晚 22:45 的排程同一條路）")
     parser.add_argument("--universe", default="twse", choices=("twse", "all"),
                         help="stats --family daily：上市（twse）或上市＋上櫃（all）的資料版本")
     parser.add_argument("--recent", action="store_true", help="factors：新設計（2015-06 起、每週排名、看 20 個交易日）")
@@ -773,6 +775,22 @@ def main() -> int:
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         years = list(range(research_model.FIRST_YEAR, daily_research.RECENT_END.year + 1))
         version = args.model_version
+        if args.this_month:
+            # 2026-11-11: the nightly refit (scheduler retrain_models) by hand — after nine failed nights there was no
+            # way to run it but to wait for 22:45
+            from quant_platform.research.model_deep2 import MONTHLY as deep_monthly
+
+            today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+            months = [today.month] if version in deep_monthly else None
+            label = f"{today.year} 年" + (f" {today.month} 月" if months else "")
+            with JobLog(RESEARCH).start(f"重訓機器學習模型（{version}，{label}）", command, total=1) as job:
+                meta = research_model.train_year(Path(args.base), version, today.year, job=job,
+                                                 **({"months": months} if months else {}))
+                item = meta["years"].get(str(today.year), {})
+                job.payload["summary"] = (f"{label}：訓練 {item.get('train_days') or item.get('train_rows')}、"
+                                          f"樣本外 IC {item.get('ic')}、前 20 名多 {item.get('top20_gain')}")
+            print(job.payload["summary"], flush=True)
+            return 0
         label = research_model.VERSIONS[version]["label"]
         with JobLog(RESEARCH).start(f"訓練機器學習模型（{version}，{label} 標籤，逐年 {years[0]}～{years[-1]}）",
                                     command, total=len(years)) as job:
