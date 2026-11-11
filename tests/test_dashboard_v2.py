@@ -250,7 +250,7 @@ def test_research_conclusions_come_from_the_method_document(tmp_path):
                    "### 下一節\n\n- 不算這行\n", encoding="utf-8")
     assert research_conclusions(doc) == ["<strong>最好的規則</strong>：A &lt;b&gt;", "用 <code>x</code> 跑"]
     assert research_conclusions(tmp_path / "missing.md") == []
-    assert research_conclusions(Path("docs/research_method.md"))        # the real document keeps the section
+    assert research_conclusions(Path("docs/research/conclusions.md"))   # the real document keeps the section
 
 
 def test_market_overview_has_its_own_entry(client):

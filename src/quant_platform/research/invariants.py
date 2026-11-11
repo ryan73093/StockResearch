@@ -173,13 +173,13 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     checks = []
 
     held_0050 = [item["name"] for item in live if uses_0050(item.get("rule") or {})]
-    checks.append(_check("前向帳戶沒有 0050", "AGENTS.md 已核定方向：策略一律 100% 個股", not held_0050,
+    checks.append(_check("前向帳戶沒有 0050", "D-003：策略一律 100% 個股", not held_0050,
                          f"{len(live)} 個帳戶；含 0050 的 {len(held_0050)} 個" + (f"：{held_0050[:3]}" if held_0050 else "")))
 
     start = common_start(today).isoformat()
     # 2026-10-21 (使用者：不要跟我說前向觀察只能做一天): no exception — the LLM trader's pair too
     wrong_start = [item["name"] for item in live if item.get("since") != start]
-    checks.append(_check("前向帳戶從當月截止日隔天起算", "AGENTS.md：前向觀察與挑策略一律每月滾動",
+    checks.append(_check("前向帳戶從當月截止日隔天起算", "D-008：前向觀察與挑策略一律每月滾動",
                          not wrong_start, f"起算日應為 {start}；不是的 {len(wrong_start)} 個"
                          + (f"：{wrong_start[:3]}" if wrong_start else "")))
 
@@ -272,7 +272,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                 refits = {}
             if cutoff.isoformat() not in refits:
                 stale.add("RL 機器人 " + factor)
-    checks.append(_check("前向帳戶用到的模型都重訓到當月截止日", "AGENTS.md：只用截止日以前的資料挑策略、重訓模型（使用者 2026-10-16）",
+    checks.append(_check("前向帳戶用到的模型都重訓到當月截止日", "D-008：只用截止日以前的資料挑策略、重訓模型（使用者 2026-10-16）",
                          not stale, f"截止日 {cutoff}；還沒重訓的 {len(stale)} 個" + (f"：{sorted(stale)[:6]}" if stale else "")))
 
     from quant_platform.research.stock_forward import FIXED_HOLD
@@ -369,7 +369,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     if backups is not None:
         files = sorted(backups.glob("*"), key=lambda path: path.stat().st_mtime) if backups.is_dir() else []
         newest = datetime.fromtimestamp(files[-1].stat().st_mtime) if files else None
-        checks.append(_check("資料庫每日備份", "AGENTS.md 資料庫安全：每日 03:00、保留 7 份",
+        checks.append(_check("資料庫每日備份", "docs/rules/data.md 資料庫安全：每日 03:00、保留 7 份",
                              newest is not None and (datetime.now() - newest).days < 2,
                              f"{len(files)} 份，最新 {newest:%m-%d %H:%M}" if newest else "沒有備份"))
     # 2026-10-22 (交接：需求檢查再加): the month's list, the news, the second copy on the other disk
@@ -380,7 +380,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     except (KeyError, TypeError, ValueError):            # a list file without its cutoff is no list
         month = {}
     wanted = cutoff_for(today).isoformat()
-    checks.append(_check("本月的每月名單存在", "AGENTS.md：前向觀察與挑策略一律每月滾動（使用者 2026-10-16／10-17）",
+    checks.append(_check("本月的每月名單存在", "D-008：前向觀察與挑策略一律每月滾動（使用者 2026-10-16／10-17）",
                          month.get("cutoff") == wanted, f"應為截止 {wanted}；最新名單截止 {month.get('cutoff') or '沒有'}"))
     news = research / "history" / "raw" / "finmind" / "TaiwanStockNews"
     days = sorted(path.name for path in news.iterdir() if path.is_dir() and path.name.isdigit()) if news.is_dir() else []
@@ -438,7 +438,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
             pass
         if status in ("interrupted", "failed") or (status == "running" and not _alive(int(record.get("pid") or 0), started)):
             stuck.append(f"{record.get('name')}（{'中斷' if status == 'interrupted' else '失敗' if status == 'failed' else '程序已不在'}，{str(record.get('started_at'))[:16]} 開始）")
-    checks.append(_check("研究流程沒有中斷了沒恢復的", "AGENTS.md 長時間程式：重開機或關機後要接著跑", not stuck,
+    checks.append(_check("研究流程沒有中斷了沒恢復的", "D-032 長時間程式：重開機或關機後要接著跑", not stuck,
                          "；".join(stuck[:4]) if stuck else "沒有"))
     # 2026-11-03: regate221 waited from 10-30 09:18 for 40 GB of memory free and nothing said so for three and a half
     # days — a flow waiting more than a day is shown with what it waits for
@@ -450,7 +450,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     from quant_platform.research.daily import ENGINE_VERSION, stale_engine
 
     stale = stale_engine(research) if (research / "trials.jsonl").is_file() else []
-    checks.append(_check("選手池每個 100% 個股規則的最新結果都是現行引擎", "AGENTS.md：前向帳戶和回測一定是同一個策略（使用者 2026-10-25）",
+    checks.append(_check("選手池每個 100% 個股規則的最新結果都是現行引擎", "D-017：前向帳戶和回測一定是同一個策略（使用者 2026-10-25）",
                          not stale, f"現行 {ENGINE_VERSION}；舊引擎的 {len(stale)} 個"
                          + (f"：{[rule.name[:30] for rule in stale[:3]]}" if stale else "")))
     # 2026-10-27 (使用者 10/26：不要再用 2015～2020 作為篩選；短歷史賽道加重; 10/27：問我幹嘛): every grade is on the
@@ -534,11 +534,11 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     # 2026-10-23 (AGENTS.md：背景程式不開視窗; 使用者 2026-10-20 關掉一堆沒說明的空白 cmd 視窗，研究跟著中斷)
     try:
         opened = own_windows(desktop_windows() if windows is None else windows, research.parent.parent)
-        checks.append(_check("桌面沒有本專案開出的視窗", "AGENTS.md：背景程式不開視窗（使用者 2026-10-20）", not opened,
+        checks.append(_check("桌面沒有本專案開出的視窗", "D-013：背景程式不開視窗（使用者 2026-10-20）", not opened,
                              (f"{len(opened)} 個：" + "；".join(f"{item['title'] or item['class']}（PID {item['pid']}）"
                                                              for item in opened[:3])) if opened else "沒有"))
     except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
-        checks.append(_check("桌面沒有本專案開出的視窗", "AGENTS.md：背景程式不開視窗（使用者 2026-10-20）", False,
+        checks.append(_check("桌面沒有本專案開出的視窗", "D-013：背景程式不開視窗（使用者 2026-10-20）", False,
                              f"沒辦法檢查：{str(exc)[:120]}"))
     # 2026-10-30: at 05:41 the disk was full for a while and the full search stopped half written; room on C: for the
     # data, the backups and the searches
@@ -563,7 +563,28 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     # 2026-10-29 (使用者：你他媽當我電腦資源很多是不是): the research took the whole CPU and another project's UE build ran
     # 9% in 8 hours; research, pipelines and the worker run at the idle priority so other work goes first
     checks.append(priority_check(processes, research.parent.parent))
+    # 2026-11-11 (使用者：D 要能確保後續文件開發後也要能維持文件的穩定、ai 要能讀對資料、省 token; D-028)
+    checks.append(docs_check(research.parent.parent))
     return checks
+
+
+DOCS_CHECK = "文件守門：字數上限、交接檔三欄、定義只一處、決定編號、提到的檔案、路線圖與架構沒落後"
+
+
+def docs_check(root: Path) -> dict[str, object]:
+    """The documents' guard (``quant_platform.docs_guard``, the same one ``tests/test_docs_guard.py`` runs) on the
+    project's files: AGENTS.md and the rules files within their sizes, the handoff with its three fields only, T0,
+    截止日 and 可以上線 defined once, every decision number there and cited, every named file there, the roadmap and
+    the architecture not far behind the code."""
+    from quant_platform import docs_guard
+
+    source = "使用者 2026-11-11：D 要能確保後續文件開發後也要能維持文件的穩定、ai 要能讀對資料、省 token（D-028）"
+    try:
+        found = docs_guard.problems(root)
+        return _check(DOCS_CHECK, source, not found, "；".join(found[:6]) + (f"（共 {len(found)} 項）" if len(found) > 6 else "")
+                      if found else "全部符合")
+    except Exception as exc:                            # noqa: BLE001 - not able to look is reported, not hidden
+        return _check(DOCS_CHECK, source, False, f"沒辦法檢查：{str(exc)[:120]}")
 
 
 def paid_check(research: Path, today: date, now: datetime | None = None) -> dict[str, object]:

@@ -4,14 +4,14 @@ already keeps, searched and asked through the model.
 
 | kind | source | one entry per |
 |---|---|---|
-| 研究紀錄 | docs/research_method.md | a heading or bold-headed part (a long one split at its top-level bullets) |
-| 最佳化紀錄 | research_method's optimization log table | row: date, family, what, result, verdict |
-| 淘汰方向 | research_method §8 table | row: direction, reason |
+| 研究紀錄 | docs/research/conclusions.md, criteria.md, results.md | a heading or bold-headed part (a long one split at its top-level bullets) |
+| 最佳化紀錄 | results.md's optimization log table | row: date, family, what, result, verdict |
+| 淘汰方向 | conclusions.md's §8 table | row: direction, reason |
 | 試驗 | instance/research/trials.jsonl | rule and period (the newest run): tier, money, drawdown, 0050, why it failed |
 | 大規模搜尋 | instance/research/scans/*/summary.json | round: candidates, passed the screen, finalists, tiers |
 | 組合搜尋 | instance/research/blend_scan/finalists-*.json | round (a rerun of the same pool once) |
 | 開發紀錄 | DEVELOPMENT_HISTORY.md | delivery (a long one split at its bullets) |
-| 使用者決定 | AGENTS.md「已核定方向」 | bullet |
+| 使用者決定 | docs/decisions.md | decision (## D-001 …) |
 | 需求 | REQUIREMENTS.md | section (split like the research records) |
 
 ``build`` writes instance/research/knowledge/entries.jsonl (rebuilt by ``ensure`` when a source changed); ``search``
@@ -33,8 +33,15 @@ from zoneinfo import ZoneInfo
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 VERSION = "knowledge-1.0.0"
-DOCS = {"research_method": Path("docs") / "research_method.md", "history": Path("DEVELOPMENT_HISTORY.md"),
-        "agents": Path("AGENTS.md"), "requirements": Path("REQUIREMENTS.md")}
+# 2026-11-11 (D 工作包): the research method split into three (conclusions, criteria, results) and the decisions moved
+# from AGENTS.md「已核定方向」to their register
+RESEARCH_DOCS = ("research_conclusions", "research_criteria", "research_results")
+DOCS = {"research_conclusions": Path("docs") / "research" / "conclusions.md",
+        "research_criteria": Path("docs") / "research" / "criteria.md",
+        "research_results": Path("docs") / "research" / "results.md", "history": Path("DEVELOPMENT_HISTORY.md"),
+        "decisions": Path("docs") / "decisions.md", "requirements": Path("REQUIREMENTS.md")}
+LINKS = {"research_conclusions": "/project/research_method", "research_criteria": "/project/research_criteria",
+         "research_results": "/project/research_results"}
 KINDS = ("研究紀錄", "最佳化紀錄", "淘汰方向", "試驗", "大規模搜尋", "組合搜尋", "開發紀錄", "使用者決定", "需求")
 CODES = {"研究紀錄": "R", "最佳化紀錄": "O", "淘汰方向": "X", "試驗": "T", "大規模搜尋": "S", "組合搜尋": "B", "開發紀錄": "H",
          "使用者決定": "D", "需求": "Q"}
@@ -42,7 +49,6 @@ FAILED = ("失敗", "淘汰")                      # the verdicts the failure li
 MAX_TEXT = 2400                                # characters a text entry holds; longer parts split at bullets
 OPTIMIZATIONS = "最佳化紀錄（網站"
 RETIRED = "已淘汰的方向與原因"
-DECISIONS = "已核定方向"
 FAIL_WORDS = ("沒過", "未通過", "沒有通過", "失敗", "淘汰", "沒用", "沒有用", "不採用", "沒找到", "沒有找到", "全部 T3",
               "全部是 T3", "作廢", "不做成", "輸 0050", "沒有贏")
 PASS_WORDS = ("**過**", "照判定通過", "都過", "個過", "過門檻", "成為最好", "上前緣", "前緣新", "新頂端", "通過")
@@ -161,7 +167,10 @@ def _entry(kind: str, key: str, title: str, text: str, date: str = "", verdict: 
             "trials": found[:40], "source": source, "link": link}
 
 
-def _document_entries(root: Path, name: str, kind: str, link: str, skip: tuple[str, ...] = ()) -> list[dict[str, object]]:
+def _document_entries(root: Path, name: str, kind: str, link: str, skip: tuple[str, ...] = (),
+                      key: str | None = None) -> list[dict[str, object]]:
+    """``key``: the name the entries' ids are made from (the three research documents keep research_method's, so an
+    entry moved by the 2026-11-11 split keeps its id)."""
     path = root / DOCS[name]
     if not path.is_file():
         return []
@@ -181,7 +190,7 @@ def _document_entries(root: Path, name: str, kind: str, link: str, skip: tuple[s
             label = title if len(pieces) == 1 else f"{title}（第 {number}／{len(pieces)} 部分）"
             date = _date(title) or _date(piece) or _date(context)
             verdict = judge(title, piece) if kind == "研究紀錄" else ("決定" if kind == "使用者決定" else "說明")
-            output.append(_entry(kind, f"{name}:{title}#{seen[title]}:{number}", label,
+            output.append(_entry(kind, f"{key or name}:{title}#{seen[title]}:{number}", label,
                                  (f"（{context}）\n" if context else "") + piece, date, verdict,
                                  f"{DOCS[name].as_posix()}:{part['line']}", link, judged=kind == "研究紀錄"))
     return output
@@ -200,26 +209,28 @@ def _table_rows(text: str, heading: str) -> list[list[str]]:
     return rows[1:] if rows else []           # without the header row
 
 
+def _text(root: Path, name: str) -> str:
+    path = root / DOCS[name]
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
 def research_entries(root: Path) -> list[dict[str, object]]:
-    path = root / DOCS["research_method"]
-    if not path.is_file():
-        return []
-    text = path.read_text(encoding="utf-8")
-    link = "/project/research_method"
-    output = _document_entries(root, "research_method", "研究紀錄", link, skip=(OPTIMIZATIONS, RETIRED))
-    for number, cells in enumerate(_table_rows(text, OPTIMIZATIONS)):
+    output = []
+    for name in RESEARCH_DOCS:
+        output += _document_entries(root, name, "研究紀錄", LINKS[name], skip=(OPTIMIZATIONS, RETIRED), key="research_method")
+    for number, cells in enumerate(_table_rows(_text(root, "research_results"), OPTIMIZATIONS)):
         if len(cells) != 5:
             continue
         date, family, what, result, verdict = cells
         output.append(_entry("最佳化紀錄", f"opt:{date}:{family}:{what}", f"{family}：{what}",
                              f"日期 {date}｜家族 {family}\n做了什麼：{what}\n結果：{result}\n判定：{verdict}",
-                             date, _verdict_of(verdict), f"{DOCS['research_method'].as_posix()}（最佳化紀錄第 {number + 1} 列）",
+                             date, _verdict_of(verdict), f"{DOCS['research_results'].as_posix()}（最佳化紀錄第 {number + 1} 列）",
                              "/research?tab=overview", family))
-    for cells in _table_rows(text, RETIRED):
+    for cells in _table_rows(_text(root, "research_conclusions"), RETIRED):
         if len(cells) < 2:
             continue
         output.append(_entry("淘汰方向", f"retired:{cells[0]}", cells[0], f"已淘汰的方向：{cells[0]}\n原因：{cells[1]}", "",
-                             "淘汰", f"{DOCS['research_method'].as_posix()}（第 8 節）", link))
+                             "淘汰", f"{DOCS['research_conclusions'].as_posix()}（第 8 節）", LINKS["research_conclusions"]))
     return output
 
 
@@ -318,31 +329,25 @@ def search_entries(research: Path) -> list[dict[str, object]]:
 
 
 def decision_entries(root: Path) -> list[dict[str, object]]:
-    path = root / DOCS["agents"]
-    if not path.is_file():
-        return []
-    output, inside, bullet, line_number = [], False, [], 0
-
-    def close():
-        if bullet:
-            text = " ".join(bullet).strip()
-            output.append(_entry("使用者決定", f"agents:{text[:60]}", text[2:60].split("（")[0].split("：")[0], text, _date(text),
-                                 "決定", f"AGENTS.md:{line_number}", "/project/handoff"))
-
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if line.startswith("## "):
-            close()
-            bullet = []
-            inside = DECISIONS in line
-            continue
-        if not inside:
-            continue
-        if line.startswith("- "):
-            close()
-            bullet, line_number = [line], number
-        elif bullet and line.strip():
-            bullet.append(line.strip())
-    close()
+    """One entry per decision of docs/decisions.md (2026-11-11; before, the bullets of AGENTS.md「已核定方向」): the
+    ``## D-001 title`` heading and what is under it — the dates, where it came from, the user's words."""
+    found, current = [], None
+    for number, line in enumerate(_text(root, "decisions").splitlines(), start=1):
+        heading = re.match(r"^## (D-\d{3})\s+(.*)$", line)
+        if heading:
+            current = {"code": heading.group(1), "title": heading.group(2).strip(), "line": number, "lines": []}
+            found.append(current)
+        elif line.startswith("## "):
+            current = None
+        elif current is not None:
+            current["lines"].append(line)
+    output = []
+    for item in found:
+        text = "\n".join(item["lines"]).strip()
+        dates = re.search(r"日期：([^\n]*)", text)
+        output.append(_entry("使用者決定", f"decision:{item['code']}", f"{item['code']} {item['title']}", text,
+                             _date(dates.group(1) if dates else text), "決定", f"{DOCS['decisions'].as_posix()}:{item['line']}",
+                             "/project/decisions"))
     return output
 
 
@@ -703,8 +708,7 @@ def unrecorded(root: str | Path, research: str | Path, since: str = RECORDED_FRO
     if not script.is_file():
         return []
     pipelines = experiment_pipelines(script.read_text(encoding="utf-8-sig"))
-    written = "".join((root / DOCS[name]).read_text(encoding="utf-8") for name in ("research_method", "history")
-                      if (root / DOCS[name]).is_file())
+    written = "".join(_text(root, name) for name in (*RESEARCH_DOCS, "history"))
     missing = []
     for path in sorted((research / "pipelines").glob("*.json")) if (research / "pipelines").is_dir() else []:
         try:

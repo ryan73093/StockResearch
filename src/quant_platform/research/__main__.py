@@ -4,6 +4,7 @@
     python -m quant_platform.research trial --spec path.json --period development|validation|holdout
     python -m quant_platform.research trials            # list and verify the registry
     python -m quant_platform.research schema            # StrategySpec JSON Schema
+    python -m quant_platform.research status            # data dates, flows, red checks, the month's list, chain days
 
 Every run is registered in instance/research/trials.jsonl (append-only hash
 chain) and its report saved under instance/research/reports/.
@@ -349,7 +350,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
@@ -500,6 +501,12 @@ def main() -> int:
                         help="tech-rl：機器人版本（1.1.0 每週決策）")
     parser.add_argument("--use-plan", action="store_true", help="用網站上最新版投資計畫的每月金額與薪資日")
     args = parser.parse_args()
+    if args.command == "status":
+        # 2026-11-11 (problem register「D 的設計」3): the state printed by the program, not written by hand
+        from quant_platform.research.status_report import collect, emit, render
+
+        emit(render(collect(RESEARCH)))
+        return 0
     if args.use_plan:
         saved = _saved_plan()
         if saved is None:

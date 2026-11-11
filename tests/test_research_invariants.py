@@ -426,3 +426,39 @@ def test_the_news_and_paid_tables_are_due_once_their_runs_have_come(tmp_path):
     assert invariants.collected_due(research, four.date(), four, (7, 30)) == date(2026, 11, 2)
     monday = datetime(2026, 11, 9, 0, 40, tzinfo=zone)                # 2026-11-09: Friday's run collected Thursday's
     assert invariants.collected_due(research, monday.date(), monday, (14, 45)) == date(2026, 11, 5)
+
+
+def test_the_documents_guard_is_a_daily_check(tmp_path):
+    """2026-11-11 (使用者：D 要能確保後續文件開發後也要能維持文件的穩定): the documents' guard (docs_guard) is one of the
+    16:00 checks — red on a broken copy, green on a good one, and part of every run."""
+    import subprocess
+
+    from quant_platform import docs_guard
+
+    def write(name, text):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    write("AGENTS.md", "# 入口\n\n- 研究讀 `docs/rules/research.md`（D-001）。\n")
+    write("docs/rules/research.md", "# 研究\n\n- 規則（D-001）。\n")
+    write("docs/decisions.md", "# 決定\n\n## D-001 一律 100% 個股\n\n原文。\n")
+    write("docs/development_handoff.md", "# 交接\n\n## 當前工作包\n\nD\n\n## 等使用者決定\n\n- 無\n\n## 下一步\n\n- B\n")
+    write("docs/research/conclusions.md", "# 現行結論\n")
+    write("docs/trading_rules.md", "<!-- 定義：T0 -->\n<!-- 定義：截止日 -->\n<!-- 定義：可以上線 -->\n")
+    for name in docs_guard.LAGGING:
+        write(name, "# doc\n")
+    git = docs_guard._git()
+    for args in (["init", "-q"], ["add", "."], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "docs"]):
+        subprocess.run([git, *args], cwd=tmp_path, check=True, capture_output=True)
+    found = invariants.docs_check(tmp_path)
+    assert found["ok"], found["detail"]
+    write("AGENTS.md", "# 入口\n\n" + "字" * 3000 + "（D-001）`docs/rules/research.md`\n")
+    write("docs/development_handoff.md", "# 交接\n\n## 11/10 的重點\n")
+    found = invariants.docs_check(tmp_path)
+    assert not found["ok"] and "AGENTS.md 3,0" in found["detail"] and "交接檔" in found["detail"]
+    assert found["name"] == "文件守門：字數上限、交接檔三欄、定義只一處、決定編號、提到的檔案、路線圖與架構沒落後"
+    research = tmp_path / "instance" / "research"
+    (research / "forward" / "stocks").mkdir(parents=True)
+    names = [item["name"] for item in invariants.run(research, date(2026, 11, 11), windows=[], memory=[], processes=[])]
+    assert found["name"] in names

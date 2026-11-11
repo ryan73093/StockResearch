@@ -224,9 +224,14 @@ def test_the_housing_issue_is_four_projects_and_a_changed_light_marks_the_readin
     assert split[1]["news"] and not split[0]["news"] and split[0]["cities"] == [] and split[0]["group"] == "housing"
     assert all(topic["question"] and topic["panels"] for topic in split)
     assert set(issues.PROJECTS) == set(NOTES)                                     # every project has a reading
-    leverage = {"key": "leverage", "indicators": [{"id": "stock_margin", "name": "上市融資餘額年增率", "level": "watch"},
-                                                  {"id": "margin_vs_index", "name": "x", "level": "alert"},
-                                                  {"id": "margin_maintenance", "name": "y", "level": "ok"}]}
+    # 2026-11-11: the lights come from the reading itself — the test had the 10/28 reading's lights written in, and
+    # failed from 11/09, when the reading was written again on other lights
+    written = NOTES["leverage"]["levels"]
+    other = next(level for level in ("watch", "alert", "ok") if level != written["stock_margin"])
+    leverage = {"key": "leverage", "indicators": [{"id": "stock_margin", "name": "上市融資餘額年增率", "level": other}]
+                + [{"id": name, "name": name, "level": level} for name, level in written.items() if name != "stock_margin"]}
     found = issues.note(leverage)
-    assert found["moved"] == ["上市融資餘額年增率"] and found["added"] == []      # written on alert, now watch
+    assert found["moved"] == ["上市融資餘額年增率"] and found["added"] == []      # one light changed since the reading
+    leverage["indicators"].append({"id": "new_one", "name": "新指標", "level": "ok"})
+    assert issues.note(leverage)["added"] == ["新指標"]                           # an indicator the reading never saw
     assert len({item["key"] for item in CANDIDATES}) == len(CANDIDATES) and all(item["why"] and item["track"] for item in CANDIDATES)

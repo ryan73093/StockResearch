@@ -6,7 +6,7 @@ import json
 from quant_platform.research import knowledge
 from quant_platform.research.registry import TrialRegistry
 
-METHOD = """# 研究方法
+RESULTS = """# 研究：結果紀錄
 
 ## 7. 結論
 
@@ -27,6 +27,10 @@ METHOD = """# 研究方法
 - 判定：09:10 賣的好處至少是開盤的一半。
 
 **籌碼因子（R13，2026-10-04）**：26 個規則全部是 T3，籌碼每天變、前 20 名一直換。
+"""
+
+# 2026-11-11: the research method split into three (conclusions, criteria, results)
+CONCLUSIONS = """# 研究：現行結論
 
 ## 8. 已淘汰的方向與原因
 
@@ -35,23 +39,35 @@ METHOD = """# 研究方法
 | 定期不定額（均線、回撤倍數） | 閒置現金拖累，3 年勝率 7%～65% |
 """
 
-AGENTS = """# 入口
+CRITERIA = """# 研究：判定準則
 
-## 已核定方向（2026-09-30）
+## 6. 關卡
 
-- 策略一律 100% 個股（使用者 2026-10-09）：0050 只當比較基準。
-- 回覆一律繁體中文。
+- 每個規則先過開發期的門檻，再看 2020-10 以後的視窗，這一段要夠長才會成為一筆。
+"""
 
-## 研究規範
+# 2026-11-11: the decisions moved from AGENTS.md「已核定方向」to docs/decisions.md
+DECISIONS = """# 決定登記簿
 
-- 不在這裡。
+## D-001 策略一律 100% 個股
+
+- 日期：2026-10-09
+
+> 策略一律 100% 個股（使用者 2026-10-09）：0050 只當比較基準。
+
+## D-002 回覆一律繁體中文
+
+- 日期：2026-10-01、2026-10-20
+
+> 回覆一律繁體中文。
 """
 
 
 def _root(tmp_path):
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "research_method.md").write_text(METHOD, encoding="utf-8")
-    (tmp_path / "AGENTS.md").write_text(AGENTS, encoding="utf-8")
+    (tmp_path / "docs" / "research").mkdir(parents=True)
+    for name, text in (("conclusions", CONCLUSIONS), ("criteria", CRITERIA), ("results", RESULTS)):
+        (tmp_path / "docs" / "research" / f"{name}.md").write_text(text, encoding="utf-8")
+    (tmp_path / "docs" / "decisions.md").write_text(DECISIONS, encoding="utf-8")
     (tmp_path / "DEVELOPMENT_HISTORY.md").write_text("# 歷程\n\n## 2026-10-22 上午 — 知識庫\n\n- 建了研究知識庫，失敗紀錄都進去（`kb`）。\n",
                                                     encoding="utf-8")
     (tmp_path / "REQUIREMENTS.md").write_text("# 需求\n\n## §7 研究\n\n- 2015-06 起挑規則，最終驗證期只能評估一次，這一段要夠長才會成為一筆。\n",
@@ -86,8 +102,12 @@ def test_the_records_become_entries(tmp_path):
     assert trial["id"] == "T-1" and trial["verdict"] == "失敗" and "2015-06 起輸 0050" in trial["text"]
     assert "400 萬" in trial["text"] and "980 萬" in trial["text"]
     assert {row["title"] for row in knowledge.failures(research)} >= {"強化學習：機器人 3.2：加跌市穩槽", "定期不定額（均線、回撤倍數）"}
+    decision = by_title["D-001 策略一律 100% 個股"]
+    assert decision["kind"] == "使用者決定" and decision["date"] == "2026-10-09" and "0050 只當比較基準" in decision["text"]
+    assert decision["source"] == "docs/decisions.md:3"
+    assert by_title["6. 關卡"]["source"].startswith("docs/research/criteria.md")         # the criteria are read too
     assert not knowledge.stale(root, research)
-    (root / "AGENTS.md").write_text(AGENTS + "\n", encoding="utf-8")
+    (root / "docs" / "decisions.md").write_text(DECISIONS + "\n", encoding="utf-8")
     assert knowledge.stale(root, research)
 
 
@@ -167,7 +187,7 @@ def test_an_edit_above_a_record_keeps_its_id(tmp_path):
     root, research = _root(tmp_path)
     knowledge.build(root, research)
     before = {row["title"]: row["id"] for row in knowledge.entries(research) if row["kind"] == "研究紀錄"}
-    path = root / "docs" / "research_method.md"
+    path = root / "docs" / "research" / "results.md"
     path.write_text(path.read_text(encoding="utf-8").replace("## 7. 結論\n", "## 7. 結論\n\n新增的一行。\n\n另一行。\n"),
                     encoding="utf-8")
     knowledge.build(root, research)

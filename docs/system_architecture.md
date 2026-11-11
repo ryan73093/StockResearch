@@ -149,7 +149,7 @@ flowchart TD
     G -->|"部分期間贏"| T2["T2"]
     G -->|"都贏、回撤深"| T1["T1"]
     G -->|"全部門檻都過"| T0C["T0 候選"]
-    T0C --> ROLL["每月滾動（2026-10-17 起）：截止日＝兩個月前的月底<br/>只用截止日以前的資料挑規則、重訓模型"]
+    T0C --> ROLL["每月滾動（2026-10-17 起，截止日的定義見交易需知 §7）<br/>只用截止日以前的資料挑規則、重訓模型"]
     ROLL --> FWD["前向觀察：從截止日隔天起算（10 月 → 9/1），每月換一次，每天 15:30 記錄"]
     FWD -->|"60 個交易日不輸 0050、對帳正常"| T0["T0"]
     T0 -->|"S10（提案）：R4 成交可行性、你核准"| PLAN["計畫可選、今日頁產生委託"]
@@ -252,6 +252,16 @@ flowchart LR
 | 舊研究（ETF 策略工廠、舊晉級流程、AI 研究員、舊版模型、舊回測與特徵） | 暫停或只讀；舊表已封存清空；研究頁「舊設計紀錄」、系統頁「舊版頁面」備查 | S8 決定刪除 | S8 |
 | Dashboard | 新介面五頁＋市場總覽＋個股頁；研究頁以新設計為主；舊頁面收在系統頁 | 舊頁面 S8 移除 | S2、S6、S9 |
 
+## 文件分層（2026-11-11，S11-D）
+
+| 層 | 檔案 | 怎麼讀 |
+|---|---|---|
+| 0 | `AGENTS.md`（硬規則＋讀檔索引，上限 3,000 字） | 每個對話自動載入 |
+| 1 | `docs/rules/` 依工作類型（交付、研究、研究流程、服務、介面、資料，各上限 4,000 字）；`docs/development_handoff.md`（三欄）；`docs/trading_rules.md`（交易規則與 T0、截止日、可以上線的唯一定義） | 做那類工作才讀 |
+| 2 | `REQUIREMENTS.md`、`docs/decisions.md`、`docs/research/`（現行結論、判定準則、結果紀錄）、`DEVELOPMENT_HISTORY.md` | 不整份讀：搜尋或知識庫查詢 |
+
+現在的狀態不寫在文件裡，由 `python -m quant_platform.research status` 印出。守門：`tests/test_docs_guard.py` 與每天 16:00 的需求檢查。
+
 ## 程式結構
 
 新程式放在既有 `src/quant_platform/` 內，名稱在各工作包定案：
@@ -304,12 +314,29 @@ flowchart LR
 | `research/promotion.py` | 晉級流程（S4-W06）：開發期／驗證期／最終驗證期關卡、成本加倍與晚一天執行、前向模擬 40 個交易日、使用者核准與撤銷；只追加的雜湊串鏈紀錄 `instance/research/promotions.jsonl`；`strategy_catalog()` 提供計畫頁可選的策略（內建基準＋已核准） |
 | `research/agent/` | AI 研究員（S4-W04）：`llm.py`（OpenAI Responses API、`store: false`、費用帳本與每月預算硬上限）、`researcher.py`（提示、設定檔驗證與去重、開發期試驗、研究日誌、每晚上限與鎖）；CLI `python -m quant_platform.research agent [--dry-run|--check]`；worker 工作 `research_agent`（每晚 22:00） |
 | `decision/` | 投資計畫、決策引擎、委託單、帳務與影子帳戶 |
-| `dashboard/v2.py`、`dashboard/templates/v2/`、`static/css/v2.css` | 新介面：今日、持倉、計畫、研究、系統（主導覽五項；下方「市場總覽」`/market` 與查個股 `/stock`，手機在頂端列）（含專案資訊，直接讀 docs 原始檔）；電腦／iPad／手機三種版面、深色預設（S2-W03 第二版）；使用教學 `/help`（讀 `docs/user-guide.md`，S6-W06） |
+| `dashboard/v2.py`、`dashboard/templates/v2/`、`static/css/v2.css` | 新介面：今日、持倉、計畫、研究、議題、系統（主導覽六項，議題 2026-10-27 起；下方「市場總覽」`/market` 與查個股 `/stock`，手機在頂端列）（含專案資訊，直接讀 docs 原始檔）；電腦／iPad／手機三種版面、深色預設（S2-W03 第二版）；使用教學 `/help`（讀 `docs/user-guide.md`，S6-W06） |
 | `application/database_backup.py`、`scripts/database_backup.py` | 每日線上備份、保留 7 份、狀態與還原演練（S2-W05） |
 | `application/close_availability.py` | 收盤資料各來源公布時間量測（S1-W05，`instance/close_availability.jsonl`） |
 | `dashboard/cloudflare_access.py` | Cloudflare Access JWT 驗證、擁有者允許清單、本機 loopback 例外、安全標頭（S2-W01） |
 | `application/prediction_archive.py` | 預測保留政策與 Parquet 封存（S1-W03） |
 | `application/listing_reconciliation.py` | 官方名冊比對與下市處理（S1-W02） |
+| `docs_guard.py`、`tests/test_docs_guard.py` | 文件守門（S11-D，2026-11-11）：`AGENTS.md` 3,000 字、`docs/rules/*.md` 各 4,000 字、交接檔只有三欄、T0／截止日／可以上線只在交易需知 §7 定義、決定編號存在且都被引用、文件提到的檔案存在、路線圖與架構落後改程式的 commit 不超過 30 個；16:00 需求檢查也跑（`research/invariants.py` `docs_check`） |
+| `research/status_report.py` | 狀態指令（S11-D）：`python -m quant_platform.research status` 印出研究資料與前向紀錄日期（對照交易所日曆應有的日期）、在跑與等待中的流程、16:00 紅燈、當月名單、串接前向天數；唯讀 |
+| `research/knowledge.py`、`research/knowledge_vectors.py` | 研究知識庫：研究三份文件（`docs/research/conclusions.md`、`docs/research/criteria.md`、`docs/research/results.md`）、決定登記簿 `docs/decisions.md`、試驗登錄、搜尋結果、開發歷程、需求 → 紀錄；BM25＋共用 Qdrant 向量；每小時 45 分重建 |
+| `research/shared_steps.py` | 流程結尾的全部重算（統計、名單、驗證期、前向、看板）同時只跑一個，排隊中的流程共用排隊後開始的那一次（2026-10-29） |
+| `research/files.py` | 寫檔時別的程序正在讀也能換上新檔（Windows 的取代重試；2026-10-29 盤後單因此中斷） |
+| `dashboard/warm.py` | 研究頁重的畫面另開程序算好（`instance/research/cache/ready/<畫面>.pkl`），網頁只讀檔（2026-10-28） |
+| `research/numbers.py` | 每個策略的固定編號＝第一次登錄的試驗編號；實驗帳戶 E1、E2…（2026-10-28） |
+| `research/charts.py`、`research/distribution.py`、`research/progress.py`、`research/checks.py`、`research/eras.py` | 研究總覽儀表板：桌面與手機各一份的線圖與長條圖；最後的錢的分佈圖（每一類一列）；研究成長的時間線；大搜尋的漏斗與正確性核對；同一規則分時期比 0050 |
+| `research/issues.py`、`research/issue_notes.py`、`research/history/issues_data.py` | 議題追蹤（主導覽第六項，2026-10-27／28）：每個議題一個專案（指標、警示線、告警線、來源）、手寫判讀（燈號變了 7 天內重寫）、公開資料下載（SEC、實價登錄等）；worker 每天 18:20 更新 |
+| `research/windows2020.py` | 門檻改以 2020-10 以後為準：用回測引擎補算 2020-11 起的滾動視窗，和原結果期末金額一元不差才採用（2026-10-27） |
+| `research/scan_full.py` | 全段大搜尋（2026-10-26）：2015-06 到截止日、含全部付費因子、顯示卡上第一階段、過初篩的完整回測 |
+| `research/branches.py`、`research/govbank_events.py` | 付費資料的研究：值得跟的分點與隔日沖分點；八大行庫異常大買的事件研究 |
+| `research/stress.py` | 大空頭壓力測試：2015-06 起挑的策略放到沒挑過的年份（2008 等）跑，只測試不挑選 |
+| `research/rl_concentration.py`、`research/rl_switch.py`、`research/rl_execution.py` | RL 第四～六版：集中或分散、換股時機、成交執行 |
+| `research/forced_followup.py` | 前向帳戶每筆「不再符合選股條件」的賣出，之後 20／60 個交易日比留著的持股多賺或少賺 |
+| `research/reproduce_check.py` | 每週日抽樣重算選手池的結果，核對重算得出來（2026-10-28 重現性漏洞之後） |
+| `scripts/stop-research.ps1` | 停研究流程：只結束核對過的程序，紀錄標「stopped」與原因（2026-11-03） |
 
 ## 2026-10-02 — Home 統一登入整合
 

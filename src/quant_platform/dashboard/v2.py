@@ -86,14 +86,19 @@ DOCS = {
     "risks": ("專案風險與排除", "docs/project_risks.md"),
     "history": ("開發歷程", "DEVELOPMENT_HISTORY.md"),
     "line": ("LINE 設定", "docs/line-notifications.md"),
-    "research_method": ("研究方法", "docs/research_method.md"),
+    # 2026-11-11 (D 工作包): the research method split into three; the key stays (links point to it), now the conclusions
+    "research_method": ("研究：現行結論", "docs/research/conclusions.md"),
+    "research_criteria": ("研究：判定準則", "docs/research/criteria.md"),
+    "research_results": ("研究：結果紀錄", "docs/research/results.md"),
+    "decisions": ("使用者決定登記簿", "docs/decisions.md"),
     "dl_review": ("文獻：深度學習與出場", "docs/research_dl_exits_review.md"),
     "ai_methods": ("AI 方法評估", "reports/AI 交易方法 實證與架構.md"),
     "taiwan_quant": ("台股量化做法", "reports/台股量化 開源專案與實證.md"),
     "ai_full": ("AI 與程式交易全面研究", "reports/AI 與程式交易可行方法全面研究.md"),
 }
 # 2026-10-17 (使用者：要在 sidebar 看到專案資訊——路線圖、專案紀錄、開發歷程): the project pages, in this order
-PROJECT_DOCS = ("roadmap", "trading", "agents", "handoff", "risks", "history", "research_method", "requirements",
+PROJECT_DOCS = ("roadmap", "trading", "agents", "decisions", "handoff", "risks", "history", "research_method",
+                "research_criteria", "research_results", "requirements",
                 "architecture", "dl_review", "ai_methods", "taiwan_quant", "ai_full", "line", "guide")
 JOB_LABELS = {
     "daily_market_data": "日線行情",
@@ -319,7 +324,7 @@ def dashboard_data(research_dir: Path) -> dict[str, object]:
     from quant_platform.research.dashboard import view as research_dashboard
 
     gates = {item["version"]: item["gate"] for item in ml_view(research_dir)["models"]}
-    optimizations = research_optimizations(_project_root() / DOCS["research_method"][1])
+    optimizations = research_optimizations(_project_root() / DOCS["research_results"][1])
     return research_dashboard(research_dir, forward_common_start(datetime.now(TAIPEI).date()).isoformat(),
                               optimizations, gates)
 
@@ -361,7 +366,7 @@ def news_view(research_dir: Path, settings) -> dict[str, object]:
 
 
 def research_conclusions(path: Path) -> list[str]:
-    """The bullets under research_method.md's "目前結論（網站…）" heading, as small HTML (bold and code);
+    """The bullets under the research conclusions' "目前結論（網站…）" heading, as small HTML (bold and code);
     the document is the one place the conclusions are written."""
     from markupsafe import escape
 
@@ -387,7 +392,7 @@ OPTIMIZATIONS_HEADING = "最佳化紀錄（網站"
 
 
 def research_optimizations(path: Path) -> list[dict[str, str]]:
-    """2026-10-20 (使用者：持續優化每一個策略，要看得到結果): the rows of research_method.md's optimization log table,
+    """2026-10-20 (使用者：持續優化每一個策略，要看得到結果): the rows of the research results' optimization log table,
     newest first as written there (the document is the one place it is kept)."""
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1256,7 +1261,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             yearly=yearly_matrix(research_dir, best) if best else None,
             forward_map={row["rule_hash"]: row for row in overview["forward_stocks"]} if overview else {},
             conclusions=research_conclusions(_project_root() / DOCS["research_method"][1]) if tab == "overview" else [],
-            optimizations=research_optimizations(_project_root() / DOCS["research_method"][1]) if tab == "overview" else [],
+            optimizations=research_optimizations(_project_root() / DOCS["research_results"][1]) if tab == "overview" else [],
             recent_jobs=[job for job in jobs if job.get("status") != "running"
                          and not str(job.get("command") or "").startswith("scheduler")][:6],
             round_view=round_view,
