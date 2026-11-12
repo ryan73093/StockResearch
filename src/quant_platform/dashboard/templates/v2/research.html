@@ -213,10 +213,10 @@
           <td data-primary><strong>{{ row.get('label') }}</strong>{% if row.get('direction') == -1 %} <span class="muted small">（越低越好）</span>{% endif %}</td>
           <td data-label="判定"><span class="badge {{ 'badge--bad' if row.get('verdict') in ('反過來了', '變弱') else ('badge--ok' if row.get('verdict') == '正常' else ('badge--warn' if row.get('verdict') == '沒辦法算' else '')) }}">{{ row.get('verdict') }}</span></td>
           <td class="num" data-label="讀它的帳戶">{{ '{:,}'.format(row.get('accounts') or 0) }} 個</td>
-          <td class="num" data-label="前五分之一一年多賺：之前（t）">{% if row.get('long_top_year') is not none %}{{ '{:+.1%}'.format(row.get('long_top_year')) }}{% else %}—{% endif %}{% if row.get('top_t') is not none %}<span class="muted small">（{{ '%.1f' % row.get('top_t') }}）</span>{% endif %}</td>
-          <td class="num" data-label="最近（t）">{% if row.get('recent_top_year') is not none %}<span class="{{ 'up' if row.get('recent_top_year') > 0 else 'down' }}">{{ '{:+.1%}'.format(row.get('recent_top_year')) }}</span>{% else %}—{% endif %}{% if row.get('recent_top_t') is not none %}<span class="muted small">（{{ '%.1f' % row.get('recent_top_t') }}）</span>{% endif %}</td>
-          <td class="num" data-label="比之前低幾個標準誤">{{ '%.1f' % row.get('below') if row.get('below') is not none else '—' }}</td>
-          <td class="num" data-label="排序相關：之前／最近">{{ '%+.3f' % row.get('long_ic') if row.get('long_ic') is not none else '—' }}／{{ '%+.3f' % row.get('recent_ic') if row.get('recent_ic') is not none else '—' }}{% if row.get('ic_verdict') %}<br><span class="muted small">{{ row.get('ic_verdict') }}</span>{% endif %}</td>
+          <td class="num" data-label="前段一年多賺：之前">{% if row.get('long_top_year') is not none %}{{ '{:+.1%}'.format(row.get('long_top_year')) }}{% else %}—{% endif %}{% if row.get('top_t') is not none %}<span class="muted small">（{{ '%.1f' % row.get('top_t') }}）</span>{% endif %}</td>
+          <td class="num" data-label="前段：最近">{% if row.get('recent_top_year') is not none %}<span class="{{ 'up' if row.get('recent_top_year') > 0 else 'down' }}">{{ '{:+.1%}'.format(row.get('recent_top_year')) }}</span>{% else %}—{% endif %}{% if row.get('recent_top_t') is not none %}<span class="muted small">（{{ '%.1f' % row.get('recent_top_t') }}）</span>{% endif %}</td>
+          <td class="num" data-label="比之前低（標準誤）">{{ '%.1f' % row.get('below') if row.get('below') is not none else '—' }}</td>
+          <td class="num" data-label="排序相關">{{ '%+.3f' % row.get('long_ic') if row.get('long_ic') is not none else '—' }}／{{ '%+.3f' % row.get('recent_ic') if row.get('recent_ic') is not none else '—' }}{% if row.get('ic_verdict') %}<br><span class="muted small">{{ row.get('ic_verdict') }}</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
