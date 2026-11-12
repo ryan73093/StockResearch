@@ -30,8 +30,9 @@ RULES = "docs/rules"
 DECISIONS = "docs/decisions.md"
 HANDOFF = "docs/development_handoff.md"
 CONCLUSIONS = "docs/research/conclusions.md"
-# 2026-11-11: the conclusions moved as they were (17,710 characters, written by date); held there until rewritten
-LIMITS = {AGENTS: 3000, HANDOFF: 3000, CONCLUSIONS: 18000}
+# 2026-11-12: the conclusions were moved on 11/11 as they were (17,901 characters, a log written by date, limit 18,000);
+# rewritten to a sentence or two each (4,415), what was taken out is in the results record word for word
+LIMITS = {AGENTS: 3000, HANDOFF: 3000, CONCLUSIONS: 8000}
 RULES_LIMIT = 4000
 HANDOFF_FIELDS = ("當前工作包", "等使用者決定", "下一步")
 HANDOFF_WORDS = ("現況", "重點", "背景執行中", "接手前必讀")       # what the dated blocks were called

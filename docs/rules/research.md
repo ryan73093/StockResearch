@@ -1,6 +1,6 @@
 # 研究
 
-適用：設計、測試、判定策略與模型；寫研究結果。先讀 `docs/research/conclusions.md`（現行結論、淘汰方向、研究路線圖），判定準則在 `docs/research/criteria.md`；深度學習、風險模型、學習出場的文獻與重做順序在 `docs/research_dl_exits_review.md`；T0、截止日、可以上線的定義只在 `docs/trading_rules.md` §7。決定原文在 `docs/decisions.md`。
+適用：設計、測試、判定策略與模型；寫研究結果。先讀 `docs/research/conclusions.md`（現行結論、淘汰方向；每條一兩句，上限 8,000 字），判定準則在 `docs/research/criteria.md`；深度學習、風險模型、學習出場的文獻與重做順序在 `docs/research_dl_exits_review.md`；T0、截止日、可以上線的定義只在 `docs/trading_rules.md` §7。決定原文在 `docs/decisions.md`。
 
 ## 範圍與帳戶
 
@@ -30,6 +30,6 @@
 ## 紀錄
 
 - 判定在跑之前寫進 `docs/research/results.md`；每個研究包、試驗與最佳化不論成敗都寫結果（失敗寫原因與下一版），流程名稱用反引號寫在結果旁邊（D-016）。
-- 每做完一包：登錄試驗、更新選手池可見的紀錄、開發歷程與 `docs/research/conclusions.md`（D-030）。
+- 每做完一包：登錄試驗、更新選手池可見的紀錄、開發歷程與 `docs/research/conclusions.md`（D-030；結論變了改那一句、不往上加，數字與原文寫 `docs/research/results.md`）。
 - 研究知識庫（`research/knowledge.py`、網站「研究 › 知識庫」、`knowledge --ask`）自動從研究三份文件、試驗登錄、搜尋結果、開發歷程、決定登記簿與需求建立；16:00 核對每個做完的研究都寫了結果、知識庫收了每一個試驗（D-016）。
 - 研究與回測變更要有手算或已知結果的測試；結果記資料版本與指紋。

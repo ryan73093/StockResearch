@@ -52,9 +52,19 @@ def test_two_processes_saving_at_once_keep_both(tmp_path):
     """2026-10-30: saves from two processes at the same moment — each one's accounts are on the file afterwards."""
     import multiprocessing
 
+    # 2026-11-12: two processes of our own with a time limit, not a Pool. A pool replaces a worker that ends without
+    # an answer and waits for ever: on 11/11 a launcher that ran pytest at the top of its file made every worker run
+    # the whole suite again and end, and the run of S11-D never finished (scripts/run-tests.ps1, D-043).
     context = multiprocessing.get_context("spawn")
-    with context.Pool(2) as pool:
-        pool.starmap(_save_many, [(str(tmp_path), "a"), (str(tmp_path), "b")])
+    workers = [context.Process(target=_save_many, args=(str(tmp_path), side), daemon=True) for side in "ab"]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(120)
+    alive = [worker for worker in workers if worker.is_alive()]
+    for worker in alive:
+        worker.terminate()
+    assert not alive and [worker.exitcode for worker in workers] == [0, 0]
     import json
 
     kept = json.loads((tmp_path / "forward" / "stocks" / "decisions.json").read_text(encoding="utf-8"))

@@ -7,6 +7,7 @@ is imported, so such a mistake now fails loudly instead of writing to the live d
 """
 from __future__ import annotations
 
+import multiprocessing
 import os
 from pathlib import Path
 
@@ -19,6 +20,13 @@ os.environ["KNOWLEDGE_QDRANT_URL"] = ""
 # every app a test built then sent its requests to the login page (302), and ten Access tests failed on 10/24 and 10/31
 # while passing from a shell. Tests build the app without the live sign-in.
 os.environ.pop("HOME_SSO_CONFIG", None)
+
+# 2026-11-12 (D-043): a process started by a test (multiprocessing "spawn") imports the file the run was started from.
+# A launcher that calls pytest at the top of its file then runs the whole suite again inside every such process - the
+# S11-D run of 11/11 did that for ever. The suite does not run inside a started process; start it with
+# scripts/run-tests.ps1 (python -m pytest).
+if multiprocessing.parent_process() is not None:
+    raise SystemExit("the test suite was started again inside a process a test started: run scripts/run-tests.ps1")
 
 PRODUCTION_DATABASE = (Path(__file__).resolve().parents[1] / "instance" / "quant_platform.db").resolve()
 
