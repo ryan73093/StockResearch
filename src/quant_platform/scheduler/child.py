@@ -24,7 +24,7 @@ from quant_platform.container import build_container
 logger = logging.getLogger(__name__)
 
 HEAVY = ("refresh_research_history", "prepare_after_close_orders", "record_forward_simulation", "retrain_models",
-         "build_stock_snapshot", "warm_after_close")
+         "build_stock_snapshot", "warm_after_close", "measure_decay")
 
 
 class ChildJobFailed(RuntimeError):

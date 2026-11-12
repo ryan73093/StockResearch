@@ -343,6 +343,17 @@ def pool_match(row: dict, picked: dict[str, str]) -> bool:
 CONCLUSIONS_HEADING = "目前結論（網站"
 
 
+def decay_view(research_dir: Path) -> dict[str, object] | None:
+    """The latest weekly watch of the factors and models (research/decay.py), its rows flagged first."""
+    from quant_platform.research import decay
+
+    report = decay.latest(research_dir)
+    if not report:
+        return None
+    return {"at": report["at"], "ranked_through": report.get("ranked_through"), "recent_weeks": report.get("recent_weeks"),
+            "rows": decay.rows(report), "flagged": len(decay.flagged(report))}
+
+
 def news_view(research_dir: Path, settings) -> dict[str, object]:
     """R15 D (2026-10-09): the scored news, this month's LLM spend against the caps, and the veto pair."""
     from quant_platform.research import news_events
@@ -722,6 +733,13 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         failed_jobs = job_failures.recent(_instance_dir(dependencies.settings.database_url), now=local)
         if failed_jobs:
             alerts.append(f"排程工作最近 24 小時失敗 {len(failed_jobs)} 個：" + "、".join(row["name"] for row in failed_jobs[:2]))
+        # 2026-11-13 (problem register P7): a factor or model the forward accounts read that stopped working
+        from quant_platform.research import decay
+
+        weak = decay.flagged(decay.latest(_instance_dir(dependencies.settings.database_url) / "research"))
+        if weak:
+            alerts.append(f"因子或模型最近變弱 {len(weak)} 個（研究 › 因子強弱 › 最近還準不準）："
+                          + "、".join(f"{row['label'][:14]}（{row['accounts']} 個帳戶）" for row in weak[:2]))
         calendar = dependencies.market_calendar.calendar("TW")
         if (
             calendar.is_trading_day(local.date()) and local.time() >= time(15, 0)
@@ -1259,6 +1277,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             hypotheses=hypothesis_items(research_dir) if tab == "hypothesis" else None,
             research_tab=tab, jobs=jobs, factor_report=latest_factor_strength(research_dir / "factors"), status=status,
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
+            # 2026-11-13 (problem register P7): the factors and models the forward accounts read, watched every week
+            decay=decay_view(research_dir) if tab == "factors" else None,
             ml=ml_view(research_dir) if tab == "ml" else None,
             robustness=robustness_latest(research_dir) if tab == "overview" else None,
             downside=downside_rows, downside_total=downside_total, best_total=best_total,

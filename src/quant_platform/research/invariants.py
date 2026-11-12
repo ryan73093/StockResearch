@@ -511,6 +511,16 @@ def run(research: str | Path, today: date, backups: Path | None = None,
                          built is not None and (today - built).days <= 2,
                          f"{lights['built_at'][:16]} 更新：告警 {lights['counts']['alert']}、警示 {lights['counts']['watch']}"
                          if lights else "還沒有議題資料"))
+    # 2026-11-13 (problem register P7): the weekly watch of the factors and models the forward accounts read ran
+    from quant_platform.research import decay as decay_watch
+
+    watch = decay_watch.latest(research)
+    watched = date.fromisoformat(str(watch["at"])[:10]) if watch else None
+    weak = decay_watch.flagged(watch)
+    checks.append(_check("因子與模型衰減監控 8 天內算過", "docs/problem_register_2026-11-11.md P7：沒有衰退監控",
+                         watched is not None and (today - watched).days <= 8,
+                         f"{str(watch['at'])[:16]} 算：{len(watch.get('factors') or {})} 個因子與模型，變弱或反過來了 {len(weak)} 個"
+                         if watch else "還沒算過（每週六 07:30）"))
     # 2026-10-28 (使用者：每個議題弄成一個專案去追蹤): every project has its written reading, rewritten within 7 days of a
     # light changing
     from quant_platform.research.issues import changes as issue_changes

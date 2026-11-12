@@ -55,6 +55,16 @@ def test_today_page_shows_one_line_when_the_system_has_a_problem(setup, monkeypa
 
     failures.record(_instance_dir(container.settings.database_url), "model_retrain", "模型重訓（交易日 22:45）", KeyError("x"))
     assert "排程工作最近 24 小時失敗 1 個：模型重訓（交易日 22:45）" in client.get("/").get_data(as_text=True)
+    # 2026-11-13 (problem register P7): a factor or model the forward accounts read that stopped working
+    import json
+
+    folder = _instance_dir(container.settings.database_url) / "research" / "decay"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "decay-20261114-073000.json").write_text(json.dumps({"at": "2026-11-14T07:30:00+08:00", "factors": {
+        "ml_gbm_k": {"label": "模型K：機器學習", "accounts": 120, "verdict": "變弱"},
+        "high_52w": {"label": "接近 52 週高點", "accounts": 793, "verdict": "正常"}}}, ensure_ascii=False), encoding="utf-8")
+    body = client.get("/").get_data(as_text=True)
+    assert "因子或模型最近變弱 1 個" in body and "模型K：機器學習（120 個帳戶）" in body and "接近 52 週高點（" not in body
 
 
 def test_onboarding_checklist_follows_the_real_setup(setup):

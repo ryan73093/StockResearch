@@ -928,6 +928,32 @@ def after_close_due(container: "Container", now: datetime | None = None) -> bool
     return (base / "raw" / "twse_stock_all" / f"{today:%Y}" / f"{today:%Y%m%d}.json").is_file()
 
 
+def measure_decay(container: "Container", now: datetime | None = None) -> object | None:
+    """2026-11-13 (problem register P7): every Saturday at 07:30, are the factors and models the forward accounts read
+    still working (research/decay.py)? Below the worker's priority: nothing waits for it."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import decay
+    from quant_platform.research.jobs import JobLog
+
+    research = _instance_dir(container.settings.database_url) / "research"
+    if not (research / "history" / "stocks" / "twse").is_dir():
+        return None
+    try:                                           # below the worker's own jobs; Windows only
+        import ctypes
+
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)
+    except (AttributeError, OSError):
+        pass
+    with JobLog(research).start("因子與模型衰減監控（每週六 07:30：前向帳戶讀的每個因子與模型，最近半年還準不準）",
+                                "scheduler measure_decay") as job:
+        found = decay.measure(research / "history", research, now=now, job=job)
+        flagged = decay.flagged(found)
+        job.payload["summary"] = (f"{len(found['factors'])} 個因子與模型（排名到 {found['ranked_through']}）："
+                                  + (f"變弱或反過來了 {len(flagged)} 個（" + "、".join(row["label"][:16] for row in flagged[:4])
+                                     + ("…" if len(flagged) > 4 else "") + "）" if flagged else "沒有變弱的"))
+        return {"factors": len(found["factors"]), "flagged": len(flagged)}
+
+
 def warm_after_close(container: "Container", now: datetime | None = None) -> object | None:
     """2026-11-12: at 12:40 on trading days, the model scores the after-close orders will read made ready
     (research/after_close.warm) — after model.py was changed the orders of 11/12 computed every kept score again and
@@ -1558,6 +1584,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=6 * 3600,
+    )
+    scheduler.add_job(
+        in_child(measure_decay),
+        args=[container],
+        trigger=CronTrigger(day_of_week="sat", hour=7, minute=30, timezone=timezone),
+        id="decay_watch",
+        name="因子與模型衰減監控（每週六 07:30，另開程序）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=12 * 3600,
     )
     scheduler.add_job(
         in_child(retrain_models),

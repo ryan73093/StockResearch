@@ -528,3 +528,21 @@ def test_the_pools_end_is_the_months_cutoff(tmp_path, monkeypatch):
     assert found["ok"] and found["detail"] == "2026-09-30"
     found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 12, 1), windows=[], memory=[])}[name]
     assert not found["ok"] and "回測終點 2026-09-30，當月截止日 2026-10-31" in found["detail"]
+
+
+def test_the_weekly_watch_of_the_factors_and_models_has_run(tmp_path):
+    """2026-11-13 (problem register P7): the decay watch (research/decay.py) ran within 8 days."""
+    import json
+
+    name = "因子與模型衰減監控 8 天內算過"
+    found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 11, 13), windows=[], memory=[])}[name]
+    assert not found["ok"] and "還沒算過" in found["detail"]
+    folder = tmp_path / "decay"
+    folder.mkdir()
+    (folder / "decay-20261114-073000.json").write_text(json.dumps({"at": "2026-11-14T07:30:00+08:00", "factors": {
+        "a": {"verdict": "變弱", "accounts": 3, "label": "a"}, "b": {"verdict": "正常", "accounts": 1, "label": "b"}}}),
+        encoding="utf-8")
+    found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 11, 22), windows=[], memory=[])}[name]
+    assert found["ok"] and "2 個因子與模型，變弱或反過來了 1 個" in found["detail"]
+    found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 11, 23), windows=[], memory=[])}[name]
+    assert not found["ok"]

@@ -380,7 +380,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "research_history_refresh",
             "forward_simulation",
             "official_close_fetch",
-            "after_close_orders", "after_close_warm",
+            "after_close_orders", "after_close_warm", "decay_watch",
             "news_collection",
             "stock_snapshot",
             "chips_update",

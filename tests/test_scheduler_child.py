@@ -77,7 +77,8 @@ def test_the_heavy_jobs_are_registered_through_the_child(tmp_path):
     wrapped = {job.id: job.func.__name__ for job in scheduler.get_jobs() if getattr(job.func, "in_child", False)}
     assert wrapped == {"research_history_refresh": "refresh_research_history", "after_close_orders": "prepare_after_close_orders",
                        "forward_simulation": "record_forward_simulation", "model_retrain": "retrain_models",
-                       "stock_snapshot": "build_stock_snapshot", "after_close_warm": "warm_after_close"}
+                       "stock_snapshot": "build_stock_snapshot", "after_close_warm": "warm_after_close",
+                       "decay_watch": "measure_decay"}
     assert sorted(wrapped.values()) == sorted(child.HEAVY)
 
 
