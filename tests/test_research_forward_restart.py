@@ -69,3 +69,18 @@ def test_the_overview_summarises_the_longest_run_on_the_lists():
     both = chain_summary({key: {**row, "sold_excess": 0.5} for key, row in chained.items()}, {"a": "甲"}, top=2)
     assert both["ahead_sold"] == both["rules"] and both["median_sold"] == 0.5
     assert chain_summary({}, {}) is None
+
+
+def test_accounts_that_double_another_are_counted_once():
+    """2026-11-13 (problem register P3): the same start, value, trades, costs and realized gains is one result; the
+    holdings today are compared by their codes."""
+    from quant_platform.research.dashboard import distinct_accounts
+
+    def row(value, codes, trades=40, since="2026-10-01"):
+        return {"since": since, "value": value, "trades_total": trades, "costs": 812.5, "realized": -1200.0,
+                "holdings": [{"code": code} for code in codes]}
+
+    rows = [row(301_000.0, ["2330", "2317"]), row(301_000.0, ["2317", "2330"]), row(301_000.0, ["2330", "2317"], trades=41),
+            row(298_500.0, ["2330", "2317"]), row(301_000.0, ["2330", "2317"], since="2026-09-01")]
+    assert distinct_accounts(rows) == {"accounts": 5, "results": 4, "holdings": 2}
+    assert distinct_accounts([]) == {"accounts": 0, "results": 0, "holdings": 0}

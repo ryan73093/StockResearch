@@ -115,6 +115,17 @@ def family_log(rows: list[dict], family: str, count: int = 6) -> list[dict]:
     return picked[:count]
 
 
+def distinct_accounts(rows: list[dict]) -> dict[str, int]:
+    """2026-11-13 (problem register P3: 3,914 forward accounts are far fewer strategies): of the forward accounts' rows
+    (StockForwardTracker.summary), how many have results of their own — an account with the same start, value, trades,
+    costs and realized gains as another is its double (checked on 11/12 against every day's value: 3,126 against
+    3,125) — and how many hold stocks of their own today."""
+    results = {(row.get("since"), round(float(row.get("value") or 0), 2), row.get("trades_total"),
+                round(float(row.get("costs") or 0), 2), round(float(row.get("realized") or 0), 2)) for row in rows}
+    holdings = {(row.get("since"), tuple(sorted(str(item.get("code")) for item in row.get("holdings") or []))) for row in rows}
+    return {"accounts": len(rows), "results": len(results), "holdings": len(holdings)}
+
+
 def chain_summary(chained: dict[str, dict], names: dict[str, str], top: int = 5) -> dict[str, object] | None:
     """2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果): the rules with the longest run on the monthly
     lists — how many are ahead of 0050 on the money counted, the middle one and the best."""
@@ -402,7 +413,8 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
     forward = {"accounts": len(cashed), "start": start,
                "median_gain": statistics.median(item["gain"] for item in cashed) if cashed else None,
                "bench_gain": statistics.median(item["bench_gain"] for item in cashed) if cashed else None,
-               "ahead_share": sum(item["ahead"] > 0 for item in cashed) / len(cashed) if cashed else None}
+               "ahead_share": sum(item["ahead"] > 0 for item in cashed) / len(cashed) if cashed else None,
+               "distinct": distinct_accounts(list(live.values()))}
     from quant_platform.research.stress import SHORT, latest as stress_latest
 
     stress = None
