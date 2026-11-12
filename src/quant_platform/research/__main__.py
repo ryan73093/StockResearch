@@ -348,7 +348,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "retry-check", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
                             "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
     )
@@ -419,6 +419,8 @@ def main() -> int:
                         help="stocks：啟動資金，之後每月照 --monthly 投入（使用者的帳戶；0＝沒有啟動資金）")
     parser.add_argument("--screen", action="store_true", help="stocks：只算全期間、不算滾動視窗（大掃描第一階段）")
     parser.add_argument("--trials", help="robustness：指定的試驗編號，逗號分隔（任何等級，含組合帳戶）")
+    parser.add_argument("--per-group", type=int, default=40,
+                        help="retry-check：有減碼與沒減碼的規則各抽幾個（2026-11-13）")
     parser.add_argument("--top", type=int, default=0, help="stocks：只跑登錄檔中全期超額最高的前 N 個規則（第二階段）")
     parser.add_argument("--dry-run", action="store_true", help="agent：只印出提示內容，不呼叫模型")
     parser.add_argument("--check", action="store_true", help="agent：極小的連線檢查呼叫（金鑰、模型、JSON 格式）")
@@ -886,6 +888,22 @@ def main() -> int:
             job.payload["summary"] = f"成本加倍後仍是 T0 候選（含高風險）：{kept}／{len(result['rows'])}"
         for row in result["rows"]:
             print(json.dumps(row, ensure_ascii=False), flush=True)
+        return 0
+
+    if args.command == "retry-check":       # 2026-11-13: what retrying a refused top-up would change (a diagnostic)
+        from quant_platform.research import retry_check
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        title = f"診斷：漲停沒買到的加碼隔天再試，有減碼與沒減碼的規則各 {args.per_group} 個（2015-06 起，不登錄）"
+        with JobLog(RESEARCH).start(title, command, total=2 * args.per_group) as job:
+            result = retry_check.run(Path(args.base), RESEARCH, broker_costs(args.broker), args.per_group, job)
+            found = result["summary"]
+            job.payload["summary"] = "；".join(
+                f"{label} {found[key]['rules']} 個：期末錢中位數 {found[key]['median_change'] or 0:+.2%}、"
+                f"等級變了 {len(found[key]['tier_changed'])} 個" for key, label in (("guarded", "有減碼"), ("plain", "沒減碼"))
+            ) + f"；不重試的結果和登錄的相同 {found['reproduced']}／{found['checked']}"
+        print(json.dumps(result["summary"], ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "exit2":             # 2026-10-17: E2, the weekly optimal-stopping exit (research/exits2.py)

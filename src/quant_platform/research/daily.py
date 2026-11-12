@@ -1677,13 +1677,16 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                    ledger: list[dict[str, object]] | None = None,
                    snapshots: dict | None = None, weights: dict[date, dict[str, float]] | None = None,
                    parked: set[date] | None = None, exposure: dict[date, float] | None = None,
-                   targets: dict[date, dict[str, float]] | None = None) -> RunResult:
+                   targets: dict[date, dict[str, float]] | None = None, retry_topups: bool = False) -> RunResult:
     """``rule=None`` is the benchmark: the same cash flow into 0050 on the day it arrives. ``targets`` (2026-10-16,
     a free rule): each session's weight per stock, the rest cash — every holding sold, trimmed or bought to its
     weight, a trade placed only when its minimum fee is at most 2% of it. ``weights``:
     each pick's share of the stock part on its check day (equal when absent). ``parked``: days the stock
     part is held in 0050 (the stocks are sold and 0050 bought the same close; on the first day after,
-    the 0050 above the core is sold and the picks bought)."""
+    the 0050 above the core is sold and the picks bought). ``retry_topups`` (2026-11-13, a diagnostic — off in engine
+    daily-1.6.1 until the owner decides): a top-up of a stock already held, refused at a locked limit-up close, is
+    tried again the next session, as the trading rules say of a blocked order; without it the cash waits for the next
+    decision or contribution day (docs/research/results.md「2026-11-13 空頭防護第一次在前向動作」)."""
     plan = plan or SeedPlan()
     sessions = [day for day in data.sessions if start <= day <= end]
     contributions = plan.schedule(sessions, start, end)
@@ -1792,7 +1795,11 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
         """``why`` (2026-10-25, 使用者質疑「漲到目標比重兩倍賣回」): the reason written on the order."""
         nonlocal cash
         close = fill_base(symbol, day)
-        if budget <= 0 or refused(symbol, day, "BUY"):
+        if budget <= 0:
+            return
+        if refused(symbol, day, "BUY"):
+            if retry_topups and units[symbol] > 0:     # a held stock's top-up: tried again tomorrow (``topping``)
+                short.add(symbol)
             return
         fill = fill_price(close, "BUY", costs.slippage_bps, _tick(symbol))
         high = price_limits(data, symbol, day)[1]
@@ -2574,7 +2581,7 @@ def free_targets(fp: FactorPanel, rule: DailyRule) -> dict[date, dict[str, float
 
 def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostModel,
              benchmark_cache: dict | None = None, end: date | None = None,
-             windows_from: date | None = None) -> dict[str, object]:
+             windows_from: date | None = None, retry_topups: bool = False) -> dict[str, object]:
     """The rule from 2015-06 to ``end`` (RECENT_END; 2026-10-16: any earlier day, the monthly rolling selection's
     cutoff — research/rolling.py)."""
     end = end or RECENT_END
@@ -2596,7 +2603,8 @@ def evaluate(data: LegacyData, fp: FactorPanel, rule: DailyRule, costs: CostMode
     exposure = exposure_schedule(data, fp, rule, costs)
 
     def account(start: date, end: date) -> RunResult:
-        return simulate_daily(data, rule, costs, start, end, ranks, weights=weights, parked=parked, exposure=exposure)
+        return simulate_daily(data, rule, costs, start, end, ranks, weights=weights, parked=parked, exposure=exposure,
+                              retry_topups=retry_topups)
 
     report = account_report(data, account, first, costs, benchmark_cache, end, windows_from)
     report["parked_sessions"] = len([day for day in parked or () if first <= day <= end])

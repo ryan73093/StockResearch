@@ -518,6 +518,36 @@ def test_market_rules_no_buy_at_limit_up_no_sell_at_limit_down_and_retry_next_se
     assert blocked[0]["reason"] == "漲停買不到"
 
 
+def test_a_top_up_refused_at_limit_up_is_tried_again_only_with_the_diagnostic_option():
+    """2026-11-13 (the guard's first action in the forward period, docs/research/results.md): the half guard lifted on
+    a day the held stock closed locked at limit-up; the top-up was refused (right) and never tried again — the cash
+    waited for the next decision day. The trading rules say a blocked order is tried again the next session.
+    ``retry_topups`` (a diagnostic, off in the engine until decided) tries it again."""
+    days = weekdays(date(2024, 1, 8), date(2024, 1, 19))                   # 10 sessions; decided on the first only
+    assert daily.check_days(days, "monthly") == {days[0]}
+    held = [100.0, 100.0, 100.0, 110.0, 111.0, 111.0, 111.0, 111.0, 111.0, 111.0]   # locked +10% on the 4th
+    other = [50.0] * 10
+    data = market(days, {"1101.TW": dict(zip(days, held)), "1102.TW": dict(zip(days, other))})
+    assert daily.price_limits(data, "1101.TW", days[3])[1] == 110.0
+    script = {days[0]: ["1101.TW", "1102.TW"]}
+    rule = DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, min_hold=0, check="monthly")
+    exposure = {day: 1.0 for day in days} | {days[2]: 0.5}                  # half on the 3rd, full again on the 4th
+
+    def run(**option):
+        ledger = []
+        simulate_daily(data, rule, FREE, days[0], days[-1], script, SeedPlan(100_000, 0), ledger=ledger,
+                       exposure=exposure, **option)
+        return [(row["day"], row["symbol"], row["side"]) for row in ledger if row["side"] in ("BUY", "SELL", "BLOCKED")]
+
+    plain = run()
+    assert (days[2], "1101.TW", "SELL") in plain and (days[2], "1102.TW", "SELL") in plain    # trimmed to half
+    assert (days[3], "1102.TW", "BUY") in plain and (days[3], "1101.TW", "BLOCKED") in plain  # topped up; A refused
+    assert not [trade for trade in plain if trade[1] == "1101.TW" and trade[2] == "BUY" and trade[0] > days[3]]
+    retried = run(retry_topups=True)
+    assert (days[4], "1101.TW", "BUY") in retried                                            # tried again, filled
+    assert [trade for trade in retried if trade[0] <= days[3]] == [trade for trade in plain if trade[0] <= days[3]]
+
+
 def test_a_locked_limit_down_holding_is_sold_the_next_session():
     days = weekdays(date(2024, 1, 1), date(2024, 1, 10))
     falling = [20.0, 20.0, 18.0, 17.5, 17.5, 17.5, 17.5, 17.5]               # −10% locked on the 3rd session
