@@ -77,7 +77,7 @@ def test_the_heavy_jobs_are_registered_through_the_child(tmp_path):
     wrapped = {job.id: job.func.__name__ for job in scheduler.get_jobs() if getattr(job.func, "in_child", False)}
     assert wrapped == {"research_history_refresh": "refresh_research_history", "after_close_orders": "prepare_after_close_orders",
                        "forward_simulation": "record_forward_simulation", "model_retrain": "retrain_models",
-                       "stock_snapshot": "build_stock_snapshot"}
+                       "stock_snapshot": "build_stock_snapshot", "after_close_warm": "warm_after_close"}
     assert sorted(wrapped.values()) == sorted(child.HEAVY)
 
 
@@ -94,3 +94,19 @@ def test_the_after_close_orders_are_due_only_in_their_window_with_todays_table_a
     assert runner.after_close_due(container, day.replace(hour=13, minute=49)) is False
     assert runner.after_close_due(container, day.replace(hour=14, minute=26)) is False
     assert runner.after_close_due(container, datetime(2026, 11, 14, 13, 55, tzinfo=ZONE)) is False     # a Saturday
+
+
+def test_the_scores_are_made_ready_at_12_40_on_trading_days_in_a_child(tmp_path):
+    """2026-11-12: the warm-up of the after-close orders (after_close.warm) — a job of its own before the table."""
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    from quant_platform.scheduler import child, runner
+
+    assert "warm_after_close" in child.HEAVY
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
+    scheduler = BackgroundScheduler(timezone=container.settings.scheduler_timezone)
+    runner._add_maintenance_jobs(scheduler, container)
+    job = scheduler.get_job("after_close_warm")
+    assert job is not None and getattr(job.func, "in_child", False) and job.func.__name__ == "warm_after_close"
+    fields = {field.name: str(field) for field in job.trigger.fields}
+    assert (fields["day_of_week"], fields["hour"], fields["minute"]) == ("mon-fri", "12", "40")

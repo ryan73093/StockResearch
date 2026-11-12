@@ -111,6 +111,69 @@ def order_lines(entry: dict, close: float, previous: float | None, names: dict[s
     return row
 
 
+def warm(history: Path, research: Path, costs=None) -> dict[str, object] | None:
+    """2026-11-12: before the table comes, every tracked rule ranked on the last session in the files — what the
+    orders will need and is not kept any more is computed now, not against the 14:30 close.
+
+    The model scores are kept by block under a key of everything they come from (model.block_key: the model file, the
+    features' values, model.py itself). Whatever changes a key — model.py changed and deployed (11/12: the orders took
+    18 minutes, 5 the days before; 11/02 the same), a model fitted again, a factor's values revised — the first run to
+    need the scores computes them. This is that first run, in its own process at 12:40 (scheduler: warm_after_close).
+    With the blocks kept it is the ranking of one session. It reads the data as ``prepare`` does without today's table
+    and writes nothing of the day's: no table, no orders, no decision. None when nothing is tracked or the files are
+    empty; a rule that fails is counted and the others go on."""
+    from quant_platform.research import daily
+    from quant_platform.research.blend import BlendRule
+    from quant_platform.research.costs import broker_costs
+    from quant_platform.research.daily import (
+        RECENT_START, ChipStore, DailyRule, FactorPanel, Industries, account_parking, daily_weights, exposure_schedule,
+        load_industries, market_closes,
+    )
+    from quant_platform.research.model import SCORE_CACHE, models_root
+    from quant_platform.research.stock_forward import StockForwardTracker
+    from quant_platform.research.stock_rules import WARMUP_YEARS, Panel, load_stock_data
+
+    items = [item for item in StockForwardTracker(research).tracked()
+             if not item.get("stopped") and item.get("kind") in ("daily", "blend")
+             and (item.get("rule") or {}).get("universe", "twse") == "twse"]
+    if not items:
+        return None
+    started = time.monotonic()
+    root = models_root(history)
+
+    def blocks() -> int:
+        return sum(1 for _path in root.glob(f"*/{SCORE_CACHE}/*.npy")) if root.is_dir() else 0
+
+    kept_before = blocks()
+    costs = costs or broker_costs("cathay")
+    data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, datetime.now(TAIPEI).year)
+    panel = Panel(data)
+    if not panel.sessions:
+        return None
+    last = panel.sessions[-1]
+    fp = FactorPanel(panel, Industries(load_industries(history)), ChipStore(history, panel.sessions, panel.symbols, panel.close),
+                     market_closes(history, panel.sessions), root)
+    fp._memo = {}
+    seen: set[str] = set()
+    errors = 0
+    for item in items:
+        try:
+            rules = ([sleeve.rule for sleeve in BlendRule.model_validate(item["rule"]).sleeves]
+                     if item.get("kind") == "blend" else [DailyRule.model_validate(item["rule"])])
+            for rule in rules:
+                if rule.rule_hash in seen:
+                    continue
+                seen.add(rule.rule_hash)
+                ranks = daily.daily_rankings(fp, rule, last, last)
+                daily_weights(fp, rule, ranks)
+                account_parking(data, fp, rule, costs)
+                exposure_schedule(data, fp, rule, costs)
+        except Exception:                          # the orders will say what is wrong with it; the others go on
+            errors += 1
+    return {"day": last.isoformat(), "rules": len(items), "ranked": len(seen), "errors": errors,
+            "new_blocks": blocks() - kept_before, "seconds": round(time.monotonic() - started, 1)}
+
+
 def prepare(history: Path, research: Path, day: date, payload: object, costs=None,
             now: datetime | None = None, min_rows: int = MIN_ROWS) -> dict[str, object] | None:
     """Today's orders of every board rule (see the module text); None while the table is not complete."""

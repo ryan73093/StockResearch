@@ -324,7 +324,7 @@ flowchart LR
 | `research/status_report.py` | 狀態指令（S11-D）：`python -m quant_platform.research status` 印出研究資料與前向紀錄日期（對照交易所日曆應有的日期）、在跑與等待中的流程、16:00 紅燈、當月名單、串接前向天數；唯讀 |
 | `research/knowledge.py`、`research/knowledge_vectors.py` | 研究知識庫：研究三份文件（`docs/research/conclusions.md`、`docs/research/criteria.md`、`docs/research/results.md`）、決定登記簿 `docs/decisions.md`、試驗登錄、搜尋結果、開發歷程、需求 → 紀錄；BM25＋共用 Qdrant 向量；每小時 45 分重建 |
 | `research/shared_steps.py` | 流程結尾的全部重算（統計、名單、驗證期、前向、看板）同時只跑一個，排隊中的流程共用排隊後開始的那一次（2026-10-29） |
-| `scheduler/child.py` | worker 的重工作（前向紀錄、盤後單、模型重訓、個股快照、研究資料補抓）在子程序裡跑，跑完記憶體還給系統；盤後單先由 worker 用 `runner.after_close_due` 看這一分鐘有沒有事才開子程序；輸出在 `instance/worker-jobs.log`（2026-11-12，S11-B） |
+| `scheduler/child.py` | worker 的重工作（前向紀錄、盤後單與它 12:40 的暖身 `after_close.warm`、模型重訓、個股快照、研究資料補抓）在子程序裡跑，跑完記憶體還給系統；盤後單先由 worker 用 `runner.after_close_due` 看這一分鐘有沒有事才開子程序；輸出在 `instance/worker-jobs.log`（2026-11-12，S11-B） |
 | `scripts/research-pipeline.ps1` 的 step-helpers | 步驟參數加引號（`Join-Arguments`）、結束碼怎麼處理（`Get-StepVerdict`：沒跑起來或有 traceback 就停，跑了沒做完流程最後標失敗）、記憶體預留（`Request-Memory`，`instance/research/memory/`）；測試用 PowerShell 實際執行這一段（2026-11-12，S11-B） |
 | `research/files.py` | 寫檔時別的程序正在讀也能換上新檔（Windows 的取代重試；2026-10-29 盤後單因此中斷） |
 | `dashboard/warm.py` | 研究頁重的畫面另開程序算好（`instance/research/cache/ready/<畫面>.pkl`），網頁只讀檔（2026-10-28） |

@@ -229,3 +229,50 @@ def test_todays_decisions_are_kept_as_the_orders_go(tmp_path, monkeypatch):
     for rule in rules:
         kept = store.fixed(decision_key(rule.rule_hash, date(2026, 10, 1)))
         assert kept is not None and kept["through"] == today
+
+
+def test_the_scores_are_made_ready_before_the_table_comes(tmp_path, monkeypatch):
+    """2026-11-12: the after-close orders of 11/12 took 18 minutes (5 the days before): model.py had been changed the
+    night before, every kept block of model scores was keyed again, and the first run to need them — the orders,
+    against the 14:30 close — computed them all. ``warm`` ranks every tracked rule (a blend's sleeves too) on the
+    last session in the files, before the table: what has to be computed again is computed then. It writes nothing
+    of the day's — no table, no orders, no decision."""
+    from quant_platform.research import daily
+    from quant_platform.research.blend import BlendRule, Sleeve
+
+    days = weekdays(date(2025, 1, 1), date(2026, 10, 12))
+    research = tmp_path / "research"
+    build(research / "history", days)
+    other = DailyRule(name="每天 6 個月動能：前 3 名", factors={"momentum_6": 1.0}, top=3, min_hold=0)
+    blend = BlendRule(name="兩個一起", sleeves=(Sleeve(rule=RULE, share=0.5), Sleeve(rule=other, share=0.5)))
+    folder = research / "forward" / "stocks"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "tracked.json").write_text(json.dumps([
+        {"rule_hash": RULE.rule_hash, "name": RULE.name, "rule": RULE.canonical(), "kind": "daily", "plan": "seed",
+         "since": "2026-10-01"},
+        {"rule_hash": "blend-1", "name": blend.name, "rule": blend.model_dump(mode="json"), "kind": "blend", "plan": "seed",
+         "since": "2026-10-01"},
+        {"rule_hash": "stopped-1", "name": "停掉的", "rule": other.canonical(), "kind": "daily", "plan": "seed",
+         "since": "2026-10-01", "stopped": "2026-10-05"}], ensure_ascii=False), encoding="utf-8")
+    ranked = []
+    real = daily.daily_rankings
+
+    def counting(fp, rule, start, end, *rest, **more):
+        ranked.append((rule.name, start, end))
+        return real(fp, rule, start, end, *rest, **more)
+
+    monkeypatch.setattr(daily, "daily_rankings", counting)
+    before = sorted(str(path.relative_to(research)) for path in research.rglob("*") if path.is_file())
+    found = after_close.warm(research / "history", research)
+    assert found["day"] == days[-1].isoformat() and found["rules"] == 2 and found["errors"] == 0
+    # the rule, and the blend's two sleeves (one of them the same rule): each on the last session only
+    assert {name for name, _start, _end in ranked} == {RULE.name, other.name}
+    assert all(start == end == days[-1] for _name, start, end in ranked)
+    after = sorted(str(path.relative_to(research)) for path in research.rglob("*") if path.is_file())
+    assert after == before                                  # nothing of the day's written
+    # a rule that fails is counted, the others still done
+    monkeypatch.setattr(daily, "daily_rankings", lambda *a, **k: (_ for _ in ()).throw(ValueError("x")))
+    assert after_close.warm(research / "history", research)["errors"] == 2
+    # nothing tracked: nothing to do
+    (folder / "tracked.json").write_text("[]", encoding="utf-8")
+    assert after_close.warm(research / "history", research) is None

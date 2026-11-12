@@ -928,6 +928,35 @@ def after_close_due(container: "Container", now: datetime | None = None) -> bool
     return (base / "raw" / "twse_stock_all" / f"{today:%Y}" / f"{today:%Y%m%d}.json").is_file()
 
 
+def warm_after_close(container: "Container", now: datetime | None = None) -> object | None:
+    """2026-11-12: at 12:40 on trading days, the model scores the after-close orders will read made ready
+    (research/after_close.warm) — after model.py was changed the orders of 11/12 computed every kept score again and
+    took 18 minutes against the 14:30 close. Lower priority than the worker: it has until 13:50."""
+    from quant_platform.container import _instance_dir
+    from quant_platform.research import after_close
+    from quant_platform.research.jobs import JobLog
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if _exchange_closure(container, "TW", local_now) is not None:
+        return None
+    research = _instance_dir(container.settings.database_url) / "research"
+    if not (research / "history" / "stocks" / "twse").is_dir():
+        return None
+    try:                                           # below the worker's own jobs; Windows only
+        import ctypes
+
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)
+    except (AttributeError, OSError):
+        pass
+    with JobLog(research).start("盤後單暖身（12:40：把盤後單要讀的模型分數先算好）", "scheduler warm_after_close") as job:
+        found = after_close.warm(research / "history", research)
+        if found:
+            job.payload["summary"] = (f"{found['rules']} 個帳戶、{found['ranked']} 個規則，新算 {found['new_blocks']} 個分數區塊，"
+                                      f"{found['seconds']:.0f} 秒" + (f"，{found['errors']} 個出錯" if found["errors"] else ""))
+        return found
+
+
 def prepare_after_close_orders(container: "Container", now: datetime | None = None) -> object | None:
     """2026-10-14 (使用者：要在 14:30 前算出建議): once TWSE's table of today is in (13:49–14:01 measured), today's
     orders of every board rule for the after-hours sessions that close at 14:30 (research/after_close.py)."""
@@ -1309,6 +1338,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=50,
+    )
+    scheduler.add_job(
+        in_child(warm_after_close),
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=12, minute=40, timezone=timezone),
+        id="after_close_warm",
+        name="盤後單暖身（交易日 12:40：把盤後單要讀的模型分數先算好，另開程序）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=1800,
     )
     scheduler.add_job(
         in_child(prepare_after_close_orders, when=after_close_due),
