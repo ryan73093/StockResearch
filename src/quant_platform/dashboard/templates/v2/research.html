@@ -206,17 +206,17 @@
   {% if decay and decay.rows %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>因子或模型</th><th>判定</th><th class="num">讀它的帳戶</th><th class="num">之前<br>排序相關（t）</th><th class="num">最近 {{ decay.recent_weeks }} 週<br>排序相關（t）</th><th class="num">比之前低<br>幾個標準誤</th><th class="num">前五分之一一年多賺<br>之前／最近</th></tr></thead>
+      <thead><tr><th>因子或模型</th><th>判定</th><th class="num">讀它的帳戶</th><th class="num">前五分之一一年多賺<br>之前（t）</th><th class="num">最近 {{ decay.recent_weeks }} 週<br>（t）</th><th class="num">比之前低<br>幾個標準誤</th><th class="num">排序相關<br>之前／最近</th></tr></thead>
       <tbody>
       {% for row in decay.rows %}
         <tr>
-          <td data-primary><strong>{{ row.label }}</strong>{% if row.direction == -1 %} <span class="muted small">（越低越好）</span>{% endif %}</td>
-          <td data-label="判定"><span class="badge {{ 'badge--bad' if row.verdict in ('反過來了', '變弱') else ('badge--ok' if row.verdict == '正常' else ('badge--warn' if row.verdict == '沒辦法算' else '')) }}">{{ row.verdict }}</span></td>
-          <td class="num" data-label="讀它的帳戶">{{ '{:,}'.format(row.accounts or 0) }} 個</td>
-          <td class="num" data-label="之前排序相關（t）">{{ '%+.3f' % row.long_ic if row.long_ic is not none else '—' }}{% if row.long_t is not none %}<span class="muted small">（{{ '%.1f' % row.long_t }}）</span>{% endif %}</td>
-          <td class="num" data-label="最近排序相關（t）">{{ '%+.3f' % row.recent_ic if row.recent_ic is not none else '—' }}{% if row.recent_t is not none %}<span class="muted small">（{{ '%.1f' % row.recent_t }}）</span>{% endif %}</td>
-          <td class="num" data-label="比之前低幾個標準誤">{{ '%.1f' % row.below if row.below is not none else '—' }}</td>
-          <td class="num" data-label="前五分之一一年多賺">{% if row.long_top_year is not none %}{{ '{:+.1%}'.format(row.long_top_year) }}{% else %}—{% endif %}／{% if row.recent_top_year is not none %}<span class="{{ 'up' if row.recent_top_year > 0 else 'down' }}">{{ '{:+.1%}'.format(row.recent_top_year) }}</span>{% else %}—{% endif %}</td>
+          <td data-primary><strong>{{ row.get('label') }}</strong>{% if row.get('direction') == -1 %} <span class="muted small">（越低越好）</span>{% endif %}</td>
+          <td data-label="判定"><span class="badge {{ 'badge--bad' if row.get('verdict') in ('反過來了', '變弱') else ('badge--ok' if row.get('verdict') == '正常' else ('badge--warn' if row.get('verdict') == '沒辦法算' else '')) }}">{{ row.get('verdict') }}</span></td>
+          <td class="num" data-label="讀它的帳戶">{{ '{:,}'.format(row.get('accounts') or 0) }} 個</td>
+          <td class="num" data-label="前五分之一一年多賺：之前（t）">{% if row.get('long_top_year') is not none %}{{ '{:+.1%}'.format(row.get('long_top_year')) }}{% else %}—{% endif %}{% if row.get('top_t') is not none %}<span class="muted small">（{{ '%.1f' % row.get('top_t') }}）</span>{% endif %}</td>
+          <td class="num" data-label="最近（t）">{% if row.get('recent_top_year') is not none %}<span class="{{ 'up' if row.get('recent_top_year') > 0 else 'down' }}">{{ '{:+.1%}'.format(row.get('recent_top_year')) }}</span>{% else %}—{% endif %}{% if row.get('recent_top_t') is not none %}<span class="muted small">（{{ '%.1f' % row.get('recent_top_t') }}）</span>{% endif %}</td>
+          <td class="num" data-label="比之前低幾個標準誤">{{ '%.1f' % row.get('below') if row.get('below') is not none else '—' }}</td>
+          <td class="num" data-label="排序相關：之前／最近">{{ '%+.3f' % row.get('long_ic') if row.get('long_ic') is not none else '—' }}／{{ '%+.3f' % row.get('recent_ic') if row.get('recent_ic') is not none else '—' }}{% if row.get('ic_verdict') %}<br><span class="muted small">{{ row.get('ic_verdict') }}</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -225,7 +225,7 @@
   {% else %}
   <p class="muted" style="margin:0">還沒有結果；每週六 07:30 算一次。</p>
   {% endif %}
-  <p class="col-help"><b>怎麼讀</b>　前向帳戶讀的每一個因子與模型，2015-06 起每週把合格的上市股票排名一次，和之後 20 個交易日的報酬比；最近 {{ decay.recent_weeks if decay else 26 }} 週（約半年）和之前所有週比。<b>判定</b>（第一次跑之前定）：反過來了＝最近的方向和之前相反、超過 2 個標準誤；變弱＝比之前低超過 2 個標準誤；長期就弱＝之前就沒有預測力（t 不到 2），不判斷；沒辦法算＝程式算不出來（看工作紀錄）。<b>排序相關</b>：分數高的股票之後是不是漲得多，1 是完全一致；括號是 t（重疊的週已調整）。<b>前五分之一一年多賺</b>：分數最高的五分之一比平均股票一年多賺多少。只是監控，不改任何規則。</p>
+  <p class="col-help"><b>怎麼讀</b>　前向帳戶讀的每一個因子與模型，2015-06 起每週把合格的上市股票排名一次，和之後 20 個交易日的報酬比；最近 {{ decay.recent_weeks if decay else 26 }} 週（約半年）和之前所有週比。<b>判定</b>看分數最高的五分之一（規則只買前段）比平均股票一年多賺多少：反過來了＝最近的方向和之前相反、超過 2 個標準誤；變弱＝比之前少超過 2 個標準誤；長期就弱＝之前就沒有多賺（t 不到 2），不判斷；沒辦法算＝程式算不出來（看工作紀錄）。括號是 t（重疊的週已調整）。<b>排序相關</b>：全部合格股票的分數和之後 20 日報酬的排序相關，下面是用它判的結果；只學「會不會進前 10%」的模型（例如深度學習第二版）全體的排序相關很低、前段卻很強，所以判定看前五分之一（11/13 第一次跑之後改的）。只是監控，不改任何規則。</p>
 </section>
 {% endif %}
 

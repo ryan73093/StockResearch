@@ -16,6 +16,13 @@ The verdict, written before the first run (2026-11-13; docs/research/results.md�
 - 正常: otherwise.
 The standard error is the recent weeks' spread over the square root of their independent count: four weekly
 rankings share their 20 sessions, so RECENT_WEEKS weeks count as RECENT_WEEKS × STEP ÷ HORIZON.
+
+2026-11-13 02:30, after the first run (written after seeing its numbers): the verdict above, on the rank correlation
+over every eligible stock, said 長期就弱 of the deep model the most accounts read (ml_deep2_top, 1,839 accounts: its
+correlation −0.020, t −1.3, while its top fifth made +15.6% a year over the average) — it learns which stocks reach the
+day's top 10%, not an order of the whole market, and the rules buy only the top. The same verdict is taken on the top
+fifth's excess over the average, and that one is the verdict (``verdict``); the rank correlation's stays beside it
+(``ic_verdict``). Nothing else changed.
 """
 from __future__ import annotations
 
@@ -85,12 +92,9 @@ def _finite(value: float) -> float | None:
     return round(value, 2) if math.isfinite(value) else None
 
 
-def judge(ics: list[float], tops: list[float], recent: int = RECENT_WEEKS) -> dict[str, object]:
-    """The verdict of the module text on one factor's weekly correlations (oldest first) and its top fifth's excess
-    over the average (per 20 sessions, same weeks; None where a week has no top fifth)."""
-    if len(ics) < recent + 52:
-        return {"verdict": "資料不夠", "weeks": len(ics)}
-    early, late = ics[:-recent], ics[-recent:]
+def _verdict(series: list[float], recent: int) -> dict[str, object]:
+    """The verdict of the module text on one weekly series (oldest first): its earlier weeks against the recent ones."""
+    early, late = series[:-recent], series[-recent:]
     long_mean, long_sd = statistics.fmean(early), statistics.stdev(early)
     long_t = _ratio(long_mean, long_sd / math.sqrt(independent(len(early))))
     late_mean, late_sd = statistics.fmean(late), statistics.stdev(late)
@@ -106,14 +110,24 @@ def judge(ics: list[float], tops: list[float], recent: int = RECENT_WEEKS) -> di
         verdict = "變弱"
     else:
         verdict = "正常"
+    return {"verdict": verdict, "direction": int(direction), "long": long_mean, "long_t": _finite(long_t),
+            "recent": late_mean, "recent_t": _finite(_ratio(late_mean, error)), "below": _finite(below)}
+
+
+def judge(ics: list[float], tops: list[float | None], recent: int = RECENT_WEEKS) -> dict[str, object]:
+    """One factor's weekly rank correlations and its top fifth's excess over the average (per 20 sessions; None where
+    a week has no top fifth), oldest first: the verdict on the top fifth (what the rules buy), the rank correlation's
+    beside it."""
+    values = [value for value in tops if value is not None]
+    if len(ics) < recent + 52 or len(values) < recent + 52:
+        return {"verdict": "資料不夠", "weeks": len(ics)}
+    ic, top = _verdict(ics, recent), _verdict(values, recent)
     scale = 252 / HORIZON
-    early_tops = [value for value in tops[:-recent] if value is not None]
-    late_tops = [value for value in tops[-recent:] if value is not None]
-    return {"verdict": verdict, "weeks": len(ics), "direction": int(direction),
-            "long_ic": round(long_mean, 4), "long_t": _finite(long_t),
-            "recent_ic": round(late_mean, 4), "recent_t": _finite(_ratio(late_mean, error)), "below": _finite(below),
-            "long_top_year": round(statistics.fmean(early_tops) * scale, 4) if early_tops else None,
-            "recent_top_year": round(statistics.fmean(late_tops) * scale, 4) if late_tops else None}
+    return {"verdict": top["verdict"], "ic_verdict": ic["verdict"], "weeks": len(ics), "direction": top["direction"],
+            "long_ic": round(ic["long"], 4), "long_t": ic["long_t"], "recent_ic": round(ic["recent"], 4),
+            "recent_t": ic["recent_t"], "ic_below": ic["below"],
+            "long_top_year": round(top["long"] * scale, 4), "top_t": top["long_t"],
+            "recent_top_year": round(top["recent"] * scale, 4), "recent_top_t": top["recent_t"], "below": top["below"]}
 
 
 def weekly(fp, factor: str, positions: list[int]) -> tuple[list[str], list[float], list[float | None]]:

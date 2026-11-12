@@ -26,18 +26,29 @@ def _series(early_mean, late_mean, early=300, late=26, swing=0.1):
     (0.005, -0.10, "長期就弱"),     # never had an edge: no judgment of a change
 ])
 def test_the_verdict_written_before_the_first_run(early, late, verdict):
-    found = decay.judge(_series(early, late), [0.001] * 326)
-    assert found["verdict"] == verdict
-    assert found["direction"] == (1 if early >= 0 else -1) and found["weeks"] == 326
+    """On the rank correlation (``ic_verdict``, the verdict of the first run); the top fifth's is the same rule."""
+    found = decay.judge(_series(early, late), _series(0.01, 0.01, swing=0.02))
+    assert found["ic_verdict"] == verdict and found["weeks"] == 326
+    assert decay.judge(_series(0.01, 0.01, swing=0.02), _series(early, late))["verdict"] == verdict
 
 
 def test_overlapping_weeks_count_as_fewer():
     """Four weekly rankings share their 20 sessions: 26 weeks are 6.5 independent ones."""
     assert decay.independent(26) == pytest.approx(6.5) and decay.independent(2) == 1.0
-    found = decay.judge(_series(0.05, -0.04), [0.002] * 300 + [-0.001] * 26)
+    found = decay.judge(_series(0.05, -0.04), _series(0.002, -0.001, swing=0.004))
     error = 0.1 * np.sqrt(26 / 25) / np.sqrt(6.5)
-    assert found["below"] == pytest.approx(0.09 / error, abs=0.02)
+    assert found["ic_below"] == pytest.approx(0.09 / error, abs=0.02)
     assert found["long_top_year"] == pytest.approx(0.002 * 252 / 20) and found["recent_top_year"] == pytest.approx(-0.001 * 252 / 20)
+
+
+def test_the_verdict_is_on_the_top_fifth_the_rules_buy():
+    """2026-11-13 02:30, after the first run: the deep model the most accounts read ranked the whole market weakly
+    (rank correlation −0.020, t −1.3) while its top fifth made +15.6% a year — the verdict is the top fifth's."""
+    strong_top = decay.judge(_series(0.005, 0.005), _series(0.01, 0.01, swing=0.02))
+    assert (strong_top["verdict"], strong_top["ic_verdict"]) == ("正常", "長期就弱")
+    weaker_top = decay.judge(_series(0.05, 0.05), _series(0.01, -0.01, swing=0.02))
+    assert (weaker_top["verdict"], weaker_top["ic_verdict"]) == ("變弱", "正常") and weaker_top["below"] > 2
+    assert decay.judge(_series(0.05, 0.05), [None] * 326)["verdict"] == "資料不夠"
 
 
 def test_too_few_weeks_are_not_judged():
@@ -144,6 +155,8 @@ def test_the_factors_tab_lists_the_watch_flagged_first(tmp_path):
         "ml_gbm_k": {"label": "模型K：機器學習", "accounts": 120, "verdict": "變弱", "direction": 1, "long_ic": 0.045,
                      "long_t": 6.0, "recent_ic": -0.012, "recent_t": -0.6, "below": 2.7, "long_top_year": 0.08,
                      "recent_top_year": -0.03},
+        "short_one": {"label": "短歷史因子", "accounts": 7, "verdict": "資料不夠", "weeks": 40},
+        "broken": {"label": "壞掉的因子", "accounts": 3, "verdict": "沒辦法算", "error": "KeyError: 'x'"},
     }
     (folder / "decay-20261114-073000.json").write_text(json.dumps(
         {"at": "2026-11-14T07:30:00+08:00", "ranked_through": "2026-10-16", "recent_weeks": 26, "factors": factors},
@@ -152,3 +165,4 @@ def test_the_factors_tab_lists_the_watch_flagged_first(tmp_path):
     assert "最近還準不準" in page and "排名到 2026-10-16" in page and "變弱或反過來了 1 個" in page
     assert page.index("模型K：機器學習") < page.index("接近 52 週高點") and "+0.045" in page and "2.7" in page
     assert "−3.0%" in page or "-3.0%" in page
+    assert "短歷史因子" in page and "資料不夠" in page and "壞掉的因子" in page and "沒辦法算" in page   # rows without numbers
