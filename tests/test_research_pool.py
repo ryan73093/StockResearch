@@ -262,3 +262,49 @@ def test_every_batch_that_runs_a_blend_search_is_left_out_of_the_sources_rebuild
                      if any(f"import {search}" in inspect.getsource(batch) for search in searches))
     assert len(running) >= 12 and "bear13" in running
     assert [name for name in running if name not in pool.SEARCH_BATCHES] == []
+
+
+def _stats(research, name, candidates, pbo=0.59, trials=8233):
+    folder = research / "stats"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / name).write_text(json.dumps({
+        "basis": "daily:x", "period": "recent", "trials": trials, "pbo": {"pbo": pbo, "months": 63},
+        "scans": {"scans": 23, "groups_090": 120580, "screened": 169380956}, "candidates": candidates}), encoding="utf-8")
+
+
+def _candidate(trial_id, dsr, effective):
+    return {"trial_id": trial_id, "name": "x", "months": 136,
+            "dsr": {"sharpe": 0.07, "deflated_sharpe": dsr, "trials": 8233},
+            "dsr_effective": {"sharpe": 0.07, "deflated_sharpe": effective, "trials": 128813}}
+
+
+def test_a_rules_multiple_testing_score_is_read_from_the_latest_statistics(tmp_path):
+    """2026-11-12 (problem register P2「多重檢定分數放回策略頁」): the weekly statistics of the daily rules keep each
+    rule's deflated Sharpe (the best of 8,152 was 0.04 against a gate of 0.95 on 11/09) and no page showed it."""
+    from quant_platform.research.pool import significance_of
+
+    research = tmp_path / "research"
+    assert significance_of(research, [7]) is None                                  # no statistics yet
+    _stats(research, "daily-recent-20261101-000000.json", [_candidate(7, 0.5, 0.4)])
+    _stats(research, "daily-recent-20261109-011659.json", [_candidate(7, 0.0123, 0.0004), _candidate(8, 0.0384, 0.0049),
+                                                            _candidate(9, 0.0001, 0.0)])
+    found = significance_of(research, [3, 7])                  # the rule's runs: the one the statistics know
+    assert found["score"] == 0.0123 and found["trials"] == 8233
+    assert found["effective"] == 0.0004 and found["effective_trials"] == 128813
+    assert found["best"] == 0.0384 and found["passing"] == 0 and found["rules"] == 3 and found["gate"] == 0.95
+    assert found["pbo"] == 0.59 and found["at"] == "2026-11-09"
+    # a rule run again after the statistics were made: said so, with the family's numbers
+    later = significance_of(research, [99])
+    assert later["score"] is None and later["best"] == 0.0384 and later["rules"] == 3
+
+
+def test_the_rule_page_shows_the_multiple_testing_score(tmp_path):
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
+    research = tmp_path / "research"
+    seed(research)
+    trial = next(record.trial_id for record in TrialRegistry(research / "trials.jsonl").records()
+                 if record.spec_hash == "stock-both")
+    _stats(research, "daily-recent-20261109-011659.json", [_candidate(trial, 0.0123, 0.0004), _candidate(10_000, 0.0384, 0.0049)])
+    page = create_app(container).test_client().get("/research/rules/stock-both").get_data(as_text=True)
+    assert "多重檢定" in page and "1.23%" in page and "8,233" in page and "門檻 95%" in page
+    assert "最高的一個 3.84%" in page and "59%" in page

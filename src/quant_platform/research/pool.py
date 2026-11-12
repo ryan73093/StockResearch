@@ -617,6 +617,48 @@ def yearly_matrix(research_dir: str | Path, rows: list[dict[str, object]]) -> di
     return {"years": ordered, "months": months, "rows": table, "benchmark": benchmark}
 
 
+_SIGNIFICANCE: dict[str, object] = {}
+
+
+def significance_of(research_dir: str | Path, trial_ids: list[int]) -> dict[str, object] | None:
+    """2026-11-12 (problem register P2「多重檢定分數放回策略頁」): a rule's deflated Sharpe from the latest statistics
+    of the daily rules (``stats --family daily``, the weekly step) — the chance its result is more than the best of
+    that many tries would give by luck — with the count of tries, the same with the searches' independent settings
+    counted, the best of all the rules, how many pass the gate, and the batch's PBO. ``score`` is None when none of the
+    rule's runs is in the statistics (run again since). None when there are no statistics. The file (12 MB) is read
+    once per version."""
+    from quant_platform.research.promotion import DSR_GATE
+
+    folder = Path(research_dir) / "stats"
+    files = sorted(folder.glob("daily-recent-*.json")) if folder.is_dir() else []
+    if not files:
+        return None
+    path = files[-1]
+    key = (str(path.resolve()), path.stat().st_mtime_ns)
+    if _SIGNIFICANCE.get("key") != key:
+        try:
+            stats = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        rows = {}
+        for item in stats.get("candidates") or []:
+            effective = item.get("dsr_effective") or {}
+            rows[item["trial_id"]] = (item["dsr"].get("deflated_sharpe"), item["dsr"].get("trials"),
+                                      effective.get("deflated_sharpe"), effective.get("trials"))
+        scores = [row[0] or 0.0 for row in rows.values()]
+        stamp = path.stem.split("-")[-2]
+        _SIGNIFICANCE.update(key=key, rows=rows, family={
+            "best": max(scores, default=None), "passing": sum(score >= DSR_GATE for score in scores),
+            "rules": len(rows), "gate": DSR_GATE, "pbo": (stats.get("pbo") or {}).get("pbo"),
+            "trials": stats.get("trials"), "at": f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}"})
+    rows, family = _SIGNIFICANCE["rows"], _SIGNIFICANCE["family"]
+    found = next((rows[trial] for trial in sorted(trial_ids, reverse=True) if trial in rows), None)
+    if found is None:
+        return {**family, "score": None, "effective": None, "effective_trials": None}
+    return {**family, "score": found[0], "trials": found[1] or family["trials"], "effective": found[2],
+            "effective_trials": found[3]}
+
+
 def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] | None:
     """Every backtest run of one rule (all periods and cash flows), with its report: what the website's
     rule page shows (使用者 2026-10-04：模擬回測的記錄要看得到)."""
@@ -686,6 +728,7 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
             # 2026-10-14: the daily-decision rules ("daily:" data) are stock rules too (the page said ETF 規則)
             "family": "個股規則" if records[-1].data_fingerprint.startswith(("stocks:", "daily:")) else "ETF 規則",
             "source": _sources(base).get(spec_hash, "其他"), "runs": runs, "forward": forward,
+            "significance": significance_of(base, [record.trial_id for record in records]),
             "final": final_validation(base).get(spec_hash)}
 
 

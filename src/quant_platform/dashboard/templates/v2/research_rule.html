@@ -44,6 +44,21 @@
   <p class="col-help"><b>欄位說明</b>　<b>期間・投入方式</b>：這次回測的期間與現金流（2015-06 起啟動 30 萬＋每月 5 日 1 萬，或 2020-10 起）。<b>期末（同樣的錢買 0050）</b>：期末帳戶價值，括號是同樣現金流買 0050。<b>比 0050</b>：期末多或少幾成。<b>年化（0050）</b>：考慮投入時間的年化報酬（XIRR）。<b>最大回撤（0050）</b>：從最高點跌最多的一段。<b>3 年勝率／中位</b>：滾動 3 年視窗贏 0050 的比例與中位數差距。<b>費稅佔投入・每月下單</b>：手續費加稅佔投入的比例、平均每月委託筆數。<b>結果</b>：等級與沒過的原因。下面每年一欄是策略與 0050 的當年報酬。</p>
 </section>
 
+{% if rule.significance %}{% set sig = rule.significance %}
+{# 2026-11-12 (problem register P2): the multiple-testing score, kept by the weekly statistics and shown nowhere #}
+<section class="card">
+  <div class="card__head"><h2>多重檢定：這個成績有多少可能只是試出來的</h2><span class="muted small">{{ sig.at }} 的統計</span></div>
+  <dl class="facts">
+    <div><dt>這個規則的分數</dt><dd>{% if sig.score is not none %}{{ '{:.2%}'.format(sig.score) }}{% else %}還沒算{% endif %}<span class="muted small">（門檻 {{ '{:.0%}'.format(sig.gate) }}）</span></dd></div>
+    <div><dt>算進去的試驗數</dt><dd>{{ '{:,}'.format(sig.trials or 0) }}<span class="muted small"> 個規則</span></dd></div>
+    {% if sig.effective is not none %}<div><dt>連大搜尋的設定也算</dt><dd>{{ '{:.2%}'.format(sig.effective) }}<span class="muted small">（{{ '{:,}'.format(sig.effective_trials or 0) }} 個獨立設定）</span></dd></div>{% endif %}
+    <div><dt>全部 {{ '{:,}'.format(sig.rules) }} 個規則</dt><dd>過門檻 {{ sig.passing }} 個<span class="muted small">，最高的一個 {{ '{:.2%}'.format(sig.best or 0) }}</span></dd></div>
+    {% if sig.pbo is not none %}<div><dt>回測最好的在下一段排到後半的機率</dt><dd>{{ '{:.0%}'.format(sig.pbo) }}</dd></div>{% endif %}
+  </dl>
+  <p class="col-help"><b>怎麼讀</b>　分數是「試了這麼多個規則之後，這個規則的成績仍然不是運氣」的機率（去膨脹夏普值），95% 以上才算。試得越多，最好的那個看起來就越好，所以回測數字偏樂觀；以每月滾動的前向為準。{% if sig.score is none %}這個規則在統計之後重跑過，下一次每週統計才會有分數。{% endif %}現行的分級門檻不看這個分數。</p>
+</section>
+{% endif %}
+
 <div data-tab="走勢與逐年報酬" id="charts">
 {% for run in rule.runs if run.chart or run.yearly %}
 <details class="card"{% if loop.first %} open{% endif %}>
