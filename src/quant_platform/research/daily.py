@@ -2757,7 +2757,7 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
             from quant_platform.research.meta_label import digest as meta_digest
             from quant_platform.research.model import models_root
 
-            payload["meta1"] = meta_digest(models_root(history) / META_VERSION)
+            payload["meta1"] = meta_digest(models_root(history) / META_VERSION, until=RECENT_END)
             payload["meta1_primary"] = digest(model_dir(history, MODELS["ml_deep2_top"]["version"]), until=RECENT_END)
     delisted = sorted((code, day.isoformat()) for code, days in (data.notes.get("delisted") or {}).items()
                       for day in days if day <= RECENT_END)
@@ -2848,7 +2848,7 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         from quant_platform.research.rl_timing import VERSION as ROBOT_VERSION
         from quant_platform.research.rl_timing import digest as robot_digest
 
-        payload["robot"] = robot_digest(models_root(history) / ROBOT_VERSION)
+        payload["robot"] = robot_digest(models_root(history) / ROBOT_VERSION, until=RECENT_END)
     if any(name in ("rl_all", "all_equal") for name in factor_names):   # the robot 2.1, its factors and models
         from quant_platform.research.fundamentals import digest as statements_digest
         from quant_platform.research.model import MODELS, digest, model_dir, models_root
@@ -2858,7 +2858,7 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         payload.setdefault("statements", statements_digest(history, RECENT_END))
         payload["models_all"] = {name: digest(model_dir(history, MODELS[name]["version"]), until=RECENT_END) for name in MODEL_FACTORS}
         if "rl_all" in factor_names:
-            payload["robot_all"] = robot_digest(models_root(history) / ALL_VERSION)
+            payload["robot_all"] = robot_digest(models_root(history) / ALL_VERSION, until=RECENT_END)
     if "rl_free" in factor_names or "rl_free41" in factor_names:    # 2026-10-16: the robots 4.0 and 4.1's weights
         from quant_platform.research.model import models_root
         from quant_platform.research.rl_free import VERSION as FREE_VERSION
@@ -2874,21 +2874,21 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
 
         payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]), until=RECENT_END)
         if "rl_blocks" in factor_names:
-            payload["robot_blocks"] = robot_digest(models_root(history) / BLOCK_VERSION)
+            payload["robot_blocks"] = robot_digest(models_root(history) / BLOCK_VERSION, until=RECENT_END)
     if "rl_worst" in factor_names:                               # 2026-10-16: the reverse robot, model F
         from quant_platform.research.model import MODELS, digest, model_dir, models_root
         from quant_platform.research.rl_timing import WORST_VERSION
         from quant_platform.research.rl_timing import digest as robot_digest
 
         payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]), until=RECENT_END)
-        payload["robot_worst"] = robot_digest(models_root(history) / WORST_VERSION)
+        payload["robot_worst"] = robot_digest(models_root(history) / WORST_VERSION, until=RECENT_END)
     if any(name in ("rl_rolling", "rolling_equal") for name in factor_names):   # 2026-10-16: the robot 3.1, model F
         from quant_platform.research.model import MODELS, digest, model_dir, models_root
         from quant_platform.research.rl_timing import ROLLING_VERSION
         from quant_platform.research.rl_timing import digest as robot_digest
 
         payload["model_f"] = digest(model_dir(history, MODELS["ml_gbm_ens"]["version"]), until=RECENT_END)
-        payload["robot_rolling"] = robot_digest(models_root(history) / ROLLING_VERSION)    # the yardstick reads it too
+        payload["robot_rolling"] = robot_digest(models_root(history) / ROLLING_VERSION, until=RECENT_END)    # the yardstick reads it too
     for pair, key in ((("rl_rolling32", "rolling32_equal"), "32"), (("rl_rolling33", "rolling33_equal"), "33"),
                       (("rl_rolling34", "rolling34_equal"), "34"), (("rl_rolling35", "rolling35_equal"), "35")):
         if any(name in pair for name in factor_names):           # 2026-10-20: the robots 3.2 and 3.3
@@ -2909,7 +2909,7 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
                 payload["paid"] = paid_digest(history, RECENT_END, sorted({PAID_SOURCES["margin_safe"],
                                                                            PAID_SOURCES["low_pledge_loan_20"]}))
             payload[f"robot_rolling{key}"] = robot_digest(models_root(history) / {
-                "32": ROLLING32_VERSION, "33": ROLLING33_VERSION, "34": ROLLING34_VERSION, "35": ROLLING35_VERSION}[key])
+                "32": ROLLING32_VERSION, "33": ROLLING33_VERSION, "34": ROLLING34_VERSION, "35": ROLLING35_VERSION}[key], until=RECENT_END)
     if any(name in TECH_FACTORS for name in factor_names):      # 2026-10-10: the technical robot's policies
         from quant_platform.research.tech_rl import digest as tech_digest
         from quant_platform.research.tech_rl import tech_dir

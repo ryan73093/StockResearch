@@ -108,3 +108,80 @@ def test_every_model_digest_of_a_rules_input_is_taken_to_the_runs_end():
         text = (root / name).read_text(encoding="utf-8")
         calls = re.findall(r"(?<![A-Za-z_.])(?:model_digest|digest)\(model_dir\([^\n]*", text)
         assert calls and all("until=" in call for call in calls), (name, [call for call in calls if "until=" not in call])
+    # 2026-11-12: the robots' and the veto model's digests too
+    text = (root / "daily.py").read_text(encoding="utf-8")
+    calls = [text[match.start():match.start() + 230] for match in re.finditer(r"(?:robot_digest|meta_digest)[(]", text)]
+    assert len(calls) >= 7 and all("until=RECENT_END)" in call for call in calls), [call[:90] for call in calls]
+
+
+def _robot(folder: Path, monthly: dict, weights: dict | None = None, trained_at: str = "2026-10-16T12:10:21+00:00") -> Path:
+    import json
+
+    folder.mkdir(parents=True, exist_ok=True)
+    meta = {"version": "block-rl-9", "factors": ["a", "b"], "config": {"step": 20},
+            "weights": weights or {"2026-09-04": [0.5, 0.5], "2026-10-05": [0.6, 0.4], "2026-11-03": [0.7, 0.3]},
+            "yearly": {"2026": {"abstained": False}}, "trained_at": trained_at, "monthly": monthly}
+    (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    return folder
+
+
+def _refit(weights: dict, trained_at: str = "2026-11-03T12:05:00+00:00") -> dict:
+    return {"weights": weights, "members": None, "abstained": False, "held_robot": 0.01, "held_equal": 0.0,
+            "held_from": "2025-06-02", "train_decisions": 900, "trained_at": trained_at}
+
+
+def test_a_robots_refit_to_the_runs_end_does_not_change_the_runs_hash(tmp_path):
+    """2026-11-12 (problem register P4): the robot's hash was its whole meta.json. A monthly refit writes
+    ``monthly[<cutoff>]`` — the weights of the sessions after the cutoff — so each month's refit changed the hash of
+    every run that ends at the cutoff and reads none of it."""
+    from quant_platform.research import rl_timing
+
+    until = date(2026, 10, 31)
+    september = _refit({"2026-10-05": [0.55, 0.45]})
+    folder = _robot(tmp_path / "block-rl-9", {"2026-09-30": september})
+    whole = hashlib.sha256((folder / "meta.json").read_bytes()).hexdigest()
+    # the results registered so far keep their hash (the pool's end today): the file as it was
+    assert rl_timing.digest(folder) == whole == rl_timing.digest(folder, until=date(2026, 9, 30))
+    before = rl_timing.digest(folder, until=until)
+    assert before != whole
+    # the refit to the run's end, the one after it, the earlier refit deciding more days as the data grows, trained again
+    _robot(tmp_path / "block-rl-9", {
+        "2026-09-30": _refit({"2026-10-05": [0.55, 0.45], "2026-11-03": [0.5, 0.5]}, trained_at="2026-12-01T22:40:00+00:00"),
+        "2026-10-31": _refit({"2026-11-03": [0.2, 0.8]}), "2026-11-30": _refit({"2026-12-01": [0.1, 0.9]})},
+        weights={"2026-09-04": [0.5, 0.5], "2026-10-05": [0.6, 0.4], "2026-11-03": [0.7, 0.3], "2026-12-01": [0.9, 0.1]},
+        trained_at="2026-12-01T22:40:00+00:00")
+    assert rl_timing.digest(folder, until=until) == before
+    # a decision the run reads
+    _robot(tmp_path / "block-rl-9", {"2026-09-30": _refit({"2026-10-05": [0.9, 0.1]})})
+    assert rl_timing.digest(folder, until=until) != before
+    _robot(tmp_path / "block-rl-9", {"2026-09-30": september}, weights={"2026-09-04": [0.4, 0.6], "2026-10-05": [0.6, 0.4]})
+    assert rl_timing.digest(folder, until=until) != before
+    assert rl_timing.digest(tmp_path / "none", until=until) == "missing"
+
+
+def test_the_veto_models_hash_takes_the_files_a_run_reads(tmp_path):
+    """The veto (meta-label) model's hash was its meta.json alone: the yearly classifiers and the monthly refits it
+    scores with were not in it, so a classifier fitted again left every result that read it under an unchanged hash
+    (the deep models' hole of 10/28, here still open). From the pool's next end it takes them — the refits whose cutoff
+    is before the run's end; the refit to the end itself changes nothing."""
+    from quant_platform.research import meta_label
+
+    folder = tmp_path / "meta-9"
+    (folder / "monthly").mkdir(parents=True)
+    (folder / "meta.json").write_text('{"version": "meta-9"}', encoding="utf-8")
+    for year in (2025, 2026):
+        (folder / f"{year}.pkl").write_bytes(f"year {year}".encode())
+    (folder / "monthly" / "2026-09-30.pkl").write_bytes(b"to 9/30")
+    whole = hashlib.sha256((folder / "meta.json").read_bytes()).hexdigest()
+    assert meta_label.digest(folder) == whole == meta_label.digest(folder, until=date(2026, 9, 30))
+    until = date(2026, 10, 31)
+    before = meta_label.digest(folder, until=until)
+    assert before != whole
+    (folder / "monthly" / "2026-10-31.pkl").write_bytes(b"to 10/31")           # scores the sessions after 10/31
+    assert meta_label.digest(folder, until=until) == before
+    (folder / "monthly" / "2026-09-30.pkl").write_bytes(b"to 9/30, fitted again")   # October's sessions read it
+    changed = meta_label.digest(folder, until=until)
+    assert changed != before
+    (folder / "2026.pkl").write_bytes(b"year 2026, fitted again")
+    assert meta_label.digest(folder, until=until) != changed
+    assert meta_label.digest(tmp_path / "none", until=until) == "missing"

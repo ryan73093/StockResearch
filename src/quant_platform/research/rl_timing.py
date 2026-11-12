@@ -713,12 +713,39 @@ def scores(fp, folder: str | Path, kind: str = "robot", version: str = VERSION) 
     return output
 
 
-def digest(folder: str | Path) -> str:
-    """The trained robot as part of a run's input (its meta.json)."""
+def digest(folder: str | Path, until: date | None = None) -> str:
+    """The trained robot as part of a run's input (its meta.json). ``until``: the run's last day.
+
+    2026-11-12 (problem register P4): the hash was the whole file. A monthly refit writes ``monthly[<cutoff>]`` — the
+    weights of the sessions after the cutoff (refit_until) — so the refit to a run's end changed the hash of a run
+    that reads none of it, and every month the robots' rules were run a second time. For a run ending after
+    ``model.DIGEST_LEGACY_UNTIL`` the hash takes what the run reads (``read_by``). Up to that day it is the file as
+    it was: the results registered so far keep their hash, and the change costs no run of its own."""
     import hashlib
 
+    from quant_platform.research.model import DIGEST_LEGACY_UNTIL
+
     path = Path(folder) / "meta.json"
-    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "missing"
+    if not path.is_file():
+        return "missing"
+    if until is None or until <= DIGEST_LEGACY_UNTIL:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    read = read_by(json.loads(path.read_text(encoding="utf-8")), until)
+    return hashlib.sha256(json.dumps(read, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def read_by(meta: dict, until: date) -> dict:
+    """What a run ending on ``until`` reads of a robot's meta: the decisions up to that day; the monthly refits whose
+    cutoff is before it (a refit decides the sessions after its cutoff), their decisions up to that day too — a refit
+    run again later decides more days; not when anything was trained."""
+    limit = until.isoformat()
+    output = {key: value for key, value in meta.items() if key not in ("weights", "monthly", "trained_at")}
+    output["weights"] = {day: values for day, values in (meta.get("weights") or {}).items() if day <= limit}
+    output["monthly"] = {
+        cutoff: {**{key: value for key, value in found.items() if key not in ("weights", "trained_at")},
+                 "weights": {day: values for day, values in (found.get("weights") or {}).items() if day <= limit}}
+        for cutoff, found in (meta.get("monthly") or {}).items() if cutoff < limit}
+    return output
 
 
 def benchmark_units(data, sessions) -> np.ndarray:

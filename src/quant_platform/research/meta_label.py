@@ -260,8 +260,24 @@ def scores(fp, folder: str | Path) -> np.ndarray:
     return output
 
 
-def digest(folder: str | Path) -> str:
+def digest(folder: str | Path, until: date | None = None) -> str:
+    """The veto model as part of a run's input. ``until``: the run's last day.
+
+    2026-11-12: the hash was meta.json alone — the yearly classifiers, the kept scores and the monthly refits
+    (train_until) that ``scores`` reads were not in it, so a classifier fitted again left every result that read it
+    under an unchanged hash (the deep models' hole of 10/28). For a run ending after ``model.DIGEST_LEGACY_UNTIL``
+    the hash takes them as the models' digest does: what the run reads — a refit to the run's end, which scores the
+    sessions after it, is not in it. Up to that day it is as it was (the results registered keep their hash)."""
     import hashlib
 
+    from quant_platform.research.model import DIGEST_LEGACY_UNTIL
+    from quant_platform.research.model import digest as files_digest
+
     path = Path(folder) / "meta.json"
-    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "missing"
+    if not path.is_file():
+        return "missing"
+    output = hashlib.sha256(path.read_bytes())
+    if until is None or until <= DIGEST_LEGACY_UNTIL:
+        return output.hexdigest()
+    output.update(files_digest(folder, until=until).encode())
+    return output.hexdigest()
