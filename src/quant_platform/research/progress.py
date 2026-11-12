@@ -274,6 +274,10 @@ def toward_t0(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str
     nearest = sorted(candidates, key=lambda item: (-item[1]["sessions"], -item[1]["excess"]))[:count]
     return {"sessions": sessions, "needed": FORWARD_SESSIONS, "rules": len(candidates),
             "not_behind": sum(value["excess"] >= 0 for _key, value in candidates),
+            # 2026-11-12: by the other money too (both sold that day) — which one grants T0 is the owner's decision
+            "not_behind_sold": sum(value.get("sold_excess", value["excess"]) >= 0 for _key, value in candidates),
+            "not_behind_both": sum(value["excess"] >= 0 and value.get("sold_excess", value["excess"]) >= 0
+                                   for _key, value in candidates),
             "nearest": [{"spec_hash": key, "name": rows[key]["name"], "tier": rows[key]["tier"],
                          "final_value": rows[key].get("final_value"), **value,
                          "gain": ((summary.get(key) or {}).get("sell_all") or {}).get("gain")} for key, value in nearest]}

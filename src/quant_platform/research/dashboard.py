@@ -125,8 +125,10 @@ def chain_summary(chained: dict[str, dict], names: dict[str, str], top: int = 5)
     if not rows:
         return None
     gaps = sorted(row["excess"] for row in rows)
+    sold = sorted(row.get("sold_excess", row["excess"]) for row in rows)   # 2026-11-12: both sold that day, beside it
     return {"start": min(row["parts"][0]["from"] for row in rows), "end": max(row["parts"][-1]["to"] for row in rows), "rules": len(rows),
             "sessions": longest, "ahead": sum(gap > 0 for gap in gaps), "median": gaps[len(gaps) // 2],
+            "ahead_sold": sum(gap > 0 for gap in sold), "median_sold": sold[len(sold) // 2],
             "benchmark": rows[0]["benchmark_return"], "top": sorted(rows, key=lambda row: -row["excess"])[:top]}
 
 

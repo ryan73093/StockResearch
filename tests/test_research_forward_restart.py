@@ -64,4 +64,8 @@ def test_the_overview_summarises_the_longest_run_on_the_lists():
     assert (found["rules"], found["sessions"], found["ahead"], found["median"]) == (3, 44, 1, -0.02)
     assert (found["start"], found["end"], found["benchmark"]) == ("2026-09-01", "2026-11-06", -0.08)
     assert [row["rule_hash"] for row in found["top"]] == ["a", "b"] and found["top"][0]["name"] == "甲"
+    # 2026-11-12: the other money (both sold that day) beside it; a record made before it reads as the counted one
+    assert found["ahead_sold"] == found["ahead"] and found["median_sold"] == found["median"]
+    both = chain_summary({key: {**row, "sold_excess": 0.5} for key, row in chained.items()}, {"a": "甲"}, top=2)
+    assert both["ahead_sold"] == both["rules"] and both["median_sold"] == 0.5
     assert chain_summary({}, {}) is None

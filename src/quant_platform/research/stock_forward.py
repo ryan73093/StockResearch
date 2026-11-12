@@ -1472,7 +1472,12 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
     first session against the money put in), not only that month's own sessions.
 
     ``records``: forward records, live and archived (each with ``since``); ``lists``: cutoff (ISO) → rule hashes that
-    passed. Returns rule hash → sessions, months, start, the chained returns and ``excess`` (rule's minus 0050's)."""
+    passed. Returns rule hash → sessions, months, start, the chained returns and ``excess`` (rule's minus 0050's).
+
+    2026-11-12 (problem register「T0 兩種算法都保留」; which of the two grants the tier is the owner's decision, not made
+    here): beside the money counted, ``sold_return`` and ``sold_excess`` — the rule's stocks and 0050 both sold that
+    day, the selling costs taken off (the counted money plus what the held stocks are up after those costs). Without
+    ``costs`` both are the paper record."""
     from quant_platform.research.rolling import cutoff_for
 
     months, month = [], CHAIN_START
@@ -1490,6 +1495,7 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
         for key, days in by_account.items():
             counted = kept_by_day([days[day] for day in sorted(days)], costs)
             by_account[key] = {day: {**record, "value": counted[day]["cash_back"],
+                                     "sold_value": counted[day]["cash_back"] + counted[day]["paper"],
                                      "benchmark_value": counted[day]["bench_back"]} for day, record in days.items()}
     output: dict[str, dict[str, object]] = {}
     hashes = {key for passed in lists.values() for key in passed}
@@ -1503,10 +1509,11 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
                 run = []
         if not run:
             continue
-        rule_units, base_units, sessions = 1.0, 1.0, 0
+        rule_units, sold_units, base_units, sessions = 1.0, 1.0, 1.0, 0
         parts = []
         for position, month in enumerate(run):
             units_before, base_before, sessions_before, first_day, last_day = rule_units, base_units, sessions, None, None
+            sold_before = sold_units
             cutoff = cutoff_for(date(int(month[:4]), int(month[5:]), 1))
             since = (cutoff + timedelta(days=1)).isoformat()
             days = dict(by_account.get((rule_hash, since), {}))
@@ -1522,16 +1529,21 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
                 flow = float(now["contributed"]) - float(before["contributed"])
                 if before["value"] and before["benchmark_value"]:
                     rule_units *= (float(now["value"]) - flow) / float(before["value"])
+                    sold_from = float(before.get("sold_value") or before["value"])
+                    sold_units *= (float(now.get("sold_value") or now["value"]) - flow) / sold_from
                     base_units *= (float(now["benchmark_value"]) - flow) / float(before["benchmark_value"])
                     sessions += 1
                     first_day, last_day = first_day or day, day
             if sessions > sessions_before:           # 2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果)
                 parts.append({"list": month, "since": since, "from": first_day, "to": last_day,
                               "sessions": sessions - sessions_before, "return": round(rule_units / units_before - 1, 6),
+                              "sold_return": round(sold_units / sold_before - 1, 6),
                               "benchmark_return": round(base_units / base_before - 1, 6)})
         output[rule_hash] = {"sessions": sessions, "months": run, "start": run[0],
                              "return": round(rule_units - 1, 6), "benchmark_return": round(base_units - 1, 6),
-                             "excess": round(rule_units - base_units, 6), "parts": parts}
+                             "excess": round(rule_units - base_units, 6),
+                             "sold_return": round(sold_units - 1, 6), "sold_excess": round(sold_units - base_units, 6),
+                             "parts": parts}
     return output
 
 

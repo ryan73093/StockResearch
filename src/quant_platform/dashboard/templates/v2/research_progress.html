@@ -148,18 +148,19 @@
   <p class="note">只有 {{ data.forward.series|length }} 個交易日，還分不出好壞；升 T0 要串接前向滿 60 個交易日（最快 {{ first_t0 }}）。</p>
   {% set t0 = data.t0 %}
   <h3 style="margin:16px 0 6px;font-size:15px">離 T0 還差多少：串接前向 {{ t0.sessions }}／{{ t0.needed }} 個交易日</h3>
-  <p class="small" style="margin:0 0 8px">本月名單上過門檻的 {{ '{:,}'.format(t0.rules) }} 個規則裡，串起來不輸 0050 的有 <strong>{{ '{:,}'.format(t0.not_behind) }}</strong> 個；還差 {{ t0.needed - t0.sessions }} 個交易日，最快 {{ first_t0 }} 收盤後，連續留在名單上、串起來仍不輸 0050、對帳正常的升 T0，再由你核准。</p>
+  <p class="small" style="margin:0 0 8px">本月名單上過門檻的 {{ '{:,}'.format(t0.rules) }} 個規則裡，串起來不輸 0050 的：照已拿到的錢算 <strong>{{ '{:,}'.format(t0.not_behind) }}</strong> 個、兩邊當天都賣掉算 <strong>{{ '{:,}'.format(t0.not_behind_sold) }}</strong> 個、兩種都不輸 <strong>{{ '{:,}'.format(t0.not_behind_both) }}</strong> 個（哪一種給 T0 等你決定；現在的等級照已拿到的）；還差 {{ t0.needed - t0.sessions }} 個交易日，最快 {{ first_t0 }} 收盤後，連續留在名單上、串起來仍不輸 0050、對帳正常的升 T0，再由你核准。</p>
   {% if t0.nearest %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th class="num">串接交易日</th><th class="num">串起來的報酬（0050）</th><th class="num">比 0050</th><th class="num">回測期末</th></tr></thead>
+      <thead><tr><th>規則</th><th class="num">串接交易日</th><th class="num" title="已拿到的錢：賺的只算賣掉的、賠的都算；括號是 0050 當天賣掉">串起來的報酬（0050）</th><th class="num" title="照已拿到的錢算，規則減 0050">比 0050（已拿到）</th><th class="num" title="規則的持股和 0050 當天都賣掉、扣掉賣出的費稅，規則減 0050">比 0050（都賣掉）</th><th class="num">回測期末</th></tr></thead>
       <tbody>
       {% for row in t0.nearest %}
         <tr>
           <td data-primary><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a> <span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else 'badge--bad' }}">{{ row.tier }}</span></td>
           <td class="num" data-label="串接交易日">{{ row.sessions }}／{{ t0.needed }}</td>
           <td class="num" data-label="串起來的報酬">{{ '{:+.1%}'.format(row['return']) }}<span class="muted small">（{{ '{:+.1%}'.format(row.benchmark_return) }}）</span></td>
-          <td class="num {{ 'up' if row.excess > 0 else 'down' }}" data-label="比 0050">{{ '{:+.1%}'.format(row.excess) }}</td>
+          <td class="num {{ 'up' if row.excess > 0 else 'down' }}" data-label="比 0050（已拿到）">{{ '{:+.1%}'.format(row.excess) }}</td>
+          <td class="num {{ 'up' if row.sold_excess > 0 else 'down' }}" data-label="比 0050（都賣掉）">{{ '{:+.1%}'.format(row.sold_excess) }}</td>
           <td class="num" data-label="回測期末">{{ wan(row.final_value) if row.final_value else '—' }}</td>
         </tr>
       {% endfor %}

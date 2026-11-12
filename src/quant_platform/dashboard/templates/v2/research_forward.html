@@ -34,14 +34,18 @@
 <section class="card">
   <div class="card__head"><h2>連續上名單的前向紀錄</h2><span class="muted small">{{ chain.parts[0].from }}～{{ chain.parts[-1].to }}，{{ chain.sessions }}／{{ chain_needed }} 個交易日</span></div>
   <dl class="facts">
-    <div><dt>這個策略</dt><dd class="{{ 'up' if chain['return'] > 0 else 'down' }}">{{ '{:+.2%}'.format(chain['return']) }}</dd></div>
+    <div><dt>這個策略（已拿到的錢）</dt><dd class="{{ 'up' if chain['return'] > 0 else 'down' }}">{{ '{:+.2%}'.format(chain['return']) }}</dd></div>
     <div><dt>同期 0050（當天賣掉）</dt><dd class="{{ 'up' if chain.benchmark_return > 0 else 'down' }}">{{ '{:+.2%}'.format(chain.benchmark_return) }}</dd></div>
     <div><dt>比 0050</dt><dd class="{{ 'up' if chain.excess > 0 else 'down' }}">{{ '{:+.2f}'.format(chain.excess * 100) }} 個百分點</dd></div>
+    {% if chain.sold_return is defined %}
+    <div><dt>這個策略（今天全部賣掉）</dt><dd class="{{ 'up' if chain.sold_return > 0 else 'down' }}">{{ '{:+.2%}'.format(chain.sold_return) }}</dd></div>
+    <div><dt>比 0050（兩邊都賣掉）</dt><dd class="{{ 'up' if chain.sold_excess > 0 else 'down' }}">{{ '{:+.2f}'.format(chain.sold_excess * 100) }} 個百分點</dd></div>
+    {% endif %}
   </dl>
-  <table class="table--stack"><thead><tr><th>名單</th><th>帳戶起算</th><th>這段期間</th><th>交易日</th><th>策略</th><th>0050</th></tr></thead><tbody>
-  {% for part in chain.parts %}<tr><td data-primary>{{ part.list[5:7]|int }} 月名單</td><td data-label="帳戶起算">{{ part.since }}</td><td data-label="這段期間">{{ part.from }}～{{ part.to }}</td><td data-label="交易日">{{ part.sessions }} 天</td><td data-label="策略" class="{{ 'up' if part['return'] > 0 else 'down' }}">{{ '{:+.2%}'.format(part['return']) }}</td><td data-label="0050" class="{{ 'up' if part.benchmark_return > 0 else 'down' }}">{{ '{:+.2%}'.format(part.benchmark_return) }}</td></tr>{% endfor %}
+  <table class="table--stack"><thead><tr><th>名單</th><th>帳戶起算</th><th>這段期間</th><th>交易日</th><th>策略</th><th>策略（都賣掉）</th><th>0050</th></tr></thead><tbody>
+  {% for part in chain.parts %}<tr><td data-primary>{{ part.list[5:7]|int }} 月名單</td><td data-label="帳戶起算">{{ part.since }}</td><td data-label="這段期間">{{ part.from }}～{{ part.to }}</td><td data-label="交易日">{{ part.sessions }} 天</td><td data-label="策略" class="{{ 'up' if part['return'] > 0 else 'down' }}">{{ '{:+.2%}'.format(part['return']) }}</td><td data-label="策略（都賣掉）" class="{{ 'up' if (part.sold_return or 0) > 0 else 'down' }}">{{ '{:+.2%}'.format(part.sold_return or 0) }}</td><td data-label="0050" class="{{ 'up' if part.benchmark_return > 0 else 'down' }}">{{ '{:+.2%}'.format(part.benchmark_return) }}</td></tr>{% endfor %}
   </tbody></table>
-  <p class="col-help">報酬是每天的實際結果（賺的只算賣掉拿到的、賠的連還拿著的都算）扣掉當天投入的錢後連乘。滿 {{ chain_needed }} 個交易日、不輸 0050、對帳正常才可能升 T0，第一次可能是 2026-11-30。</p>
+  <p class="col-help">報酬是每天的實際結果（賺的只算賣掉拿到的、賠的連還拿著的都算）扣掉當天投入的錢後連乘。「都賣掉」是持股當天全部賣掉、扣掉賣出的費稅，還沒賣的賺的也算。兩種都列；哪一種給 T0 等使用者決定，現在的等級照已拿到的錢。滿 {{ chain_needed }} 個交易日、不輸 0050、對帳正常才可能升 T0，第一次可能是 2026-11-30。</p>
 </section>
 {% endif %}
 

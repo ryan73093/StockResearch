@@ -627,6 +627,54 @@ def test_the_t0_chain_counts_the_money_kept_against_0050_sold():
     assert mid["return"] == pytest.approx(0.0) and chain(records[:2], lists, date(2026, 10, 5))["A"]["return"] == pytest.approx(0.30)
 
 
+def test_the_chain_also_gives_the_record_with_both_sides_sold_that_day():
+    """2026-11-12 (problem register「T0 兩種算法都保留」; which money grants the tier is the owner's open decision):
+    beside the money counted (a gain once sold, every loss), the chain gives the record with the rule's stocks and
+    0050 both sold that day, the costs of selling taken off — ``sold_return``, ``sold_excess`` and each part's."""
+    from types import SimpleNamespace
+
+    from quant_platform.research.stock_forward import chain
+
+    def rec(day, close, bench, trades=()):
+        return {"rule_hash": "A", "since": "2026-09-01", "date": day, "contributed": 1000.0, "cash": 0.0,
+                "value": 10 * close, "benchmark_value": bench, "trades_today": list(trades),
+                "holdings": [{"code": "2330", "units": 10, "close": close, "value": 10 * close}]}
+
+    buy = {"code": "2330", "side": "BUY", "shares": 10, "price": 100.0, "fee": 0.0, "tax": 0.0}
+    records = [rec("2026-09-01", 100.0, 1000.0, [buy]), rec("2026-09-02", 130.0, 1010.0), rec("2026-09-03", 90.0, 1020.0)]
+    lists = {"2026-08-31": {"A"}}
+    free = SimpleNamespace(slippage_bps=0.0, fee=lambda amount: 0.0, tax=lambda amount, kind, side: 0.0)
+    mid = chain(records[:2], lists, date(2026, 10, 5), free)["A"]
+    # 9/2: up 300 on paper — nothing counted, 1,300 when sold; 0050 1,010
+    assert mid["return"] == pytest.approx(0.0) and mid["excess"] == pytest.approx(-0.01)
+    assert mid["sold_return"] == pytest.approx(0.30) and mid["sold_excess"] == pytest.approx(0.29)
+    assert mid["parts"][0]["sold_return"] == pytest.approx(0.30)
+    full = chain(records, lists, date(2026, 10, 5), free)["A"]
+    assert full["sold_return"] == pytest.approx(-0.10) == full["return"]           # a loss counts both ways
+    # selling costs 1%: 1,287 for the stocks on 9/2, 999.9 for 0050
+    paid = SimpleNamespace(slippage_bps=0.0, fee=lambda amount: amount * 0.01, tax=lambda amount, kind, side: 0.0)
+    costly = chain(records[:2], lists, date(2026, 10, 5), paid)["A"]
+    assert costly["sold_return"] == pytest.approx(0.287) and costly["benchmark_return"] == pytest.approx(-0.0001)
+    assert costly["sold_excess"] == pytest.approx(0.287 + 0.0001)
+    # without the costs (the paper record) the two are the same
+    paper = chain(records[:2], lists, date(2026, 10, 5))["A"]
+    assert paper["sold_return"] == paper["return"] == pytest.approx(0.30)
+
+
+def test_the_way_to_t0_counts_the_rules_not_behind_by_each_money():
+    from quant_platform.research.progress import toward_t0
+
+    def row(sessions, excess, sold_excess):
+        return {"sessions": sessions, "months": ["2026-10"], "start": "2026-10", "return": 0.0, "benchmark_return": 0.0,
+                "excess": excess, "sold_return": 0.0, "sold_excess": sold_excess, "parts": []}
+
+    chained = {"a": row(47, 0.02, 0.03), "b": row(47, -0.01, 0.04), "c": row(47, 0.01, -0.02), "d": row(47, -0.03, -0.01)}
+    pool = [{"spec_hash": key, "name": key, "tier": "T0 候選", "final_value": 1.0} for key in chained]
+    found = toward_t0(chained, pool, {})
+    assert (found["not_behind"], found["not_behind_sold"], found["not_behind_both"]) == (2, 2, 1)
+    assert found["nearest"][0]["sold_excess"] == 0.03
+
+
 def test_the_chain_lists_each_months_part_with_its_days_and_returns():
     """2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果): 9-01 account 100 -> 110 (0050 100 -> 105), then
     October's list's account, in November only, 200 -> 190 (0050 200 -> 210)."""
