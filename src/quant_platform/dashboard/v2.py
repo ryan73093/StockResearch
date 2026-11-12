@@ -241,6 +241,9 @@ POOL_FILTERS = ("q", "family", "tier", "trait")
 # only when the warm-up has none younger than READY_FOR.
 _READY: dict[str, tuple[float, object]] = {}
 READY_FOR = 15 * 60
+# 2026-11-12: a view written before this process started was written by the version before it (the deploy of 15:01:
+# /research answered 500 for a minute — the overview kept by the old warm-up had no ``ahead_sold``); not used
+_STARTED = __import__("time").time()
 
 
 def ready(name: str, research_dir: Path, compute):
@@ -259,7 +262,7 @@ def ready(name: str, research_dir: Path, compute):
         stamp = path.stat().st_mtime
     except OSError:
         stamp = None
-    if stamp is not None and clock.time() - stamp < READY_FOR:
+    if stamp is not None and stamp >= _STARTED and clock.time() - stamp < READY_FOR:
         if found is not None and len(found) > 2 and found[2] == stamp:
             return found[1]
         try:

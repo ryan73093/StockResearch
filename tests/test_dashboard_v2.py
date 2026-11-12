@@ -507,3 +507,38 @@ def test_a_view_the_warm_up_process_wrote_is_read_from_its_file(tmp_path):
     assert v2.ready("pool:seed", tmp_path, lambda: calls.append(2)) == {"made": "by the warm-up"} and calls == [1]
     assert warm.path_of(tmp_path, "pool:seed").name == "pool-seed.pkl"
 
+
+def test_a_view_written_before_this_process_started_is_not_used(tmp_path, monkeypatch):
+    """2026-11-12: for a minute after the 15:01 deploy /research answered 500 — the page read the overview the warm-up
+    of the version before had written (no ``ahead_sold``), and the new template formatted a value that was not there.
+    A file older than this process was written by the version before it: the page computes the view itself until the
+    warm-up of this version has written one."""
+    import os
+
+    from quant_platform.dashboard import v2, warm
+
+    path = warm.write(tmp_path, "dashboard", {"made": "by the version before"})
+    monkeypatch.setattr(v2, "_STARTED", path.stat().st_mtime + 5)          # this process started after it
+    calls = []
+    assert v2.ready("dashboard", tmp_path, lambda: calls.append(1) or {"made": "here"}) == {"made": "here"} and calls == [1]
+    warm.write(tmp_path, "dashboard", {"made": "by this version"})
+    os.utime(path, (path.stat().st_mtime + 10, path.stat().st_mtime + 10))  # written after the start
+    assert v2.ready("dashboard", tmp_path, lambda: calls.append(2)) == {"made": "by this version"} and calls == [1]
+
+
+def test_the_overview_shows_a_chain_summary_made_before_the_second_money(tmp_path):
+    """A summary without the both-sold numbers (kept by a process of the version before) still renders."""
+    from flask import render_template_string
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
+    app = create_app(container)
+    old = {"start": "2026-09-01", "end": "2026-11-11", "rules": 3, "sessions": 47, "ahead": 1, "median": -0.02,
+           "benchmark": -0.05, "top": [{"rule_hash": "a", "name": "甲", "return": 0.01, "excess": 0.06, "parts": []}]}
+    with app.test_request_context("/research"):
+        page = render_template_string(
+            '{% from "v2/_dashboard.html" import chain_panel %}{{ chain_panel(chain) }}', chain=old)
+        assert "贏 0050（已拿到的錢）" in page and "兩邊當天都賣掉" not in page
+        page = render_template_string(
+            '{% from "v2/_dashboard.html" import chain_panel %}{{ chain_panel(chain) }}',
+            chain={**old, "ahead_sold": 2, "median_sold": 0.01, "top": [{**old["top"][0], "sold_excess": 0.07}]})
+        assert "贏 0050（兩邊當天都賣掉）" in page and "+7.0 個百分點" in page

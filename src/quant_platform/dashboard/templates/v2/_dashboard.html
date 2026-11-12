@@ -10,6 +10,16 @@
 {% macro mark(ok) %}{% if ok is none %}<span class="check__mark check__mark--info" aria-hidden="true">≈</span>{% elif ok %}<span class="check__mark check__mark--ok" aria-hidden="true">✓</span>{% else %}<span class="check__mark check__mark--bad" aria-hidden="true">✗</span>{% endif %}{% endmacro %}
 {% macro state(row) %}{% if row.ok is none %}參考{% elif row.ok %}通過{% else %}沒過{% endif %}{% if row.stale %}・太久沒跑{% endif %}{% endmacro %}
 {% macro legend(items) %}<div class="legend">{% for item in items %}<span><i class="sw-{{ item.css }}"></i>{{ item.label }}</span>{% endfor %}</div>{% endmacro %}
+{% macro chain_panel(chain) %}
+    {# 2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果): the record that decides T0, from its first day #}
+    <figure class="dash-panel dash-panel--full">
+      <figcaption><h3>連續上名單的前向紀錄（{{ chain.start[5:7]|int }}/{{ chain.start[8:10]|int }}～{{ chain.end[5:7]|int }}/{{ chain.end[8:10]|int }}，{{ chain.sessions }} 個交易日）</h3><span>{{ '{:,}'.format(chain.rules) }} 個規則連續留在每月名單上；報酬只算賣掉拿到的、賠的都算；0050 同期 {{ '{:+.1%}'.format(chain.benchmark) }}（當天賣掉）</span></figcaption>
+      <div class="kpis kpis--page"><div class="kpi"><div class="kpi__label">贏 0050（已拿到的錢）</div><div class="kpi__value">{{ '{:,}'.format(chain.ahead) }}<small> 個，共 {{ '{:,}'.format(chain.rules) }} 個</small></div></div><div class="kpi"><div class="kpi__label">中間那個規則比 0050</div><div class="kpi__value {{ 'up' if chain.median > 0 else 'down' }}">{{ '{:+.1f}'.format(chain.median * 100) }}<small> 個百分點</small></div></div>{% if chain.ahead_sold is defined %}<div class="kpi"><div class="kpi__label">贏 0050（兩邊當天都賣掉）</div><div class="kpi__value">{{ '{:,}'.format(chain.ahead_sold) }}<small> 個，中間那個 {{ '{:+.1f}'.format(chain.median_sold * 100) }} 個百分點</small></div></div>{% endif %}</div>
+      <table class="table--stack dash-chain"><thead><tr><th>贏最多的規則</th><th>報酬</th><th>比 0050</th>{% if chain.ahead_sold is defined %}<th>比 0050（都賣掉）</th>{% endif %}</tr></thead><tbody>
+      {% for row in chain.top %}<tr><td data-primary><a href="/research/forward/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }} {{ row.name[:60] }}</a></td><td data-label="報酬" class="{{ 'up' if row['return'] > 0 else 'down' }}">{{ '{:+.1%}'.format(row['return']) }}</td><td data-label="比 0050" class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '{:+.1f}'.format(row.excess * 100) }} 個百分點</td>{% if chain.ahead_sold is defined %}<td data-label="比 0050（都賣掉）" class="{{ 'up' if (row.sold_excess or 0) > 0 else 'down' }}">{{ '{:+.1f}'.format((row.sold_excess or 0) * 100) }} 個百分點</td>{% endif %}</tr>{% endfor %}
+      </tbody></table>
+    </figure>
+{% endmacro %}
 {% macro dashboard(d) %}
 {% if d %}
 {% set fw = d.forward %}{% set era = d.eras %}{% set c = d.charts or {} %}{% set st = d.stress %}
@@ -20,7 +30,7 @@
     <div class="kpi"><div class="kpi__label">一般風險錢最多</div><div class="kpi__value">{{ wan(d.ordinary.final_value) if d.ordinary else '—' }}</div><div class="kpi__note">{% if d.ordinary and d.benchmark %}0050 的 {{ '{:.1f}'.format(d.ordinary.final_value / d.benchmark) }} 倍・回撤不比 0050 深 5 點以上・{{ '已實現' if d.ordinary.counted else '含帳面' }}{% endif %}</div></div>
     <div class="kpi"><div class="kpi__label">跌市最穩的錢最多</div><div class="kpi__value">{{ wan(d.steady.final_value) if d.steady else '—' }}</div><div class="kpi__note">{% if d.steady and d.steady.worst_fall %}#{{ d.steady.trial }}・0050 跌最多那次{{ '少跌' if d.steady.worst_fall.gap >= 0 else '多跌' }} {{ '%.1f'|format((d.steady.worst_fall.gap * 100)|abs) }} 點{% endif %}</div></div>
     <div class="kpi"><div class="kpi__label">前向：{{ fw.start[5:7]|int }}/{{ fw.start[8:10]|int }} 起照規則做</div><div class="kpi__value">{{ '{:.0%}'.format(fw.ahead_share) if fw.ahead_share is not none else '—' }} 贏 0050</div><div class="kpi__note">{{ '{:,}'.format(fw.accounts) }} 個帳戶，實際結果計算</div></div>
-    <div class="kpi"><div class="kpi__label">第一個 T0 最快</div><div class="kpi__value">{{ first_t0[5:7]|int }}/{{ first_t0[8:10]|int }}</div><div class="kpi__note">前向已 {{ d.t0.sessions }}／{{ d.t0.needed }} 個交易日</div></div>
+    <div class="kpi"><div class="kpi__label">第一個 T0 最快</div><div class="kpi__value">{{ first_t0[5:7]|int }}/{{ first_t0[8:10]|int }}</div><div class="kpi__note">前向已 {{ d.t0.sessions }}／{{ d.t0.needed }} 個交易日{% if d.t0.not_behind_sold is defined %}；到目前不輸 0050：已拿到的 {{ '{:,}'.format(d.t0.not_behind) }} 個、兩邊都賣掉 {{ '{:,}'.format(d.t0.not_behind_sold) }} 個、兩種都不輸 {{ '{:,}'.format(d.t0.not_behind_both) }} 個{% endif %}</div></div>
   </div>
 
   <div class="dash-grid">
@@ -63,15 +73,7 @@
       {{ legend([{'css': 'v1', 'label': '帳戶的中位數'}, {'css': 'band', 'label': '中間一半的帳戶'}, {'css': 'vref', 'label': '0050 同樣的錢'}]) }}
     </figure>
     {% endif %}
-    {% if d.chain %}
-    {# 2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果): the record that decides T0, from its first day #}
-    <figure class="dash-panel dash-panel--full">
-      <figcaption><h3>連續上名單的前向紀錄（{{ d.chain.start[5:7]|int }}/{{ d.chain.start[8:10]|int }}～{{ d.chain.end[5:7]|int }}/{{ d.chain.end[8:10]|int }}，{{ d.chain.sessions }} 個交易日）</h3><span>{{ '{:,}'.format(d.chain.rules) }} 個規則連續留在每月名單上；報酬只算賣掉拿到的、賠的都算；0050 同期 {{ '{:+.1%}'.format(d.chain.benchmark) }}（當天賣掉）</span></figcaption>
-      <div class="kpis kpis--page"><div class="kpi"><div class="kpi__label">贏 0050（已拿到的錢）</div><div class="kpi__value">{{ '{:,}'.format(d.chain.ahead) }}<small> 個，共 {{ '{:,}'.format(d.chain.rules) }} 個</small></div></div><div class="kpi"><div class="kpi__label">中間那個規則比 0050</div><div class="kpi__value {{ 'up' if d.chain.median > 0 else 'down' }}">{{ '{:+.1f}'.format(d.chain.median * 100) }}<small> 個百分點</small></div></div><div class="kpi"><div class="kpi__label">贏 0050（兩邊當天都賣掉）</div><div class="kpi__value">{{ '{:,}'.format(d.chain.ahead_sold) }}<small> 個，中間那個 {{ '{:+.1f}'.format(d.chain.median_sold * 100) }} 個百分點</small></div></div></div>
-      <table class="table--stack dash-chain"><thead><tr><th>贏最多的規則</th><th>報酬</th><th>比 0050</th><th>比 0050（都賣掉）</th></tr></thead><tbody>
-      {% for row in d.chain.top %}<tr><td data-primary><a href="/research/forward/{{ row.rule_hash }}">{{ rule_no(row.rule_hash) }} {{ row.name[:60] }}</a></td><td data-label="報酬" class="{{ 'up' if row['return'] > 0 else 'down' }}">{{ '{:+.1%}'.format(row['return']) }}</td><td data-label="比 0050" class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '{:+.1f}'.format(row.excess * 100) }} 個百分點</td><td data-label="比 0050（都賣掉）" class="{{ 'up' if (row.sold_excess or 0) > 0 else 'down' }}">{{ '{:+.1f}'.format((row.sold_excess or 0) * 100) }} 個百分點</td></tr>{% endfor %}
-      </tbody></table>
-    </figure>
+    {% if d.chain %}{{ chain_panel(d.chain) }}
     {% endif %}
     {% set fs = d.spread.forward if d.spread else none %}{% if fs %}
     {# 2026-10-27 (使用者：獲益的那些分佈圖我也要看): the forward accounts' money if all sold, each category a row #}
