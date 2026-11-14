@@ -542,3 +542,29 @@ def test_the_overview_shows_a_chain_summary_made_before_the_second_money(tmp_pat
             '{% from "v2/_dashboard.html" import chain_panel %}{{ chain_panel(chain) }}',
             chain={**old, "ahead_sold": 2, "median_sold": 0.01, "top": [{**old["top"][0], "sold_excess": 0.07}]})
         assert "贏 0050（兩邊當天都賣掉）" in page and "+7.0 個百分點" in page
+
+
+def test_my_orders_page_brings_a_rule_to_the_owners_account_and_only_shows(tmp_path):
+    """2026-11-14 (使用者：先做一個只能看的頁面「照這個規則，今天你的帳戶要買賣什麼」包括沒買到時隔天怎麼調整)."""
+    import json
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}", scheduler_in_web=False)
+    client = create_app(build_container(settings)).test_client()
+    empty = client.get("/research/my-orders")
+    assert empty.status_code == 200 and "還沒有盤後單可以對照" in empty.get_data(as_text=True)
+    folder = tmp_path / "research" / "forward" / "stocks" / "orders"
+    folder.mkdir(parents=True)
+    (folder / "2026-11-13.json").write_text(json.dumps({
+        "date": "2026-11-13", "rules": [
+            {"rule_hash": "bad", "name": "壞掉的", "error": "x"},
+            {"rule_hash": "x", "name": "測試策略", "rank": 1, "orders": [], "cash": 1000,
+             "holdings": [{"code": "2330", "name": "台積電", "shares": 10, "value": 10000},
+                          {"code": "2317", "name": "鴻海", "shares": 100, "value": 20000}]}]},
+        ensure_ascii=False), encoding="utf-8")
+    page = client.get("/research/my-orders?rule=x&money=62000")
+    body = page.get_data(as_text=True)
+    assert page.status_code == 200 and "測試策略" in body and "示範" in body and "只能看" in body
+    assert "2330</strong> 台積電" in body and "2317</strong> 鴻海" in body and "規則持有、你還沒有" in body
+    assert "昨天沒買到、沒賣掉，今天怎麼辦" in body and "<form method=\"post\"" not in body
+    assert client.get("/research/my-orders?rule=nothing&money=abc").status_code == 200
+    assert 'href="/research/my-orders"' in client.get("/research").get_data(as_text=True)

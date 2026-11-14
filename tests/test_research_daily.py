@@ -771,6 +771,22 @@ def test_a_drawdown_within_fifteen_points_is_a_high_risk_t0_candidate():
     assert tier({**base, "max_drawdown": -0.45}, forward)[0] == "T0（高風險）"
 
 
+def test_t0_needs_the_chained_record_not_behind_by_both_moneys():
+    """2026-11-14 (使用者：兩個都要評估 兩個都好當然最好, D-045): the money counted and both sides sold that day."""
+    from quant_platform.research.daily import tier
+
+    base = {"full_period_excess": 2.0, "since_2020_excess": 0.5, "benchmark_max_drawdown": -0.34, "max_drawdown": -0.36,
+            "windows": {"3y": {"count": 30, "win_ratio": 0.9, "median_excess": 0.2}, "1y": {"count": 50, "win_ratio": 0.6}}}
+    assert tier(base, {"sessions": 60, "excess": 0.01, "sold_excess": 0.0})[0] == "T0"
+    grade, why = tier(base, {"sessions": 60, "excess": -0.01, "sold_excess": 0.03})
+    assert grade == "T0 候選" and "只有「兩邊當天都賣掉」不輸 0050" in why
+    grade, why = tier(base, {"sessions": 60, "excess": 0.02, "sold_excess": -0.01})
+    assert grade == "T0 候選" and "只有「已拿到的錢」不輸 0050" in why
+    assert tier(base, {"sessions": 60, "excess": -0.02, "sold_excess": -0.01}) == ("T0 候選", "串接前向 60／60 個交易日")
+    assert tier(base, {"sessions": 59, "excess": 0.02, "sold_excess": 0.02})[0] == "T0 候選"
+    assert tier(base, {"sessions": 60, "excess": 0.02, "sold_excess": 0.02, "problems": ["x"]})[0] == "T0 候選"
+
+
 def test_a_winner_grown_past_trim_above_times_its_target_is_sold_back_to_it():
     """2026-10-18: the deep rule held 30% of the account in one stock — with trim_above 2 a holding is never left above
     twice its target on a decision day; the money goes to the picks below theirs. Off, the winner keeps growing."""

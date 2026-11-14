@@ -53,11 +53,11 @@
 {% endif %}
 
 <section class="card" id="best">
-  <div class="card__head"><h2>目前最好的規則 <span class="badge">T0、T0 候選、T1</span></h2><a class="small" href="/research/pool?tier=T0%20%E5%80%99%E9%81%B8#daily">期末最多的前 {{ best|length }} 個，全部 {{ best_total }} 個在選手池</a></div>
+  <div class="card__head"><h2>目前最好的規則 <span class="badge">T0、T0 候選、T1</span></h2><a class="small" href="/research/pool?tier=T0%20%E5%80%99%E9%81%B8#daily">綜合分數最高的前 {{ best|length }} 個，全部 {{ best_total }} 個在選手池</a></div>
   {% if best %}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th>等級</th><th class="num">2015-06 起已實現（0050 賣掉）</th><th class="num">比 0050<br>2015-06 起／2020-10 起</th><th class="num">最大回撤（0050）</th><th class="num">每月下單</th><th class="num">前向觀察<br>天數・相對 0050</th></tr></thead>
+      <thead><tr><th>規則</th><th>等級</th><th class="num">2015-06 起已實現（0050 賣掉）</th><th class="num">比 0050<br>2015-06 起／2020-10 起</th><th class="num">最大回撤（0050）</th><th class="num">每月下單</th><th class="num">串接前向比 0050<br>已拿到的／都賣掉</th><th class="num">綜合分數<br>（0～100）</th><th class="num">前向觀察<br>天數・相對 0050</th></tr></thead>
       <tbody>
       {% for row in best %}{% set fwd = forward_map.get(row.spec_hash) %}
         <tr>
@@ -67,15 +67,17 @@
           <td class="num" data-label="比 0050">{% if row.excess is not none %}<span class="{{ 'up' if row.excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.excess) }}</span>{% else %}—{% endif %}／{% if row.since_2020_excess is not none %}<span class="{{ 'up' if row.since_2020_excess > 0 else 'down' }}">{{ '{:+.0%}'.format(row.since_2020_excess) }}</span>{% else %}—{% endif %}</td>
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
           <td class="num" data-label="每月下單">{{ '%.0f 筆' % row.orders_per_month if row.orders_per_month else '—' }}</td>
+          {% set ch = row.get('chain') %}<td class="num" data-label="串接前向比 0050">{% if ch %}<span class="{{ 'up' if ch.excess >= 0 else 'down' }}">{{ '{:+.1f}'.format(ch.excess * 100) }}</span>／<span class="{{ 'up' if ch.sold_excess >= 0 else 'down' }}">{{ '{:+.1f}'.format(ch.sold_excess * 100) }}</span> 點<br><span class="muted small">{{ ch.sessions }} 個交易日</span>{% else %}<span class="muted small">還沒有</span>{% endif %}</td>
+          <td class="num" data-label="綜合分數">{% if row.get('combined') is not none %}{{ '%.0f' % (row.get('combined') * 100) }}{% else %}—{% endif %}</td>
           <td class="num" data-label="前向觀察">{% if fwd and fwd.sessions %}<a href="/research/forward/{{ row.spec_hash }}">{{ fwd.sessions }} 天</a>{% if fwd.kept %}・實際比 0050 <span class="{{ 'up' if fwd.kept.ahead > 0 else ('down' if fwd.kept.ahead < 0 else '') }}">{{ '{:+,.0f}'.format(fwd.kept.ahead) }} 元</span>{% endif %}{% elif row.forward_since %}<span class="muted small">{{ row.forward_since[5:] }} 起</span>{% else %}<span class="muted small">下個交易日 15:30 加入</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="note">T0 候選要串接滾動前向紀錄（連續留在每月名單上的月份串起來）滿 60 個交易日仍不輸 0050 才是 T0，最快 {{ first_t0 }}；T0 候選（高風險）其他門檻都過，但回撤比 0050 深 5～15 個百分點（使用者 2026-10-18：錢賺得多就可以，標註高風險）；T1 贏 0050，但回撤比 0050 深超過 15 個百分點。前向觀察的相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入，明細在<a href="/research?tab=forward">前向觀察</a>。歷史結果只作研究參考。</p>
+  <p class="note">T0 候選要串接滾動前向紀錄（連續留在每月名單上的月份串起來）滿 60 個交易日、兩種算法（已拿到的錢、兩邊當天都賣掉）都不輸 0050 才是 T0，最快 {{ first_t0 }}；T0 候選（高風險）其他門檻都過，但回撤比 0050 深 5～15 個百分點（使用者 2026-10-18：錢賺得多就可以，標註高風險）；T1 贏 0050，但回撤比 0050 深超過 15 個百分點。前向觀察的相對 0050 ＝（規則資產 − 同樣的錢放 0050 的資產）÷ 投入，明細在<a href="/research?tab=forward">前向觀察</a>。歷史結果只作研究參考。</p>
   {% else %}<p class="muted" style="margin:0">還沒有過門檻的規則。</p>{% endif %}
-  <p class="col-help"><b>欄位說明</b>　<b>規則</b>：點進去看每一次回測。<b>等級</b>：T0 候選＝2015-06 起與 2020-10 起都贏同樣的錢買 0050、回撤不比 0050 深超過 5 個百分點；高風險＝深 5～15 點；T1 只進前向觀察。<b>2015-06 起期末（0050）</b>：啟動 30 萬＋每月 5 日 1 萬到 2026-09 的帳戶價值，括號是同樣的錢買 0050。<b>比 0050</b>：兩段期間期末多或少幾成。<b>最大回撤</b>：帳戶從最高點跌最多的一段（括號 0050）。<b>每月下單</b>：平均每月委託筆數。<b>前向觀察</b>：從當月截止日隔天起的前向帳戶記錄了幾個交易日、目前比同樣的錢買 0050 多或少。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>規則</b>：點進去看每一次回測。<b>等級</b>：T0 候選＝2015-06 起與 2020-10 起都贏同樣的錢買 0050、回撤不比 0050 深超過 5 個百分點；高風險＝深 5～15 點；T1 只進前向觀察。<b>2015-06 起期末（0050）</b>：啟動 30 萬＋每月 5 日 1 萬到 2026-09 的帳戶價值，括號是同樣的錢買 0050。<b>比 0050</b>：兩段期間期末多或少幾成。<b>最大回撤</b>：帳戶從最高點跌最多的一段（括號 0050）。<b>每月下單</b>：平均每月委託筆數。<b>串接前向比 0050</b>：留在每月名單上的月份串起來的報酬比同期 0050 多或少幾個百分點；前面是已拿到的錢（賺的賣掉才算、賠的都算），後面是規則和 0050 當天都賣掉。<b>綜合分數</b>：這張表的排序。前向佔七成、回測佔三成：前向看串接前向兩種算法裡比較差的那個在這些規則裡排第幾，回測看 2020-10 起比 0050 排第幾；100 是兩邊都排第一，還沒有串接前向的只有回測那三成。<b>前向觀察</b>：從當月截止日隔天起的前向帳戶記錄了幾個交易日、目前比同樣的錢買 0050 多或少。</p>
 </section>
 
 {% if yearly and yearly.rows %}

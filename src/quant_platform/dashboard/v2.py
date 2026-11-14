@@ -1233,7 +1233,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         best = [row for row in overview["daily"] if row["tier"] in BEST_TIERS and not row["uses_0050"]] if overview else []
         best_total = len(best)
         # 2026-10-30: variants with the very same results are one row (pool.merge_same)
-        best = merge_same(sorted(best, key=lambda row: -(row.get("final_value") or 0)))[:BEST_ROWS]
+        # 2026-11-14 (使用者：回測加前向綜合評估 但前向權重較重): by pool.combine's score, the backtest money after it
+        best = merge_same(sorted(best, key=lambda row: (-(row.get("combined") or 0), -(row.get("final_value") or 0))))[:BEST_ROWS]
         downside = ready("downside", research_dir, lambda: downside_table(research_dir)) if tab == "overview" else None
         if downside:
             downside_total = len(downside)
@@ -1476,6 +1477,40 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             flash(f"沒有編號 #{number} 的策略（編號是它第一次登錄的試驗編號）", "error")
             return redirect(url_for("v2.research_pool"))
         return redirect(url_for("v2.research_rule", spec_hash=spec))
+
+    @blueprint.get("/research/my-orders")
+    def research_my_orders():
+        """2026-11-14 (使用者：先做一個只能看的頁面「照這個規則，今天你的帳戶要買賣什麼」包括沒買到時隔天怎麼調整):
+        read-only — a rule's forward account after today's close, brought to the owner's cash and holdings."""
+        from quant_platform.research import my_orders
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        kept = my_orders.days(research_dir)
+        day = kept[-1] if kept else None
+        report = after_close_load(research_dir, day) if day else None
+        entries = [entry for entry in (report or {}).get("rules") or [] if not entry.get("error")]
+        basis = _default_basis(research_dir)
+        pool = ready(f"pool:{basis}", research_dir, lambda: pool_view(research_dir, basis=basis)) if entries else None
+        options = my_orders.choices(entries, (pool or {}).get("daily") or [])
+        wanted = request.args.get("rule", "").strip()
+        by_hash = {str(entry["rule_hash"]): entry for entry in entries}
+        chosen = by_hash.get(wanted) or (by_hash.get(options[0]["rule_hash"]) if options else None)
+        cash, held, recorded = my_orders.account(dependencies.actual_account_service.overview(include_shadow=False))
+        money = None
+        if not recorded:                       # nothing recorded on the holdings page: an example from cash alone
+            try:
+                money = min(max(float(request.args.get("money", "300000").replace(",", "")), 10_000.0), 1e9)
+            except ValueError:
+                money = 300_000.0
+            cash, held = money, {}
+        result = None
+        if chosen:
+            today, before = my_orders.closes(research_dir, day)
+            result = my_orders.plan(chosen, cash, held, today, before)
+        return render_template("v2/research_my_orders.html", active_nav="research", research_tab="my-orders",
+                               day=day, today=datetime.now(TAIPEI).date(), report=report, options=options,
+                               chosen=chosen, result=result, recorded=recorded, money=money,
+                               jobs=JobLog(research_dir).jobs())
 
     @blueprint.get("/research/forward/<rule_hash>")
     def research_forward(rule_hash: str):

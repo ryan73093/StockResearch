@@ -327,6 +327,7 @@ flowchart LR
 | `scheduler/child.py` | worker 的重工作（前向紀錄、盤後單與它 12:40 的暖身 `after_close.warm`、每週六 07:30 的衰減監控、模型重訓、個股快照、研究資料補抓）在子程序裡跑，跑完記憶體還給系統；盤後單先由 worker 用 `runner.after_close_due` 看這一分鐘有沒有事才開子程序；輸出在 `instance/worker-jobs.log`（2026-11-12，S11-B） |
 | `research/decay.py` | 因子與模型衰減監控（2026-11-13，問題清冊 P7）：前向帳戶讀的每個因子與模型，2015-06 起每週排名一次、和之後 20 個交易日比；最近 26 週和之前比，判定（事先寫）反過來了／變弱／正常／長期就弱。結果 `instance/research/decay/`；研究 › 因子強弱 › 最近還準不準、首頁提醒、16:00 檢查「8 天內算過」 |
 | `research/retry_check.py` | 診斷（2026-11-13，不登錄）：漲停被擋下的加碼隔天再試（`simulate_daily(retry_topups=True)`，引擎預設關）會讓成績差多少；指令與流程 `retry-check`，結果 `instance/research/diagnostics/` |
+| `research/my_orders.py` | 只能看的頁面「今天我的帳戶要買賣什麼」（2026-11-14，D-045；`/research/my-orders`）：規則前向帳戶收盤後的持股（13:50 的盤後單）當目標，把持倉頁記錄的現金與持股調成同樣比例（整數股、留 1.2% 現金），相減就是今天的單；不照抄昨天沒成交的單、收在漲跌停的列為做不到、差一點的不動。不下單、不核准、不改今日建議。`pool.combine` 的綜合分數（前向七成、回測三成）決定預設的規則 |
 | `scripts/research-pipeline.ps1` 的 step-helpers | 步驟參數加引號（`Join-Arguments`）、結束碼怎麼處理（`Get-StepVerdict`：沒跑起來或有 traceback 就停，跑了沒做完流程最後標失敗）、記憶體預留（`Request-Memory`，`instance/research/memory/`）；測試用 PowerShell 實際執行這一段（2026-11-12，S11-B） |
 | `research/files.py` | 寫檔時別的程序正在讀也能換上新檔（Windows 的取代重試；2026-10-29 盤後單因此中斷） |
 | `dashboard/warm.py` | 研究頁重的畫面另開程序算好（`instance/research/cache/ready/<畫面>.pkl`），網頁只讀檔（2026-10-28） |

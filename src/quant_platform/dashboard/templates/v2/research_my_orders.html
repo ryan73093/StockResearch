@@ -1,0 +1,115 @@
+{% extends "v2/base.html" %}
+{# 2026-11-14 (使用者：先做一個只能看的頁面「照這個規則，今天你的帳戶要買賣什麼」包括沒買到時隔天怎麼調整; D-045):
+   read-only — nothing here places an order, approves a rule or changes Today's advice. #}
+{% block title %}今天我的帳戶要買賣什麼{% endblock %}
+{% block heading %}<h1>今天我的帳戶要買賣什麼</h1>
+<p class="muted small" style="margin:4px 0 0">只能看：不下單、不核准、不改今日建議。照一個規則的前向帳戶，把你的錢和持股調成同樣的比例。</p>{% endblock %}
+{% macro order_table(rows, side) %}
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>股票</th><th class="num">{{ '賣出' if side == 'SELL' else '買進' }}（股）</th><th class="num">收盤（元）</th><th class="num">金額（元）</th><th>怎麼下</th><th>原因</th><th class="num">你現在 → 做完（股）</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td data-primary><strong>{{ row.code }}</strong> {{ row.name }}</td>
+        <td class="num" data-label="{{ '賣出' if side == 'SELL' else '買進' }}（股）">{{ '{:,}'.format(row.shares) }}{% if row.get('cut') %}<br><span class="muted small">現金不夠，已等比例減少</span>{% endif %}</td>
+        <td class="num" data-label="收盤（元）">{{ '{:,.2f}'.format(row.close) }}</td>
+        <td class="num" data-label="金額（元）">{{ '{:,}'.format(row.amount) }}</td>
+        <td data-label="怎麼下" data-wide>{% for part in row.get('parts') or [] %}{{ part.session }}：{{ '{:,}'.format(part.shares) }} 股{% if part.get('limit') %}，限價 {{ '{:,.2f}'.format(part.limit) }} 元{% else %}，{{ '{:,.2f}'.format(part.price) }} 元{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+        <td data-label="原因">{{ row.get('why', '') }}</td>
+        <td class="num" data-label="你現在 → 做完（股）">{{ '{:,}'.format(row.have) }} → {{ '{:,}'.format(row.have + row.shares if side == 'BUY' else row.have - row.shares) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+{% block content %}
+{% include "v2/_research_tabs.html" %}
+{% if not day or not chosen %}
+<section class="card"><p class="muted" style="margin:0">還沒有盤後單可以對照：交易日 13:50 以後才有（<a href="/research?tab=orders">今天的盤後單</a>）。</p></section>
+{% else %}
+<section class="card" id="my-orders-setup">
+  <div class="card__head"><h2>照哪個規則、用哪個帳戶</h2></div>
+  <p class="small" style="margin:0 0 8px"><b>資料日</b>：{{ day }} 收盤後（13:50 的收盤表）。{% if day != today %}今天是 {{ today }}，下一個交易日 13:50 以後會換成那天的。{% endif %}</p>
+  <form method="get" style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin:0 0 8px">
+    <label class="small" style="flex:1;min-width:240px">規則（綜合分數高的在前，前向比重較大）<br>
+      <select name="rule" style="width:100%">
+        {% for option in options %}<option value="{{ option.rule_hash }}"{% if option.rule_hash == chosen.rule_hash %} selected{% endif %}>{{ rule_no(option.rule_hash) }}（{{ option.tier }}，綜合 {{ '%.0f' % (option.combined * 100) }} 分）{{ option.name[:44] }}</option>{% endfor %}
+        {% if chosen.rule_hash not in options|map(attribute='rule_hash')|list %}<option value="{{ chosen.rule_hash }}" selected>{{ rule_no(chosen.rule_hash) }} {{ chosen.name[:50] }}</option>{% endif %}
+      </select></label>
+    {% if not recorded %}<label class="small">假設你有現金（元）<br><input type="number" name="money" min="10000" step="10000" value="{{ '%.0f' % money }}" style="width:140px"></label>{% endif %}
+    <button class="button" type="submit">重算</button>
+  </form>
+  <p class="small" style="margin:0 0 4px"><b>規則</b>：<a href="/research/forward/{{ chosen.rule_hash }}">{{ rule_no(chosen.rule_hash) }} {{ chosen.name }}</a></p>
+  {% if recorded %}
+  <p class="small" style="margin:0"><b>你的帳戶</b>：讀<a href="/holdings">持倉頁</a>記錄的現金與持股。</p>
+  {% else %}
+  <p class="small" style="margin:0"><b>你的帳戶</b>：持倉頁還沒有記錄，下面是<b>示範</b>：假設你今天只有 {{ '{:,.0f}'.format(money) }} 元現金、沒有持股。在<a href="/holdings">持倉頁</a>記錄入金與成交以後，這裡會改用你真的現金與持股。</p>
+  {% endif %}
+</section>
+
+{% if not result or not result.ok %}
+<section class="card"><p style="margin:0">算不出來：{{ result.reason if result else '沒有這個規則今天的前向帳戶' }}。</p></section>
+{% else %}
+<div class="kpis kpis--page kpis--four">
+  <div class="kpi"><div class="kpi__label">你的帳戶（現金＋持股）</div><div class="kpi__value">{{ '{:,}'.format(result.total) }}<small> 元</small></div><div class="kpi__note">其中現金 {{ '{:,}'.format(result.cash) }} 元</div></div>
+  <div class="kpi"><div class="kpi__label">今天要賣</div><div class="kpi__value">{{ result.sells|length }}<small> 筆・{{ '{:,}'.format(result.sell_amount) }} 元</small></div></div>
+  <div class="kpi"><div class="kpi__label">今天要買</div><div class="kpi__value">{{ result.buys|length }}<small> 筆・{{ '{:,}'.format(result.buy_amount) }} 元</small></div></div>
+  <div class="kpi"><div class="kpi__label">做完以後的現金（最少）</div><div class="kpi__value">{{ '{:,}'.format(result.cash_after) }}<small> 元</small></div><div class="kpi__note">買單照限價、扣費稅算</div></div>
+</div>
+
+<section class="card" id="my-orders-today">
+  <div class="card__head"><h2>今天的單 <span class="badge">14:30 前</span></h2><span class="muted small">規則自己今天下了 {{ result.rule_orders }} 筆</span></div>
+  {% if not result.sells and not result.buys %}<p style="margin:0 0 8px"><b>今天不用下單。</b>你的持股和規則的比例已經一樣（或只差一點）。</p>{% endif %}
+  {% if result.sells %}<h3 class="dash-h">先賣</h3>{{ order_table(result.sells, 'SELL') }}{% endif %}
+  {% if result.buys %}<h3 class="dash-h">再買</h3>{{ order_table(result.buys, 'BUY') }}{% endif %}
+  {% if result.waiting %}
+  <h3 class="dash-h">今天做不到的（明天重算，不會自動補單）</h3>
+  <ul class="small" style="margin:0 0 8px;padding-left:18px;line-height:1.7">
+    {% for row in result.waiting %}<li><b>{{ row.code }} {{ row.name }}</b>：想{{ '買' if row.side == 'BUY' else '賣' }} {{ '{:,}'.format(row.shares) }} 股，{{ row.why }}。</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% if result.left %}
+  <details><summary class="small">只差一點、今天不動的 {{ result.left|length }} 檔</summary>
+    <ul class="small" style="margin:4px 0 0;padding-left:18px;line-height:1.7">
+      {% for row in result.left %}<li>{{ row.code }} {{ row.name }}：你 {{ '{:,}'.format(row.have) }} 股、規則的比例是 {{ '{:,}'.format(row.want) }} 股，差 {{ '{:,}'.format(row.amount) }} 元。</li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+  {% if result.unknown %}<p class="small down" style="margin:8px 0 0">你持有但今天的收盤表裡沒有的：{{ result.unknown|join('、') }}（沒算進帳戶、也沒有排單；可能是上櫃、停牌或代號記錯）。</p>{% endif %}
+</section>
+
+<section class="card" id="my-orders-unfilled">
+  <div class="card__head"><h2>昨天沒買到、沒賣掉，今天怎麼辦</h2></div>
+  <ul class="small" style="margin:0;padding-left:18px;line-height:1.8">
+    <li><b>不照抄昨天的單。</b>每天都拿你當天真正的持股和規則當天的持股重新比，差多少就是今天的單（交易需知 §5：當天的決策當天做，隔天照前一天收盤後的狀況重新決定）。</li>
+    <li><b>昨天沒買到</b>：規則今天還持有那一檔，它會出現在「再買」，原因寫「你的比規則少」；規則今天已經不要它了，就不會再出現。</li>
+    <li><b>昨天沒賣掉</b>：規則今天沒有那一檔，它會出現在「先賣」。</li>
+    <li><b>今天收在漲停或跌停</b>：盤後買不到或賣不掉，列在「今天做不到的」，明天再照明天的狀況算。</li>
+    <li><b>差距很小</b>（不到 2,000 元或不到那一檔的兩成）：不動，省手續費。</li>
+    <li>成交以後到<a href="/holdings">持倉頁</a>記錄實際成交的股數與價格，明天的單才會照你真的持股算。</li>
+  </ul>
+</section>
+
+<section class="card" id="my-orders-holdings">
+  <div class="card__head"><h2>持股對照</h2><span class="muted small">規則前向帳戶 {{ '{:,}'.format(result.model_total) }} 元（現金 {{ '{:,}'.format(result.model_cash) }} 元），你的帳戶是它的 {{ '%.2f' % result.scale }} 倍</span></div>
+  <div class="table-wrap table-wrap--stack" style="max-height:420px;overflow:auto">
+    <table class="table--stack">
+      <thead><tr><th>股票</th><th class="num">你現在（股）</th><th class="num">照規則的比例（股）</th><th class="num">收盤（元）</th><th class="num">照比例的市值（元）</th></tr></thead>
+      <tbody>
+      {% for row in result.holdings %}
+        <tr><td data-primary><strong>{{ row.code }}</strong> {{ row.name }}</td>
+          <td class="num" data-label="你現在（股）">{{ '{:,}'.format(row.have) }}</td>
+          <td class="num" data-label="照規則的比例（股）">{{ '{:,}'.format(row.want) }}</td>
+          <td class="num" data-label="收盤（元）">{{ '{:,.2f}'.format(row.close) }}</td>
+          <td class="num" data-label="照比例的市值（元）">{{ '{:,}'.format(row.value) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="col-help"><b>欄位說明</b>　<b>照規則的比例</b>：規則前向帳戶收盤後的持股 × 你的帳戶 ÷ 規則的帳戶，取整數股；留 1.2% 現金（零股限價比收盤高 1%，加手續費）。<b>怎麼下</b>：整張走盤後定價（收盤價）、不足一張走盤後零股（限價是收盤 ±1%，不超出漲跌停）。<b>做完以後的現金（最少）</b>：賣單、買單都照限價成交、扣手續費與證交稅以後剩的錢；實際多半成交在收盤價附近，會剩更多。</p>
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

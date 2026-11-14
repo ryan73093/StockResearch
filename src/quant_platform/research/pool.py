@@ -368,6 +368,51 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
         })
     # 2026-10-09: rules that hold 0050 are listed last and never count as candidates (categories.NO_0050)
     rows.sort(key=lambda row: (row["uses_0050"], TIERS.index(row["tier"]), -(row["excess"] if row["excess"] is not None else -9)))
+    combine(rows, chained)
+    return rows
+
+
+FORWARD_WEIGHT = 0.7   # 2026-11-14 (使用者：回測加前向綜合評估 但前向權重較重, D-045); 0.7 is the assistant's number
+
+
+def _places(values: dict[str, float]) -> dict[str, float]:
+    """Each key's place among the values, 0 (lowest) to 1 (highest); equal values share the average place."""
+    if len(values) < 2:
+        return {key: 1.0 for key in values}
+    ordered = sorted(values, key=lambda key: values[key])
+    out, start = {}, 0
+    while start < len(ordered):
+        end = start
+        while end + 1 < len(ordered) and values[ordered[end + 1]] == values[ordered[start]]:
+            end += 1
+        for key in ordered[start:end + 1]:
+            out[key] = (start + end) / 2 / (len(ordered) - 1)
+        start = end + 1
+    return out
+
+
+def combine(rows: list[dict], chained: dict[str, dict], weight: float = FORWARD_WEIGHT) -> list[dict]:
+    """The score the "best rules" are ordered by (使用者 2026-11-14: 回測加前向綜合評估 但前向權重較重): among the
+    passing 100%-stock rules and T1 (the overview's "best" tiers), ``weight`` × the place of the chained forward record + (1 − weight) × the place of the
+    backtest from 2020-10 against 0050. The forward record is read by both moneys and the worse one counts (T0 needs
+    both, D-045). A rule with no chained record yet has only its backtest part, so it comes after the ones that have."""
+    from quant_platform.research.daily import PASSING_TIERS
+
+    mine = [row for row in rows if row["tier"] in (*PASSING_TIERS, "T1") and not row["uses_0050"]]
+    back = _places({row["spec_hash"]: row["since_2020_excess"] for row in mine if row.get("since_2020_excess") is not None})
+    worse = {}
+    for row in mine:
+        record = chained.get(row["spec_hash"])
+        if record and record.get("sessions"):
+            counted = record.get("excess") or 0
+            sold = record.get("sold_excess")
+            worse[row["spec_hash"]] = min(counted, counted if sold is None else sold)
+            row["chain"] = {"sessions": record["sessions"], "excess": counted, "sold_excess": counted if sold is None else sold}
+    front = _places(worse)
+    for row in mine:
+        key = row["spec_hash"]
+        row["combined"] = round(weight * front.get(key, 0.0) + (1 - weight) * back.get(key, 0.0), 6)
+        row["combined_parts"] = {"forward": front.get(key), "backtest": back.get(key)}
     return rows
 
 

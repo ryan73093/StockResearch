@@ -2558,9 +2558,17 @@ def _tier(metrics: dict, forward: dict | None = None) -> tuple[str, str]:
     mark = "（高風險）" if risky else ""
     note = f"；最大回撤 {metrics['max_drawdown']:.0%} 比 0050 {metrics['benchmark_max_drawdown']:.0%} 深" if risky else ""
     sessions = (forward or {}).get("sessions") or 0
-    if (sessions >= FORWARD_SESSIONS and ((forward or {}).get("excess") or 0) >= 0
-            and not (forward or {}).get("problems")):
-        return f"T0{mark}", f"串接前向 {sessions} 個交易日、不輸 0050{note}"
+    # 2026-11-14 (使用者：兩個都要評估 兩個都好當然最好, D-045): the chained record by both moneys — the money counted
+    # (gains once sold, every loss) and both sides sold that day; T0 needs neither behind 0050
+    counted = (forward or {}).get("excess") or 0
+    sold = (forward or {}).get("sold_excess")
+    sold = counted if sold is None else sold
+    if sessions >= FORWARD_SESSIONS and not (forward or {}).get("problems"):
+        if counted >= 0 and sold >= 0:
+            return f"T0{mark}", f"串接前向 {sessions} 個交易日、兩種算法都不輸 0050{note}"
+        if counted >= 0 or sold >= 0:
+            only = "已拿到的錢" if counted >= 0 else "兩邊當天都賣掉"
+            return f"T0 候選{mark}", f"串接前向 {sessions} 個交易日、只有「{only}」不輸 0050（T0 要兩種都不輸）{note}"
     return f"T0 候選{mark}", f"串接前向 {sessions}／{FORWARD_SESSIONS} 個交易日{note}"
 
 
