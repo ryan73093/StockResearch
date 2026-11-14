@@ -38,11 +38,15 @@
       </tbody>
     </table>
   </div>
-  <svg class="rule-chart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" preserveAspectRatio="none" role="img" aria-label="近 3 個月資產走勢" style="margin-top:12px">
+  {% from "v2/_chart.html" import frame, money %}
+  {% set top = 10 / chart.height * 100 %}
+  {% call frame([(top, money(chart.peak)), ((100 + top) / 2, money((chart.peak + chart.floor) / 2)), (100, money(chart.floor))], chart.first, chart.last) %}
+  <svg class="rule-chart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" preserveAspectRatio="none" role="img" aria-label="近 3 個月資產走勢">
     <polyline class="line-put" points="{{ chart.put_in }}"/>
     <polyline class="line-bench" points="{{ chart.benchmark }}"/>
     <polyline class="line-rule" points="{{ chart.rule }}"/>
   </svg>
+  {% endcall %}
   <div class="legend"><span><i style="background:var(--accent)"></i>這個策略</span><span><i style="background:var(--warn)"></i>同樣的錢買 0050</span><span><i style="background:var(--muted)"></i>累計投入</span><span>{{ chart.first }}～{{ chart.last }}</span></div>
   <p class="note">研究期間內的部分，規則是看過那段資料才被挑出來的，只能看它「會怎麼操作」；{{ recent.research_end }} 以後才是沒看過的資料。費稅合計 {{ '{:,}'.format(recent.costs) }} 元。</p>
 </section>

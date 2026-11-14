@@ -7,18 +7,18 @@
     <h2>策略角色成長</h2>
     <a class="small" href="/research/roles">全部角色與指標</a>
   </div>
-  <p class="muted small" style="margin:0 0 8px">每個角色玩同一個帳戶：2015-06 起 30 萬、每月 5 日加 1 萬，只照台股交易規則；對手是同樣的錢全買 0050（{{ '{:,.0f}'.format((growth.benchmark or 0) / 10000) }} 萬）。「上次優化」是這個角色最近一次找到新規則之前的最好成績。</p>
+  <p class="muted small" style="margin:0 0 8px">每個角色玩同一個帳戶：2015-06 起 30 萬、每月 5 日加 1 萬，只照台股交易規則；對手是同樣的錢全買 0050（含帳面 {{ '{:,.0f}'.format((growth.benchmark or 0) / 10000) }} 萬；賣掉扣費稅後的數字在研究總覽）。「上次優化」是這個角色最近一次找到新規則之前的最好成績。</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>角色</th><th>等級</th><th class="num">現在最好</th><th class="num">上次優化前</th><th class="num">這次成長</th><th class="num">年化（0050）</th><th class="num">最大回撤（0050）</th></tr></thead>
+      <thead><tr><th>角色</th><th>等級</th><th class="num">現在最好<br>已實現</th><th class="num">含帳面：現在<br>／上次優化前</th><th class="num">這次成長<br>（含帳面）</th><th class="num">年化（0050）</th><th class="num">最大回撤（0050）</th></tr></thead>
       <tbody>
       {% for row in growth.roles[:limit] %}
         {% set now = row.now %}
         <tr>
-          <td data-primary class="name"><strong>{{ row.role }}</strong><br><span class="muted small">{{ row.rules }} 個規則{% if row.grades.get('T0 候選') %}・T0 候選 {{ row.grades.get('T0 候選') }}{% endif %}</span></td>
+          <td data-primary class="name"><strong>{% if now.spec %}<a href="/research/rules/{{ now.spec }}" title="{{ now.name }}">{{ row.role }}</a>{% else %}{{ row.role }}{% endif %}</strong>{% if now.spec and rule_no(now.spec) %} <span class="muted small">最好的是 {{ rule_no(now.spec) }}</span>{% endif %}<br><span class="muted small">{{ row.rules }} 個規則{% if row.grades.get('T0 候選') %}・T0 候選 {{ row.grades.get('T0 候選') }}{% endif %}</span></td>
           <td data-label="等級"><span class="badge{% if now.tier == 'T0 候選' %} badge--ok{% elif '高風險' in now.tier %} badge--bad{% elif now.tier == 'T3' %} badge--warn{% endif %}">{{ now.tier }}</span></td>
-          <td class="num" data-label="現在最好">{{ '{:,.0f}'.format(now.final / 10000) }} 萬</td>
-          <td class="num" data-label="上次優化前">{{ '{:,.0f}'.format(row.before.final / 10000) ~ ' 萬' if row.before else '—' }}</td>
+          <td class="num" data-label="現在最好（已實現）">{% if now.counted is defined and now.counted is not none %}<strong>{{ '{:,.0f}'.format(now.counted / 10000) }} 萬</strong>{% else %}<span class="muted small">還沒用新引擎重跑</span>{% endif %}</td>
+          <td class="num" data-label="含帳面：現在／上次">{{ '{:,.0f}'.format(now.final / 10000) }} 萬<br><span class="muted small">／{{ '{:,.0f}'.format(row.before.final / 10000) ~ ' 萬' if row.before else '—' }}</span></td>
           <td class="num {{ 'up' if (row.change or 0) > 0 else ('down' if (row.change or 0) < 0 else '') }}" data-label="這次成長">{{ '{:+.0%}'.format(row.change) if row.change is not none else '新角色' }}</td>
           <td class="num" data-label="年化（0050）">{{ '{:.1%}'.format(now.xirr) if now.xirr is not none else '—' }}<span class="muted small">（{{ '{:.1%}'.format(now.bench_xirr) if now.bench_xirr is not none else '—' }}）</span></td>
           <td class="num" data-label="最大回撤（0050）">{{ '{:.0%}'.format(now.drawdown) if now.drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(now.bench_drawdown) if now.bench_drawdown is not none else '—' }}）</span></td>
@@ -27,7 +27,7 @@
       </tbody>
     </table>
   </div>
-  <p class="col-help"><b>這次成長</b>：和這個角色上次找到新規則之前比。數字也會下降：引擎改得更貼近真實交易（漲停買不到、整股零股、減資等）時，全部規則會重算。<b>年化</b>：帳戶的內部報酬率。RL 角色從 2018 起算（之前沒有訓練資料），0050 對照也同期。</p>
+  <p class="col-help"><b>現在最好（已實現）</b>：這個角色最好的規則，賺的只算已經賣掉的、賠的都算——和研究總覽、選手池的「最好」同一個數；點角色名稱開那個規則。<b>含帳面</b>：還沒賣的持股照市價算；以前的紀錄只有這一種，所以「上次優化前」和「這次成長」用它比，才是同一種算法。<b>這次成長</b>：和這個角色上次找到新規則之前比。數字也會下降：引擎改得更貼近真實交易（漲停買不到、整股零股、減資等）時，全部規則會重算。<b>年化</b>：帳戶的內部報酬率。RL 角色從 2018 起算（之前沒有訓練資料），0050 對照也同期。</p>
 </section>
 {% endif %}
 {% endmacro %}
@@ -35,34 +35,43 @@
 {# 2026-10-16 (使用者：訓練到兩個月前、最近兩個月做前向測試): this month's rolling forward test. #}
 {% macro rolling_card(rolling, limit=6, tab=none) %}
 {% if rolling %}
+{% set money = rolling.money %}
 <section class="card" id="rolling"{% if tab %} data-tab="{{ tab }}"{% endif %}>
   <div class="card__head">
     <h2>本月可用策略（滾動前向測試）</h2>
-    <a class="small" href="/research/roles#rolling">全部結果</a>
+    <a class="small" href="/research/roles#rolling">全部 {{ rolling.holdout|length }} 個</a>
   </div>
-  <p class="muted small" style="margin:0 0 8px">只用 {{ rolling.cutoff }} 以前的資料挑策略與訓練模型；{{ rolling.holdout_start or '截止日之後' }} 起到 {{ rolling.data_through or '最新交易日' }} 是挑的時候沒看過的資料，每個策略用新的 30 萬帳戶（每月 5 日加 1 萬）跑，和同樣的錢買 0050 比。數字就是前向觀察帳戶的紀錄（每天收盤後當下的決定，之後不改）。</p>
+  <p class="muted small" style="margin:0 0 8px">只用 {{ rolling.cutoff }} 以前的資料挑策略與訓練模型；{{ rolling.holdout_start or '截止日之後' }} 起到 {{ rolling.data_through or '最新交易日' }} 是挑的時候沒看過的資料，每個策略用新的 30 萬帳戶（每月 5 日加 1 萬）照規則記帳，和同樣的錢買 0050 比。數字就是前向帳戶的紀錄（每天收盤後當下的決定，之後不改）。</p>
   {% if not rolling.graded %}
     <p class="muted" style="margin:0">這個月的挑選進行中（全部規則回測到 {{ rolling.cutoff }}）。</p>
   {% else %}
   <div class="kpis kpis--four">
-    <div class="kpi"><div class="kpi__label">回測到截止日的規則</div><div class="kpi__value">{{ rolling.graded }}</div></div>
-    <div class="kpi"><div class="kpi__label">過截止日門檻</div><div class="kpi__value">{{ rolling.passed }}</div></div>
-    <div class="kpi"><div class="kpi__label">前向測試贏 0050</div><div class="kpi__value">{{ rolling.usable|length }}<small>／{{ rolling.holdout|length }}</small></div></div>
+    <div class="kpi"><div class="kpi__label">回測到截止日的規則</div><div class="kpi__value">{{ '{:,}'.format(rolling.graded) }}<small> 個</small></div></div>
+    <div class="kpi"><div class="kpi__label">過截止日門檻（上名單）</div><div class="kpi__value">{{ '{:,}'.format(rolling.passed) }}<small> 個</small></div></div>
+    {% if money %}
+    <div class="kpi"><div class="kpi__label">當月可用：兩種算法都不輸 0050</div><div class="kpi__value" data-figure="month-both" data-value="{{ money.both }}">{{ '{:,}'.format(money.both) }}<small>／{{ '{:,}'.format(money.rows) }} 個</small></div><div class="kpi__note">已拿到的錢不輸 {{ '{:,}'.format(money.kept) }} 個・兩邊當天都賣掉不輸 {{ '{:,}'.format(money.sold) }} 個</div></div>
+    {% else %}
+    <div class="kpi"><div class="kpi__label">前向測試贏 0050（帳面）</div><div class="kpi__value">{{ rolling.usable|length }}<small>／{{ rolling.holdout|length }} 個</small></div></div>
+    {% endif %}
     <div class="kpi"><div class="kpi__label">前向測試天數</div><div class="kpi__value">{{ rolling.holdout[0].sessions if rolling.holdout else '—' }}<small> 個交易日</small></div></div>
   </div>
   {% if rolling.holdout %}
   <div class="table-wrap table-wrap--stack" style="margin-top:10px">
     <table class="table--stack">
-      <thead><tr><th>策略</th><th class="num">前向測試期末</th><th class="num">0050</th><th class="num">報酬（0050）</th><th class="num">回撤</th><th>可用</th></tr></thead>
+      <thead><tr><th>策略（點進去看每一筆交易）</th><th class="num">已拿到的錢<br>比 0050</th><th class="num">兩邊當天都賣掉<br>比 0050</th><th class="num">最大回撤</th><th>當月可用</th></tr></thead>
       <tbody>
       {% for row in rolling.holdout[:limit] %}
         <tr>
-          <td data-primary class="name">{{ row.name }}{{ risk_badge(row.rule_hash) }}</td>
-          <td class="num" data-label="前向測試期末">{{ '{:,.0f}'.format(row.value) }}</td>
-          <td class="num" data-label="0050">{{ '{:,.0f}'.format(row.benchmark_value) }}</td>
-          <td class="num {{ 'up' if (row['return'] or 0) > (row.benchmark_return or 0) else 'down' }}" data-label="報酬（0050）">{{ '{:+.1%}'.format(row['return']) if row['return'] is not none else '—' }}（{{ '{:+.1%}'.format(row.benchmark_return) if row.benchmark_return is not none else '—' }}）</td>
-          <td class="num" data-label="回撤">{{ '{:.1%}'.format(row.drawdown) }}</td>
-          <td data-label="可用">{% if row.usable %}<span class="badge badge--ok">贏 0050</span>{% else %}<span class="badge">沒贏</span>{% endif %}</td>
+          <td data-primary class="name"><a href="/research/forward/{{ row.rule_hash }}" title="{{ row.name }}">{{ rule_no(row.rule_hash) }} {{ row.name|short }}</a>{{ risk_badge(row.rule_hash) }}</td>
+          {% if row.ahead_kept is defined and row.ahead_kept is not none %}
+          <td class="num {{ 'up' if row.ahead_kept > 0 else ('down' if row.ahead_kept < 0 else '') }}" data-label="已拿到的錢比 0050">{{ '{:+,.0f}'.format(row.ahead_kept) }} 元</td>
+          <td class="num {{ 'up' if row.ahead_sold > 0 else ('down' if row.ahead_sold < 0 else '') }}" data-label="都賣掉比 0050">{{ '{:+,.0f}'.format(row.ahead_sold) }} 元</td>
+          {% else %}
+          <td class="num muted" data-label="已拿到的錢比 0050">還沒有紀錄</td>
+          <td class="num {{ 'up' if (row.excess or 0) > 0 else 'down' }}" data-label="含帳面比 0050">{{ '{:+,.0f}'.format(row.value - row.benchmark_value) }} 元<span class="muted small">（含帳面）</span></td>
+          {% endif %}
+          <td class="num" data-label="最大回撤">{{ '{:.1%}'.format(row.drawdown) }}</td>
+          <td data-label="當月可用">{% if row.ahead_kept is not defined or row.ahead_kept is none %}<span class="badge">{{ '帳面贏' if row.usable else '帳面輸' }}・等前向紀錄</span>{% elif row.usable %}<span class="badge badge--ok">可用</span>{% elif row.ahead_kept is defined and row.ahead_kept is not none and (row.ahead_kept >= 0 or row.ahead_sold >= 0) %}<span class="badge badge--warn">只有一種不輸</span>{% else %}<span class="badge">輸 0050</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -72,7 +81,7 @@
   <p class="muted" style="margin:8px 0 0">前向測試還沒跑（模型重訓完才跑）。</p>
   {% endif %}
   {% endif %}
-  <p class="col-help">每個月滾動一次：截止日是兩個月前的月底，下個月用新的截止日重挑、重訓、重測。前向測試只有一兩個月，只能排除明顯不行的，不能證明一定行；連續留在每月名單上的月份串起來（串接滾動前向紀錄）滿 60 個交易日、不輸 0050 再升 T0，最快 {{ first_t0 }}。</p>
+  <p class="col-help"><b>欄位說明</b>　<b>已拿到的錢</b>：賺的只算已經賣掉的，賠的不管賣了沒都算；0050 用同樣的錢、今天全部賣掉來比。<b>兩邊當天都賣掉</b>：策略的持股和 0050 今天都賣掉、扣掉費稅，還沒賣的賺的也算。<b>當月可用</b>：兩種算法都不輸 0050（和 T0 用同一個規則）；排序照兩種裡比較差的那一個。每個月滾動一次：截止日是兩個月前的月底，下個月用新的截止日重挑、重訓、重測。前向測試只有一兩個月，只能排除明顯不行的，不能證明一定行；連續留在每月名單上的月份串起來滿 60 個交易日、兩種算法都不輸 0050 才是 T0，最快 {{ first_t0 }}。</p>
 </section>
 {% endif %}
 {% endmacro %}

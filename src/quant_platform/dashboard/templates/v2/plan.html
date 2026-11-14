@@ -12,6 +12,10 @@
 {% endblock %}
 {% block content %}
 {% if error %}<p class="form-error" role="alert"><strong>沒有儲存：</strong>{{ error }}</p>{% endif %}
+{# 2026-11-15 (D-046 第 9 項；介面檢查 U2、P-1): this page is used only after going live, and it says so #}
+<section class="card prelaunch" data-notab>
+  <p><span class="badge badge--warn">上線以後才會用到</span>　這一頁是「真的拿錢照做」時設定每月投入用的。<b>現在沒有任何個股規則可以上線</b>：要先有規則成為 T0（最快 {{ first_t0[:10] }} 收盤後判第一次）、再由你核准。下面目前只能選舊的 0050／債券基準——它們是拿來比較的對照組，不是研究找到的策略；核准的規則之後會出現在「採用策略」。研究走到哪一步看<a href="/">首頁的六步</a>，照某個規則今天要買賣什麼（只能看）在<a href="/research/my-orders">研究 › 今天我的帳戶要買賣什麼</a>。</p>
+</section>
     {% if preview %}
     <section class="card card--highlight order-1" id="plan-preview">
       <div class="card__head"><h2>確認變更 <span class="badge badge--accent">將存成第 {{ preview.version }} 版</span></h2></div>
@@ -54,12 +58,13 @@
     {% else %}
     <section class="card empty order-1">
       <div class="empty__icon">{{ icon('plan') }}</div>
-      <h2>建立你的投資計畫</h2>
-      <p class="muted">填寫每月投入金額、薪資日與要採用的策略。之後的每日建議、定期定額影子帳戶與研究回測都會依照這份計畫。</p>
+      <h2>還沒有投資計畫</h2>
+      <p class="muted">上線以前不需要填。想先試用（例如照 0050 定期定額記帳）可以到「填寫計畫」分頁：表單先帶了範例數字（每月 1 萬、5 日、定期定額基準），<b>按「儲存為第 1 版」才會存</b>，存了之後「今日」會開始依計畫提醒投入日。</p>
+      <p><a class="btn" href="#plan-form">去填寫計畫</a></p>
     </section>
     {% endif %}
 
-    <section class="card order-2" id="plan-form"{% if error or not current %} data-tab-default{% endif %}>
+    <section class="card order-2" id="plan-form"{% if error %} data-tab-default{% endif %}>
       <div class="card__head"><h2>{{ '修改計畫（存成新版本）' if current else '填寫計畫' }}</h2></div>
       <form method="post" class="form">
         <div class="form__row">
@@ -73,7 +78,7 @@
               <input type="radio" name="strategy_key" value="{{ key }}" {{ 'checked' if values.strategy_key == key else '' }}>
               <span><strong>{{ name }}</strong><small>{{ description }}</small>
                 {% if research.get(name) %}{% set row = research.get(name) %}
-                  <small class="choice__stat">全期間 XIRR {{ '{:.2%}'.format(row.xirr) if row.xirr is not none else '—' }}、最大回撤 {{ '{:.0%}'.format(row.drawdown) }}{% if row.three_year %}、3 年勝率 {{ '{:.0%}'.format(row.three_year.win_ratio) }}{% endif %}</small>
+                  <small class="choice__stat">回測 {{ row.period }}：年化 {{ '{:.2%}'.format(row.xirr) if row.xirr is not none else '—' }}、最大回撤 {{ '{:.0%}'.format(row.drawdown) }}{% if row.three_year %}、3 年勝率 {{ '{:.0%}'.format(row.three_year.win_ratio) }}{% endif %}</small>
                 {% endif %}
               </span>
             </label>
@@ -126,10 +131,10 @@
     <section class="card card--quiet order-4">
       <div class="card__head"><h2>說明</h2></div>
       <ul class="rules">
-        <li>策略目前只能選內建基準；AI 研究員找到並經你核准的策略，之後會出現在這裡（路線圖 S4、S5）。</li>
+        <li>策略目前只能選內建的 0050／債券基準（對照組）。研究找到的個股規則要成為 T0、再由你核准，才會出現在這裡（<a href="/project/trading">交易需知</a>第 7 節「可以上線」）。</li>
         <li>可承受回撤是每日建議的風險上限：帳戶從高點回落到它的 8 成時，今日頁會提醒；不會自動賣出。</li>
-        <li>它也是研究「進攻型賽道」的回撤上限：回撤比定期定額深很多的策略（例如槓桿 ETF），歷史最深回撤在這個數字以內才可能晉級；調高後，下一次夜間研究可能讓這類策略進入驗證期與最終驗證期（最終驗證期只能評估一次）。</li>
-        <li>回測數字來自研究頁的歷史模擬，只作參考。</li>
+        <li>每個基準旁邊的年化與回撤，是那個基準自己的回測期間（寫在數字前面），期間不同不能直接比。回測數字只作參考。</li>
+        <li>平台永遠不會自己下單；「今日」只列出建議，成交後由你到「持倉」回報。</li>
       </ul>
     </section>
 {% endblock %}

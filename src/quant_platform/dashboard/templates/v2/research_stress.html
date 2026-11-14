@@ -19,7 +19,7 @@
         <td class="num" data-label="0050 跌幅">{{ pct(sc.fall) }}</td>
         <td class="num" data-label="0050 回到高點">{{ span(sc.base_days) }}</td>
         <td class="num" data-label="撐過的策略"><b>{{ sc.held }}</b>／{{ sc.tested }}</td>
-        <td class="num" data-label="跌最少／最多">{% if sc.least %}#{{ sc.least.trial }} {{ pct(sc.least.fall) }}／#{{ sc.most.trial }} {{ pct(sc.most.fall) }}{% else %}—{% endif %}</td>
+        <td class="num" data-label="跌最少／最多">{% if sc.least %}{{ rule_link(none, sc.least.trial) }} {{ pct(sc.least.fall) }}／{{ rule_link(none, sc.most.trial) }} {{ pct(sc.most.fall) }}{% else %}—{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -40,7 +40,7 @@
         <td class="num" data-label="最大回撤">{{ pct(row.max_drawdown) }}<span class="muted small">（{{ pct(row.base_max_drawdown) }}）</span></td>
       </tr>
     {% endfor %}
-    {% for row in report.rows if row.error %}<tr><td data-primary>#{{ row.trial }} {{ row.name }}</td><td colspan="4" class="small down">沒跑成：{{ row.error }}</td></tr>{% endfor %}
+    {% for row in report.rows if row.error %}<tr><td data-primary>{{ rule_link(row.spec_hash, row.trial, row.name) }}</td><td colspan="4" class="small down">沒跑成：{{ row.error }}</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>
@@ -51,7 +51,7 @@
     <thead><tr><th>策略</th>{% for sc in report.scenarios %}<th class="num">{{ sc.high[:7] }}<br><span class="muted small">0050 {{ pct(sc.fall) }}</span></th>{% endfor %}</tr></thead>
     <tbody>
     {% for row in rows %}
-      <tr><td class="small">#{{ row.trial }}</td>{% for item in row.bears %}<td class="num {{ 'up' if item.held else 'down' }}">{{ pct(item.fall) }}<br><span class="muted small">{{ span(item.days) }}回來</span></td>{% endfor %}</tr>
+      <tr><td class="small">{{ rule_link(row.spec_hash, row.trial) }}</td>{% for item in row.bears %}<td class="num {{ 'up' if item.held else 'down' }}">{{ pct(item.fall) }}<br><span class="muted small">{{ span(item.days) }}回來</span></td>{% endfor %}</tr>
     {% endfor %}
     </tbody>
   </table>
@@ -64,7 +64,7 @@
     <tbody>
       <tr><td class="small"><b>0050</b></td>{% for top in report.base_tops %}<td class="num">{{ pct(top.worst) }}<br><span class="muted small">{{ span(top.even_days) }}回本</span></td>{% endfor %}</tr>
     {% for row in rows %}
-      <tr><td class="small">#{{ row.trial }}</td>{% for top in row.tops %}<td class="num {{ 'up' if top.worst >= top.base_worst else 'down' }}">{{ pct(top.worst) }}<br><span class="muted small">{{ span(top.even_days) }}回本</span></td>{% endfor %}</tr>
+      <tr><td class="small">{{ rule_link(row.spec_hash, row.trial) }}</td>{% for top in row.tops %}<td class="num {{ 'up' if top.worst >= top.base_worst else 'down' }}">{{ pct(top.worst) }}<br><span class="muted small">{{ span(top.even_days) }}回本</span></td>{% endfor %}</tr>
     {% endfor %}
     </tbody>
   </table>
@@ -112,9 +112,9 @@
     <thead><tr><th>策略</th>{% for key in protect.columns %}<th class="num">{{ protect.short[key] }}</th>{% endfor %}</tr></thead>
     <tbody>
     {% for row in protect.rows %}
-      <tr><td class="small">#{{ row.trial }}</td>{% for key in protect.columns %}{% set v = row.variants.get(key, {}) %}<td class="num">{% if v.final is defined %}{{ v.held_count }} 次{% if v.held_2008 %} <span class="badge badge--ok">2008</span>{% endif %}<br><span class="muted small">{{ wan(v.final) }}</span>{% elif v.skip %}<span class="muted small">{{ v.skip }}</span>{% else %}<span class="small down">沒跑成</span>{% endif %}</td>{% endfor %}</tr>
+      <tr><td class="small">{{ rule_link(none, row.trial) }}</td>{% for key in protect.columns %}{% set v = row.variants.get(key, {}) %}<td class="num">{% if v.final is defined %}{{ v.held_count }} 次{% if v.held_2008 %} <span class="badge badge--ok">2008</span>{% endif %}<br><span class="muted small">{{ wan(v.final) }}</span>{% elif v.skip %}<span class="muted small">{{ v.skip }}</span>{% else %}<span class="small down">沒跑成</span>{% endif %}</td>{% endfor %}</tr>
     {% endfor %}
-    {% for row in protect.errors %}<tr><td class="small">#{{ row.trial }}</td><td colspan="{{ protect.columns|length }}" class="small down">沒跑成：{{ row.error }}</td></tr>{% endfor %}
+    {% for row in protect.errors %}<tr><td class="small">{{ rule_link(none, row.trial) }}</td><td colspan="{{ protect.columns|length }}" class="small down">沒跑成：{{ row.error }}</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>
@@ -128,12 +128,12 @@
     <tbody>
     {% for g in guards.ways %}
       <tr>
-        <td data-primary><b>{{ g.label }}</b>{% if g.frontier %} <span class="badge badge--ok">{% for n in g.frontier %}#{{ n }}{{ '、' if not loop.last }}{% endfor %} 上前緣</span>{% endif %}</td>
+        <td data-primary><b>{{ g.label }}</b>{% if g.frontier %} <span class="badge badge--ok">{% for n in g.frontier %}{{ rule_link(none, n) }}{{ '、' if not loop.last }}{% endfor %} 上前緣</span>{% endif %}</td>
         <td class="num" data-label="過門檻">{{ g.passing }}／{{ g.graded }}</td>
         <td class="num" data-label="錢留住">{{ '{:.0%}'.format(g.kept) }}</td>
         <td class="num {{ 'up' if g.drawdown >= 0 else 'down' }}" data-label="最大回撤">{{ '淺' if g.drawdown >= 0 else '深' }} {{ '%.1f'|format(g.drawdown|abs) }} 點</td>
         <td class="num {{ 'up' if g.gap >= 0 else 'down' }}" data-label="0050 最大那次跌">{{ '少跌' if g.gap >= 0 else '多跌' }} {{ '%.1f'|format(g.gap|abs) }} 點<span class="muted small">（{{ g.less }} 個比原版好）</span></td>
-        <td data-label="錢最多的"><a href="/research/rules/{{ g.best.spec_hash }}">{{ rule_no(g.best.spec_hash) }}</a> {{ wan(g.best.final) }}<span class="muted small">（原版 #{{ g.best.origin }} {{ wan(g.best.origin_final) }}）</span></td>
+        <td data-label="錢最多的"><a href="/research/rules/{{ g.best.spec_hash }}">{{ rule_no(g.best.spec_hash) }}</a> {{ wan(g.best.final) }}<span class="muted small">（原版 {{ rule_link(none, g.best.origin) }} {{ wan(g.best.origin_final) }}）</span></td>
       </tr>
     {% endfor %}
     </tbody>

@@ -53,16 +53,16 @@
   {% endif %}
   <div class="table-wrap table-wrap--stack" style="margin-top:12px">
     <table class="table--stack">
-      <thead><tr><th>年</th><th class="num">訓練樣本</th><th class="num">訓練時{{ robot.unit }}</th><th class="num">實際{{ robot.unit }}</th>{% if robot.rows and robot.rows[0].held_robot is not none %}<th class="num">驗證：機器人／平均</th><th>決定</th>{% endif %}{% if robot.rows and robot.rows[0].curve %}<th>學習曲線</th>{% endif %}<th class="num">這一年：機器人</th>{% if robot.free %}<th class="num">平均持有</th><th class="num">平均現金</th>{% else %}<th class="num">平均</th><th>押最重的</th>{% endif %}</tr></thead>
+      <thead><tr><th>年</th><th class="num">訓練樣本</th><th class="num">訓練時{{ robot.unit }}</th><th class="num">實際{{ robot.unit }}</th>{% if robot.rows and robot.rows[0].held_robot is not none %}<th class="num">驗證：<br>機器人／平均</th><th>決定</th>{% endif %}{% if robot.rows and robot.rows[0].curve %}<th>學習曲線</th>{% endif %}<th class="num">這一年：機器人</th>{% if robot.free %}<th class="num">平均持有</th><th class="num">平均現金</th>{% else %}<th class="num">平均</th><th>押最重的</th>{% endif %}</tr></thead>
       <tbody>
       {% for row in robot.rows %}
         <tr>
-          <td data-primary>{{ row.year }}</td>
-          <td class="num" data-label="訓練樣本">{{ row.train_decisions }}{% if row.held_decisions %}＋驗證 {{ row.held_decisions }}{% endif %}</td>
+          <td data-primary class="date">{{ row.year }}</td>
+          <td class="num" data-label="訓練樣本">{{ row.train_decisions }}{% if row.held_decisions %}<br><span class="muted small">＋驗證 {{ row.held_decisions }}</span>{% endif %}</td>
           <td class="num" data-label="訓練時{{ robot.unit }}">{{ '{:+.3%}'.format(row.trained) if row.trained is not none else '—' }}</td>
           <td class="num {{ 'up' if row.tested > 0 else 'down' }}" data-label="實際{{ robot.unit }}">{{ '{:+.3%}'.format(row.tested) }}</td>
           {% if row.held_robot is not none %}
-          <td class="num" data-label="驗證">{{ '{:+.2%}'.format(row.held_robot) }}／{{ '{:+.2%}'.format(row.held_equal) }}</td>
+          <td class="num" data-label="驗證">{{ '{:+.2%}'.format(row.held_robot) }}<br>／{{ '{:+.2%}'.format(row.held_equal) }}</td>
           <td data-label="決定">{% if row.abstained %}<span class="badge">不押，用平均</span>{% else %}<span class="badge badge--ok">照機器人</span>{% endif %}</td>
           {% endif %}
           {% if row.curve %}
@@ -74,7 +74,7 @@
           <td class="num" data-label="平均現金">{{ '{:.0%}'.format(row.cash) if row.cash is not none else '—' }}</td>
           {% else %}
           <td class="num" data-label="平均">{{ '{:+.1%}'.format(row.equal) }}</td>
-          <td data-label="押最重的" class="name">{% for name, share in row.heaviest %}{{ labels.get(name, name) }} {{ '{:.0%}'.format(share) }}{% if not loop.last %}、{% endif %}{% endfor %}</td>
+          <td data-label="押最重的" class="name name--tight small">{% for name, share in row.heaviest %}{{ labels.get(name, name) }} {{ '{:.0%}'.format(share) }}{% if not loop.last %}、{% endif %}{% endfor %}</td>
           {% endif %}
         </tr>
       {% endfor %}

@@ -6,6 +6,9 @@
   <div>
     <h1>研究選手池</h1>
     <p class="page-head__sub">每一個試過的規則、它走到哪一關、為什麼被淘汰或還在場上</p>
+    {% if rule_counts %}{% set rc = rule_counts %}
+    <p class="small muted" style="margin:6px 0 0;max-width:70em"><b>各頁的「規則數」為什麼不同</b>：這裡登錄了 {{ '{:,}'.format(rc.all) }} 個；其中 {{ rc.with_0050 }} 個有一部分放 0050，只留紀錄、不採用，剩 {{ '{:,}'.format(rc.all - rc.with_0050) }} 個是 100% 個股。{% if rc.full_track %}研究總覽的分佈圖只畫從 2015-06 起跑的 {{ '{:,}'.format(rc.full_track) }} 個（另外 {{ rc.all - rc.with_0050 - rc.full_track }} 個的資料比較短，從 2016、2018 或 2021 起跑）。{% endif %}{% if rc.graded %}每月名單評的是回測得到截止日的 {{ '{:,}'.format(rc.graded) }} 個。{% endif %}</p>
+    {% endif %}
   </div>
   <div class="page-head__meta">{{ generated }} 產生・<a href="/research/pool.json">JSON</a>・<a href="/research">回研究頁</a>・<a href="/project/research_method">研究方法</a></div>
 </header>
@@ -29,7 +32,7 @@
           <td class="num" data-label="T1">{{ item.tiers['T1'] }}</td>
           <td class="num" data-label="T2">{{ item.tiers['T2'] }}</td>
           <td class="num" data-label="T3">{{ item.tiers['T3'] }}</td>
-          <td data-label="最好的規則" data-wide><a href="/research/rules/{{ item.best.spec_hash }}">{{ rule_no(item.best.spec_hash) }} {{ item.best.name }}</a> <span class="badge {{ 'badge--ok' if item.best.tier in ('T0', 'T0 候選') else ('badge--warn' if item.best.tier == 'T1' else ('badge--bad' if item.best.tier == 'T3' or '高風險' in item.best.tier else '')) }}">{{ item.best.tier }}</span>{% if item.best.excess is not none %} <span class="small {{ 'up' if item.best.excess > 0 else 'down' }}">比 0050 {{ '{:+.0%}'.format(item.best.excess) }}</span>{% endif %}</td>
+          <td data-label="最好的規則" data-wide><a href="/research/rules/{{ item.best.spec_hash }}" title="{{ item.best.name }}">{{ rule_no(item.best.spec_hash) }} {{ item.best.name|short }}</a> <span class="badge {{ 'badge--ok' if item.best.tier in ('T0', 'T0 候選') else ('badge--warn' if item.best.tier == 'T1' else ('badge--bad' if item.best.tier == 'T3' or '高風險' in item.best.tier else '')) }}">{{ item.best.tier }}</span>{% if item.best.excess is not none %} {% if item.best.final_value and item.best.benchmark_final_value %}<span class="small {{ 'up' if item.best.excess > 0 else 'down' }}">是 0050 的 {{ '{:.1f}'.format(item.best.final_value / item.best.benchmark_final_value) }} 倍</span>{% else %}<span class="small {{ 'up' if item.best.excess > 0 else 'down' }}">比 0050 {{ '{:+.0%}'.format(item.best.excess) }}</span>{% endif %}{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -71,18 +74,17 @@
     <span class="muted small" id="daily-count">符合 {{ daily_matched }} 個（結果完全相同的算一個）{% if daily_rows|length < daily_matched %}，列出前 {{ daily_rows|length }} 個・<a href="?{% for key, value in picked.items() if value %}{{ key }}={{ value|urlencode }}&amp;{% endfor %}all=1#daily">顯示全部</a>{% endif %}{% if picked.values()|select|list %}・<a href="/research/pool#daily">清除篩選</a>{% endif %}</span>
   </form>
   <div class="table-wrap table-wrap--stack">
-    <table class="table--stack">
-      <thead><tr><th>規則</th><th style="min-width:9em">分類</th><th>等級</th><th>2015-06 起到 2026-09 有多少錢</th><th>2020-10 起到 2026-09</th><th class="num">贏 0050 的視窗比例</th><th class="num">最大跌幅</th><th style="min-width:10em">交易</th></tr></thead>
+    <table class="table--stack table--compact">
+      <thead><tr><th>規則・分類</th><th>等級</th><th>2015-06 起到 2026-09 有多少錢</th><th>2020-10 起到 2026-09</th><th class="num">贏 0050 的視窗比例</th><th class="num">最大跌幅</th><th>交易</th></tr></thead>
       <tbody>
       {% for row in daily_rows %}
         <tr data-name="{{ row.name }}" data-family="{{ row.category.family }}" data-tier="{{ '不採用' if row.uses_0050 else row.tier }}" data-traits="|{{ row.category.traits|join('|') }}|">
-          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a></strong>{{ risk_badge(row.spec_hash) }}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}{% if row.same %}<br><span class="small muted">另外 {{ row.same|length }} 個結果完全相同（濾網或否決從沒觸發），只列這一個：{% for other in row.same[:6] %}<a href="/research/rules/{{ other.spec_hash }}">{{ rule_no(other.spec_hash) }}</a>{{ '、' if not loop.last else '' }}{% endfor %}{% if row.same|length > 6 %}…{% endif %}</span>{% endif %}</td>
-          <td data-label="分類" data-wide><span class="badge">{{ row.category.family }}</span>{% if row.category.detail %} <span class="small">{{ row.category.detail }}</span>{% endif %}<br><span class="muted small">{{ row.category.traits|join('・') }}</span></td>
+          <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}" title="{{ row.name }}">{{ rule_no(row.spec_hash) }} {{ row.name|short }}</a></strong>{{ risk_badge(row.spec_hash) }}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}{% if row.same %}<br><span class="small muted">另外 {{ row.same|length }} 個結果完全相同（濾網或否決從沒觸發），只列這一個：{% for other in row.same[:6] %}<a href="/research/rules/{{ other.spec_hash }}">{{ rule_no(other.spec_hash) }}</a>{{ '、' if not loop.last else '' }}{% endfor %}{% if row.same|length > 6 %}…{% endif %}</span>{% endif %}<br><span class="badge">{{ row.category.family }}</span>{% if row.category.detail %} <span class="small">{{ row.category.detail }}</span>{% endif %} <span class="muted small">{{ row.category.traits|join('・') }}</span></td>
           <td data-label="等級" data-wide>{% if row.uses_0050 %}<span class="badge">不採用</span> <span class="small">含 0050（你自己另外持有 0050），回測等級 {{ row.tier }}</span>{% else %}<span class="badge {{ 'badge--ok' if row.tier in ('T0', 'T0 候選') else ('badge--warn' if row.tier == 'T1' else ('badge--bad' if row.tier == 'T3' or '高風險' in row.tier else '')) }}">{{ row.tier }}</span> <span class="small">{{ row.tier_reason }}</span>{% endif %}</td>
           <td data-label="2015-06 起" data-wide>{% if row.final_value %}<strong>{{ wan(row.final_value) }}</strong> <span class="muted small">{{ '已實現' if row.counted else '含帳面' }}</span><br>{{ versus(row.final_value, row.benchmark_final_value) }}{% else %}—{% endif %}</td>
           <td data-label="2020-10 起" data-wide>{% if row.since_2020_final_value %}<strong>{{ wan(row.since_2020_final_value) }}</strong><br>{{ versus(row.since_2020_final_value, row.since_2020_benchmark_final_value) }}{% else %}—{% endif %}</td>
-          <td class="num" data-label="贏 0050 的視窗">1 年 {{ '{:.0%}'.format(row.win_1y) if row.win_1y is not none else '—' }}・3 年 {{ '{:.0%}'.format(row.win_3y) if row.win_3y is not none else '—' }}</td>
-          <td class="num" data-label="最大跌幅">{{ '{:.0%}'.format(-row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（0050 {{ '{:.0%}'.format(-row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
+          <td class="num" data-label="贏 0050 的視窗">1 年 {{ '{:.0%}'.format(row.win_1y) if row.win_1y is not none else '—' }}<br>3 年 {{ '{:.0%}'.format(row.win_3y) if row.win_3y is not none else '—' }}</td>
+          <td class="num" data-label="最大跌幅">{{ '{:.0%}'.format(-row.max_drawdown) if row.max_drawdown is not none else '—' }}<br><span class="muted small">（0050 {{ '{:.0%}'.format(-row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
           <td data-label="交易" data-wide>{% if row.orders_per_month %}每月 {{ '%.0f' % row.orders_per_month }} 筆<br>{% endif %}{% if row.costs is not none and row.contributed %}<span class="small">費稅 {{ wan(row.costs) }}（投入的 {{ '%.1f' % (row.costs / row.contributed) }} 倍）</span>{% elif row.cost_share is not none %}<span class="small">費稅是投入的 {{ '%.1f' % row.cost_share }} 倍</span>{% endif %}</td>
         </tr>
       {% endfor %}
@@ -123,12 +125,13 @@
 {% macro rule_table(rows, show_validation=True) %}
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
-    <thead><tr><th>規則</th><th>狀態</th><th class="num">開發期期末（0050）</th><th class="num">開發期比 0050</th><th class="num">3 年勝率／中位</th><th class="num">最大回撤</th><th class="num">費稅佔投入</th>{% if show_validation %}<th class="num">驗證期比 0050</th><th class="num">驗證期 3 年勝率／中位</th>{% endif %}<th>說明</th></tr></thead>
+    <thead><tr><th>規則</th><th>狀態</th><th class="num">開發期期末（0050）</th><th class="num">開發期比 0050</th><th class="num">3 年勝率／中位</th><th class="num">最大回撤</th><th class="num">費稅佔投入</th>{% if show_validation %}<th class="num">驗證期比 0050</th><th class="num">驗證期 3 年勝率／中位</th>{% endif %}</tr></thead>
     <tbody>
     {% for row in rows %}
       {% set d = row.development %}{% set v = row.validation %}
-      <tr data-name="{{ row.name }}" data-status="{{ row.status }}" data-family="{{ row.family }}">
-        <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}">{{ rule_no(row.spec_hash) }} {{ row.name }}</a></strong><span class="muted small"> {{ row.family }}・{{ row.source }}</span></td>
+      {% set note %}{% if row.holdout %}最終驗證比 0050 {{ '{:+.0%}'.format(row.holdout.excess) if row.holdout.excess is not none else '—' }}{% if row.holdout.reasons %}：{{ row.holdout.reasons|join('；') }}{% endif %}{% elif v and v.reasons %}驗證期：{{ v.reasons|join('；') }}{% elif d.reasons %}{{ d.reasons|join('；') }}{% elif d.dsr is not none %}DSR {{ '%.2f' % d.dsr }}{% endif %}{% endset %}
+      <tr data-name="{{ row.name }}" data-status="{{ row.status }}" data-family="{{ row.family }}"{% if note|trim %} class="has-note"{% endif %}>
+        <td data-primary><strong><a href="/research/rules/{{ row.spec_hash }}" title="{{ row.name }}">{{ rule_no(row.spec_hash) }} {{ row.name|short }}</a></strong><span class="muted small"> {{ row.family }}・{{ row.source }}</span></td>
         <td data-label="狀態"><span class="badge {{ 'badge--ok' if row.status in ('approved', 'forward', 'holdout_passed', 'validation_passed') else ('badge--bad' if row.status in ('validation_failed', 'holdout_failed') else '') }}">{{ row.status_label }}</span>{% if row.track and row.track != '一般' %} <span class="badge badge--warn">{{ row.track }}</span>{% endif %}{% if row.forward_since %} <span class="badge">前向觀察 {{ row.forward_since[5:] }} 起</span>{% endif %}</td>
         <td class="num" data-label="開發期期末（0050）">{% if d.final_value %}{{ '{:,.0f}'.format(d.final_value / 10000) }} 萬（{{ '{:,.0f}'.format(d.benchmark_final_value / 10000) }} 萬）{% else %}—{% endif %}</td>
         <td class="num {{ 'up' if (d.excess or 0) > 0 else ('down' if (d.excess or 0) < 0 else '') }}" data-label="開發期比 0050">{{ '{:+.0%}'.format(d.excess) if d.excess is not none else '—' }}</td>
@@ -139,8 +142,9 @@
         <td class="num {{ 'up' if v and (v.excess or 0) > 0 else ('down' if v and (v.excess or 0) < 0 else '') }}" data-label="驗證期比 0050">{{ '{:+.0%}'.format(v.excess) if v and v.excess is not none else '—' }}</td>
         <td class="num" data-label="驗證期 3 年">{{ ('{:.0%}'.format(v.win_3y) ~ '／' ~ '{:+.1%}'.format(v.median_3y)) if v and v.win_3y is not none else '—' }}</td>
         {% endif %}
-        <td class="small" data-label="說明" data-wide>{% if row.holdout %}最終驗證比 0050 {{ '{:+.0%}'.format(row.holdout.excess) if row.holdout.excess is not none else '—' }}{% if row.holdout.reasons %}：{{ row.holdout.reasons|join('；') }}{% endif %}{% elif v and v.reasons %}驗證期：{{ v.reasons|join('；') }}{% elif d.reasons %}{{ d.reasons|join('；') }}{% elif d.dsr is not none %}DSR {{ '%.2f' % d.dsr }}{% else %}—{% endif %}</td>
+        <td class="small note-cell" data-label="說明" data-wide>{{ note|trim or '—' }}</td>
       </tr>
+      {% if note|trim %}<tr class="row-note" data-name="{{ row.name }}" data-status="{{ row.status }}" data-family="{{ row.family }}"><td colspan="{{ 9 if show_validation else 7 }}"><b>說明</b>{{ note|trim }}</td></tr>{% endif %}
     {% endfor %}
     </tbody>
   </table>

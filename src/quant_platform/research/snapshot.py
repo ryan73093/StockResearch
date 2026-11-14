@@ -103,7 +103,10 @@ def display(factor: str, value: float | None) -> str:
         return f"{value:+.0%}"
     if factor == "low_debt":
         return f"負債比 {-value:.0%}"
-    return f"{value:.3g}"
+    # 2026-11-15 (介面檢查 E-16：個股頁出現「-4.9e-05」這種沒單位的原始數字): a factor with no everyday unit shows a plain
+    # decimal (never an exponent) and says it is the raw score — what to read is its rank beside it
+    text = f"{value:,.0f}" if abs(value) >= 1000 else f"{value:.2f}" if abs(value) >= 1 else f"{value:.6f}".rstrip("0").rstrip(".")
+    return f"{'0' if text in ('-0', '') else text}（原始分數）"
 
 
 def _number(value) -> float | None:

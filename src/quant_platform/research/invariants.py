@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -572,6 +573,11 @@ def run(research: str | Path, today: date, backups: Path | None = None,
         checks.append(_check("研究頁 5 秒內打開、規則有編號、每一筆交易有買進價與賣出價",
                              "使用者 2026-10-28：研究的載入也太慢了吧；每個策略給個編號；每一筆交易都要顯示買入的價格跟賣出的價格",
                              not slow, "；".join(slow) if slow else "研究總覽、規則頁、前向頁都在 5 秒內"))
+        # 2026-11-15 (介面檢查 U3，D-046 第 9 項：同一件事兩個數字是錯的)
+        differing = same_figures(site)
+        checks.append(_check("同一個問題，各頁的數字一樣（首頁、研究總覽、策略角色）",
+                             "使用者 2026-11-13：把現在有什麼問題全部檢查一次；介面檢查 U3：同一個問題各頁數字不一樣",
+                             not differing, "；".join(differing) if differing else "標記的數字各頁一致"))
     # 2026-10-28 (使用者：專案資訊有把所有的交易事項需知、開發需知、規則寫清楚嗎)
     found = trading_page(research.parent.parent)
     checks.append(_check("專案資訊有交易需知與開發規則、交易需知寫的引擎版本和程式一致",
@@ -729,6 +735,40 @@ def research_pages(site: str, rule_hash: str | None, limit: float = PAGE_LIMIT) 
         if spent > limit:
             wrong.append(f"{name} {spent:.1f} 秒")
         wrong += [f"{name}沒有「{text}」" for text in needed if text not in body]
+    return wrong
+
+
+FIGURE = re.compile(r'data-figure="([a-z0-9-]+)"\s+data-value="([^"]*)"')
+FIGURE_PAGES = (("首頁", "/"), ("研究總覽", "/research"), ("策略角色", "/research/roles"))
+FIGURE_NAMES = {"chain-both": "串接前向兩種算法都不輸 0050 的規則數", "month-both": "當月可用（兩種算法都不輸 0050）的規則數",
+                "bench-0050": "同樣的錢買 0050 的期末（2015-06 起）", "chain-sessions": "串接前向的交易日數"}
+
+
+def same_figures(site: str) -> list[str]:
+    """2026-11-15 (介面檢查 U3：同一個問題各頁數字不一樣——首頁 339、研究總覽 1%、同一頁 978／983／990 萬): the pages mark
+    the figures that answer the same question (``data-figure="name" data-value="…"``; v2 templates); every page that
+    shows a figure must show the same value. Returns what differs or could not be read."""
+    import urllib.request
+
+    seen: dict[str, dict[str, set[str]]] = {}
+    wrong = []
+    for name, path in FIGURE_PAGES:
+        try:
+            with urllib.request.urlopen(site.rstrip("/") + path, timeout=60) as response:
+                body = response.read().decode("utf-8", "replace")
+        except Exception as exc:                        # noqa: BLE001 - a page that does not open is the finding
+            wrong.append(f"{name}打不開：{str(exc)[:80]}")
+            continue
+        for figure, value in FIGURE.findall(body):
+            if value.strip():
+                seen.setdefault(figure, {}).setdefault(value.strip(), set()).add(name)
+    for figure, values in sorted(seen.items()):
+        if len(values) > 1:
+            wrong.append(f"{FIGURE_NAMES.get(figure, figure)}：" + "、".join(
+                f"{'／'.join(sorted(pages))} 寫 {value}" for value, pages in sorted(values.items())))
+    missing = [FIGURE_NAMES[figure] for figure in ("chain-both", "bench-0050") if figure not in seen]
+    if missing and not wrong:
+        wrong.append("頁面上找不到：" + "、".join(missing))
     return wrong
 
 

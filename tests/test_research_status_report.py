@@ -61,7 +61,8 @@ def test_the_month_list_and_the_chain(tmp_path):
     state = status.collect(research, NOW)
     assert state["list"]["wanted"] == "2026-09-30"
     assert state["list"]["latest"] == {"cutoff": "2026-09-30", "graded": 4, "passed": 2, "usable": 1,
-                                       "data_through": "2026-11-27", "released": True}
+                                       "data_through": "2026-11-27", "released": True,
+                                       "by_money": False}       # 2026-11-15: this list was judged on book value
     assert state["chain"]["start"] == "2026-09-01" and state["chain"]["sessions"] == 60
     assert state["chain"]["rules"] == 1 and state["chain"]["lists"] == 2 and state["chain"]["needed"] == 60
     text = status.render(state)

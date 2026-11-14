@@ -197,7 +197,7 @@ def test_shadow_dca_invests_each_deposit_the_same_day(service):
 def test_holdings_page_records_and_reports_errors(tmp_path):
     container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
     client = create_app(container).test_client()
-    assert "開始記錄實際帳戶" in client.get("/holdings").get_data(as_text=True)
+    assert "還沒有紀錄" in client.get("/holdings").get_data(as_text=True)
 
     bad = client.post("/holdings/trade", data={"day": "2026-09-01", "symbol": "0050", "side": "SELL", "shares": "5", "price": "100"})
     assert bad.status_code == 400 and "無法賣出" in bad.get_data(as_text=True)

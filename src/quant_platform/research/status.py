@@ -221,7 +221,8 @@ def analyses(research: Path) -> list[dict[str, object]]:
     month = rolling.summary(rolling.latest(research)) or {}
     items.append({"name": "每月滾動（截止日以前挑、之後前向）", "when": month.get("data_through"),
                   "result": (f"截止 {month.get('cutoff')}：{month.get('graded')} 個規則、{month.get('passed')} 個過門檻、"
-                             f"前向測試贏 0050 {len(month.get('usable') or [])}／{len(month.get('holdout') or [])}")
+                             f"前向測試{'兩種錢都不輸' if month.get('money') else '贏'} 0050 "
+                             f"{len(month.get('usable') or [])}／{len(month.get('holdout') or [])}")
                   if month else "還沒跑", "link": "/research/roles#rolling"})
     live_path = _newest(research / "live", "????-??-??/latest.json")
     items.append({"name": "盤中資金流（每 15 秒全市場快照）", "when": _stamp(live_path),

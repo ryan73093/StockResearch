@@ -6,6 +6,9 @@
 <section class="check-detail">
   <h3 class="dash-h">{{ mark(row.ok if not row.stale else false) }} {{ row.title }}</h3>
   <p><b>{{ row.headline }}</b>（{{ state(row) }}，{% if row.at %}{{ row.at.year }}-{{ '%02d-%02d %02d:%02d'|format(row.at.month, row.at.day, row.at.hour, row.at.minute) }}{% else %}沒有紀錄{% endif %}）{% if row.detail %}<br><span class="small">{{ row.detail }}</span>{% endif %}</p>
+  {% if row.impact and (row.ok is sameas false or row.stale) %}
+  <p class="small check-impact"><b>沒過會影響什麼</b>：{{ row.impact }}{% if row.remedy %}<br><b>怎麼處理</b>：{{ row.remedy }}進度寫在<a href="/project/handoff">目前工作（交接）</a>。{% endif %}{% if row.next %}<br><b>下一次核對</b>：{{ row.next }}。{% endif %}</p>
+  {% endif %}
   <p class="small muted">怎麼核對：{{ row.how }}</p>
   {% if row.parts %}
   <details><summary class="small">每一項（{{ row.parts|length }}）</summary>

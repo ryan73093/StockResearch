@@ -623,7 +623,13 @@ def gist(entry: dict[str, object], length: int = 160) -> str:
         if at > 0:
             text = text[at:]
             break
-    text = re.sub(r"\s+", " ", text.replace("**", "")).strip()
+    # 2026-11-15 (介面檢查 E-10：「重點」欄是原始筆記——反引號、表格的直線符號): the notes' marks are not text. A table's
+    # rule row goes, its cells are joined by "、", code marks and bold marks are dropped
+    text = text.replace("**", "").replace("`", "")
+    text = re.sub(r"\|\s*:?-{2,}:?\s*(?=\|)", "", text)
+    text = re.sub(r"\s*\|\s*", "、", text)
+    text = re.sub(r"(、\s*){2,}", "、", text)
+    text = re.sub(r"\s+", " ", text).strip(" 、")
     return text if len(text) <= length else text[:length] + "…"
 
 

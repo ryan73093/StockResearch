@@ -1,0 +1,25 @@
+{% extends "v2/base.html" %}
+{% block title %}找不到這一頁 · 交易研究分析平台{% endblock %}
+{% block heading %}
+<header class="page-head"><div><h1>找不到這一頁</h1><p class="page-head__sub">網址 <code>{{ path }}</code> 沒有對應的頁面。</p></div></header>
+{% endblock %}
+{% block content %}
+<section class="card" data-notab>
+  {% if kind == 'rule' %}
+  <p style="margin:0 0 12px">這個網址後面的策略代碼不存在（可能少了幾個字，或這個策略已經不在紀錄裡）。用編號找最快：</p>
+  <form class="rule-jump" action="/research/no" method="get" role="search" style="margin:0 0 12px">
+    <label class="sr-only" for="nf-jump">策略編號</label>
+    <input id="nf-jump" name="n" inputmode="numeric" placeholder="輸入編號，例如 7339" autocomplete="off">
+    <button type="submit">開啟</button>
+  </form>
+  <p class="small" style="margin:0">或到<a href="/research/pool">選手池</a>用名稱搜尋，或回<a href="/research">研究總覽</a>。</p>
+  {% elif kind == 'issue' %}
+  <p style="margin:0">沒有這個議題專案。全部的專案在<a href="/issues">議題</a>。</p>
+  {% elif kind == 'stock' %}
+  <p style="margin:0">找不到這檔股票。到<a href="/stock">查個股</a>輸入代號或名稱。</p>
+  {% else %}
+  <p style="margin:0 0 8px">可能是網址打錯，或這一頁已經搬走。從這裡走：</p>
+  <ul class="reasons"><li><a href="/">首頁（從這裡開始）</a></li><li><a href="/research">研究總覽</a></li><li><a href="/issues">議題</a></li><li><a href="/stock">查個股</a></li><li><a href="/system">系統</a></li></ul>
+  {% endif %}
+</section>
+{% endblock %}

@@ -24,9 +24,9 @@
   <table class="table--stack">
     <thead><tr><th class="num">名次</th><th>{{ '帳戶（規則）' if key == 'forward' else '規則' }}</th><th class="num">{{ '實際結果' if key == 'forward' else '期末' }}</th><th class="num">是 0050 的</th><th>等級</th></tr></thead>
     <tbody>
-    {% for item in items %}
-      <tr><td class="num" data-label="名次">{{ start + loop.index0 }}</td>
-        <td data-primary>{% set who = ('#' ~ item.trial ~ ' ') if item.trial is not none else '' %}{% if item.spec_hash and item.trial is not none %}<a href="/research/rules/{{ item.spec_hash }}">{{ rule_no(item.spec_hash) }} {{ who }}{{ item.name }}</a>{% else %}{{ who }}{{ item.name }}{% endif %} <span class="badge">{{ item.family }}</span></td>
+    {% for item in items|rank_same(start) %}
+      <tr><td class="num" data-label="名次">{{ item.rank }}{% if item.same %}～{{ item.rank + item.same|length }}{% endif %}</td>
+        <td data-primary>{{ rule_link(item.spec_hash, item.trial, item.name) }} <span class="badge">{{ item.family }}</span>{% if item.same %} <span class="badge" title="結果一模一樣的規則合成一列：{% for other in item.same %}{{ rule_no(other.spec_hash) }} {% endfor %}">另有 {{ item.same|length }} 個結果相同</span>{% endif %}</td>
         <td class="num" data-label="{{ '實際結果' if key == 'forward' else '期末' }}">{{ '{:,.1f}'.format(item.value / 10000) if key == 'forward' else '{:,.0f}'.format(item.value / 10000) }} 萬</td>
         <td class="num" data-label="是 0050 的">{{ '{:.2f}'.format(item.value / track.bench) }} 倍</td>
         <td data-label="等級">{{ item.tier or '—' }}</td></tr>

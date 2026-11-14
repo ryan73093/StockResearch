@@ -25,14 +25,16 @@ def numbers(research: str | Path) -> dict[str, int]:
     key = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
     if _CACHE.get("key") != key:
         found: dict[str, int] = {}
+        runs: dict[int, str] = {}
         with open(path, encoding="utf-8") as handle:
             for line in handle:
                 match = _HEAD.search(line[:400])
                 if match:
                     trial, spec = int(match.group(1)), match.group(2)
+                    runs[trial] = spec
                     if spec not in found or trial < found[spec]:
                         found[spec] = trial
-        _CACHE.update(key=key, found=found, by_number={trial: spec for spec, trial in found.items()})
+        _CACHE.update(key=key, found=found, by_number={trial: spec for spec, trial in found.items()}, runs=runs)
     return dict(_CACHE["found"])  # type: ignore[arg-type]
 
 
@@ -47,6 +49,20 @@ def spec_of(research: str | Path, number: int) -> str | None:
     """The spec hash a strategy number stands for (None when no rule was registered as that trial first)."""
     numbers(research)
     return (_CACHE.get("by_number") or {}).get(number)  # type: ignore[union-attr]
+
+
+def spec_of_run(research: str | Path, trial: int) -> str | None:
+    """2026-11-15 (介面檢查 E-1): the rule ANY trial belongs to — a later run of a rule has a newer trial id, and pages
+    printed that one ("#34653"); typed in the number box it opens the rule (whose fixed number is its first trial)."""
+    numbers(research)
+    return (_CACHE.get("runs") or {}).get(trial)  # type: ignore[union-attr]
+
+
+def label_of_run(research: str | Path, trial: int | None) -> str:
+    """"#7958" for trial 34653 (a later run of #7958); "" when the trial is not registered."""
+    if trial is None:
+        return ""
+    return label(research, spec_of_run(research, int(trial)))
 
 
 def experiments() -> dict[str, str]:

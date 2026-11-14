@@ -18,8 +18,10 @@
   --accent: #5d9eff;
   --accent-contrast: #0b1220;
   --accent-bg: rgba(93, 158, 255, .14);
-  --ok: #4fc48c;
-  --ok-bg: rgba(79, 196, 140, .14);
+  /* 2026-11-15 (介面檢查 S-4：綠色同時是「跌、賠」和「好、通過」): the state "good / passed" is cyan-blue; green and
+     red are kept for prices and money (台股：漲紅跌綠) */
+  --ok: #4cc3e0;
+  --ok-bg: rgba(76, 195, 224, .14);
   --warn: #e6b45a;
   --warn-bg: rgba(230, 180, 90, .14);
   --bad: #f3737b;
@@ -60,8 +62,8 @@
   --accent: #1d62d8;
   --accent-contrast: #ffffff;
   --accent-bg: #e8f0fe;
-  --ok: #13773f;
-  --ok-bg: #e3f3e9;
+  --ok: #0b6f86;
+  --ok-bg: #def1f6;
   --warn: #8a5b00;
   --warn-bg: #fdf1d3;
   --bad: #c0262f;
@@ -387,6 +389,9 @@ details.card[open] > summary { margin-bottom: 12px; }
 .tabset__bar button:hover { border-color: var(--border-strong); color: var(--text); }
 .tabset__bar button[aria-selected="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .tabset > [hidden] { display: none !important; }
+/* 2026-11-15 (介面檢查 E-12): a link to a tab or to something inside it stops below the fixed tab bar, not under it */
+.tabset > *, .tabset [id] { scroll-margin-top: 64px; }
+@media (max-width: 767px) { .tabset > *, .tabset [id] { scroll-margin-top: calc(var(--appbar-height, 56px) + 60px); } }
 @media (max-width: 767px) { .tabset__bar { top: var(--appbar-height, 56px); } }
 
 /* ---------- tables ---------- */
@@ -399,6 +404,30 @@ details.card[open] > summary { margin-bottom: 12px; }
   .table-wrap thead th { position: sticky; top: 0; z-index: 2; background: var(--surface); }
   .table-wrap td[data-primary], .table-wrap td.name { white-space: normal; min-width: 200px; max-width: 460px; }
   .table-wrap td:not(.num) { white-space: normal; overflow-wrap: anywhere; }      /* words wrap, numbers stay whole */
+  /* 2026-11-15 (介面檢查 E-2：筆電寬度下「原因」欄只剩 52 px、一列 1,206 px 高): "anywhere" lets a text cell shrink to
+     one character; a text cell keeps a width it can be read at, a long one (data-wide) a paragraph's, a date stays whole.
+     A long note of a wide table goes on a line of its own under the row (tr.row-note), not in a column. */
+  .table-wrap td:not(.num):not([data-primary]):not(.name) { min-width: 4.5em; }
+  .table-wrap td[data-wide]:not(.num) { min-width: 9em; }
+  .table-wrap .table--notes td[data-wide]:not(.num) { min-width: 17em; }      /* a table of sentences (the optimization log) */
+  .table-wrap td.date, .table-wrap td[data-primary].date { white-space: nowrap; min-width: 0; }
+  .table-wrap td.keep { white-space: nowrap; }
+  .table-wrap td.name.name--tight { min-width: 150px; }
+  .table-wrap td.note-cell { display: none; }
+  .table-wrap tr.has-note > td { border-bottom: 0; padding-bottom: 2px; }
+  .table-wrap tr.row-note > td { white-space: normal; padding-top: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.55; }
+  .table-wrap tr.row-note > td b { color: var(--muted); font-weight: 500; margin-right: 6px; }
+  .table-wrap tr.has-note:hover + tr.row-note > td { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+}
+@media (max-width: 767px) { tr.row-note { display: none !important; } }
+/* at every width: a long verdict wraps inside its cell, a code word breaks instead of widening the card */
+.table-wrap td:not(.num) .badge { white-space: normal; text-align: left; line-height: 1.35; border-radius: 10px; }
+.table-wrap td code { white-space: normal; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; background: var(--surface-3); padding: 0 4px; border-radius: 4px; }
+/* 2026-11-15: the stock page's factor table on a phone — the factor's verdict goes under its name (three columns fit) */
+.factor-verdict--under { display: none; }
+@media (max-width: 767px) {
+  .factor-table .factor-verdict { display: none; }
+  .factor-verdict--under { display: block; margin-top: 3px; }
 }
 .col-help { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
 .col-help b { color: var(--text-2); font-weight: 600; }
@@ -520,7 +549,8 @@ td.wrap { white-space: normal; min-width: 180px; }
 .choice strong .badge { margin-left: 6px; vertical-align: 1px; }
 .choice strong { color: var(--text); font-size: 14.5px; }
 .choice small { color: var(--muted); font-size: 12.5px; font-weight: 400; }
-.choice__stat { color: var(--accent) !important; }
+/* 2026-11-15 (介面檢查 E-16：藍色的字像連結卻不能點): a figure, not a link */
+.choice__stat { color: var(--text-2) !important; }
 .form-error { color: var(--bad); background: var(--bad-bg); border-radius: 10px; padding: 10px 12px; margin: 0 0 4px; }
 .form select { appearance: auto; }
 .lookup-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 0 0 14px; }
@@ -975,3 +1005,115 @@ td.wrap { white-space: normal; min-width: 180px; }
 .app-tile--small .app-tile__name { font-size: 13px; }
 .app-tile--small[aria-current="page"] { border-color: var(--accent); background: var(--accent-bg); }
 @media (max-width: 600px) { .app-grid { grid-template-columns: repeat(2, 1fr); } .app-tile__icon { width: 52px; height: 52px; } }
+
+/* ---------- 從這裡開始 (2026-11-15, D-046 第 9 項：首頁是入口——一句話、六步各一個數字、今天變了什麼) ---------- */
+.start__lead { margin: 0 0 14px; font-size: 16px; line-height: 1.7; max-width: 60em; }
+.start__h { margin: 18px 0 8px; font-size: 14px; font-weight: 600; color: var(--text); }
+.start__steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.start__step {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: baseline; height: 100%;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2);
+  color: var(--text); text-decoration: none;
+}
+.start__step:hover, .start__state:hover { border-color: var(--accent); }
+.start__n {
+  grid-row: 1 / span 2; align-self: start; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent-bg); color: var(--accent); font-weight: 700; font-size: 13px;
+}
+.start__title { font-size: 13px; color: var(--text-2); }
+.start__number { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.start__number small { font-size: 12px; font-weight: 400; color: var(--muted); }
+.start__text { grid-column: 1 / -1; font-size: 12.5px; line-height: 1.6; color: var(--text-2); margin-top: 4px; }
+.start__today { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.start__state {
+  display: grid; gap: 2px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px;
+  color: var(--text); text-decoration: none;
+}
+.start__label, .start__note { font-size: 12px; color: var(--muted); }
+.start__value { font-size: 17px; font-weight: 600; }
+.start__red { margin-top: 10px; }
+.start__issues { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.start__issues a { color: var(--text); text-decoration: none; font-size: 13.5px; }
+.start__issues a:hover { text-decoration: underline; }
+/* 2026-11-15 (U2): a page that is used only after going live says so at the top */
+.prelaunch { border-left: 3px solid var(--warn); }
+.prelaunch p { margin: 0; line-height: 1.7; }
+
+/* ---------- 2026-11-15: the overview's tiles open what they count; its charts come in four groups ---------- */
+a.kpi--link { display: block; color: inherit; text-decoration: none; border: 1px solid transparent; transition: border-color .12s; }
+a.kpi--link:hover, a.kpi--link:focus-visible { border-color: var(--accent); }
+a.kpi--link .kpi__label::after { content: " \203A"; color: var(--accent); }
+.kpi__note b { color: var(--accent); font-weight: 600; }
+.dash-groups { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 0; padding-bottom: 2px; border-bottom: 1px solid var(--border); }
+.dash-groups button {
+  padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-2);
+  font: inherit; font-size: 14.5px; cursor: pointer; margin-bottom: -1px;
+}
+.dash-groups button:hover { color: var(--text); }
+.dash-groups button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.dash-grid > [hidden] { display: none !important; }
+
+/* 2026-11-15 (介面檢查 R-11): a failed check's consequence under it */
+.check__impact { grid-column: 2 / -1; font-size: 12.5px; line-height: 1.6; color: var(--text-2); padding: 2px 0 2px; }
+.check-impact { border-left: 3px solid var(--bad); padding: 4px 0 4px 10px; line-height: 1.7; }
+
+/* 2026-11-15: 今天的盤後單 — which rules are listed (chips) and the number box, on one line */
+.orders-pick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.orders-pick .rule-jump { margin-left: auto; }
+.orders-pick a.chip { text-decoration: none; }
+@media (max-width: 600px) { .orders-pick .rule-jump { margin-left: 0; } }
+
+/* 2026-11-15 (介面檢查 E-2): a table with several text columns (the pool) — each keeps a column's width, not a paragraph's */
+@media (min-width: 768px) {
+  .table-wrap .table--compact td[data-wide]:not(.num) { min-width: 6.5em; }
+  .table-wrap .table--compact td[data-primary] { min-width: 250px; max-width: 340px; }
+}
+
+/* ---------- 2026-11-15 (介面檢查 E-6): a chart's axis around the stretched SVG, and the day under the pointer ---------- */
+.chart-frame { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 6px; margin: 4px 0 6px; }
+.chart-frame__y { position: relative; min-width: 3.6em; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chart-frame__y span { position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; }
+.chart-frame__y span:last-child { transform: translateY(-100%); }
+.chart-frame__plot { position: relative; min-width: 0; touch-action: pan-y; }
+.chart-frame__plot > svg { margin: 0 !important; }
+.chart-frame__grid { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--border); pointer-events: none; }
+.chart-frame__x { grid-column: 2; display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding-top: 3px; font-variant-numeric: tabular-nums; }
+.chart-frame__cursor { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--text-2); pointer-events: none; }
+.chart-frame__tip {
+  position: absolute; top: 6px; z-index: 3; display: grid; gap: 2px; padding: 7px 10px; border-radius: 8px; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow); font-size: 12px; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.chart-frame__tip[hidden], .chart-frame__cursor[hidden] { display: none; }
+
+/* 2026-11-15 (介面檢查 K-1): the knowledge base says a search is running */
+.kb-wait { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; color: var(--accent); }
+.kb-wait[hidden] { display: none; }
+.kb-wait__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: kb-pulse 1s ease-in-out infinite; }
+@keyframes kb-pulse { 50% { opacity: .25; } }
+
+/* ---------- 2026-11-15 (介面檢查 A-1、U5、E-11) ---------- */
+.sidefold { display: none; }
+@media (min-width: 1200px) {
+  .sidefold { display: block; }
+  .sidefold > summary { margin: 0 0 4px 22px; padding: 4px 10px; font-size: 12px; color: var(--muted); cursor: pointer; list-style: none; border-radius: 8px; }
+  .sidefold > summary::-webkit-details-marker { display: none; }
+  .sidefold > summary::before { content: "\25B8  "; }
+  .sidefold[open] > summary::before { content: "\25BE  "; }
+  .sidefold > summary:hover { background: var(--surface-2); color: var(--text); }
+}
+/* the phone's top icons: a word under each */
+.appbar .icon-btn { width: 42px; height: 42px; grid-template-rows: auto auto; align-content: center; row-gap: 1px; text-decoration: none; }
+.appbar .icon-btn small { font-size: 9.5px; line-height: 1; color: var(--muted); white-space: nowrap; }
+.appbar .icon-btn .icon { width: 18px; height: 18px; }
+.appbar .icon-btn > span { display: inline-grid; }
+.appbar { gap: 6px; }
+/* a phone's long card lists come 20 at a time (base.html) */
+tr.row-later { display: none !important; }
+.more-rows { display: block; width: 100%; margin: 10px 0 0; }
+@media (min-width: 768px) { .more-rows { display: none !important; } tr.row-later { display: table-row !important; } }
+
+/* 2026-11-15: a dashboard window opened as a page of its own (window_page.html) on a phone — its plain tables scroll
+   inside the card; their negative margins widened the page by 51 px */
+.dash-window { overflow-x: hidden; }
+.dash-window .table-wrap, .dash-dialog__body .table-wrap { margin-left: 0; margin-right: 0; }

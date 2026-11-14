@@ -22,33 +22,29 @@
   <div class="table-wrap">
     <table>
       <thead><tr>
-        <th>角色</th><th>規則</th><th class="num">期末</th><th class="num">年化（0050）</th><th class="num">2015-06 起超額</th><th class="num">2020-10 起超額</th>
-        <th class="num">最大回撤（0050）</th><th class="num">報酬／回撤</th><th class="num">1 年勝率</th><th class="num">3 年勝率</th><th class="num">最差 1 年</th>
-        <th class="num">每月委託</th><th class="num">費稅／投入</th><th>引擎</th>
+        <th>角色</th><th>規則</th><th class="num">期末</th><th class="num">年化<br>（0050）</th><th class="num">超額<br>2015-06 起／2020-10 起</th>
+        <th class="num">最大回撤<br>（0050）</th><th class="num">報酬<br>／回撤</th><th class="num">1 年／3 年<br>勝率</th><th class="num">最差<br>1 年</th>
+        <th class="num">每月委託<br>費稅／投入</th>
       </tr></thead>
       <tbody>
       {% for row in growth.roles %}{% set now = row.now %}
         <tr>
-          <td class="name"><strong>{{ row.role }}</strong><br><span class="badge">{{ now.tier }}</span></td>
-          <td class="name"><a href="/research/rules/{{ now.spec }}">{{ rule_no(now.spec) }}</a> {{ now.name }}</td>
+          <td class="keep"><strong>{{ row.role }}</strong><br><span class="badge">{{ now.tier }}</span></td>
+          <td class="name"><a href="/research/rules/{{ now.spec }}" title="{{ now.name }}">{{ rule_no(now.spec) }} {{ now.name|short }}</a><br><span class="muted small">引擎 {{ now.engine }}</span></td>
           <td class="num">{{ '{:,.0f}'.format(now.final / 10000) }} 萬</td>
-          <td class="num">{{ '{:.1%}'.format(now.xirr) if now.xirr is not none else '—' }}（{{ '{:.1%}'.format(now.bench_xirr) if now.bench_xirr is not none else '—' }}）</td>
-          <td class="num {{ 'up' if (now.excess_full or 0) > 0 else 'down' }}">{{ '{:+.0%}'.format(now.excess_full) if now.excess_full is not none else '—' }}</td>
-          <td class="num {{ 'up' if (now.excess_recent or 0) > 0 else 'down' }}">{{ '{:+.0%}'.format(now.excess_recent) if now.excess_recent is not none else '—' }}</td>
-          <td class="num">{{ '{:.0%}'.format(now.drawdown) if now.drawdown is not none else '—' }}（{{ '{:.0%}'.format(now.bench_drawdown) if now.bench_drawdown is not none else '—' }}）</td>
+          <td class="num">{{ '{:.1%}'.format(now.xirr) if now.xirr is not none else '—' }}<br><span class="muted small">（{{ '{:.1%}'.format(now.bench_xirr) if now.bench_xirr is not none else '—' }}）</span></td>
+          <td class="num"><span class="{{ 'up' if (now.excess_full or 0) > 0 else 'down' }}">{{ '{:+.0%}'.format(now.excess_full) if now.excess_full is not none else '—' }}</span>／<span class="{{ 'up' if (now.excess_recent or 0) > 0 else 'down' }}">{{ '{:+.0%}'.format(now.excess_recent) if now.excess_recent is not none else '—' }}</span></td>
+          <td class="num">{{ '{:.0%}'.format(now.drawdown) if now.drawdown is not none else '—' }}<br><span class="muted small">（{{ '{:.0%}'.format(now.bench_drawdown) if now.bench_drawdown is not none else '—' }}）</span></td>
           <td class="num">{{ now.calmar if now.calmar is not none else '—' }}</td>
-          <td class="num">{{ '{:.0%}'.format(now.win_1y) if now.win_1y is not none else '—' }}</td>
-          <td class="num">{{ '{:.0%}'.format(now.win_3y) if now.win_3y is not none else '—' }}</td>
+          <td class="num">{{ '{:.0%}'.format(now.win_1y) if now.win_1y is not none else '—' }}／{{ '{:.0%}'.format(now.win_3y) if now.win_3y is not none else '—' }}</td>
           <td class="num">{{ '{:+.0%}'.format(now.worst_1y) if now.worst_1y is not none else '—' }}</td>
-          <td class="num">{{ now.orders if now.orders is not none else '—' }}</td>
-          <td class="num">{{ '{:.0%}'.format(now.cost_share) if now.cost_share is not none else '—' }}</td>
-          <td class="muted small">{{ now.engine }}</td>
+          <td class="num">{{ now.orders if now.orders is not none else '—' }} 筆<br><span class="muted small">{{ '{:.0%}'.format(now.cost_share) if now.cost_share is not none else '—' }}</span></td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="col-help"><b>超額</b>：期末比 0050 多出的錢，佔投入本金的比例。<b>報酬／回撤</b>：年化報酬除以最大回撤（越高越好，賺得多又跌得淺）。<b>1 年／3 年勝率</b>：每個月起算的 1 年（3 年）裡贏 0050 的比例。<b>最差 1 年</b>：最差的那一年比 0050 少多少。<b>每月委託</b>：平均每月下幾筆單。<b>費稅／投入</b>：手續費加證交稅佔投入本金。</p>
+  <p class="col-help"><b>超額</b>：期末比 0050 多出的錢，佔投入本金的比例。<b>報酬／回撤</b>：年化報酬除以最大回撤（越高越好，賺得多又跌得淺）。<b>1 年／3 年勝率</b>：每個月起算的 1 年（斜線後是 3 年）裡贏 0050 的比例。<b>最差 1 年</b>：最差的那一年比 0050 少多少。<b>每月委託</b>：平均每月下幾筆單。<b>費稅／投入</b>：手續費加證交稅佔投入本金。</p>
 </section>
 <section class="card" data-tab="成長紀錄">
   <div class="card__head"><h2>每個角色最好成績的變化（當時紀錄的數字，萬元）</h2></div>
@@ -73,6 +69,8 @@
 {% macro excess_cell(cell) %}{% if cell %}<span><span class="{{ 'up' if cell.mean > 0 else 'down' }}">{{ '{:+.2f}%'.format(cell.mean * 100) }}</span><br><span class="muted small">贏 {{ '{:.0f}%'.format(cell.win * 100) }}</span></span>{% else %}—{% endif %}{% endmacro %}
 <section class="card" data-tab="分工">
   <div class="card__head"><h2>誰負責什麼 <span class="badge">{{ division.since }}～{{ division.until }}</span></h2><span class="muted small">每一類的代表規則，每個月比 0050 多多少（扣掉當月投入的錢）</span></div>
+  {# 2026-11-15 (介面檢查 RO-1：「分工」用 10 月中的規則，沒標日期): which rules stand for each family, and since when #}
+  <p class="small check-impact" style="border-left-color:var(--warn);margin:0 0 10px">這一頁用的是 <b>2026-10-20 選定的代表規則</b>（表頭每一欄的編號），用來看「每一類擅長什麼市場」；之後各類最好的規則換過了，現在各類最好的在「成長」「全部指標」分頁。結論（誰進攻、誰防守）看的是類別的特性，不是哪一個規則現在最賺。</p>
   <ul class="rules">
     <li><b>深度學習＝進攻選股</b>：0050 大漲的月份只有它贏，高波動時賺最多；0050 大跌時會多跌。</li>
     <li><b>因子規則（共識、穩健、跌市穩）＝防守</b>：0050 大跌的月份反而贏 0050（約三分之二的月份），大漲時追不上。</li>
@@ -82,7 +80,7 @@
   </ul>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>市場狀況（月數）</th>{% for role in division.roles %}<th class="num" title="{{ role.job }}">{{ role.name }}<br><span class="muted small">#{{ role.trial }}</span></th>{% endfor %}</tr></thead>
+      <thead><tr><th>市場狀況（月數）</th>{% for role in division.roles %}<th class="num" title="{{ role.job }}">{{ role.name }}<br><span class="muted small">{{ rule_link(role.rule_hash, role.trial) }}</span></th>{% endfor %}</tr></thead>
       <tbody>
       {% for row in division.states + division.known %}
         <tr>

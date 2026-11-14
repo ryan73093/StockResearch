@@ -42,6 +42,9 @@
       <button type="submit" class="btn btn--primary" name="ai" value="1"{% if not ai.ready %} disabled title="{{ ai.note }}"{% endif %}>問 AI</button>
     </div>
   </form>
+  {# 2026-11-15 (介面檢查 K-1：搜尋一題 23 秒、問 AI 25～50 秒，畫面沒有任何反應): say it is running, and how long #}
+  <p class="kb-wait small" id="kb-wait" hidden role="status"><span class="kb-wait__dot"></span><span id="kb-wait-text"></span></p>
+  <p class="muted small" style="margin:6px 0 0">「搜尋紀錄」不花錢，第一次要載入語意模型約 20 秒、之後幾秒；「問 AI」會把找到的紀錄交給模型整理，約 30～50 秒、會計費（同一題在紀錄沒變以前不重複計費）。</p>
   <p class="muted small" style="margin:6px 0 0">{{ ai.note }}　試試：{% for example in examples %}<a href="/research/knowledge?q={{ example|urlencode }}">{{ example }}</a>{% if not loop.last %}、{% endif %}{% endfor %}</p>
 
   {% if answer and (answer.conclusion or answer.note) %}
@@ -118,4 +121,19 @@
   {% else %}<p class="muted">還沒有人問過。</p>{% endif %}
   <p class="col-help"><b>欄位說明</b>　點問題重看答案（知識庫沒變就讀已存的答案，不重複計費）。</p>
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const form = document.querySelector('.kb-form'), wait = document.getElementById('kb-wait'), text = document.getElementById('kb-wait-text');
+  if (!form || !wait) return;
+  const begin = (asking) => {
+    const started = Date.now();
+    const say = () => { text.textContent = (asking ? 'AI 整理中（約 30～50 秒）' : '搜尋中（第一次約 20 秒）') + '…已經 ' + Math.round((Date.now() - started) / 1000) + ' 秒'; };
+    wait.hidden = false; say(); setInterval(say, 1000);
+  };
+  form.addEventListener('submit', (event) => begin(Boolean(event.submitter && event.submitter.name === 'ai')));
+  document.querySelectorAll('a[href^="/research/knowledge?q="]').forEach((link) => link.addEventListener('click', () => begin(link.href.includes('ai=1'))));
+})();
+</script>
 {% endblock %}

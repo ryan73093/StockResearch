@@ -331,7 +331,10 @@ flowchart LR
 | `scripts/research-pipeline.ps1` 的 step-helpers | 步驟參數加引號（`Join-Arguments`）、結束碼怎麼處理（`Get-StepVerdict`：沒跑起來或有 traceback 就停，跑了沒做完流程最後標失敗）、記憶體預留（`Request-Memory`，`instance/research/memory/`）；測試用 PowerShell 實際執行這一段（2026-11-12，S11-B） |
 | `research/files.py` | 寫檔時別的程序正在讀也能換上新檔（Windows 的取代重試；2026-10-29 盤後單因此中斷） |
 | `dashboard/warm.py` | 研究頁重的畫面另開程序算好（`instance/research/cache/ready/<畫面>.pkl`），網頁只讀檔（2026-10-28） |
-| `research/numbers.py` | 每個策略的固定編號＝第一次登錄的試驗編號；實驗帳戶 E1、E2…（2026-10-28） |
+| `research/numbers.py` | 每個策略的固定編號＝第一次登錄的試驗編號；實驗帳戶 E1、E2…（2026-10-28）；任何一次重跑的試驗號也找得回規則（`spec_of_run`，2026-11-15） |
+| `research/short_name.py` | 規則的短名（表格用；完整名稱在規則頁），樣板 `{{ name\|short }}`（2026-11-15，D-046 第 9 項） |
+| `dashboard/v2.py` 的 `start_view`、`month_view`、`orders_view` | 首頁「從這裡開始」（六步各一個數字、今天的狀態，背景預先算好）、每月名單加兩種錢、今天的盤後單的狀態與預設清單（2026-11-15） |
+| `scripts/preview-site.py`、`scripts/ui-table-sweep.js` | 改介面用：5055 的原始碼預覽（只讀、不動服務）；量每張表有沒有超出卡片（2026-11-15） |
 | `research/charts.py`、`research/distribution.py`、`research/progress.py`、`research/checks.py`、`research/eras.py` | 研究總覽儀表板：桌面與手機各一份的線圖與長條圖；最後的錢的分佈圖（每一類一列）；研究成長的時間線；大搜尋的漏斗與正確性核對；同一規則分時期比 0050 |
 | `research/issues.py`、`research/issue_notes.py`、`research/history/issues_data.py` | 議題追蹤（主導覽第六項，2026-10-27／28）：每個議題一個專案（指標、警示線、告警線、來源）、手寫判讀（燈號變了 7 天內重寫）、公開資料下載（SEC、實價登錄等）；worker 每天 18:20 更新 |
 | `research/windows2020.py` | 門檻改以 2020-10 以後為準：用回測引擎補算 2020-11 起的滾動視窗，和原結果期末金額一元不差才採用（2026-10-27） |

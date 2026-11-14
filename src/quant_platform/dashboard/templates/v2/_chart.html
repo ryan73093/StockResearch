@@ -1,0 +1,13 @@
+{# 2026-11-15 (介面檢查 E-6：資產走勢、交易圖、K 線圖上沒有任何金額或日期刻度，滑鼠移上去也沒有數字；D-018：滑鼠移上去看數字).
+   A stretched SVG cannot carry text (it would stretch too), so the axis is drawn around it: ``frame`` puts the amounts
+   on the left at their heights (``marks``: [(percent from the top, text)]) and the first and last day under it.
+   ``points`` (a list of {"d": day, label: value…}, in the chart's order, evenly spaced) turns on the readout: the
+   values of the day under the pointer or the finger. #}
+{% macro frame(marks, first, last, points=none, labels=none, unit='元') %}
+<div class="chart-frame"{% if points %} data-points='{{ points|tojson }}' data-labels='{{ labels|tojson }}' data-unit="{{ unit }}"{% endif %}>
+  <div class="chart-frame__y" aria-hidden="true">{% for top, text in marks %}<span style="top:{{ '%.1f'|format(top) }}%">{{ text }}</span>{% endfor %}</div>
+  <div class="chart-frame__plot">{{ caller() }}{% for top, text in marks %}<i class="chart-frame__grid" style="top:{{ '%.1f'|format(top) }}%"></i>{% endfor %}{% if points %}<i class="chart-frame__cursor" hidden></i><div class="chart-frame__tip" hidden></div>{% endif %}</div>
+  <div class="chart-frame__x" aria-hidden="true"><span>{{ first }}</span><span>{{ last }}</span></div>
+</div>
+{% endmacro %}
+{% macro money(value) %}{% if value|abs >= 100000000 %}{{ '{:,.2f}'.format(value / 100000000) }} 億{% elif value|abs >= 1000000 %}{{ '{:,.0f}'.format(value / 10000) }} 萬{% elif value|abs >= 10000 %}{{ '{:,.1f}'.format(value / 10000) }} 萬{% else %}{{ '{:,.0f}'.format(value) }}{% endif %}{% endmacro %}

@@ -52,6 +52,9 @@
 <section class="card">
   <div class="card__head"><h2>日 K 線（近 120 個交易日）</h2></div>
   {% if page.chart %}
+  {% from "v2/_chart.html" import frame %}
+  {% set ch = page.chart %}
+  {% call frame([(6 / ch.height * 100, '{:,.1f}'.format(ch.high)), (50, '{:,.1f}'.format((ch.high + ch.low) / 2)), (100 - 6 / ch.height * 100, '{:,.1f}'.format(ch.low))], ch.first, ch.last) %}
   <svg class="candles" viewBox="0 0 {{ page.chart.width }} {{ page.chart.height }}" preserveAspectRatio="none" role="img" aria-label="{{ page.code }} 日 K 線">
     {% for bar in page.chart.bodies %}
       <g class="{{ 'up' if bar.up else 'down' }}">
@@ -62,6 +65,7 @@
     {% if page.chart.ma20 %}<polyline class="ma20" points="{{ page.chart.ma20 }}"/>{% endif %}
     {% if page.chart.ma60 %}<polyline class="ma60" points="{{ page.chart.ma60 }}"/>{% endif %}
   </svg>
+  {% endcall %}
   <div class="legend"><span><i style="background:var(--accent)"></i>20 日均線</span><span><i style="background:var(--warn)"></i>60 日均線</span><span>{{ page.chart.first }}～{{ page.chart.last }}，最高 {{ '{:,.2f}'.format(page.chart.high) }}、最低 {{ '{:,.2f}'.format(page.chart.low) }}</span></div>
   <p class="note">紅漲綠跌；價格是當天實際成交價，沒有還原除權息（除權息日會出現缺口）。因子用的是還原後的價格。</p>
   {% else %}
@@ -75,16 +79,18 @@
   {# 2026-10-15 (繼續優化): a table that scrolls inside the card with its header in view, not a 1,700 px list #}
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
-      <thead><tr><th>規則</th><th class="num">佔帳戶</th><th class="num">持有日</th><th class="num">開始觀察</th></tr></thead>
+      {# 2026-11-15 (介面檢查 E-16：「持有日」整欄都是同一天): the day of the records is said once, above the table #}
+      {% set days = page.holders|map(attribute='date')|unique|list %}
+      <thead><tr><th>規則（點進去看它的每一筆交易）</th><th class="num">佔帳戶</th>{% if days|length > 1 %}<th class="num">紀錄日期</th>{% endif %}<th class="num">帳戶開始</th></tr></thead>
       <tbody>
       {% for holder in page.holders|sort(attribute='share', reverse=true) %}
-        <tr><td class="name" data-primary><a href="/research/rules/{{ holder.rule_hash }}">{{ rule_no(holder.rule_hash) }} {{ holder.name }}</a></td>
-          <td class="num" data-label="佔帳戶">{{ '{:.1%}'.format(holder.share) }}</td><td class="num" data-label="持有日">{{ holder.date }}</td><td class="num" data-label="開始觀察">{{ holder.since }}</td></tr>
+        <tr><td class="name" data-primary><a href="/research/forward/{{ holder.rule_hash }}" title="{{ holder.name }}">{{ rule_no(holder.rule_hash) }} {{ holder.name|short }}</a></td>
+          <td class="num" data-label="佔帳戶">{{ '{:.1%}'.format(holder.share) }}</td>{% if days|length > 1 %}<td class="num" data-label="紀錄日期">{{ holder.date }}</td>{% endif %}<td class="num" data-label="帳戶開始">{{ holder.since }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="col-help"><b>佔帳戶</b>：這檔股票市值占該規則前向帳戶的比例（依大到小排）。<b>持有日</b>：最近一次前向紀錄的日期。<b>開始觀察</b>：這個規則前向觀察的起始日。</p>
+  <p class="col-help">{% if days|length == 1 %}這是 <b>{{ days[0] }}</b> 收盤的前向紀錄。{% endif %}<b>佔帳戶</b>：這檔股票市值占該規則前向帳戶的比例（依大到小排）。<b>帳戶開始</b>：這個規則這個月的前向帳戶從哪一天起算。</p>
 </section>
 {% endif %}
 
@@ -94,11 +100,15 @@
     <div class="card__head"><h2>{{ group.title }}</h2></div>
     <div class="table-wrap">
       <table class="factor-table">
-        <thead><tr><th>因子（研究判定的強弱）</th><th class="num">數值</th><th class="num">排名</th></tr></thead>
+        {# 2026-11-15 (介面檢查 ST-1：「12 個月動能 弱 +67.5% 前 17%」的「弱」被讀成這檔股票弱): the verdict is about the
+           factor (does ranking by it pick winners), in a column of its own with its own words #}
+        <thead><tr><th>因子</th><th class="factor-verdict">這個因子準不準<br><span class="muted small">研究的結論，不是這檔的強弱</span></th><th class="num">這檔的數值</th><th class="num">這檔在全市場<br>排第幾</th></tr></thead>
         <tbody>
         {% for row in group.rows %}
           <tr>
-            <td>{{ row.label }}{% if row.verdict %} <span class="badge {{ 'badge--ok' if row.verdict == '強' else ('badge--bad' if row.verdict == '反向' else '') }}">{{ row.verdict }}</span>{% endif %}</td>
+            {% set verdict %}{% if row.verdict %}<span class="badge {{ 'badge--ok' if row.verdict == '強' else ('badge--bad' if row.verdict == '反向' else '') }}">{{ {'強': '準（照它排有用）', '弱': '不太準', '反向': '反著才準'}.get(row.verdict, row.verdict) }}</span>{% else %}<span class="muted small">沒有結論</span>{% endif %}{% endset %}
+            <td>{{ row.label }}<span class="factor-verdict--under"><span class="muted small">這個因子：</span>{{ verdict }}</span></td>
+            <td class="factor-verdict">{{ verdict }}</td>
             <td class="num">{{ row.value }}</td>
             <td class="num">{% if row.top %}前 {{ row.top }}%<span class="rankbar" aria-hidden="true"><i style="width:{{ (row.rank * 100)|round(0) }}%"></i></span>{% else %}—{% endif %}</td>
           </tr>
@@ -106,7 +116,7 @@
         </tbody>
       </table>
     </div>
-    <p class="col-help">排名：{{ page.snapshot_date }} 收盤後，和當天有成交、有這個因子數值的全部上市＋上櫃股票比；「前 5%」表示這個因子上比 95% 的股票強（低波動、不追飆股是越平穩排越前）。籌碼與基本面用 {{ page.snapshot_date }} 收盤前已公布的資料{% if page.chips_as_of %}，目前下載到 {{ page.chips_as_of }}{% endif %}；上櫃股的籌碼還在下載。「因子強弱」是研究頁因子分析的結論（2015-06 起每週排名、看之後 20 個交易日），不是對這檔股票的預測。</p>
+    <p class="col-help">排名：{{ page.snapshot_date }} 收盤後，和當天有成交、有這個因子數值的全部上市＋上櫃股票比；「前 5%」表示這個因子上比 95% 的股票強（低波動、不追飆股是越平穩排越前）。籌碼與基本面用 {{ page.snapshot_date }} 收盤前已公布的資料{% if page.chips_as_of %}，目前下載到 {{ page.chips_as_of }}{% endif %}；上櫃股的籌碼還在下載。「這個因子準不準」是研究頁因子分析的結論（2015-06 起每週照這個因子排名、看之後 20 個交易日的報酬）：準＝排前面的之後報酬比較好；不太準＝分不出來；反著才準＝排後面的反而好。它講的是因子，不是對這檔股票的預測。標「原始分數」的數值沒有日常單位，看右邊的排名就好。</p>
   </section>
 {% endfor %}
 {% else %}

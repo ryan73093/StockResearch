@@ -67,6 +67,9 @@ def _bins(items: list[dict], cut: list[float], invested: float, bench: float, no
 
 
 def _who(item: dict) -> str:
+    """2026-11-15 (介面檢查 E-1): the rule's fixed number (``no``, set where the items are made), not its latest run's."""
+    if item.get("no"):
+        return str(item["no"])
     return f"#{item['trial']}" if item.get("trial") is not None else "・"
 
 
@@ -143,8 +146,11 @@ def view(research: str | Path, rows: list[dict]) -> dict[str, object]:
         bench = Counter(round(row[track["bench"]]) for row in members if row.get(track["bench"])).most_common(1)
         if not invested or not bench:
             continue
+        from quant_platform.research.numbers import label as number_label
+
         items = [{"trial": row.get("trial_id"), "name": row.get("name"), "tier": row.get("tier"),
                   "family": (row.get("category") or {}).get("family") or "其他", "spec_hash": row.get("spec_hash"),
+                  "no": number_label(research, row.get("spec_hash")),
                   "value": float(row[track["value"]])} for row in members]
         output[key] = _track(track["label"], invested, float(bench[0][0]), items)
     return output

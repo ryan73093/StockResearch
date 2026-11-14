@@ -1399,11 +1399,12 @@ def main() -> int:
             from quant_platform.research.stock_forward import StockForwardTracker
 
             # 2026-10-21: the forward accounts already ran these rules to the day at 15:30 — read, don't run again
+            tracker = StockForwardTracker(RESEARCH)
             refreshed = rolling.refresh(RESEARCH, lambda universe: daily_research.load(Path(args.base), universe),
                                         broker_costs(args.broker),
-                                        cutoff, records=StockForwardTracker(RESEARCH).records())
+                                        cutoff, records=tracker.records(), accounts=tracker.summary())
             usable = [row for row in (refreshed or {}).get("holdout") or [] if row["usable"]]
-            job.payload["summary"] = (f"{len((refreshed or {}).get('holdout') or [])} 個策略前向測試、{len(usable)} 個贏 0050"
+            job.payload["summary"] = (f"{len((refreshed or {}).get('holdout') or [])} 個策略前向測試、{len(usable)} 個兩種錢都不輸 0050"
                                       f"（重算 {refreshed.get('holdout_run', 0)} 個，其餘讀前向帳戶紀錄）"
                                       if refreshed else "這個月還沒挑策略")
         print(job.payload["summary"])

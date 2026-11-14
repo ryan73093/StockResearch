@@ -5,7 +5,7 @@
 <header class="page-head">
   <div>
     <h1>持倉</h1>
-    <p class="page-head__sub">實際帳戶，以及同一筆入金改買 0050 的定期定額影子帳戶</p>
+    <p class="page-head__sub">你真的拿錢買的帳戶（自己記），以及同一筆入金改買 0050 的對照帳戶</p>
   </div>
 </header>
 {% endblock %}
@@ -13,6 +13,12 @@
 {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
 
 {% set has_actual = actual.flows or actual.trades %}
+{# 2026-11-15 (D-046 第 9 項；介面檢查 U2): before going live this page is empty on purpose, and it says so #}
+{% if not has_actual %}
+<section class="card prelaunch" data-notab>
+  <p><span class="badge badge--warn">上線以後才會用到</span>　這裡記的是<b>你自己真的買賣的帳戶</b>，平台不會下單、也不會自己填。現在沒有任何個股規則可以上線（要先有 T0、再由你核准），所以這一頁是空的。研究帳戶的持股與每一筆交易不在這裡：到<a href="/research">研究總覽</a>點任何一個規則，看它的「前向觀察・每一筆交易」。想先看「照某個規則，我的帳戶今天要買賣什麼」（只能看），把現金與持股記在下面，再開<a href="/research/my-orders">今天我的帳戶要買賣什麼</a>。</p>
+</section>
+{% endif %}
 {% if has_actual %}
 {% set profit = actual.total_value - actual.net_deposits %}
 <section class="kpis kpis--four kpis--page" aria-label="實際帳戶">
@@ -169,11 +175,13 @@
 {% else %}
 <section class="card empty">
   <div class="empty__icon">{{ icon('holdings') }}</div>
-  <h2>開始記錄實際帳戶</h2>
-  <p class="muted">每次入金與券商成交回報後記在這裡：系統會算出持股、平均成本、XIRR，並和「同一筆錢當天買 0050」的定期定額影子帳戶比較。</p>
+  <h2>還沒有紀錄</h2>
+  <p class="muted">每次入金與券商成交回報後記在這裡（個股、ETF 都可以）：系統會算出持股、平均成本、年化報酬，並和「同一筆錢當天買 0050」的對照帳戶比較。要記的時候打開下面的「記錄入金與成交」。</p>
 </section>
 {% endif %}
 
+{# 2026-11-15 (介面檢查 H-3): with an empty account the two forms stay folded until asked for #}
+{% if not has_actual %}<details class="card" data-notab id="record"{% if form or error or request.args.get('symbol') %} open{% endif %}><summary><h2>記錄入金與成交</h2></summary>{% endif %}
 <div class="grid grid--half">
   {% set f = form if form.get('form') == 'cash' else {} %}
   {% set dividend_prefill = f.get('kind') == 'dividend' and f.get('amount') and not error %}
@@ -187,7 +195,7 @@
       </div>
       <div class="form__row">
         <label>金額（元）<input name="amount" inputmode="decimal" value="{{ f.get('amount', '') }}" required></label>
-        <label>股利來源代號（選填）<input name="symbol" value="{{ f.get('symbol', '') }}" placeholder="0050"></label>
+        <label>股利來源代號（選填）<input name="symbol" value="{{ f.get('symbol', '') }}" placeholder="例如 2330、0050"></label>
       </div>
       <label>券商帳戶<select name="broker">{% for broker in brokers %}<option value="{{ broker.key }}" {{ 'selected' if f.get('broker', default_broker) == broker.key else '' }}>{{ '未指定' if broker.key == 'conservative' else broker.name }}</option>{% endfor %}</select></label>
       <label>備註（選填）<input name="note" maxlength="500" value="{{ f.get('note', '') }}"></label>
@@ -202,7 +210,7 @@
     <form method="post" action="/holdings/trade" class="form">
       <div class="form__row">
         <label>成交日<input name="day" type="date" value="{{ t.get('day', today_iso) }}" max="{{ today_iso }}" required></label>
-        <label>代號<input name="symbol" value="{{ t.get('symbol', '0050') }}" required></label>
+        <label>代號（個股或 ETF）<input name="symbol" value="{{ t.get('symbol', '') }}" placeholder="例如 2330" required></label>
         <label>買賣<select name="side"><option value="BUY" {{ 'selected' if t.get('side', 'BUY') == 'BUY' else '' }}>買進</option><option value="SELL" {{ 'selected' if t.get('side') == 'SELL' else '' }}>賣出</option></select></label>
       </div>
       <div class="form__row">
@@ -219,6 +227,7 @@
     </form>
   </section>
 </div>
+{% if not has_actual %}</details>{% endif %}
 
 {% if has_actual %}
 <details class="card">
@@ -251,9 +260,12 @@
 </details>
 {% endif %}
 
-<details class="card card--quiet" id="paper"{% if request.args.get('paper') %} open{% endif %}>
+{# 2026-11-15 (D-046 第 9 項；介面檢查 H-1：-17.79% 的舊模擬帳戶放在「持倉」，給人看第一印象是這平台在賠錢): the old AI's
+   paper account is opened from 系統 › 舊版頁面 (/holdings?paper=1), not listed on the owner's holdings page #}
+{% if request.args.get('paper') %}
+<details class="card card--quiet" id="paper" open data-tab-default>
   <summary><h2>舊版模擬帳戶 <span class="badge">舊版盤後 AI，2026-10-04 起暫停</span>{% set pending = overview.orders|selectattr('status.value', 'equalto', 'pending')|list %}{% if pending %} <span class="badge badge--warn">待成交 {{ pending|length }} 筆</span>{% endif %}</h2></summary>
-  <p class="note" style="margin:0 0 10px">這是舊版盤後 AI 研究的模擬帳戶（10/04 起暫停，持股是當時留下的），不是你的帳戶，也不是新研究的策略；新研究策略的模擬帳戶在 研究 › 前向觀察。</p>
+  <p class="note" style="margin:0 0 10px">這是舊版盤後 AI 研究的模擬帳戶（10/04 起暫停，持股是當時留下的），不是你的帳戶，也不是新研究的策略；新研究每個規則的模擬帳戶在<a href="/research">研究總覽</a>點規則 ›「前向觀察・每一筆交易」。</p>
   <div class="kpis kpis--four">
     <div class="kpi"><div class="kpi__label">權益</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.equity) }}<small>元</small></div></div>
     <div class="kpi"><div class="kpi__label">現金</div><div class="kpi__value">{{ '{:,.0f}'.format(overview.account.cash) }}<small>元</small></div></div>
@@ -338,4 +350,5 @@
   <p class="note">模擬帳戶只作研究對照，不代表你的實際持股，也不會連接券商。舊版盤後 AI 已暫停（2026-10-04），不再自動下單；這裡可以手動送模擬單，下一個交易日用研究行情的開盤價加滑價、手續費與證交稅成交（每個交易日 13:50 的台股流程會處理，也可以按「檢查待成交委託」）。</p>
   <p class="col-help"><b>欄位說明</b>　舊版盤後 AI 的模擬帳戶（2026-10-04 起暫停，只留紀錄）。持股表：<b>平均成本</b>（含費用）、<b>現價</b>、<b>市值</b>、<b>未實現損益</b>（還沒賣、不算賺錢）、<b>送單</b>；委託表：<b>代號、買賣、股數、參考價</b>與<b>狀態</b>（待成交、已成交、取消）。</p>
 </details>
+{% endif %}
 {% endblock %}

@@ -342,11 +342,13 @@ def view(research: str | Path, start: str) -> dict[str, object]:
         frontier = [row for row in downside_table(research) if row.get("frontier")]
         frontier.sort(key=lambda row: -(row.get("final_value") or 0))
         named = {}
+        from quant_platform.research.numbers import label as number_label     # 2026-11-15: the fixed number (E-1)
+
         if frontier:                 # the frontier's richest, and its richest that falls at most 1 point more than 0050
-            named[frontier[0]["rule_hash"]] = f"#{frontier[0]['trial']}（前緣錢最多）"
+            named[frontier[0]["rule_hash"]] = f"{number_label(research, frontier[0]['rule_hash']) or '#' + str(frontier[0]['trial'])}（前緣錢最多）"
             steady = [row for row in frontier if row.get("worst_fall") and row["worst_fall"]["gap"] >= -0.01]
             if steady and steady[0]["rule_hash"] not in named:
-                named[steady[0]["rule_hash"]] = f"#{steady[0]['trial']}（跌市多跌不到 1 點裡錢最多）"
+                named[steady[0]["rule_hash"]] = f"{number_label(research, steady[0]['rule_hash']) or '#' + str(steady[0]['trial'])}（跌市多跌不到 1 點裡錢最多）"
         fwd = forward(research, start, named)
         summary = {row["rule_hash"]: row for row in StockForwardTracker(research).summary()}
         search_rows = searches(research)

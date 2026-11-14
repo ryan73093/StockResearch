@@ -140,6 +140,11 @@ def chain_summary(chained: dict[str, dict], names: dict[str, str], top: int = 5)
     return {"start": min(row["parts"][0]["from"] for row in rows), "end": max(row["parts"][-1]["to"] for row in rows), "rules": len(rows),
             "sessions": longest, "ahead": sum(gap > 0 for gap in gaps), "median": gaps[len(gaps) // 2],
             "ahead_sold": sum(gap > 0 for gap in sold), "median_sold": sold[len(sold) // 2],
+            # 2026-11-15 (介面檢查 R-3：同一頁「不輸 0050」31、608 和「贏 0050」30、553 兩組): T0 asks "not behind" (>= 0)
+            # by both moneys, of the rules with the longest run — one count, used by the tile above and this panel
+            "not_behind": sum(row["excess"] >= 0 for row in rows),
+            "not_behind_sold": sum(row.get("sold_excess", row["excess"]) >= 0 for row in rows),
+            "not_behind_both": sum(row["excess"] >= 0 and row.get("sold_excess", row["excess"]) >= 0 for row in rows),
             "benchmark": rows[0]["benchmark_return"], "top": sorted(rows, key=lambda row: -row["excess"])[:top]}
 
 
@@ -242,7 +247,10 @@ def charts(research: Path, start: str, overall: dict | None, ordinary: dict | No
                              {"key": "t0", "label": "一般風險（T0 候選）最好", "css": "v2", "short": "一般風險最好"}],
             wan, lambda x, full: x.strftime("%m/%d %H:%M" if full else "%m/%d"), "研究進展：回測最好的成績",
             x_key="at", step=True,
-            guides=[(line["benchmark"], f"0050 同樣的錢 {wan(line['benchmark'])}")] if line.get("benchmark") else [],
+            # 2026-11-15 (介面檢查 R-1：同一頁 978、983、990 萬三個 0050): the page's one 0050 figure (``benchmark``, the
+            # current engine's), not the last registered run's (an old engine's run could be the last)
+            guides=[(benchmark or line["benchmark"], f"0050 同樣的錢 {wan(benchmark or line['benchmark'])}")]
+            if (benchmark or line.get("benchmark")) else [],
             # an engine version fixes earlier errors and runs every rule again: the best can drop there
             marks=[(item["at"], "引擎 " + item["engine"].replace("daily-", "")[:3]) for item in line.get("engines") or []
                    if str(item.get("engine", "")).endswith(".0")])

@@ -19,8 +19,9 @@ def client(tmp_path):
     ("path", "marker"),
     [
         ("/", "資料狀態"),
-        ("/holdings", "模擬帳戶"),
-        ("/plan", "建立你的投資計畫"),
+        ("/holdings", "上線以後才會用到"),          # 2026-11-15: the pages used after going live say so
+        ("/holdings?paper=1", "模擬帳戶"),           # the old AI's paper account is opened from 系統 › 舊版頁面
+        ("/plan", "還沒有投資計畫"),
         ("/research", "研究現況"),
         ("/system", "暫停中的模組"),
         ("/system", "專案資訊"),
@@ -295,7 +296,9 @@ def test_the_forward_tab_shows_todays_after_close_orders(tmp_path):
 
     settings = Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}", scheduler_in_web=False)
     client = create_app(build_container(settings)).test_client()
-    assert "今天的單還沒算出來" in client.get("/research?tab=orders").get_data(as_text=True)
+    empty = client.get("/research?tab=orders").get_data(as_text=True)
+    # 2026-11-15: whose orders these are, and that there are none yet
+    assert "還沒有任何一天的盤後單紀錄" in empty and "研究帳戶的單，不是你的單" in empty
     today = datetime.now(TAIPEI).date().isoformat()
     folder = tmp_path / "research" / "forward" / "stocks" / "orders"
     folder.mkdir(parents=True)
@@ -342,7 +345,8 @@ def test_plan_market_and_stock_sections_are_tabs(client):
     """2026-10-15 (繼續優化): the plan's two columns, the market's side-by-side grids and the stock's factor groups were
     outside the tab set (always shown, so the page stayed long)."""
     plan = client.get("/plan").get_data(as_text=True)
-    assert "grid--main-side" not in plan and 'id="plan-form" data-tab-default' in plan
+    # 2026-11-15 (介面檢查 E-16): the form is a tab, no longer the one a visitor lands on (a click saved a plan)
+    assert "grid--main-side" not in plan and 'id="plan-form"' in plan and 'id="plan-form" data-tab-default' not in plan
     market = client.get("/market").get_data(as_text=True)
     assert market.count("data-tab=") in (0, 2)          # the grids are tabs whenever the snapshot exists
 
@@ -406,6 +410,9 @@ def test_the_home_page_shows_this_months_rolling_forward_test(client, monkeypatc
     page = client.get("/research/roles").get_data(as_text=True)
     assert "本月可用策略" in page or "還沒有試驗紀錄" in page
     monkeypatch.setattr(rolling, "latest", lambda _research: None)
+    from quant_platform.dashboard import v2
+
+    v2._READY.clear()                       # 2026-11-15: the home page reads the kept roles view (15 minutes)
     monkeypatch.setattr(rolling, "pending", lambda _research: {"cutoff": "2026-08-31", "holdout_start": None,
                                                                 "data_through": None, "graded": 0, "passed": 0,
                                                                 "errors": 0, "usable": [], "holdout": [], "models": []})

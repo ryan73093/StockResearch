@@ -43,13 +43,18 @@
           {% endif %}
         {% endfor %}
       </nav>
+      {# 2026-11-15 (介面檢查 A-1、U5：側欄 41 個連結): the 13 project documents fold under 專案資訊 — open on a project
+         page, one click away elsewhere (2026-10-17 使用者：要在 sidebar 看到專案資訊 — the entry stays in the sidebar) #}
       <nav class="sidenav sidenav--sub" aria-label="專案資訊">
         <a href="/project"{% if active_nav == 'project' %} aria-current="page"{% endif %}>{{ icon('project') }}<span>專案資訊</span></a>
-        <div class="sidegroup" role="group" aria-label="專案資訊">
-          {% for sub, text, link in project_pages %}
-          <a href="{{ link }}"{% if active_nav == 'project' and doc_key == sub %} aria-current="true"{% endif %}>{{ text }}</a>
-          {% endfor %}
-        </div>
+        <details class="sidefold"{% if active_nav == 'project' %} open{% endif %}>
+          <summary>{{ project_pages|length }} 份文件（路線圖、交易需知、決定…）</summary>
+          <div class="sidegroup" role="group" aria-label="專案資訊">
+            {% for sub, text, link in project_pages %}
+            <a href="{{ link }}"{% if active_nav == 'project' and doc_key == sub %} aria-current="true"{% endif %}>{{ text }}</a>
+            {% endfor %}
+          </div>
+        </details>
       </nav>
       <nav class="sidenav sidenav--sub" aria-label="市場與個股">
         <a href="/market"{% if active_nav == 'market' and request.path != '/market/live' %} aria-current="page"{% endif %}>{{ icon('market') }}<span>市場總覽</span></a>
@@ -81,19 +86,20 @@
       <header class="appbar">
         <a class="brand" href="/" aria-label="交易研究分析平台首頁">{{ brand_mark() }}<span>交易研究分析平台</span></a>
         <span class="session session--{{ market_session.tone }}" title="{{ market_session.detail }}"><span class="session__dot"></span><span class="session__short">{{ market_session.short }}</span></span>
-        <a class="icon-btn" href="/market" aria-label="市場總覽"{% if active_nav == 'market' %} aria-current="page"{% endif %}>{{ icon('market') }}</a>
-        <a class="icon-btn" href="/stock" aria-label="查個股"{% if active_nav == 'stock' %} aria-current="page"{% endif %}>{{ icon('search') }}</a>
-        <a class="icon-btn" href="/project" aria-label="專案資訊"{% if active_nav == 'project' %} aria-current="page"{% endif %}>{{ icon('project') }}</a>
-        <a class="icon-btn" href="/help" aria-label="使用教學">{{ icon('help') }}</a>
+        {# 2026-11-15 (介面檢查 A-1：手機頂列 5 個圖示都沒有字): a word under each #}
+        <a class="icon-btn" href="/market" aria-label="市場總覽"{% if active_nav == 'market' %} aria-current="page"{% endif %}>{{ icon('market') }}<small>市場</small></a>
+        <a class="icon-btn" href="/stock" aria-label="查個股"{% if active_nav == 'stock' %} aria-current="page"{% endif %}>{{ icon('search') }}<small>個股</small></a>
+        <a class="icon-btn" href="/project" aria-label="專案資訊"{% if active_nav == 'project' %} aria-current="page"{% endif %}>{{ icon('project') }}<small>文件</small></a>
+        <a class="icon-btn" href="/help" aria-label="使用教學"{% if active_nav == 'guide' %} aria-current="page"{% endif %}>{{ icon('help') }}<small>教學</small></a>
         <button type="button" class="icon-btn" data-theme-toggle aria-label="切換深色或淺色主題">
-          <span class="when-dark">{{ icon('sun') }}</span><span class="when-light">{{ icon('moon') }}</span>
+          <span class="when-dark">{{ icon('sun') }}</span><span class="when-light">{{ icon('moon') }}</span><small>亮暗</small>
         </button>
       </header>
       <main class="page {% block page_class %}{% endblock %}">
         {% block heading %}{% endblock %}
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% for category, message in messages %}
-            <div class="card flash"><span class="badge {{ 'badge--bad' if category == 'error' else 'badge--ok' }}">{{ '錯誤' if category == 'error' else '完成' }}</span>{{ message }}</div>
+            <div class="card flash"><span class="badge {{ 'badge--bad' if category == 'error' else ('badge--accent' if category == 'info' else 'badge--ok') }}">{{ '錯誤' if category == 'error' else ('提示' if category == 'info' else '完成') }}</span>{{ message }}</div>
           {% endfor %}
         {% endwith %}
         {# 2026-10-14 (使用者：不同區塊用 tab 分隔，不要一頁式長頁面): every page's top-level cards become tabs #}
@@ -170,6 +176,9 @@
       const show = (id) => {
         panels.forEach((panel) => { panel.hidden = panel.id !== id; });
         bar.querySelectorAll('button').forEach((button) => button.setAttribute('aria-selected', String(button.dataset.target === id)));
+        // 2026-11-15 (介面檢查 E-12：手機上分頁列不會捲到現在這個分頁，看不出自己在哪): the chosen tab in view
+        const chosen = bar.querySelector('button[aria-selected="true"]');
+        if (chosen && bar.scrollWidth > bar.clientWidth) bar.scrollLeft = Math.max(0, chosen.offsetLeft - (bar.clientWidth - chosen.offsetWidth) / 2);
       };
       const wanted = () => {
         const hash = decodeURIComponent(location.hash.slice(1));
@@ -179,6 +188,57 @@
       };
       show(wanted() || (panels.find((panel) => panel.hasAttribute('data-tab-default')) || panels[0]).id);
       window.addEventListener('hashchange', () => { const id = wanted(); if (id) show(id); });
+    });
+  })();
+  </script>
+  <script>
+  // 2026-11-15 (介面檢查 E-11：手機上一個分頁 89,282 px、約 110 個畫面): on a phone a long list of cards (a stacked table)
+  // shows 20, then 20 more at a press; the count of what is left is on the button. Wide screens keep the scrolling table.
+  (() => {
+    if (!window.matchMedia('(max-width: 767px)').matches) return;
+    const STEP = 20;
+    document.querySelectorAll('table.table--stack').forEach((table) => {
+      const rows = [...table.querySelectorAll(':scope > tbody > tr:not(.row-note)')];
+      if (rows.length <= STEP + 5) return;
+      let shown = STEP;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn more-rows';
+      const apply = () => {
+        rows.forEach((row, index) => { row.classList.toggle('row-later', index >= shown); });
+        const left = rows.length - shown;
+        button.hidden = left <= 0;
+        button.textContent = `再看 ${Math.min(STEP, left)} 個（還有 ${left.toLocaleString('zh-TW')} 個，共 ${rows.length.toLocaleString('zh-TW')} 個）`;
+      };
+      button.addEventListener('click', () => { shown += STEP; apply(); });
+      (table.closest('.table-wrap') || table).after(button);
+      apply();
+    });
+  })();
+  </script>
+  <script>
+  // 2026-11-15 (介面檢查 E-6): the values of the day under the pointer on a framed chart (v2/_chart.html)
+  (() => {
+    document.querySelectorAll('.chart-frame[data-points]').forEach((frame) => {
+      let points, labels;
+      try { points = JSON.parse(frame.dataset.points); labels = JSON.parse(frame.dataset.labels); } catch (error) { return; }
+      const plot = frame.querySelector('.chart-frame__plot'), tip = frame.querySelector('.chart-frame__tip'), cursor = frame.querySelector('.chart-frame__cursor');
+      if (!points.length || !plot || !tip) return;
+      const unit = frame.dataset.unit || '';
+      const show = (event) => {
+        const box = plot.getBoundingClientRect();
+        const part = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+        const point = points[Math.round(part * (points.length - 1))];
+        tip.innerHTML = '<b>' + point.d + '</b>' + Object.keys(labels).filter((key) => point[key] !== null && point[key] !== undefined)
+          .map((key) => '<span>' + labels[key] + ' ' + Number(point[key]).toLocaleString('zh-TW', { maximumFractionDigits: 2 }) + ' ' + unit + '</span>').join('');
+        tip.hidden = false; cursor.hidden = false;
+        cursor.style.left = (part * 100) + '%';
+        tip.style.left = part > 0.6 ? '' : 'calc(' + (part * 100) + '% + 10px)';
+        tip.style.right = part > 0.6 ? 'calc(' + ((1 - part) * 100) + '% + 10px)' : '';
+      };
+      plot.addEventListener('pointermove', show);
+      plot.addEventListener('pointerdown', show);
+      plot.addEventListener('pointerleave', () => { tip.hidden = true; cursor.hidden = true; });
     });
   })();
   </script>

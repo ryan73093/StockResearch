@@ -227,7 +227,42 @@ def correctness(research: str | Path, now: datetime | None = None) -> list[dict[
                 "how": "大搜尋第一階段用簡化的帳戶先篩：每天照比重重新配、用隔天的報酬、扣手續費、交易稅與滑價，但不管漲跌停"
                        "買不到、整股零股與每月投入的錢。每輪最好的幾個才用真正的回測引擎完整重跑。簡化帳戶會高估，所以名單、"
                        "成績與等級一律用完整回測，初篩只用來縮小範圍。"})
+    # 2026-11-15 (介面檢查 R-11：3 個 ✗ 沒寫影響什麼、誰在處理、哪天再查): each check says what a failure affects and
+    # what is done about one; a failed or stale one also says when it runs next
+    for row in out:
+        row["impact"], row["remedy"] = IMPACT.get(str(row["key"]), ("", ""))
+        row["next"] = _next_run(str(row["key"]), now)
     return out
+
+
+# key -> (what a failure affects, what is done about it). Shown on the overview and in the checks window.
+IMPACT = {
+    "leak": ("用到這個因子的規則，回測可能用了當天還不知道的資料，回測成績偏高；前向帳戶每天只讀當天以前的資料，不受影響。",
+             "查出是哪個因子、哪幾天有差異，修好資料對齊後重跑用到它的規則；修好以前，用到它的規則的回測數字當成偏高。"),
+    "trades": ("有違規委託的回測，買賣了實際上買不到或賣不掉的股票，成績不可信。", "修引擎後全部規則重跑。"),
+    "forward": ("這些帳戶某幾天的買賣和回測引擎重算的不同；它們的前向紀錄不能直接拿來判 T0。",
+                "原因都是「13:50 的收盤表和收盤後的正式資料不同」時，前向照當時看到的資料決定是對的（D-046 第 3 項）："
+                "核對要改成拿當時那張表重算，並量回測多看的那一點成交量會不會改變等級；量完以前這一項照實是紅的。"),
+    "decisions": ("沒過的那一項對應你的一個決定或一條規則，內容寫在明細。", "每一項當天處理或寫明卡在哪；連續幾天沒過會寫出天數。"),
+    "reproduce": ("抽到的規則重算的結果和登錄的不同，選手池裡可能有過期的成績。", "找出沒算進指紋的輸入，補進去後重跑過期的結果。"),
+    "screen": ("這一項只是參考：初篩分數本來就比完整回測樂觀，名單與等級不看初篩。", ""),
+}
+
+
+def _next_run(key: str, now: datetime | None = None) -> str:
+    """When the check runs next: the weekly audits on Sunday, the requirement check on the next weekday at 16:00
+    (the exchange calendar decides whether that day is a session; a holiday moves it to the next session)."""
+    from datetime import timedelta
+
+    now = now or datetime.now(TAIPEI)
+    local = now.astimezone(TAIPEI) if now.tzinfo else now
+    if key == "decisions":
+        day = local.date() if (local.weekday() < 5 and local.hour < 16) else local.date() + timedelta(days=1)
+        while day.weekday() >= 5:
+            day += timedelta(days=1)
+        return f"{day:%m/%d} 16:00（交易日）"
+    day = local.date() + timedelta(days=(6 - local.weekday()) % 7 or 7)
+    return f"{day:%m/%d}（每週日）"
 
 
 def full_search(research: str | Path) -> dict[str, object] | None:

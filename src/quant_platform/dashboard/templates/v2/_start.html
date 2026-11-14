@@ -1,0 +1,46 @@
+{# 2026-11-15 (D-046 第 9 項；使用者 11/13：我點開給 user 看，完全不知道從何介紹): the home page's first tab — one sentence,
+   the research's six steps each with one number (click to open that step's page), what changed today, the issues'
+   lights in one line. The data: dashboard/v2.py start_view (the same functions the other pages read). #}
+{% macro start_card(start, issues_head=none) %}
+<section class="card start" id="start" data-tab="從這裡開始" data-tab-default>
+  <p class="start__lead">這是我自己的<b>台股研究平台</b>：讓程式和 AI 找「只買個股」的選股規則，看能不能用同樣的錢贏過<b>全部買 0050</b>（先放 30 萬，每月 5 日再放 1 萬）。它只做研究和模擬記帳，<b>不會下單</b>。</p>
+  {% if start %}
+  <h3 class="start__h">研究怎麼走：六步，現在走到第 5 步</h3>
+  <ol class="start__steps">
+    {% for step in start.steps %}
+    <li><a class="start__step" href="{{ step.href }}">
+      <span class="start__n">{{ loop.index }}</span>
+      <span class="start__title">{{ step.title }}</span>
+      <span class="start__number"{% if step.figure %} data-figure="{{ step.figure }}" data-value="{{ step.value }}"{% endif %}>{{ step.number }}<small> {{ step.unit }}</small></span>
+      <span class="start__text">{{ step.text }}</span>
+    </a></li>
+    {% endfor %}
+  </ol>
+  <h3 class="start__h">今天的狀態<span class="muted small">　應有的最新交易日 {{ start.due[5:7]|int }}/{{ start.due[8:10]|int }}・{{ start.at[11:16] }} 整理</span></h3>
+  <div class="start__today">
+    {% for item in start.today %}
+    <a class="start__state" href="{{ item.href }}">
+      <span class="start__label">{{ item.label }}</span>
+      <span class="start__value">{% if item.ok is not none %}<span class="check__mark check__mark--{{ 'ok' if item.ok else 'bad' }}" aria-hidden="true">{{ '✓' if item.ok else '✗' }}</span> {% endif %}{{ item.value }}</span>
+      <span class="start__note">{{ item.note }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% if start.red %}
+  <ul class="reasons start__red">{% for item in start.red %}<li><span class="badge badge--bad">沒過{% if item.days and item.days > 1 %}・連續 {{ item.days }} 天{% endif %}</span> {{ item.name }}<span class="muted small">：{{ item.detail }}</span></li>{% endfor %}</ul>
+  {% endif %}
+  {% else %}
+  <p class="muted">研究的數字整理中，一分鐘後重新整理就會出現；先看<a href="/research">研究總覽</a>。</p>
+  {% endif %}
+  {% if issues_head %}
+  {% set names = {'ok': '正常', 'watch': '警示', 'alert': '告警', 'none': '沒有資料'} %}
+  {% set css = {'alert': 'badge--bad', 'watch': 'badge--warn', 'ok': 'badge--ok'} %}
+  <h3 class="start__h">市場議題<span class="muted small">　只是提醒，不改策略、不下單</span></h3>
+  <div class="start__issues">
+    {% for topic in issues_head.topics %}<a href="/issues/{{ topic.key }}"><span class="badge {{ css.get(topic.level, '') }}">{{ names[topic.level] }}</span> {{ topic.title }}</a>{% endfor %}
+    <a class="small" href="#issues">看每一項 ›</a>
+  </div>
+  {% endif %}
+  <p class="col-help"><b>怎麼介紹</b>　由上而下唸：這是什麼 → 六步（點任何一步看那一步的頁面）→ 今天資料到了沒、有沒有紅燈。要看一個規則真的買賣了什麼：到第 4 步點任何一個策略。完整的說明在<a href="/help">使用教學</a>。</p>
+</section>
+{% endmacro %}

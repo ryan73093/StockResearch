@@ -199,6 +199,7 @@ TOOL_GROUPS = (
     {
         "title": "暫停中的模組", "badge": "S8 決定去留", "badge_class": "badge--warn", "paused": True,
         "tools": (
+            ("/holdings?paper=1#paper", "舊版 AI 模擬帳戶", "舊版盤後 AI 的模擬持股，2026-10-04 起暫停"),
             ("/rl-lab", "強化學習", "PPO／DQN 研究"),
             ("/shadow-trading", "影子交易", "代理假想委託"),
             ("/promotions", "晉級審查", "人工核准與券商沙盒"),
@@ -286,12 +287,188 @@ def warm(name: str, research_dir: Path, compute) -> None:
     _READY[f"{name}|{Path(research_dir).resolve()}"] = (monotonic(), compute())
 
 
+def month_view(research_dir: Path) -> dict[str, object] | None:
+    """2026-11-15 (D-046 第 9 項): the month's list for the pages — every row with the two moneys of its forward account
+    as of now (``rolling.with_money``; the stored list has them from the nightly forward test, this reads today's)."""
+    from quant_platform.research import rolling as rolling_test
+
+    payload = rolling_test.latest(research_dir)
+    if not payload:
+        return rolling_test.pending(research_dir)
+    try:
+        accounts = ready("forward", research_dir, lambda: StockForwardTracker(research_dir).summary())
+        rows = rolling_test.with_money(payload.get("holdout") or [], accounts, str(payload["cutoff"]))
+        # the worse of the two moneys first: the order "usable" is decided by
+        rows.sort(key=lambda row: -min(row.get("ahead_kept", -1e18), row.get("ahead_sold", -1e18)))
+        payload = {**payload, "holdout": rows}
+    except Exception:  # noqa: BLE001 — the list still shows without the moneys
+        logger.exception("Month list: the forward accounts' moneys failed")
+    return rolling_test.summary(payload)
+
+
+def start_view(research_dir: Path) -> dict[str, object]:
+    """2026-11-15 (D-046 第 9 項；介面檢查 U1：打開首頁不知道這個平台在做什麼、走到哪一步): the home page's "從這裡開始" —
+    the research's six steps, each with ONE number and the page it opens, and what changed today (data, forward records,
+    the 16:00 checks, what is running). Every number is read from what the other pages show (the same functions), so
+    the home page cannot say something else."""
+    from quant_platform.research import status_report
+    from quant_platform.research.pool import pool_view
+
+    now = datetime.now(TAIPEI)
+    state = status_report.collect(research_dir, now)
+    board = ready("dashboard", research_dir, lambda: dashboard_data(research_dir)) or {}
+    funnel = (board.get("funnel") or {})
+    searched = (funnel.get("full") or {}).get("screened") or (funnel.get("total") or {}).get("candidates") or 0
+    backtested = sum((((board.get("spread") or {}).get("full") or {}).get("counts") or {}).values())
+    month = month_view(research_dir) or {}
+    pool = ready("pool:seed", research_dir, lambda: pool_view(research_dir, basis="seed"))["daily"]
+    chained = ready("chained", research_dir, lambda: StockForwardTracker(research_dir).chained(now.date()))
+    from quant_platform.research.dashboard import chain_summary
+
+    try:                          # the same count the overview's tile and panel show (dashboard.chain_summary)
+        t0 = chain_summary(chained, {}) or {}
+    except Exception:  # noqa: BLE001 — the step shows the days without the count
+        logger.exception("Start page: the chained record's count failed")
+        t0 = {}
+    chain, money = state["chain"], month.get("money") or {}
+    t0_rules = sum(1 for row in pool if str(row.get("tier") or "").startswith("T0") and "候選" not in str(row.get("tier")))
+    first = date.fromisoformat(chain["first_t0"])
+
+    def big(count: float) -> str:
+        return f"{count / 1e8:,.2f} 億" if count >= 1e8 else (f"{count / 1e4:,.0f} 萬" if count >= 1e5 else f"{count:,.0f}")
+
+    steps = [
+        {"title": "搜尋", "number": big(searched), "unit": "個設定試過",
+         "text": "程式大量試不同的選股設定（看哪些訊號、買幾檔、多久換一次），先用簡化的帳戶初篩。", "href": "/research/searches"},
+        {"title": "完整回測、分級", "number": f"{backtested:,}", "unit": "個規則完整回測",
+         "text": "初篩留下的，加上深度學習、機器學習、組合帳戶，用正式引擎從 2015-06 完整重跑（30 萬＋每月 5 日 1 萬），"
+                 "和同樣的錢全部買 0050 比，分成 T3～T0 候選。",
+         "href": "/research/pool"},
+        {"title": "每月名單", "number": f"{month.get('passed') or 0:,}", "unit": "個過門檻",
+         "text": f"每個月只用截止日（{month.get('cutoff') or '—'}）以前的資料重挑一次：{month.get('graded') or 0:,} 個裡過門檻的上名單。",
+         "href": "/research/roles#rolling"},
+        {"title": "前向帳戶", "number": (f"{money['both']:,}" if money else "—"),
+         "figure": "month-both", "value": money.get("both", ""),
+         "unit": (f"個不輸 0050（共 {money['rows']:,} 個）" if money else "還沒有紀錄"),
+         "text": f"名單上每個規則開一個新帳戶，從截止日隔天（{month.get('holdout_start') or '—'}）起每天收盤照規則記帳，之後不能改。"
+                 "「不輸」＝已拿到的錢、兩邊當天都賣掉，兩種算法都不輸。",
+         "href": "/research/roles#rolling"},
+        {"title": "串接 60 個交易日", "number": f"{chain['sessions']}／{chain['needed']}", "unit": "個交易日",
+         "figure": "chain-both", "value": t0.get("not_behind_both", ""),
+         "text": (f"連續留在每月名單上的月份串起來（{chain.get('start') or '—'} 起）。"
+                  + (f"到目前兩種算法都不輸 0050 的有 {t0['not_behind_both']:,} 個。" if t0.get("not_behind_both") is not None else "")),
+         "href": "/research#dashboard"},
+        {"title": "T0 → 你核准 → 上線", "number": f"{t0_rules:,}", "unit": "個 T0",
+         "text": (f"串接滿 60 個交易日、兩種算法都不輸 0050 才是 T0；第一次可能在 {first.month}/{first.day} 收盤後。"
+                  "T0 也要你核准才會進「今日」的建議；平台永遠不會自己下單。"),
+         "href": "/project/trading"},
+    ]
+    red = state["checks"].get("red") or []
+    running = state["flows"].get("running") or []
+    close_ok = state["close"] == state["due"]
+    forward_ok = state["forward"] == state["due"]
+    today = [
+        {"label": "收盤資料", "value": state["close"][5:].replace("-", "/") if state["close"] else "還沒有",
+         "ok": close_ok, "note": "到最新交易日" if close_ok else f"應該到 {state['due'][5:].replace('-', '/')}", "href": "/system#timing"},
+        {"label": "前向紀錄", "value": state["forward"][5:].replace("-", "/") if state["forward"] else "還沒有",
+         "ok": forward_ok, "note": "到最新交易日" if forward_ok else f"應該到 {state['due'][5:].replace('-', '/')}", "href": "/research#dashboard"},
+        {"label": "16:00 自動檢查", "value": f"{len(red)} 項沒過" if red else "全部通過", "ok": not red,
+         "note": f"{state['checks'].get('count') or 0} 項，{str(state['checks'].get('at') or '')[5:16].replace('-', '/').replace('T', ' ')}",
+         "href": "/research/checks"},
+        {"label": "在跑的研究程式", "value": f"{len(running)} 個", "ok": None,
+         "note": "、".join(str(row.get("name") or "")[:18] for row in running[:2]) or "現在沒有", "href": "/research?tab=jobs"},
+    ]
+    return {"steps": steps, "today": today, "red": [{"name": item.get("name"), "detail": str(item.get("detail") or "")[:160],
+                                                     "days": item.get("red_days")} for item in red],
+            "due": state["due"], "at": now.isoformat(timespec="minutes"), "first_t0": chain["first_t0"]}
+
+
+ORDER_ROWS = 60
+
+
+def orders_view(research_dir: Path, now: datetime, calendar, args) -> dict[str, object]:
+    """2026-11-15 (D-046 第 9 項；介面檢查 O-1、O-2、O-3、E-7): 今天的盤後單 as the page shows it.
+
+    - which day: today's report, else the last session's (a weekend or holiday, or before 13:50) — and it says which;
+    - the state in words: 休市 / 還沒到 13:50 / 計算中 / 14:30 前下單 / 今天已截止;
+    - which rules: by default the ones whose chained forward record is not behind 0050 by both moneys (the ones on the
+      way to T0); ``n`` opens any rule by its number, ``show=all`` lists every account (ORDER_ROWS a page).
+    """
+    from quant_platform.research import my_orders
+    from quant_platform.research.numbers import experiment_spec, label, spec_of, spec_of_run
+
+    today = now.date()
+    trading = calendar.is_trading_day(today)
+    report = after_close_load(research_dir, today)
+    day, stale = today, False
+    if report is None:
+        kept = [item for item in my_orders.days(research_dir) if item <= today]
+        if kept:
+            day, stale = kept[-1], True
+            report = after_close_load(research_dir, day)
+    clock = now.time()
+    if not trading:
+        state = {"badge": "今天休市", "tone": "", "text": f"今天不是交易日，沒有新的單；下一個交易日是 {calendar.next_trading_day(today):%m/%d}。"}
+    elif (stale or report is None) and clock < time(13, 50):
+        state = {"badge": "13:50 起計算", "tone": "", "text": "今天的單要等收盤後證交所的行情表（約 13:50～14:01）到了才算。"}
+    elif stale or report is None:
+        state = {"badge": "今天的還沒算出來", "tone": "badge--warn", "text": "今天的單還沒算出來：收盤表到手後約 2～4 分鐘會出現在這裡，重新整理看看。"}
+    elif not report.get("finished_at"):
+        state = {"badge": "計算中", "tone": "badge--warn", "text": ""}
+    elif clock <= time(14, 30):
+        state = {"badge": "14:30 前下單", "tone": "badge--accent", "text": ""}
+    else:
+        state = {"badge": "今天已截止（14:30）", "tone": "", "text": "盤後定價與盤後零股 14:30 收單，今天的單已經過了時間；下面是今天算出來的內容。"}
+    if stale and report is not None:
+        state["text"] += f"下面是上一個交易日（{day:%m/%d}）的單，只供對照。"
+    rules = list((report or {}).get("rules") or [])
+    chained = ready("chained", research_dir, lambda: StockForwardTracker(research_dir).chained(today)) or {}
+    longest = max((row.get("sessions") or 0 for row in chained.values()), default=0)
+    on_track = {key for key, row in chained.items() if row.get("sessions") == longest and row.get("excess", -1) >= 0
+                and row.get("sold_excess", row.get("excess", -1)) >= 0}
+    typed = (args.get("n") or "").strip().lstrip("#")
+    wanted, missing = None, ""
+    if typed:
+        wanted = experiment_spec(typed) or (spec_of(research_dir, int(typed)) or spec_of_run(research_dir, int(typed))
+                                            if typed.isdigit() else None)
+        if wanted is None:
+            missing = f"沒有編號 #{typed} 的策略。"
+        elif not any(rule.get("rule_hash") == wanted for rule in rules):
+            missing = f"{label(research_dir, wanted)} 不在這一天的盤後單裡（只有這個月名單上、只買上市股的規則會算）。"
+    show = "one" if typed and wanted and not missing else ("all" if args.get("show") == "all" else "track")
+    if show == "one":
+        picked = [rule for rule in rules if rule.get("rule_hash") == wanted]
+    elif show == "all":
+        picked = rules
+    else:
+        picked = [rule for rule in rules if rule.get("rule_hash") in on_track]
+    none_on_track = show == "track" and not picked
+    if none_on_track:             # nothing on the way to T0 (or no chained record yet): every account, said so
+        show, picked = "all", rules
+    for rule in picked:
+        row = chained.get(str(rule.get("rule_hash"))) or {}
+        rule["chain"] = {"sessions": row.get("sessions"), "excess": row.get("excess"), "sold_excess": row.get("sold_excess")} if row else None
+    if show == "track":           # the furthest ahead by the worse of the two moneys first
+        picked.sort(key=lambda rule: -min((rule["chain"] or {}).get("excess") or -9, (rule["chain"] or {}).get("sold_excess") or -9))
+    try:
+        page = max(1, int(args.get("page") or 1))
+    except ValueError:
+        page = 1
+    pages = max(1, -(-len(picked) // ORDER_ROWS))
+    page = min(page, pages)
+    return {"report": report, "day": day.isoformat(), "stale": stale, "state": state, "show": show, "typed": typed,
+            "none_on_track": none_on_track,
+            "missing": missing, "total": len(rules), "with_orders": sum(1 for rule in rules if rule.get("orders")),
+            "on_track": sum(1 for rule in rules if rule.get("rule_hash") in on_track), "longest": longest,
+            "matched": len(picked), "rules": picked[(page - 1) * ORDER_ROWS: page * ORDER_ROWS], "page": page, "pages": pages}
+
+
 def roles_view(research_dir: Path) -> dict[str, object]:
     """The strategy roles page: each role's growth, the month's list, the division of labour, the holding styles."""
     from quant_platform.research import rolling as rolling_test
     from quant_platform.research.roles import summary
 
-    rolling = rolling_test.summary(rolling_test.latest(research_dir)) or rolling_test.pending(research_dir)
+    rolling = month_view(research_dir)
     try:                          # 2026-10-20 (使用者：因子、DL、RL、ML 各負責什麼): the division of labour
         from quant_platform.research.division import diagnose
 
@@ -318,7 +495,7 @@ def ready_views(research_dir: Path) -> dict[str, object]:
             "pool:seed": lambda: pool_view(research_dir, basis="seed"), "dashboard": lambda: dashboard_data(research_dir),
             "downside": lambda: downside_table(research_dir), "forward": lambda: StockForwardTracker(research_dir).summary(),
             "status": lambda: research_status(research_dir), "scale": lambda: search_scale(research_dir),
-            "roles": lambda: roles_view(research_dir)}
+            "roles": lambda: roles_view(research_dir), "start": lambda: start_view(research_dir)}
 
 
 def dashboard_data(research_dir: Path) -> dict[str, object]:
@@ -362,14 +539,32 @@ def news_view(research_dir: Path, settings) -> dict[str, object]:
 
     ledger = UsageLedger(research_dir / "agent" / "usage.jsonl")
     now = datetime.now(UTC)
-    pair = [row for row in StockForwardTracker(research_dir).summary() if "新聞" in row["name"]]
+    # 2026-11-15 (介面檢查 E-15：新聞事件第一次開 13～16 秒): the forward accounts as the warm-up keeps them, not recomputed
+    pair = [row for row in ready("forward", research_dir, lambda: StockForwardTracker(research_dir).summary())
+            if "新聞" in row["name"]]
+    from html import unescape
+
     from quant_platform.research import market_news
 
+    def clean(text: object) -> str:
+        """2026-11-15 (介面檢查 N-1：摘要顯示 &#10;): a feed's text escaped twice — entities resolved, line breaks spaces"""
+        return " ".join(unescape(unescape(str(text or ""))).split())
+
+    headlines = [{**item, "title": clean(item.get("title")), "summary": clean(item.get("summary"))}
+                 for item in market_news.latest(research_dir / "history", days=2)[:200]]
+    scored = news_events.summary(research_dir / "history")
+    seen, flags = set(), []
+    for item in scored.get("flags") or []:          # N-2: one headline carried by two feeds (udn / UDN) is one flag
+        key = (item.get("news_day"), item.get("stock_id"), clean(item.get("title")).casefold())
+        if key not in seen:
+            seen.add(key)
+            flags.append({**item, "title": clean(item.get("title"))})
+    scored = {**scored, "flags": flags}
     return {
         # 2026-10-20 (使用者：自動每日抓取財經新聞): the latest two days' headlines
-        "headlines": market_news.latest(research_dir / "history", days=2)[:200],
+        "headlines": headlines,
         "feeds": [label for label, _url in market_news.FEEDS.values()],
-        **news_events.summary(research_dir / "history"),
+        **scored,
         "spend": {"total": ledger.month_spend(now), "total_cap": settings.llm_monthly_budget_usd,
                   "news": ledger.month_spend(now, (news_events.OPERATION,)), "news_cap": settings.news_events_monthly_budget_usd,
                   "researcher": ledger.month_spend(now, (RESEARCHER_OPERATION, "research_round", "connection_check")),
@@ -424,7 +619,42 @@ def research_optimizations(path: Path) -> list[dict[str, str]]:
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         if len(cells) == 5:
             output.append(dict(zip(("date", "family", "what", "result", "verdict"), cells, strict=True)))
+    # 2026-11-15 (介面檢查 R-7：第 4 列 10-30 排在 10-29 後面): newest first by its date; rows of a day keep their order
+    output.sort(key=lambda row: row["date"][:10], reverse=True)
     return output
+
+
+def later_notes(path: Path, after: str) -> list[dict[str, str]]:
+    """2026-11-15 (介面檢查 R-7：最佳化紀錄最新一筆是 10/30，11 月沒有): the research results' sections dated after the
+    log's newest row — measurements and diagnoses, not trials, so they have no row — by their headings, newest first."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    found = []
+    for line in lines:
+        match = re.match(r"^#{2,3}\s+(.*)$", line)
+        day = re.search(r"(20\d\d-\d\d-\d\d)", match.group(1)) if match else None
+        if day and day.group(1) > after and "移出的原文" not in match.group(1):
+            title = re.sub(rf"（{day.group(1)}）", "", match.group(1))            # "…（2026-11-02）" → "…"
+            title = re.sub(rf"（{day.group(1)}[，、]\s*", "（", title)             # "…（2026-11-02，重現性）" → "…（重現性）"
+            found.append({"date": day.group(1), "title": title.replace(day.group(1), "").strip()})
+    return sorted(found, key=lambda row: row["date"], reverse=True)
+
+
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*")
+_MD_CODE = re.compile(r"`([^`]+)`")
+
+
+def inline_md(text: str | None):
+    """2026-11-15 (介面檢查 R-7、E-10：頁面直接顯示 12 個 ** 和 164 個反引號): the two marks the research notes use, as
+    bold and code; everything else escaped."""
+    from markupsafe import Markup, escape
+
+    safe = str(escape(text or ""))
+    safe = _MD_BOLD.sub(r"<b>\1</b>", safe)
+    safe = _MD_CODE.sub(r"<code>\1</code>", safe)
+    return Markup(safe)
 
 
 def ml_view(research_dir: Path) -> dict[str, object]:
@@ -662,6 +892,56 @@ def create_v2_blueprint(dependencies) -> Blueprint:
 
     blueprint.add_app_template_global(rule_no, "rule_no")
 
+    def run_no(trial) -> dict[str, str]:
+        """2026-11-15 (介面檢查 E-1): the rule a trial belongs to, for data that only carries a run's trial id (the
+        latest run of a rule has a newer id than the rule's number): {"label": "#7958", "spec": hash} or {}."""
+        from quant_platform.research.numbers import label, spec_of_run
+
+        try:
+            research = _instance_dir(dependencies.settings.database_url) / "research"
+            spec = spec_of_run(research, int(trial))
+            return {"label": label(research, spec), "spec": spec} if spec else {}
+        except (OSError, TypeError, ValueError):
+            return {}
+
+    blueprint.add_app_template_global(run_no, "run_no")
+
+    def rule_link(spec_hash: str | None = None, trial=None, text: str = ""):
+        """"<a href=/research/rules/…>#7958 text</a>" from a rule's hash or any of its trials — the one way a page names a
+        rule (D-019: the fixed number, and it opens). Plain text when the rule is not registered."""
+        from markupsafe import Markup, escape
+
+        found = {"spec": spec_hash, "label": rule_no(spec_hash)} if spec_hash else run_no(trial)
+        words = " ".join(part for part in (found.get("label") or "", text) if part)
+        if not found.get("spec") or not found.get("label"):
+            # a trial the registry does not know keeps the number it was printed with
+            return Markup(escape(" ".join(part for part in (f"#{trial}" if trial is not None and not found.get("label") else "", words) if part)))
+        page = "research_forward" if str(found["label"]).startswith("#E") else "research_rule"
+        key = "rule_hash" if page == "research_forward" else "spec_hash"
+        return Markup('<a href="{}">{}</a>').format(url_for(f"v2.{page}", **{key: found["spec"]}), words)
+
+    blueprint.add_app_template_global(rule_link, "rule_link")
+
+    def rank_same(items, start: int = 1) -> list[dict]:
+        """2026-11-15 (介面檢查 E-8): a ranked list with the rules whose result is the same to the dollar on one row —
+        the first keeps its rank, the others are counted on it (``same``); ranks still count every rule."""
+        output: list[dict] = []
+        for index, item in enumerate(items or []):
+            value = round(float(item.get("value") or 0))
+            if output and output[-1]["_value"] == value and output[-1].get("family") == item.get("family"):
+                output[-1]["same"].append(item)
+                continue
+            output.append({**item, "rank": start + index, "same": [], "_value": value})
+        return output
+
+    blueprint.add_app_template_filter(rank_same, "rank_same")
+
+    from quant_platform.research.short_name import short as short_rule_name
+
+    # 2026-11-15 (D-046 第 9 項): {{ row.name|short }} — a rule's short name in tables; its page has the full one
+    blueprint.add_app_template_filter(short_rule_name, "short")
+    blueprint.add_app_template_filter(inline_md, "md")
+
     def rule_family(spec: dict | None, source: str = "") -> str:
         """The strategy's family (research/categories.py), for the breadcrumb 研究總覽 › family › #number."""
         from quant_platform.research.categories import classify
@@ -682,6 +962,18 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                 datetime.now(TAIPEI), dependencies.market_calendar.calendar("TW")
             ),
         }
+
+    @blueprint.app_errorhandler(404)
+    def not_found(error):
+        """2026-11-15 (介面檢查 E-14：打錯網址是英文的 404 Not Found，沒有導覽、回不去): the site's own page, in Chinese,
+        with the navigation and the ways on; JSON and the old API keep the plain answer."""
+        wants_page = request.accept_mimetypes.accept_html and not request.path.startswith(("/api/", "/static/"))
+        if not wants_page or request.path.endswith(".json"):
+            return error
+        path = request.path
+        kind = ("rule" if path.startswith(("/research/rules/", "/research/forward/", "/research/recent/")) else
+                "issue" if path.startswith("/issues/") else "stock" if path.startswith("/stock/") else "page")
+        return render_template("v2/not_found.html", active_nav="", kind=kind, path=path, **layout_context()), 404
 
     def names_for(symbols) -> dict[str, str]:
         wanted = set(symbols)
@@ -762,9 +1054,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         steps = [
             {"label": "建立投資計畫", "hint": "每月投入、薪資日、策略與券商", "href": "/plan",
              "done": investment_plan is not None},
-            {"label": "記錄入金", "hint": "目前證券帳戶的現金（含已持有 ETF 的成本）", "href": "/holdings",
+            {"label": "記錄入金", "hint": "目前證券帳戶的現金（含已持有股票的成本）", "href": "/holdings",
              "done": deposited},
-            {"label": "回報已持有的 ETF", "hint": "沒有持股可略過", "href": "/holdings", "done": bool(account.trades),
+            {"label": "回報已持有的股票或 ETF", "hint": "沒有持股可略過", "href": "/holdings", "done": bool(account.trades),
              "optional": True},
             {"label": "設定 LINE 通知", "hint": "專案資訊 › LINE 設定", "href": "/project/line", "done": line_ready,
              "optional": True},
@@ -965,20 +1257,19 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             if books.trades:
                 dividends_due = len(dependencies.dividend_calendar.account_view(books.flows, books.trades, day)["due"])
             drawdown_note = drawdown_alert(books, investment_plan.max_drawdown_tolerance)
-        growth = rolling = None
-        try:                      # 2026-10-16: the strategy roles' growth on the home page (never breaks the page)
-            from quant_platform.research.roles import summary as roles_summary
-
-            growth = roles_summary(_instance_dir(dependencies.settings.database_url) / "research")
+        growth = rolling = start = None
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        # 2026-11-15 (介面檢查 T-6：首頁每次開頁都重讀角色與滾動結果，2.5～4.8 秒): the roles page's view and the start
+        # view are kept ready by the warm-up (ready_views); the home page reads them
+        try:                      # 2026-10-16: this month's rolling forward test (with the roles' growth, one view)
+            kept_roles = ready("roles", research_dir, lambda: roles_view(research_dir))
+            growth, rolling = kept_roles.get("growth"), kept_roles.get("rolling")
         except Exception:  # noqa: BLE001
             logger.exception("Strategy roles failed")
-        try:                      # 2026-10-16: this month's rolling forward test
-            from quant_platform.research import rolling as rolling_test
-
-            research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-            rolling = rolling_test.summary(rolling_test.latest(research_dir)) or rolling_test.pending(research_dir)
+        try:                      # 2026-11-15: 從這裡開始 — the six steps and what changed today
+            start = ready("start", research_dir, lambda: start_view(research_dir))
         except Exception:  # noqa: BLE001
-            logger.exception("Rolling forward test failed")
+            logger.exception("Start view failed")
         issues_head = None
         try:                      # 2026-10-27 (使用者：在首頁的部分做一個初步警示): the issues' lights
             from quant_platform.research import issues as issue_tracker
@@ -990,6 +1281,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             "v2/today.html",
             active_nav="today",
             issues_head=issues_head,
+            start=start,
             growth=growth,
             rolling=rolling,
             dividends_due=dividends_due,
@@ -1275,6 +1567,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             forward_limit=None if request.args.get("all") else FORWARD_ROWS,
             forward_board=forward_board_load(research_dir) if tab == "forward" else None,
             after_close=after_close_load(research_dir, datetime.now(TAIPEI).date()) if tab == "orders" else None,
+            orders=(orders_view(research_dir, datetime.now(TAIPEI), dependencies.market_calendar.calendar("TW"), request.args)
+                    if tab == "orders" else None),
             hypotheses=hypothesis_items(research_dir) if tab == "hypothesis" else None,
             research_tab=tab, jobs=jobs, factor_report=latest_factor_strength(research_dir / "factors"), status=status,
             factor_rows=factor_table(latest_factor_strength(research_dir / "factors")) if tab == "factors" else [],
@@ -1292,8 +1586,16 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             forward_map={row["rule_hash"]: row for row in overview["forward_stocks"]} if overview else {},
             conclusions=research_conclusions(_project_root() / DOCS["research_method"][1]) if tab == "overview" else [],
             optimizations=research_optimizations(_project_root() / DOCS["research_results"][1]) if tab == "overview" else [],
+            current_engine=__import__("quant_platform.research.daily", fromlist=["ENGINE_VERSION"]).ENGINE_VERSION,
+            later_notes=(later_notes(_project_root() / DOCS["research_results"][1],
+                                     max((row["date"][:10] for row in research_optimizations(
+                                         _project_root() / DOCS["research_results"][1])), default="9999"))
+                         if tab == "overview" else []),
+            # 2026-11-15 (介面檢查 R-9：前 5 筆都是每小時一次、「這次編碼 0、刪除 0」的知識庫索引): a run that changed
+            # nothing is not news; it stays on 執行中的程式
             recent_jobs=[job for job in jobs if job.get("status") != "running"
-                         and not str(job.get("command") or "").startswith("scheduler")][:6],
+                         and not str(job.get("command") or "").startswith("scheduler")
+                         and not str(job.get("name") or "").startswith("研究知識庫：")][:6],
             round_view=round_view,
             legacy=challenger_view(latest_challenger(research_dir / "legacy")),
             ranking=ranking,
@@ -1320,6 +1622,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                                daily_matched=len(matched), picked=picked, pool_rows=POOL_ROWS,
                                distinct=len(merge_same(view["daily"])) if any(picked.values()) else len(matched),
                                research_tab="pool", jobs=JobLog(research_dir).jobs(), counts=basis_counts(research_dir),
+                               # 2026-11-15 (介面檢查 PL-1：8,233、8,161、8,159 三個「規則數」沒寫各算什麼)
+                               rule_counts={"all": len(view["daily"]), "with_0050": sum(1 for row in view["daily"] if row.get("uses_0050")),
+                                            "full_track": (ready("dashboard", research_dir, lambda: dashboard_data(research_dir)) or {}).get("rules"),
+                                            "graded": (month_view(research_dir) or {}).get("graded")},
                                generated=datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M"))
 
     @blueprint.get("/research/pool.json")
@@ -1365,7 +1671,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         from quant_platform.research.eras import analyze
 
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
-        return window_or_page(render_template("v2/research_eras.html", era=analyze(research_dir)), "各時期還適用嗎")
+        # 2026-11-15 (介面檢查 E-15：這個視窗要等 46.7 秒): the overview's ready view already holds this analysis
+        # (dashboard.py "eras" is eras.analyze); the window reads it instead of analysing every rule again
+        era = (ready("dashboard", research_dir, lambda: dashboard_data(research_dir)) or {}).get("eras") or analyze(research_dir)
+        return window_or_page(render_template("v2/research_eras.html", era=era), "各時期還適用嗎")
 
     @blueprint.get("/research/searches")
     def research_searches():
@@ -1472,9 +1781,17 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             if not typed:
                 return redirect(url_for("v2.research_pool"))
             number = int(typed)
-        spec = spec_of(_instance_dir(dependencies.settings.database_url) / "research", number)
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        spec = spec_of(research_dir, number)
         if spec is None:
-            flash(f"沒有編號 #{number} 的策略（編號是它第一次登錄的試驗編號）", "error")
+            # 2026-11-15 (介面檢查 E-1): the number of a later run of a rule opens that rule and says its fixed number
+            from quant_platform.research.numbers import label, spec_of_run
+
+            spec = spec_of_run(research_dir, number)
+            if spec is not None:
+                flash(f"#{number} 是這個策略後來某一次重跑的試驗編號；它的固定編號是 {label(research_dir, spec)}。", "info")
+        if spec is None:
+            flash(f"沒有編號 #{number} 的策略。請確認號碼，或在下面的選手池用名稱搜尋。", "error")
             return redirect(url_for("v2.research_pool"))
         return redirect(url_for("v2.research_rule", spec_hash=spec))
 

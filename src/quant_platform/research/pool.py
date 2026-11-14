@@ -743,6 +743,10 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
             "start": metrics.get("start") or report.get("start"), "end": metrics.get("end") or report.get("end"),
             "final_value": metrics.get("final_value") or strategy.get("final_value"),
             "benchmark_final_value": metrics.get("benchmark_final_value") or benchmark.get("final_value"),
+            # 2026-11-15 (介面檢查 S-2：期末是含帳面但沒標；同一個期末配不同的「比 0050」): the money counted (a gain once
+            # sold, every loss) and 0050 sold that day, when this run's engine wrote them (1.6.0 on); the page shows
+            # which money each row is and the multiple of 0050 on that same money
+            "counted_value": metrics.get("counted_value"), "benchmark_sold_value": metrics.get("benchmark_sold_value"),
             "contributed": metrics.get("contributed") or strategy.get("contributed"),
             "xirr": metrics.get("xirr"), "benchmark_xirr": metrics.get("benchmark_xirr"),
             "max_drawdown": metrics.get("max_drawdown"), "benchmark_max_drawdown": metrics.get("benchmark_max_drawdown"),
@@ -764,10 +768,13 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
     runs.sort(key=lambda run: run["created_at"], reverse=True)
     runs.sort(key=lambda run: (PERIOD_ORDER.index(run["period"]) if run["period"] in PERIOD_ORDER else 9,
                                tuple(-part for part in order.get(run["trial_id"], ()))))
-    seen_periods: set[str] = set()
+    seen_periods: dict[str, str] = {}
     for run in runs:
         run["current"] = run["period"] not in seen_periods
-        seen_periods.add(run["period"])
+        # 2026-11-15 (S-2：daily-1.6.1 一列寫「目前採用」、一列寫「舊引擎」): an earlier run on the engine in use is not
+        # an old engine's run
+        run["same_engine"] = not run["current"] and seen_periods.get(run["period"]) == str(run.get("engine"))
+        seen_periods.setdefault(run["period"], str(run.get("engine")))
     forward = StockForwardTracker(base).summary_for(spec_hash)       # 2026-10-28: its own records only (it took ~14 s)
     return {"spec_hash": spec_hash, "name": records[-1].spec_name, "spec": spec, "description": describe_rule(spec),
             # 2026-10-14: the daily-decision rules ("daily:" data) are stock rules too (the page said ETF 規則)

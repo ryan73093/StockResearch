@@ -6,7 +6,8 @@
 <header class="page-head rule-head">
   <div>
     <nav class="crumbs" aria-label="位置"><a href="/research">研究總覽</a><span aria-hidden="true">›</span>{% if family %}<a href="/research/pool?family={{ family|urlencode }}">{{ family }}</a><span aria-hidden="true">›</span>{% endif %}<span aria-current="page">{{ number or '策略' }}</span></nav>
-    <h1>{% if number %}<span class="rule-no">{{ number }}</span> {% endif %}{{ name }}</h1>{{ risk_badge(spec_hash) }}
+    {# 2026-11-15 (D-046 第 9 項；介面檢查 S-1：標題截在詞中間): the number and the short name; the full name in 規則內容 #}
+    <h1 title="{{ name }}">{% if number %}<span class="rule-no">{{ number }}</span> {% endif %}{{ name|short }}</h1>{{ risk_badge(spec_hash) }}
     {% if sub %}<p class="page-head__sub">{{ sub }}</p>{% endif %}
   </div>
   <form class="rule-jump" action="/research/no" method="get" role="search">

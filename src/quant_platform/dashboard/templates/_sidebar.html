@@ -1,6 +1,16 @@
+{# 2026-11-15 (介面檢查 SY-1：舊版 25 頁掛另一個品牌、英文標題，看不出是不再更新的頁面): every old page says what it is
+   at the top and leads back; whether they stay is S8's decision (使用者要求做的功能不刪，D-045) #}
+<style>
+  .legacy-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 9999; display: flex; gap: 12px; align-items: center; justify-content: center;
+    min-height: 34px; padding: 4px 14px; background: #5a4300; color: #fff3cf; font-size: 13.5px; line-height: 1.5; text-align: center; }
+  .legacy-banner a { color: #fff; font-weight: 700; text-decoration: underline; white-space: nowrap; }
+  body.tech-body { padding-top: 34px; }
+  body.tech-body .tech-sidebar { top: 34px; height: calc(100vh - 34px); }
+</style>
+<div class="legacy-banner" role="note"><span><b>舊版頁面，不再更新</b>：這是 2026-10 以前的舊設計留下來備查的，數字可能已經過期，也不是現在研究用的結果。</span><a href="/">回新版首頁</a></div>
 <aside id="techSidebar" class="tech-sidebar" data-auth-state="{{ 'authenticated' if current_user else 'local' }}">
   <div class="sidebar-brand-v2">
-    <a class="tech-logo" href="/"><span>Q</span><div><b>QUANT OS</b><small>研究決策平台</small></div></a>
+    <a class="tech-logo" href="/"><span>舊</span><div><b>舊版頁面</b><small>交易研究分析平台</small></div></a>
     <button id="sidebarToggle" class="sidebar-toggle-v2" type="button" aria-label="收折側邊欄" aria-expanded="true" title="收折側邊欄">‹</button>
   </div>
 

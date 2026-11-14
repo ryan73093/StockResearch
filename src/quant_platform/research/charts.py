@@ -242,7 +242,9 @@ def _histogram(bins, refs, label, dots, count_text, size, rows=()) -> str:
     width, base_height = SIZES[size]
     wide = size != "narrow"
     strip = 46 if (dots and wide) else 0
-    row_height = 22 if wide else 40          # 2026-10-30: a phone's rows were too small to read (11px text, 2px dots)
+    # 2026-10-30: a phone's rows were too small to read (11px text, 2px dots); 2026-11-15 (介面檢查 E-13：類別名稱壓在
+    # 點上): the name has a line of its own above the band
+    row_height = 22 if wide else 48
     rows_height = len(rows) * row_height + 12 if rows else 0
     height = base_height + strip + rows_height
     left, right, top, bottom = ((150 if rows else 54), 12, 30, 30) if wide else (40, 8, 40, 28)
@@ -250,11 +252,18 @@ def _histogram(bins, refs, label, dots, count_text, size, rows=()) -> str:
         return ""
     low, high = bins[0]["low"], bins[-1]["high"]
     span = math.log(high) - math.log(low)
+    peak = max(item["count"] for item in bins) or 1
+    y_ticks = ticks(0, peak, 4 if wide else 3)
+    if not wide:
+        # 2026-11-15 (介面檢查 E-13：手機上「1,000 個」只剩「000 個」): the left margin fits the longest count
+        left = max(left, int(max(text_width(count_text(value)) for value in y_ticks)) + 10)
+    elif rows:
+        # … and on the wide drawings the longest category name ("T0 共識清單・318 個" was cut at 1366 and 1920 px)
+        # (text_width is an estimate: measured in the browser the name was still cut, so a third of room on top)
+        left = max(left, int(max(text_width(f'{row["label"]}・{row["count"]:,} 個') for row in rows) * 1.3) + 14)
 
     def sx(value: float) -> float:
         return left + (math.log(max(value, low)) - math.log(low)) / span * (width - left - right)
-    peak = max(item["count"] for item in bins) or 1
-    y_ticks = ticks(0, peak, 4 if wide else 3)
     ceiling = max(peak, y_ticks[-1]) * 1.06
 
     def sy(value: float) -> float:
@@ -266,7 +275,10 @@ def _histogram(bins, refs, label, dots, count_text, size, rows=()) -> str:
     axis_y = sy(0)
     for value in money_ticks(low, high)[:: (1 if wide else 2)]:
         text = f"{value / 10000:g} 億" if value >= 10000 else f"{value:,.0f} 萬"
-        parts.append(f'<text x="{sx(value):.1f}" y="{axis_y + 16:.1f}" text-anchor="middle">{escape(text)}</text>')
+        # 2026-11-15 (E-13：右邊的「1,000 萬」切一半): a label that would cross an edge is anchored to it
+        half, x = text_width(text) / 2, sx(value)
+        anchor, x = ("end", width - 2) if x + half > width - 2 else (("start", 2) if x - half < 2 else ("middle", x))
+        parts.append(f'<text x="{x:.1f}" y="{axis_y + 16:.1f}" text-anchor="{anchor}">{escape(text)}</text>')
     for item in bins:
         x0, x1 = sx(item["low"]) + 1, sx(item["high"]) - 1
         if item["count"]:
@@ -283,6 +295,12 @@ def _histogram(bins, refs, label, dots, count_text, size, rows=()) -> str:
             anchor = "start" if number else "end"           # two lines close together: the labels to either side
         else:
             anchor = "end" if x > width - right - 90 else ("start" if number else "middle")
+        # 2026-11-15 (介面檢查 E-13): whatever side was chosen, a label that would leave the drawing goes to the other
+        reach = text_width(ref["label"]) + 4
+        if anchor == "start" and x + reach > width - 2:
+            anchor = "end"
+        elif anchor == "end" and x - reach < 2:
+            anchor = "start"
         parts.append(f'<text class="lbl" x="{x + (4 if anchor == "start" else -4 if anchor == "end" else 0):.1f}" '
                      f'y="{top - 8 - (14 if number and not wide else 0)}" text-anchor="{anchor}">{escape(ref["label"])}</text>')
     if strip:
@@ -294,7 +312,7 @@ def _histogram(bins, refs, label, dots, count_text, size, rows=()) -> str:
     first = base_height + strip + 6
     for number, row in enumerate(rows):
         y0 = first + number * row_height
-        band_top, band_bottom = (y0 + 4, y0 + row_height - 4) if wide else (y0 + 18, y0 + row_height - 3)
+        band_top, band_bottom = (y0 + 4, y0 + row_height - 4) if wide else (y0 + 26, y0 + row_height - 3)
         data = "".join(f' data-{name}="{escape(str(value))}"' for name, value in (row.get("data") or {}).items())
         parts.append(f'<g class="frow"{data} tabindex="0" role="button" aria-label="{escape(row["title"])}">'
                      f'<title>{escape(row["title"])}</title>'

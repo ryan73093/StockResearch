@@ -208,7 +208,7 @@ def test_changing_the_plan_shows_the_changes_before_saving(container):
 
 def test_plan_page_saves_and_shows_errors(container):
     client = create_app(container).test_client()
-    assert "建立你的投資計畫" in client.get("/plan").get_data(as_text=True)
+    assert "還沒有投資計畫" in client.get("/plan").get_data(as_text=True)
 
     bad = client.post("/plan", data={**FORM, "salary_day": "32"})
     assert bad.status_code == 400 and "沒有儲存" in bad.get_data(as_text=True)

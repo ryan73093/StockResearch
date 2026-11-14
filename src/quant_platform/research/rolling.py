@@ -361,12 +361,34 @@ def from_records(records: list[dict], rows: list[dict], cutoff: date) -> tuple[l
     return output, missing
 
 
+def with_money(rows: list[dict], accounts: list[dict], cutoff: str) -> list[dict]:
+    """2026-11-15 (D-046 第 9 項；介面檢查 T-2：首頁用帳面判「贏 0050」，研究總覽用已拿到的錢，同一件事兩個數字): each row of
+    the month's forward test with the two moneys T0 is judged by, from the rule's forward account opened after the
+    cutoff (``StockForwardTracker.summary()``): ``ahead_kept`` — 已拿到的錢 (a gain once sold, every loss) against the
+    same money in 0050 sold today; ``ahead_sold`` — both sold today. ``usable`` is then "not behind 0050 by both", the
+    same rule as T0 (trading_rules §7); a row with no account yet keeps the value it had (the month's first evening)."""
+    by_rule = {str(row.get("rule_hash")): row for row in accounts
+               if not row.get("stopped") and str(row.get("since") or "") > cutoff and row.get("kept") and row.get("sell_all")}
+    output = []
+    for row in rows:
+        account = by_rule.get(str(row.get("rule_hash")))
+        if account is None:
+            output.append(row)
+            continue
+        kept_ahead, sold_ahead = float(account["kept"]["ahead"]), float(account["sell_all"]["ahead"])
+        output.append({**row, "ahead_kept": round(kept_ahead, 0), "ahead_sold": round(sold_ahead, 0),
+                       "book_usable": row.get("book_usable", row.get("usable")),
+                       "money_date": account.get("date"), "usable": kept_ahead >= 0 and sold_ahead >= 0})
+    return output
+
+
 def _universe(row: dict) -> str:
     spec = row["spec"] if isinstance(row["spec"], dict) else json.loads(row["spec"])
     return "twse" if spec.get("kind") == "blend" else spec.get("universe", "twse")
 
 
-def refresh(research: str | Path, load, costs, cutoff: date | None = None, records: list[dict] | None = None) -> dict | None:
+def refresh(research: str | Path, load, costs, cutoff: date | None = None, records: list[dict] | None = None,
+            accounts: list[dict] | None = None) -> dict | None:
     """The holdout of the month's passing rules again, through the latest session: 2026-10-21, read from the forward
     accounts' records where they are up to date (``from_records``); only the others are run (``load(universe)`` →
     data, fp; 2026-10-28: each on its own universe's stocks)."""
@@ -382,6 +404,8 @@ def refresh(research: str | Path, load, costs, cutoff: date | None = None, recor
         data, fp = load(universe)
         rows += holdout(data, fp, [row for row in missing if _universe(row) == universe], month_cutoff, costs)
         through = fp.sessions[-1].isoformat()
+    if accounts:                  # 2026-11-15: the two moneys of each account, and "usable" by both (with_money)
+        rows = with_money(rows, accounts, month_cutoff.isoformat())
     rows.sort(key=lambda item: -(item["excess"] or -9))
     payload["holdout"] = rows
     payload["holdout_run"] = len(missing)
@@ -407,7 +431,12 @@ def summary(payload: dict | None) -> dict | None:
         return None
     graded = payload.get("graded") or []
     hold = payload.get("holdout") or []
+    money = [row for row in hold if row.get("ahead_kept") is not None]
     return {"cutoff": payload["cutoff"], "holdout_start": hold[0]["start"] if hold else None,
             "data_through": payload.get("data_through"), "graded": len(graded),
             "passed": sum(1 for row in graded if row.get("passed")), "errors": sum(1 for row in graded if row.get("error")),
-            "usable": [row for row in hold if row["usable"]], "holdout": hold, "models": payload.get("models") or []}
+            "usable": [row for row in hold if row["usable"]], "holdout": hold, "models": payload.get("models") or [],
+            # 2026-11-15: how many are not behind 0050 by each money (None until the accounts' moneys are read)
+            "money": {"rows": len(money), "kept": sum(1 for row in money if row["ahead_kept"] >= 0),
+                      "sold": sum(1 for row in money if row["ahead_sold"] >= 0),
+                      "both": sum(1 for row in money if row["ahead_kept"] >= 0 and row["ahead_sold"] >= 0)} if money else None}

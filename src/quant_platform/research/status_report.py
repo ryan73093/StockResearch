@@ -130,6 +130,8 @@ def lists(research: Path, today: date) -> dict[str, object]:
         months.append({"cutoff": payload.get("cutoff") or path.stem, "graded": len(graded),
                        "passed": {str(row.get("rule_hash")) for row in graded if row.get("passed")},
                        "usable": sum(1 for row in payload.get("holdout") or [] if row.get("usable")),
+                       # 2026-11-15: "usable" is by both moneys once the nightly forward test has written them
+                       "by_money": any(row.get("ahead_kept") is not None for row in payload.get("holdout") or []),
                        "data_through": payload.get("data_through"), "released": payload.get("released", True)})
     return {"wanted": cutoff_for(today).isoformat(), "months": months}
 
@@ -222,6 +224,8 @@ def render(state: dict[str, object]) -> str:
         latest = month["latest"]
         lines.append(f"  應為截止 {month['wanted']}；最新名單截止 {latest['cutoff']} {_mark(latest['cutoff'] == month['wanted'])}："
                      f"評 {latest['graded']:,} 個、過門檻 {latest['passed']:,} 個、當月可用 {latest['usable']:,} 個"
+                     + ("（已拿到的錢、兩邊都賣掉都不輸 0050）" if latest.get("by_money")
+                        else "（這一份還是用帳面算的；下一次 22:30 的前向測試起改成兩種錢都不輸 0050）")
                      + (f"（資料到 {latest['data_through']}）" if latest.get("data_through") else ""))
         if latest.get("released") is False:
             lines.append("  名單已評、還沒發布：等模型重訓到截止日，發布後才開前向帳戶")

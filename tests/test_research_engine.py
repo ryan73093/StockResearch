@@ -202,7 +202,7 @@ def test_research_page_lists_the_latest_baseline_reports(tmp_path):
 
     body = client.get("/research?tab=legacy").get_data(as_text=True)
     assert "定期不定額（200 日均線）" in body and "定期定額對照" in body
-    assert "全期間 XIRR" in client.get("/plan").get_data(as_text=True)
+    assert "：年化 " in client.get("/plan").get_data(as_text=True)
 
 
 def test_metrics_by_hand():

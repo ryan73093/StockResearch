@@ -111,6 +111,10 @@ def _view(record) -> dict[str, object]:
     xirr = metrics.get("xirr")
     return {"trial": record.trial_id, "spec": record.spec_hash, "name": record.spec_name, "engine": metrics.get("engine"), "tier": grade,
             "start": metrics.get("start"), "final": metrics.get("final_value"),
+            # 2026-11-15 (介面檢查 T-4：首頁「現在最好」8,219 萬是含帳面，研究總覽同一件事寫 5,991 萬): the money counted
+            # (a gain once sold, every loss) beside it — what every "best" on the site shows. ``final`` stays the
+            # value with paper gains: the history it is compared with was recorded that way
+            "counted": metrics.get("counted_value"), "bench_sold": metrics.get("benchmark_sold_value"),
             "bench_final": metrics.get("benchmark_final_value"), "contributed": metrics.get("contributed"),
             "xirr": xirr, "bench_xirr": metrics.get("benchmark_xirr"),
             "excess_full": metrics.get("full_period_excess"), "excess_recent": metrics.get("since_2020_excess"),

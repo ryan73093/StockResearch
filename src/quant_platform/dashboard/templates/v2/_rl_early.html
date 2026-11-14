@@ -1,16 +1,16 @@
 {# 2026-10-17: the early RL work (technical robots 1.x, overlays, allocators), moved from the model page to the RL page. Expects ``ml``. #}
 {% for robot in ml.tech %}
 <section class="card">
-  <div class="card__head"><h2>技術分析 RL 機器人 <span class="badge">{{ robot.version }}</span></h2><span class="muted small">{{ robot.seeds|length }} 個種子・{{ robot.trained_at }}</span></div>
+  <div class="card__head"><h2>技術分析 RL 機器人 <span class="badge">{{ robot.version }}</span></h2><span class="muted small">{{ robot.seeds|length }} 個種子・{{ (robot.trained_at or '')[:16]|replace('T', ' ') }} 訓練</span></div>
   <p class="small" style="margin:0 0 10px">只看價格與成交量（{{ robot.features|length }} 個技術因子、大盤的技術狀態、自己的部位：持有幾天、賺賠、離高點多遠），每檔股票每天收盤後自己決定「進場／待著／出場」。進場的獎勵是那檔股票隔天贏過當天平均股票多少，進出都扣成本；不看財報、籌碼、新聞或任何訓練過的因子模型。每一年的機器人只用那一年以前的資料訓練。放進規則時，引擎只買它想要的股票（前 20 名、同產業最多 3 成），什麼時候賣完全由它決定；規則的結果在選手池（名稱以「技術分析 RL 機器人」開頭）。</p>
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th>交易年</th><th>訓練到</th><th class="num">訓練獎勵（前→後）</th><th class="num">樣本外：在場時每天贏平均股票</th><th class="num">在場比例</th><th class="num">平均持有</th><th class="num">進場次數</th></tr></thead>
       <tbody>
       {% for year, item in robot.years.items() %}
-        <tr><td data-primary><strong>{{ year }}</strong></td>
+        <tr><td data-primary class="date"><strong>{{ year }}</strong></td>
             <td data-label="訓練到">{{ item.trained_until }}</td>
-            <td class="num" data-label="訓練獎勵">{{ item.training_reward_first }} → {{ item.training_reward_last }}</td>
+            <td class="num" data-label="訓練獎勵">{% if item.training_reward_first is number and item.training_reward_last is number %}{{ '{:+.3f}'.format(item.training_reward_first) }} → {{ '{:+.3f}'.format(item.training_reward_last) }}{% else %}{{ item.training_reward_first }} → {{ item.training_reward_last }}{% endif %}</td>
             <td class="num {{ 'up' if (item.excess_per_in_session or 0) > 0 else 'down' }}" data-label="在場時每天">{{ '{:+.3%}'.format(item.excess_per_in_session) if item.excess_per_in_session is not none else '—' }}</td>
             <td class="num" data-label="在場比例">{{ '{:.0%}'.format(item.share_in) if item.share_in is not none else '—' }}</td>
             <td class="num" data-label="平均持有">{{ item.average_hold if item.average_hold is not none else '—' }} 天</td>
@@ -80,7 +80,7 @@
         <thead><tr><th>年</th><th class="num">RL（回撤）</th><th class="num">訓練期最好的固定組合</th><th class="num">{{ report.families[0] }}</th><th class="num">{{ report.families[1] }}</th><th class="num">0050</th><th class="num">換組合</th></tr></thead>
         <tbody>
         {% for year, item in report.years.items() %}
-          <tr><td data-primary><strong>{{ year }}</strong></td>
+          <tr><td data-primary class="date"><strong>{{ year }}</strong></td>
               <td class="num" data-label="RL">{{ '{:+.0%}'.format(item.rl.growth) }}<span class="muted small">（{{ '{:.0%}'.format(item.rl.max_drawdown) }}）</span></td>
               <td class="num" data-label="訓練期最好的固定">{{ '{:+.0%}'.format(item.best_fixed_result.growth) }}<span class="muted small">（{% for value in item.best_fixed %}{{ '{:.0%}'.format(value) }}{% if not loop.last %}／{% endif %}{% endfor %}）</span></td>
               <td class="num" data-label="{{ report.families[0] }}">{{ '{:+.0%}'.format(item.model.growth) }}</td>
@@ -123,7 +123,7 @@
         <thead><tr><th>年</th><th class="num">RL（回撤）</th><th class="num">規則</th><th class="num">一半 0050</th><th class="num">0050</th><th class="num">平均個股・換部位</th></tr></thead>
         <tbody>
         {% for year, item in report.years.items() %}
-          <tr><td data-primary><strong>{{ year }}</strong></td>
+          <tr><td data-primary class="date"><strong>{{ year }}</strong></td>
               <td class="num" data-label="RL">{{ '{:+.0%}'.format(item.rl.growth) }}<span class="muted small">（{{ '{:.0%}'.format(item.rl.max_drawdown) }}）</span></td>
               <td class="num" data-label="規則">{{ '{:+.0%}'.format(item.rule.growth) }}<span class="muted small">（{{ '{:.0%}'.format(item.rule.max_drawdown) }}）</span></td>
               <td class="num" data-label="一半 0050">{{ '{:+.0%}'.format(item.half.growth) }}</td>
