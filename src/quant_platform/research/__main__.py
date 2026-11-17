@@ -2063,6 +2063,9 @@ def main() -> int:
             hit = {item["rule_hash"] for item in tracker.tracked()
                    if not item.get("stopped") and item.get("kind") in ("daily", "blend") and item.get("rule")
                    and reads_any(item["rule"], names)}
+            if args.restart_unexplained:        # 2026-11-17: with --restart-unexplained, only those of them the latest
+                audits = sorted((RESEARCH / "forward" / "stocks").glob("audit-*.json"))    # audit cannot explain
+                hit &= unexplained(json.loads(audits[-1].read_text(encoding="utf-8"))["rows"] if audits else [])
             restarted = tracker.restart_accounts(hit, args.reason or f"讀 {'、'.join(names)}，從起算日重新記錄")
             print(f"讀 {'、'.join(names)}、紀錄與決定封存後從起算日重新記錄的帳戶 {len(restarted)} 個", flush=True)
         if args.restart_audited:                # 2026-10-27: the accounts the latest forward audit found differing
@@ -2071,7 +2074,7 @@ def main() -> int:
             hit = {row["rule_hash"] for row in found["rows"] if row.get("differed")}
             names = tracker.restart_accounts(hit, args.reason or "前向核對和重算不一樣，從起算日重新記錄")
             print(f"前向核對（{audits[-1].name if audits else '沒有'}）不一樣、從起算日重新記錄的帳戶 {len(names)} 個", flush=True)
-        if args.restart_unexplained:            # 2026-11-08: differing from the rebuild with no 13:50-table reason, or out of step
+        if args.restart_unexplained and not args.restart_uses:   # 2026-11-08: differing from the rebuild with no 13:50-table reason, or out of step
             audits = sorted((RESEARCH / "forward" / "stocks").glob("audit-*.json"))
             found = json.loads(audits[-1].read_text(encoding="utf-8")) if audits else {"rows": []}
             hit = unexplained(found["rows"])

@@ -120,10 +120,6 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
         DailyRule,
         FactorPanel,
         Industries,
-        account_parking,
-        daily_rankings,
-        daily_weights,
-        exposure_schedule,
         load_industries,
         market_closes,
         simulate_daily,
@@ -158,6 +154,7 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
     from quant_platform.research.decisions import DecisionStore
     from quant_platform.research.decisions import key as decision_key
     from quant_platform.research.decisions import rankings as kept_rankings
+    from quant_platform.research.decisions import sizing as kept_sizing
 
     store = DecisionStore(research)                 # 2026-10-15: decisions already taken stay as they were made
     bench = simulate_daily(data, None, costs, first, last, plan=plan)
@@ -178,9 +175,10 @@ def build(research: Path, history: Path, today: date, costs=None) -> dict[str, o
             else:
                 rule = DailyRule.model_validate(item["rule"])
                 ranks = kept_rankings(fp, rule, first, last, store, decision_key(item["rule_hash"], first), last)
+                weights, parked, exposure = kept_sizing(data, fp, rule, costs, ranks, first, store,
+                                                        decision_key(item["rule_hash"], first), last)     # 2026-11-17
                 run = simulate_daily(data, rule, costs, first, last, ranks, plan, ledger=ledger,
-                                     weights=daily_weights(fp, rule, ranks), parked=account_parking(data, fp, rule, costs),
-                                     exposure=exposure_schedule(data, fp, rule, costs))
+                                     weights=weights, parked=parked, exposure=exposure)
         except Exception as error:                    # one bad item does not stop the board
             rows.append({"rule_hash": item["rule_hash"], "name": item["name"], "error": str(error)[:200]})
             continue

@@ -13,6 +13,15 @@ One file, ``forward/stocks/decisions.json``: ``{key: {"through": day, "days": {d
 (``pending``, engine 1.5.0: the orders the market refused that are still to be tried — the sells and the number of
 places to fill; entries written before 1.5.0 have ``again_after``: the next session decides again in full), the key
 being the account (rule hash and start day, a blend's sleeve numbered after ``#``).
+
+2026-11-17: the lists were kept and the sizes were not. Each replay computed again, with the day's data, how much of
+the account every pick takes (``daily_weights``: 1 / volatility, or 1 / the risk model's drop chance — a score read
+from the networks for every session after the kept ones), how much of it stays invested (``exposure_schedule``) and
+the sessions it parks (``account_parking``). On 11-16 and 11-17 the replays sized 11-10, 11-11 and 11-16 differently
+from the records of those days: 293 accounts held one to five shares more or fewer than the day before plus the
+day's trades (the 16:00 check 「前向帳戶對帳 0 問題」). ``sizing`` keeps the three with the lists — an entry's
+``sizing``: ``{"through": day, "weights": {day: {symbol: share}}, "exposure": {day: share}, "parked": [days]}`` —
+and a later replay takes the days up to ``through`` as they are.
 """
 
 from __future__ import annotations
@@ -99,7 +108,24 @@ class DecisionStore:
                 reasons[stamp] = dict(notes)
         self._kept[name] = {"through": through.isoformat(),
                             "days": {day.isoformat(): list(symbols) for day, symbols in sorted(ranks.items()) if day <= through},
-                            "pending": pending or None, "why": reasons}
+                            "pending": pending or None, "why": reasons,
+                            **({"sizing": entry["sizing"]} if entry and entry.get("sizing") else {})}
+
+    def sized(self, name: str) -> dict | None:
+        """The sizes kept for an account (module text, 2026-11-17), or None."""
+        entry = self._kept.get(name) or self._data.get(name) or {}
+        return entry.get("sizing") or None
+
+    def keep_sizing(self, name: str, kept: dict) -> None:
+        """Write the sizes down with the account's decisions (an account with no decisions kept has none to go with;
+        never moving an earlier ``through`` back)."""
+        entry = self._kept.get(name) or self._data.get(name)
+        if not entry:
+            return
+        old = entry.get("sizing")
+        if old and old["through"] > kept["through"]:
+            return
+        self._kept[name] = {**entry, "sizing": kept}
 
     def _locked(self):
         """2026-10-30: the file read, merged and written by one process at a time — two writers (the after-close orders
@@ -181,3 +207,40 @@ def rankings(fp, rule, start: date, end: date, store: DecisionStore | None = Non
         pending = trace["pending"].get(resume) if resume is not None else trace["pending_after"]
         store.keep(name, ranks, pending, through, trace.get("why"))
     return ranks
+
+
+def sizing(data, fp, rule, costs, ranks: dict[date, list[str]], start: date, store: DecisionStore | None = None,
+           name: str | None = None, through: date | None = None) -> tuple[dict | None, set | None, dict | None]:
+    """(weights, parked, exposure) for ``simulate_daily``: the days kept under ``name`` as they were sized, the later
+    ones as the data says now — and, up to ``through``, kept (module text, 2026-11-17). Without a store: computed."""
+    from quant_platform.research.daily import account_parking, daily_weights, exposure_schedule
+
+    weights = daily_weights(fp, rule, ranks)
+    parked = account_parking(data, fp, rule, costs)
+    exposure = exposure_schedule(data, fp, rule, costs)
+    if store is None or name is None:
+        return weights, parked, exposure
+    kept = store.sized(name)
+    if kept:
+        last = date.fromisoformat(kept["through"])
+        if weights is not None:
+            weights = dict(weights)                # the computed ones may be shared between accounts: never changed
+            for stamp, shares in (kept.get("weights") or {}).items():
+                day = date.fromisoformat(stamp)
+                if day in ranks and set(shares) == set(ranks[day]):
+                    weights[day] = dict(shares)
+        if exposure is not None:
+            exposure = {**exposure,
+                        **{date.fromisoformat(stamp): share for stamp, share in (kept.get("exposure") or {}).items()}}
+        if parked is not None:
+            parked = ({day for day in parked if not start <= day <= last}
+                      | {date.fromisoformat(stamp) for stamp in kept.get("parked") or []})
+    if through is not None:
+        store.keep_sizing(name, {
+            "through": through.isoformat(),
+            "weights": {day.isoformat(): {symbol: float(share) for symbol, share in shares.items()}
+                        for day, shares in sorted((weights or {}).items()) if start <= day <= through},
+            "exposure": {day.isoformat(): float(share) for day, share in sorted((exposure or {}).items())
+                         if start <= day <= through},
+            "parked": sorted(day.isoformat() for day in parked or () if start <= day <= through)})
+    return weights, parked, exposure

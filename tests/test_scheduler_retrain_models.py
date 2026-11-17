@@ -51,6 +51,23 @@ def test_the_monthly_deep_model_refits_only_the_new_month_once(tmp_path, monkeyp
     assert calls == []                                                   # October's month already fitted
     runner.retrain_models(container, datetime(2026, 11, 2, 22, 45, tzinfo=ZoneInfo("Asia/Taipei")))
     assert calls == [(version, 2026, [11])]                              # November: that month only
+    # 2026-11-17: the month fitted is the next session's — on October's last session November is fitted that night, so
+    # that 11/2 is decided at 13:50 with November's networks (it was decided with October's, then scored again)
+    calls.clear()
+    runner.retrain_models(container, datetime(2026, 10, 30, 22, 45, tzinfo=ZoneInfo("Asia/Taipei")))
+    assert calls == [(version, 2026, [11])]
+    (folder / "meta.json").write_text(json.dumps({"trained_at": "2026-10-30T15:57:00+00:00", "networks_for": "2026-11"}),
+                                      encoding="utf-8")
+    calls.clear()
+    runner.retrain_models(container, datetime(2026, 11, 2, 22, 45, tzinfo=ZoneInfo("Asia/Taipei")))
+    runner.retrain_models(container, datetime(2026, 11, 27, 22, 45, tzinfo=ZoneInfo("Asia/Taipei")))
+    assert calls == []                                                   # November's are there, all month
+    runner.retrain_models(container, datetime(2026, 11, 30, 22, 45, tzinfo=ZoneInfo("Asia/Taipei")))
+    assert calls == [(version, 2026, [12])]
+    (folder / "meta.json").write_text(json.dumps({"networks_for": "2026-12"}), encoding="utf-8")
+    calls.clear()
+    runner.retrain_models(container, datetime(2026, 12, 31, 22, 45, tzinfo=ZoneInfo("Asia/Taipei")))
+    assert calls == [(version, 2027, [1])]                               # the year turning: January's, under 2027
 
 
 def test_one_models_failure_does_not_stop_the_others_and_the_run_still_fails(tmp_path, monkeypatch):
