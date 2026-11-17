@@ -1,5 +1,5 @@
 {% from "v2/_icons.html" import icon, brand_mark %}
-{% from "v2/_nav.html" import research_pages, research_groups, system_pages, project_pages %}
+{% from "v2/_nav.html" import nav_sections, phone_bar, system_pages, project_pages %}
 <!doctype html>
 <html lang="zh-Hant" data-theme="{{ theme }}">
 <head>
@@ -12,41 +12,23 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css', v=asset_version) }}">
 </head>
 <body>
-  {% set nav_items = [
-    ('today', '/', '今日'),
-    ('holdings', '/holdings', '持倉'),
-    ('plan', '/plan', '計畫'),
-    ('research', '/research', '研究'),
-    ('issues', '/issues', '議題'),
-    ('system', '/system', '系統'),
-  ] %}
+  {# 2026-11-17 (D-047): what this page is known by in the navigation (v2/_nav.html nav_sections) #}
+  {% set nav_key = ('r:' ~ (research_tab or 'overview')) if active_nav == 'research' else ('live' if request.path == '/market/live' else active_nav) %}
   <div class="app">
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="交易研究分析平台首頁">{{ brand_mark() }}<span class="brand__text"><strong>交易研究分析平台</strong><small>台股</small></span></a>
       {% set running_jobs = (jobs or [])|selectattr('status', 'equalto', 'running')|list|length %}
-      <nav class="sidenav" aria-label="主要功能">
-        {% for key, href, label in nav_items %}
-          <a href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span></a>
-          {% if key == 'research' %}
-          <div class="sidegroup" role="group" aria-label="研究">
-            {% for caption, keys in research_groups %}
-            <span class="sidegroup__caption">{{ caption }}</span>
-            {% for sub, text, link in research_pages if sub in keys %}
-            <a href="{{ link }}"{% if active_nav == 'research' and research_tab == sub %} aria-current="true"{% endif %}>{{ text }}{% if sub == 'jobs' and running_jobs %} <span class="badge badge--warn">{{ running_jobs }}</span>{% endif %}</a>
-            {% endfor %}
-            {% endfor %}
-          </div>
-          {% elif key == 'system' %}
-          <div class="sidegroup" role="group" aria-label="系統">
-            {% for sub, text, link in system_pages %}<a href="{{ link }}">{{ text }}</a>{% endfor %}
-          </div>
-          {% endif %}
-        {% endfor %}
-      </nav>
-      {# 2026-11-15 (介面檢查 A-1、U5：側欄 41 個連結): the 13 project documents fold under 專案資訊 — open on a project
-         page, one click away elsewhere (2026-10-17 使用者：要在 sidebar 看到專案資訊 — the entry stays in the sidebar) #}
-      <nav class="sidenav sidenav--sub" aria-label="專案資訊">
-        <a href="/project"{% if active_nav == 'project' %} aria-current="page"{% endif %}>{{ icon('project') }}<span>專案資訊</span></a>
+      <nav class="sidenav sidenav--sorted" aria-label="主要功能">
+        {% for caption, items in nav_sections %}
+        {% if caption %}<span class="navcap">{{ caption }}</span>{% endif %}
+        {% for key, label, href, mark, _note in items %}
+        <a class="navlink{{ ' navlink--rail' if mark else '' }}" href="{{ href }}"{% if nav_key == key %} aria-current="page"{% endif %}>{% if mark %}{{ icon(mark) }}{% endif %}{% if key == 'r:orders' %}<span>{{ label.split('（')[0] }}</span><small class="navlink__more">（{{ label.split('（', 1)[1] }}</small>{% else %}<span>{{ label }}</span>{% endif %}{% if key == 'r:jobs' and running_jobs %} <span class="badge badge--warn">{{ running_jobs }}</span>{% endif %}</a>
+        {% if key == 'system' %}
+        <div class="sidegroup" role="group" aria-label="系統">
+          {% for sub, text, link in system_pages %}<a href="{{ link }}">{{ text }}</a>{% endfor %}
+        </div>
+        {% elif key == 'project' %}
+        {# 2026-11-15: the 13 project documents fold under 專案資訊 (2026-10-17 使用者：要在 sidebar 看到專案資訊) #}
         <details class="sidefold"{% if active_nav == 'project' %} open{% endif %}>
           <summary>{{ project_pages|length }} 份文件（路線圖、交易需知、決定…）</summary>
           <div class="sidegroup" role="group" aria-label="專案資訊">
@@ -55,12 +37,11 @@
             {% endfor %}
           </div>
         </details>
+        {% endif %}
+        {% endfor %}
+        {% endfor %}
+        <a class="navlink navlink--rail navlink--menu" href="/menu"{% if nav_key == 'menu' %} aria-current="page"{% endif %}>{{ icon('menu') }}<span>全部</span></a>
       </nav>
-      <nav class="sidenav sidenav--sub" aria-label="市場與個股">
-        <a href="/market"{% if active_nav == 'market' and request.path != '/market/live' %} aria-current="page"{% endif %}>{{ icon('market') }}<span>市場總覽</span></a>
-        <a href="/market/live"{% if request.path == '/market/live' %} aria-current="page"{% endif %}>{{ icon('market') }}<span>盤中資金流</span></a>
-      </nav>
-      <a class="sidesearch-link" href="/stock"{% if active_nav == 'stock' %} aria-current="page"{% endif %}>{{ icon('search') }}<span>查個股</span></a>
       <form class="sidesearch" action="/stock" method="get" role="search">
         <label class="visually-hidden" for="sidesearch">查個股</label>
         {{ icon('search') }}<input id="sidesearch" name="q" type="search" placeholder="查個股（代號或名稱）" autocomplete="off">
@@ -71,7 +52,6 @@
           <span class="session__short">{{ market_session.short }}</span>
           <span class="session__text">台股{{ market_session.label }}<small>{{ market_session.detail }}</small></span>
         </div>
-        <a class="theme-toggle" href="/help"{% if active_nav == 'guide' %} aria-current="page"{% endif %}>{{ icon('help') }}<span class="theme-toggle__text">使用教學</span></a>
         <button type="button" class="theme-toggle" data-theme-toggle aria-label="切換深色或淺色主題">
           <span class="when-dark">{{ icon('sun') }}<span class="theme-toggle__text">切換淺色</span></span>
           <span class="when-light">{{ icon('moon') }}<span class="theme-toggle__text">切換深色</span></span>
@@ -108,8 +88,8 @@
     </div>
 
     <nav class="tabbar" aria-label="主要功能">
-      {% for key, href, label in nav_items %}
-        <a href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>{{ icon(key) }}<span>{{ label }}</span></a>
+      {% for key, label, href, mark in phone_bar %}
+        <a href="{{ href }}"{% if nav_key == key %} aria-current="page"{% endif %}>{{ icon(mark) }}<span>{{ label }}</span></a>
       {% endfor %}
     </nav>
   </div>

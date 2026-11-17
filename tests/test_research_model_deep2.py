@@ -403,11 +403,13 @@ def test_the_monthly_version_refits_every_month_on_labels_ended_before_it(monkey
     assert earlier and all(np.array_equal(before[day], after[day], equal_nan=True) for day in earlier)
 
 
-def test_a_month_fitted_before_it_ended_is_fitted_again_with_the_next_month(monkeypatch, tmp_path):
+def test_a_months_refit_keeps_the_scores_in_use_and_never_writes_over_them(monkeypatch, tmp_path):
     """2026-11-11: dl-2.6.0's October was fitted on 10/20, so the kept scores ended that day (the later sessions are
-    scored when read, never kept). From 11/03 the nightly November refit died on ``KeyError: '2026-10-29'`` — the
-    year's report asks for every weekly session — after writing the new networks and before saving anything: nine
-    nights, six minutes each, nothing kept. A month with a session not kept is fitted again with the new month."""
+    scored when read). From 11/03 the nightly November refit died on ``KeyError: '2026-10-29'`` after writing the new
+    networks and before saving anything. 2026-11-17: the fix of 11-11 fitted October again and wrote the whole month
+    over — the scores no longer gave the lists 115 forward accounts had decided on 10-21～10-31. Now the sessions
+    scored when read are kept first, by the networks on disk (the ones the accounts decided with), and a month's
+    refit writes only the days not kept."""
     monkeypatch.setattr(model_deep2, "EPOCHS", 1)
     monkeypatch.setattr(model_deep2, "SEEDS", (0,))
     monkeypatch.setattr(model_deep2, "LENGTH", 10)
@@ -424,22 +426,59 @@ def test_a_month_fitted_before_it_ended_is_fitted_again_with_the_next_month(monk
     monkeypatch.setattr(model_deep2, "_fit", spy)
     folder = tmp_path / "dl-2.6.0"
     _data, short = _panel(until=date(2017, 10, 20))                       # the day October was fitted
-    model.train(short, folder, years=[2017], label="deep2", version="dl-2.6.0")
+    first_meta = model.train(short, folder, years=[2017], label="deep2", version="dl-2.6.0")
+    assert first_meta["networks_for"] == "2017-10"
     before = model_deep2._load_scores(folder, short.symbols)
     assert max(before) == "2017-10-20"
-    _data, fp = _panel(until=date(2017, 12, 29))                          # November, with October's labels known
+    _data, fp = _panel(until=date(2017, 11, 10))                          # the refit runs on a November night
+    in_use = model_deep2.scores(fp, folder)                               # what a forward account read until now
     fits.clear()
     meta = model.train(fp, folder, years=[2017], label="deep2", version="dl-2.6.0", months=[11])
     after = model_deep2._load_scores(folder, fp.symbols)
-    wanted = [day.isoformat() for day in fp.sessions if day.year == 2017 and day.month in (10, 11)]
-    assert all(day in after for day in wanted)                            # October's later sessions and November
-    first = {month: next(index for index, day in enumerate(fp.sessions) if (day.year, day.month) == (2017, month))
-             for month in (10, 11)}
-    assert len(fits) == 2 and fits[0] + model.HORIZON < first[10] and fits[1] + model.HORIZON < first[11]
-    assert meta["years"]["2017"]["top20_gain"] is not None and meta["trained_at"]
-    earlier = [day for day in before if day < "2017-10-01"]
-    assert earlier and all(np.array_equal(before[day], after[day], equal_nan=True) for day in earlier)
-    assert not any(day.startswith("2017-12") for day in after)            # December was not asked for
+    first = next(index for index, day in enumerate(fp.sessions) if (day.year, day.month) == (2017, 11))
+    assert len(fits) == 1 and fits[0] + model.HORIZON < first             # November only, on labels ended before it
+    assert meta["networks_for"] == "2017-11" and meta["years"]["2017"]["top20_gain"] is not None
+    assert all(np.array_equal(before[day], after[day], equal_nan=True) for day in before)
+    later = [(position, day.isoformat()) for position, day in enumerate(fp.sessions) if day.isoformat() > "2017-10-20"]
+    assert later and all(stamp in after for _position, stamp in later)
+    for position, stamp in later:                                        # float16 on disk
+        assert np.allclose(after[stamp], in_use[position], atol=2e-3, equal_nan=True)
+    again = model_deep2.scores(fp, folder)                                # and a read after the refit says the same
+    assert all(np.allclose(again[position], in_use[position], atol=2e-3, equal_nan=True) for position, _stamp in later)
+
+
+def test_a_month_is_fitted_the_night_before_its_first_session(monkeypatch, tmp_path):
+    """2026-11-17: fitted on its first session's night, a month's first session had been decided at 13:50 with the
+    month before's networks. Asked for before it has a session, the month is fitted on the labels ended by now."""
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "GATE_YEARS", (2017,))
+    snapshot = tmp_path / "gbm-2.2.0"
+    snapshot.mkdir()
+    (snapshot / "meta.json").write_text(json.dumps({"version": "gbm-2.2.0", "features": ["momentum_3"]}), encoding="utf-8")
+    fits = []
+    real_fit = model_deep2._fit
+
+    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None):
+        fits.append(max(held_days))
+        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+    monkeypatch.setattr(model_deep2, "_fit", spy)
+    folder = tmp_path / "dl-2.6.0"
+    _data, fp = _panel(until=date(2017, 11, 30))                          # November's last session
+    model.train(fp, folder, years=[2017], label="deep2", version="dl-2.6.0")
+    before = model_deep2._load_scores(folder, fp.symbols)
+    fits.clear()
+    meta = model.train(fp, folder, years=[2017], label="deep2", version="dl-2.6.0", months=[12])
+    assert len(fits) == 1 and fits[0] + model.HORIZON < len(fp.sessions) and meta["networks_for"] == "2017-12"
+    after = model_deep2._load_scores(folder, fp.symbols)
+    assert sorted(after) == sorted(before)
+    assert all(np.array_equal(before[day], after[day], equal_nan=True) for day in before)
+    # the year turning: January of the next year, its networks under that year's name
+    fits.clear()
+    meta = model.train(fp, folder, years=[2018], label="deep2", version="dl-2.6.0", months=[1],
+                       gate=False)                   # this small panel has no yardstick for the gate of a later year
+    assert len(fits) == 1 and meta["networks_for"] == "2018-01" and (folder / "2018-0.pt").is_file()
 
 
 def test_a_monthly_cutoff_refit_scores_every_session_after_it(monkeypatch, tmp_path):

@@ -823,26 +823,34 @@ def retrain_models(container: "Container", now: datetime | None = None) -> objec
         if version in DEEP_MONTHLY and this_year:
             # 2026-10-21: a network refitted every month — the new month once (about 7 minutes), not the whole year
             # again every night (it was, 72 minutes, by the check below missing it)
+            # 2026-11-17: the month fitted is the next session's — on a month's last session the next month's
+            # networks are fitted that night (on the labels ended by then), so the month's first session is decided
+            # with them. Fitted on the first session's night, as before, that session had been decided at 13:50 with
+            # the month before's networks and was then scored again with the new ones.
+            ahead = container.market_calendar.calendar("TW").next_trading_day(local_now.date())
             try:
-                fitted = json.loads((folder / "meta.json").read_text(encoding="utf-8")).get("trained_at") or ""
+                meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+                fitted = meta.get("trained_at") or ""
                 when = datetime.fromisoformat(fitted).astimezone(zone) if fitted else None
             except (OSError, ValueError):
-                when = None
-            if when is not None and (when.year, when.month) == (local_now.year, local_now.month):
+                meta, when = {}, None
+            done = meta.get("networks_for") or (f"{when.year}-{when.month:02d}" if when is not None else "")
+            if done >= f"{ahead.year}-{ahead.month:02d}":
                 continue
-            months = [local_now.month]
+            months, target_year = [ahead.month], ahead.year
         # 2026-10-21 (使用者：每個月都要重跑那麼久，我時間很多嗎): a deep model keeps <year>-<seed>.pt, not <year>.pkl —
         # the check missed it and dl-2.1.0 and dl-2.6.0 were retrained every trading night (about 80 minutes)
         elif this_year:
             continue
-        label = f"{local_now.year} 年" + (f" {local_now.month} 月" if months else "")
+        year = target_year if months else local_now.year
+        label = f"{year} 年" + (f" {months[0]} 月" if months else "")
         # 2026-11-11: one model's failure no longer stops the others (dl-2.6.0 failed nine nights; the models after it
         # in the order were never looked at); the first error is raised after the last model, so the run still fails
         try:
             with JobLog(research).start(f"重訓機器學習模型（{version}，{label}）", "scheduler retrain_models",
                                         total=1) as job:
-                meta = train_year(base, version, local_now.year, job=job, **({"months": months} if months else {}))
-                item = meta["years"].get(str(local_now.year), {})
+                meta = train_year(base, version, year, job=job, **({"months": months} if months else {}))
+                item = meta["years"].get(str(year), {})
                 rows = item.get("train_rows") if item.get("train_rows") is not None else item.get("train_days")
                 job.payload["summary"] = (f"{local_now.year} 年模型：訓練 {rows} "
                                           + ("筆" if item.get("train_rows") is not None else "個交易日"))

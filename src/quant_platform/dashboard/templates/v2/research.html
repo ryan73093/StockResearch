@@ -8,8 +8,11 @@
 {% block heading %}
 <header class="page-head">
   <div>
-    <h1>研究</h1>
-    <p class="page-head__sub">研究規則、模擬回測紀錄、因子強弱與前向觀察</p>
+    {# 2026-11-17 (D-047): each research page says which one it is (they all said 「研究」) #}
+    {% set heads = {'overview': ('研究總覽', '全部規則的回測與前向：儀表板、最好的規則、結論與紀錄'), 'orders': ('今天的盤後單', '每個研究規則的模擬帳戶今天要下的單'), 'factors': ('因子強弱', '哪些因子準、哪些最近變弱'), 'ml': ('機器學習模型', '每一版模型的預測力與它們做成的規則'), 'news': ('新聞事件', '新聞整理成事件、利空旗標與否決實驗'), 'hypothesis': ('AI 假設檢驗', '寫一個選股想法，平台翻成規則、實際跑一次'), 'jobs': ('執行中的程式', '正在跑的研究程式、進度與最近完成的'), 'legacy': ('舊設計紀錄', '2026-10-04 以前的研究，只留著備查')} %}
+    {% set head = heads.get(research_tab, ('研究', '')) %}
+    <h1>{{ head[0] }}</h1>
+    <p class="page-head__sub">{{ head[1] }}</p>
   </div>
   
 </header>
@@ -26,7 +29,7 @@
   {% if conclusions %}
   <ul class="reasons">{% for item in conclusions %}<li>{{ item|safe }}</li>{% endfor %}</ul>
   {% endif %}
-  <p class="muted small" style="margin:10px 0 0">完整的方法、數字與淘汰原因：<a href="/project/research_method">現行結論與淘汰方向</a>、<a href="/project/research_results">結果紀錄</a>；每個規則走到哪一關：<a href="/research/pool">選手池</a>。</p>
+  <p class="muted small" style="margin:10px 0 0">完整的方法、數字與淘汰原因：<a href="/project/research_method">現行結論與淘汰方向</a>、<a href="/project/research_results">結果紀錄</a>；每個規則走到哪一關：<a href="/research/pool">選手池</a>；最近跑完哪些研究程式：<a href="/research?tab=jobs">執行中的程式</a>{% if running_count %}（現在 {{ running_count }} 個在跑）{% endif %}。</p>
 </section>
 
 {% if optimizations %}
@@ -167,12 +170,7 @@
 </section>
 {% endif %}
 
-<section class="card">
-  <div class="card__head"><h2>最近完成的研究程式</h2><a class="small" href="/research?tab=jobs">全部{% if running_count %}（{{ running_count }} 個在跑）{% endif %}</a></div>
-  {% if recent_jobs %}
-  <ul class="reasons">{% for job in recent_jobs %}<li><span class="badge {{ 'badge--ok' if job.status == 'done' else 'badge--bad' }}">{{ job.status_label }}</span> {{ job.name }}<span class="muted small">（{{ (job.finished_at or job.started_at or '')[5:16].replace('-', '/').replace('T', ' ') }}）</span>{% if job.summary %}：{{ job.summary }}{% endif %}</li>{% endfor %}</ul>
-  {% else %}<p class="muted" style="margin:0">還沒有紀錄。</p>{% endif %}
-</section>
+{# 2026-11-17 (D-047：真的重複的才合併): 最近完成的研究程式 was the first six rows of 執行中的程式 — one place now, linked from 目前結論 #}
 {% endif %}
 
 {% if research_tab == 'factors' %}

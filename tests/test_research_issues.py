@@ -200,7 +200,7 @@ def test_the_page_and_the_home_card(tmp_path):
     assert "議題追蹤" in page and 'class="app-tile app-tile--alert" href="/issues/ai"' in page
     assert "AI 資本支出" in page and "1 項告警" in page
     assert "還值得追蹤、討論的議題" in page and "台積電與大盤集中度" in page
-    assert '<a href="/issues" aria-current="page">' in page                                  # in the main navigation
+    assert 'href="/issues" aria-current="page">' in page          # in the navigation, under 市場 (D-047)
     project = client.get("/issues/ai").get_data(as_text=True)
     assert "巨頭蓋 AI 資料中心的錢會不會燒過頭" in project and "現在怎麼看" in project and "追蹤什麼、為什麼" in project
     assert "台積電月營收（近 3 個月合計）年增率" in project and "轉負" in project                # the lit item and its line

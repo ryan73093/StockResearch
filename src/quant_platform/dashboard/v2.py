@@ -963,6 +963,11 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             ),
         }
 
+    @blueprint.get("/menu")
+    def menu():
+        """2026-11-17 (D-047): every page, sorted by kind of research — the phone's 「全部」."""
+        return render_template("v2/menu.html", active_nav="menu")
+
     @blueprint.app_errorhandler(404)
     def not_found(error):
         """2026-11-15 (介面檢查 E-14：打錯網址是英文的 404 Not Found，沒有導覽、回不去): the site's own page, in Chinese,
@@ -1267,7 +1272,11 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         except Exception:  # noqa: BLE001
             logger.exception("Strategy roles failed")
         try:                      # 2026-11-15: 從這裡開始 — the six steps and what changed today
-            start = ready("start", research_dir, lambda: start_view(research_dir))
+            # 2026-11-17: only as the warm-up keeps it. Computed here it took the first visitor after a deploy 83 s
+            # (it needs the whole overview); for that first minute the tab says the numbers are being put together
+            start = ready("start", research_dir, lambda: None)
+            if start is None:
+                _READY.pop(f"start|{Path(research_dir).resolve()}", None)      # ask again next time, do not keep "none"
         except Exception:  # noqa: BLE001
             logger.exception("Start view failed")
         issues_head = None
@@ -1591,11 +1600,6 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                                      max((row["date"][:10] for row in research_optimizations(
                                          _project_root() / DOCS["research_results"][1])), default="9999"))
                          if tab == "overview" else []),
-            # 2026-11-15 (介面檢查 R-9：前 5 筆都是每小時一次、「這次編碼 0、刪除 0」的知識庫索引): a run that changed
-            # nothing is not news; it stays on 執行中的程式
-            recent_jobs=[job for job in jobs if job.get("status") != "running"
-                         and not str(job.get("command") or "").startswith("scheduler")
-                         and not str(job.get("name") or "").startswith("研究知識庫：")][:6],
             round_view=round_view,
             legacy=challenger_view(latest_challenger(research_dir / "legacy")),
             ranking=ranking,

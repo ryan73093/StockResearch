@@ -1,9 +1,13 @@
-{# Research sub-navigation (使用者 2026-10-04：研究的子項目用分頁分類). 2026-10-14: wide screens list these in the
-   sidebar's 研究 group instead (v2/_nav.html); the tabs stay for phones and the icon rail. #}
-{% from "v2/_nav.html" import research_pages %}
+{# 2026-11-17 (D-047): the pages of the same kind as this one, as a row — phones and the icon rail, where the sidebar
+   does not list them. It was every research page in one row (13 links); now only this page's group. #}
+{% from "v2/_nav.html" import nav_sections %}
+{% set here = 'r:' ~ (research_tab or 'overview') %}
 {% set running_jobs = (jobs or [])|selectattr('status', 'equalto', 'running')|list|length %}
-<nav class="subtabs subtabs--grouped" aria-label="研究分頁">
-  {% for key, label, href in research_pages %}
-  <a href="{{ href }}"{% if research_tab == key %} aria-current="true"{% endif %}>{{ label }}{% if key == 'jobs' and running_jobs %} <span class="badge badge--warn">{{ running_jobs }}</span>{% endif %}</a>
+{% for caption, items in nav_sections if items|selectattr(0, 'equalto', here)|list %}
+<nav class="subtabs subtabs--grouped" aria-label="{{ caption }}">
+  <span class="subtabs__cap">{{ caption }}</span>
+  {% for key, label, href, _mark, _note in items %}
+  <a href="{{ href }}"{% if key == here %} aria-current="true"{% endif %}>{{ label }}{% if key == 'r:jobs' and running_jobs %} <span class="badge badge--warn">{{ running_jobs }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
+{% endfor %}

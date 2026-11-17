@@ -25,7 +25,7 @@ def test_the_research_page_shows_the_status_table(tmp_path):
 
     container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'status.db'}"))
     body = create_app(container).test_client().get("/research").get_data(as_text=True)
-    assert "研究現況總表" in body and "策略類別與成長" in body and "角色成長歷程" in body and "欄位說明" in body
+    assert "研究現況總表" in body and "策略類別與成長" in body and 'href="/research/roles#growth-history"' in body and "欄位說明" in body
 
 
 def test_blend_rounds_are_not_summed_and_tiers_read_in_words(tmp_path):

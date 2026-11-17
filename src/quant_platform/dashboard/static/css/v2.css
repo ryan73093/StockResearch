@@ -168,8 +168,8 @@ h1, h2, h3, p, li, dd { overflow-wrap: anywhere; }
 
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
-  /* 2026-10-27: six main items (議題 added) */
-  display: grid; grid-template-columns: repeat(6, 1fr);
+  /* 2026-11-17 (D-047): four pages and 「全部」 */
+  display: grid; grid-template-columns: repeat(5, 1fr);
   background: color-mix(in srgb, var(--chrome) 92%, transparent);
   -webkit-backdrop-filter: saturate(1.4) blur(12px);
   backdrop-filter: saturate(1.4) blur(12px);
@@ -1117,3 +1117,25 @@ tr.row-later { display: none !important; }
    inside the card; their negative margins widened the page by 51 px */
 .dash-window { overflow-x: hidden; }
 .dash-window .table-wrap, .dash-dialog__body .table-wrap { margin-left: 0; margin-right: 0; }
+
+/* ---------- 2026-11-17 (D-047): the navigation sorted by kind of research; research pages are first-level ---------- */
+.navcap { display: none; }
+.sidenav--sorted .navlink:not(.navlink--rail) { display: none; }          /* the rail (tablets): the items with an icon */
+.subtabs__cap { flex: 0 0 auto; align-self: center; font-size: 12px; color: var(--muted); padding-right: 4px; }
+@media (min-width: 1200px) {
+  .sidenav--sorted { gap: 1px; }
+  .navcap { display: block; padding: 12px 12px 3px; font-size: 11.5px; color: var(--muted); letter-spacing: .04em; }
+  .sidenav--sorted .navlink, .sidenav--sorted .navlink:not(.navlink--rail) { display: flex; padding: 6px 12px; font-size: 14px; gap: 10px; }
+  .sidenav--sorted .navlink .icon { display: none; }                       /* captions sort the list; no icon column */
+  .sidenav--sorted .navlink[aria-current="page"] { font-weight: 600; }
+  .sidenav--sorted .navlink--menu { display: none; }
+  .sidenav--sorted .sidegroup { margin: 0 0 4px 14px; }
+  .sidenav--sorted .sidefold > summary { margin-left: 14px; }
+}
+.menu-card .card__head h2 { font-size: 15px; }
+.menu-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.menu-item { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); text-decoration: none; }
+.menu-item:hover { border-color: var(--accent); text-decoration: none; }
+.menu-item span { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.navlink__more { display: none; font-size: 12px; color: var(--muted); }
+@media (min-width: 1200px) { .navlink__more { display: inline; margin-left: -6px; } }

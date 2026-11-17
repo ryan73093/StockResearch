@@ -1,0 +1,19 @@
+{% extends "v2/base.html" %}
+{# 2026-11-17 (D-047): every page of the site, sorted by kind — the phone's 「全部」and the rail's. #}
+{% from "v2/_nav.html" import nav_sections %}
+{% block title %}全部功能 · 交易研究分析平台{% endblock %}
+{% block heading %}
+<header class="page-head"><div><h1>全部功能</h1><p class="page-head__sub">依研究的類型分類；每一項寫了那一頁在回答什麼</p></div></header>
+{% endblock %}
+{% block content %}
+{% for caption, items in nav_sections %}
+<section class="card menu-card" data-notab>
+  {% if caption %}<div class="card__head"><h2>{{ caption }}</h2></div>{% endif %}
+  <div class="menu-grid">
+    {% for key, label, href, _mark, note in items %}
+    <a class="menu-item" href="{{ href }}"><strong>{{ label }}</strong><span>{{ note }}</span></a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

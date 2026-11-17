@@ -31,6 +31,8 @@
         </tbody>
       </table>
     </div>
+    {# 2026-11-17 (D-047：真的重複的才合併): the 角色成長歷程 tab here was the same history as 策略角色 › 成長紀錄 (only its last 8 points) #}
+    <p class="small" style="margin:8px 0 0">每一類從第一次紀錄到現在、每次加入新策略那天的最好成績：<a href="/research/roles#growth-history">策略角色 › 成長紀錄</a>。</p>
     <p class="col-help"><b>欄位說明</b>　<b>類別</b>：策略押的是什麼（策略角色）。<b>策略數</b>：這一類登錄過的不同策略（最新引擎）。<b>過門檻</b>：T0 候選＋高風險 T0 候選＋T1（T1 只進前向觀察）。<b>最好的策略</b>：這一類期末錢最多的一個。<b>比 1 天前／7 天前</b>：這一類最好的期末金額和 1 天前、7 天前比（— 是那時這一類還沒有策略或沒有變）。<b>最近一次最佳化</b>：這一類最近一次加入新策略之前和現在比，下面是那次的時間。<b>從第一個起</b>：和這一類第一個策略的期末比。引擎改版重算時數字也會往下修。</p>
   </div>
 
@@ -105,23 +107,6 @@
       </table>
     </div>
     <p class="col-help"><b>欄位說明</b>　<b>回測引擎</b>：交易規則的版本，改版時全部策略重算。<b>開發期門檻</b>：模型只有在 2016～2020 的成績不輸比較對象才拿來做策略。<b>重訓到截止日</b>：前向帳戶用的模型每個月重訓到本月截止日（兩個月前的月底）。<b>前向帳戶用到</b>：目前有幾個前向帳戶讀這個模型。</p>
-  </div>
-
-  <div data-tab="角色成長歷程" id="status-roles">
-    <div class="table-wrap table-wrap--stack">
-      <table class="table--stack">
-        <thead><tr><th>類別</th><th>最好的期末（加入新策略的日子）</th></tr></thead>
-        <tbody>
-        {% for row in c.rows %}
-          <tr>
-            <td data-primary><strong>{{ row.role }}</strong></td>
-            <td data-label="歷程">{% for point in row.history[-8:] %}{{ point.day[5:] }} {{ money(point.final) }}{% if not loop.last %} → {% endif %}{% endfor %}</td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <p class="col-help"><b>欄位說明</b>　每個日期是這一類加入新策略的那天，金額是當時這一類最好的期末（2015-06 起 30 萬＋每月 1 萬）；最後一個是今天。只列最近 8 個點。</p>
   </div>
 
   </div>

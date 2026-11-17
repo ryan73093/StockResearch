@@ -1,27 +1,3 @@
-{# 2026-10-14 (使用者：研究裡面就很多個 tab，該分類到 sidebar 群組的就分類): the sub-pages of each main item, one
-   list for the sidebar groups (wide screens) and the in-page tabs (phones and the icon rail). #}
-{% set research_pages = [
-  ('overview', '總覽', '/research'),
-  ('orders', '今天的盤後單（研究帳戶）', '/research?tab=orders'),
-  ('my-orders', '今天我的帳戶要買賣什麼', '/research/my-orders'),
-  ('pool', '選手池', '/research/pool'),
-  ('roles', '策略角色', '/research/roles'),
-  ('factors', '因子強弱', '/research?tab=factors'),
-  ('ml', '機器學習模型', '/research?tab=ml'),
-  ('rl', '強化學習（RL）', '/research/rl'),
-  ('news', '新聞事件', '/research?tab=news'),
-  ('hypothesis', 'AI 假設檢驗', '/research?tab=hypothesis'),
-  ('knowledge', '知識庫（失敗紀錄與 AI 問答）', '/research/knowledge'),
-  ('jobs', '執行中的程式', '/research?tab=jobs'),
-  ('legacy', '舊設計紀錄', '/research?tab=legacy'),
-] %}
-{# 2026-10-17 (使用者：分類到底有沒有好好分類): the sidebar shows the research pages in four groups #}
-{% set research_groups = [
-  ('每天看', ('overview', 'orders', 'my-orders')),
-  ('策略', ('pool', 'roles')),
-  ('方法與模型', ('factors', 'ml', 'rl', 'news', 'hypothesis')),
-  ('程式與紀錄', ('knowledge', 'jobs', 'legacy')),
-] %}
 {% set system_pages = [
   ('runs', '排程與執行', '/system#runs'),
   ('quality', '資料品質', '/system#quality'),
@@ -44,8 +20,58 @@
   ('architecture', '架構', '/project/architecture'),
   ('dl_review', '文獻與研究報告', '/project/dl_review'),
 ] %}
-{% set market_pages = [
-  ('market', '市場總覽', '/market'),
-  ('live', '盤中資金流', '/market/live'),
-  ('stock', '查個股', '/stock'),
+{# 2026-11-17 (D-047；使用者：研究很大就要好好分類，不是一個「研究」統包全部；這個系統本來就是在做研究的，大的放在外面):
+   the whole site's navigation, sorted by kind of research. One list for the sidebar (wide screens: every item under its
+   caption), the icon rail (tablets: the items with an icon), the phone's bottom bar (``phone_bar``), the phone's
+   「全部」page (/menu) and the row of sibling pages inside a page (v2/_research_tabs.html).
+   Item: (key, label, href, icon or '', one line on what the page answers). ``key`` is what a page is known by:
+   'r:<research_tab>' for a research page, else its ``active_nav`` ('live' for /market/live). #}
+{% set nav_sections = [
+  ('', [
+    ('today', '首頁', '/', 'today', '這個平台在做什麼、研究走到哪一步、今天的狀態'),
+  ]),
+  ('策略研究', [
+    ('r:overview', '研究總覽', '/research', 'research', '全部規則的回測與前向：儀表板、最好的規則、結論'),
+    ('r:pool', '選手池', '/research/pool', 'pool', '每一個試過的規則、等級、為什麼被淘汰'),
+    ('r:roles', '策略角色', '/research/roles', '', '每一類策略現在多強、這個月的名單'),
+  ]),
+  ('每天的單', [
+    ('r:orders', '今天的盤後單（研究帳戶）', '/research?tab=orders', 'orders', '每個研究規則的模擬帳戶今天下什麼單'),
+    ('r:my-orders', '今天我的帳戶要買賣什麼', '/research/my-orders', '', '照某個規則，我自己的帳戶今天要買賣什麼（只能看）'),
+  ]),
+  ('模型與訊號', [
+    ('r:factors', '因子強弱', '/research?tab=factors', '', '哪些因子準、哪些最近變弱'),
+    ('r:ml', '機器學習模型', '/research?tab=ml', '', '每一版模型的預測力'),
+    ('r:rl', '強化學習（RL）', '/research/rl', '', '每一版機器人學什麼、結果'),
+    ('r:news', '新聞事件', '/research?tab=news', '', '新聞整理成事件、利空旗標、否決實驗'),
+  ]),
+  ('市場', [
+    ('issues', '議題追蹤', '/issues', 'issues', 'AI 支出、房市、融資：燈號與判讀'),
+    ('market', '市場總覽', '/market', 'market', '加權指數、市場寬度、產業強弱'),
+    ('live', '盤中資金流', '/market/live', '', '盤中各類股的資金流向'),
+    ('stock', '查個股', '/stock', 'search', '一檔股票的 K 線、因子排名、哪些規則持有'),
+  ]),
+  ('問與紀錄', [
+    ('r:knowledge', '知識庫', '/research/knowledge', '', '所有研究與失敗紀錄，可以搜尋或問 AI'),
+    ('r:hypothesis', 'AI 假設檢驗', '/research?tab=hypothesis', '', '寫一個選股想法，平台實際跑一次'),
+    ('r:jobs', '執行中的程式', '/research?tab=jobs', '', '正在跑的研究程式與進度'),
+    ('r:legacy', '舊設計紀錄', '/research?tab=legacy', '', '2026-10-04 以前的研究，備查'),
+  ]),
+  ('我的帳戶（上線以後）', [
+    ('holdings', '持倉', '/holdings', 'holdings', '你自己真的買賣的帳戶'),
+    ('plan', '計畫', '/plan', 'plan', '每月投入與採用的策略'),
+  ]),
+  ('系統與文件', [
+    ('system', '系統', '/system', 'system', '服務、資料品質、排程、備份'),
+    ('project', '專案資訊', '/project', 'project', '路線圖、交易需知、決定、開發歷程'),
+    ('guide', '使用教學', '/help', 'help', '怎麼看、怎麼介紹'),
+  ]),
+] %}
+{# the phone's bottom bar: four pages and the page of everything #}
+{% set phone_bar = [
+  ('today', '首頁', '/', 'today'),
+  ('r:overview', '研究', '/research', 'research'),
+  ('r:orders', '今天的單', '/research?tab=orders', 'orders'),
+  ('r:pool', '選手池', '/research/pool', 'pool'),
+  ('menu', '全部', '/menu', 'menu'),
 ] %}

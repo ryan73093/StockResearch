@@ -33,10 +33,14 @@ def test_new_pages_render_with_five_item_navigation(client, path, marker):
 
     assert response.status_code == 200
     assert marker in body
-    for label in ("今日", "持倉", "計畫", "研究", "系統"):
-        # Sidebar (tablet and desktop) and bottom tab bar (phone) both carry the item.
+    # 2026-11-17 (D-047): the navigation is sorted by kind of research; the sidebar lists every page under its kind
+    for caption in ("策略研究", "每天的單", "模型與訊號", "市場", "問與紀錄", "我的帳戶（上線以後）", "系統與文件"):
+        assert f'<span class="navcap">{caption}</span>' in body
+    for label in ("研究總覽", "持倉", "計畫", "系統", "議題追蹤", "因子強弱"):
+        assert f"<span>{label}</span>" in body
+    for label in ("首頁", "選手池"):                    # the sidebar and the phone's bottom bar both carry these
         assert body.count(f"<span>{label}</span></a>") == 2
-    assert body.count('aria-current="page"') == 2
+    assert 'class="tabbar"' in body and '<span>全部</span></a>' in body
     assert "本頁名詞解釋" not in body  # legacy chrome stays on legacy pages
 
 
@@ -232,7 +236,7 @@ def test_ml_tab_shows_the_models_and_the_rl_report(tmp_path):
 def test_research_overview_is_the_new_design_and_the_old_tabs_became_one_record(client):
     """2026-10-07: 總覽 shows the new design; ranking, promotion, AI researcher and legacy model are 舊設計紀錄."""
     body = client.get("/research").get_data(as_text=True)
-    assert "目前最好的規則" in body and "最近完成的研究程式" in body
+    assert "目前最好的規則" in body and 'href="/research?tab=jobs">執行中的程式</a>' in body   # D-047: one place for the jobs
     assert "本週研究報告" not in body and "定期定額對照" not in body and "第一批研究結論" not in body
     for old, anchor in (("rules", "ranking"), ("promotion", "promotion"), ("agent", "agent")):
         moved = client.get(f"/research?tab={old}")
@@ -422,8 +426,10 @@ def test_the_home_page_shows_this_months_rolling_forward_test(client, monkeypatc
 def test_the_sidebar_groups_research_and_always_lists_system(client):
     """2026-10-17 (使用者：分類到底有沒有好好分類、sidebar 的內容是否還有缺的)."""
     body = client.get("/").get_data(as_text=True)
-    for caption in ("每天看", "策略", "方法與模型", "程式與紀錄"):
-        assert f'<span class="sidegroup__caption">{caption}</span>' in body
+    for caption in ("策略研究", "每天的單", "模型與訊號", "問與紀錄"):      # 2026-11-17 (D-047): by kind of research
+        assert f'<span class="navcap">{caption}</span>' in body
+    menu = client.get("/menu").get_data(as_text=True)                       # the phone's page of everything
+    assert "全部功能" in menu and 'href="/research/pool"' in menu and "每一個試過的規則" in menu
     assert "機器學習模型" in body and "強化學習（RL）" in body and "機器學習與 RL" not in body
     for link in ("/system#runs", "/system#quality", "/system#timing", "/system#legacy-tools"):
         assert f'href="{link}"' in body                               # 系統's pages on every page, as 研究's

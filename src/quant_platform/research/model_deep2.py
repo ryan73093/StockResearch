@@ -733,6 +733,19 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                  "device": device_name()})
     meta.setdefault("years", {})
     stored = _load_scores(out, fp.symbols)
+    if only_months and version in MONTHLY and stored:
+        # 2026-11-17: the sessions after the last one kept are scored when read, by the networks on disk — the ones
+        # the forward accounts decided those days with. A month's refit then replaced the networks (and, from 11-11,
+        # fitted the month before again and wrote all its days over): on 11-11 October's new scores no longer gave
+        # the lists 115 accounts had decided on 10-21～10-31 (the forward audit of 11-15: 原因不明 125). The scores
+        # in use are kept first, with the networks that gave them, and saved before any network is replaced; a
+        # month's refit never writes over a day kept.
+        last_kept = max(stored)
+        live = scores(fp, out)
+        for position, day in enumerate(fp.sessions):
+            if day.isoformat() > last_kept and position >= LENGTH and np.isfinite(live[position]).any():
+                stored[day.isoformat()] = live[position]
+        _save_scores(out, stored, fp.symbols)
     for number, year in enumerate(order):
         # 2026-10-24: gate=False — the stress test retrains a version that already passed its gate (research/stress.py)
         if gate and year not in gated and all(str(item) in meta["years"] for item in gated if item in years):
@@ -752,10 +765,14 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
             unkept = {fp.sessions[column].month for column in session_columns
                       if fp.sessions[column].isoformat() not in stored and fp.sessions[column].month <= max(only_months)}
             months = [month for month in months if month in only_months or month in unkept]
+            # 2026-11-17: a month asked for before its first session (the night before it: retrain_models) is fitted
+            # on the labels ended by now, so that its first session is decided with its own networks
+            months += [month for month in only_months if month not in months
+                       and (year, month) > (fp.sessions[-1].year, fp.sessions[-1].month)]
         train_days, held_days, curves = [], [], []
         for month in months:
             period = [column for column in session_columns if month is None or fp.sessions[column].month == month]
-            first = period[0] if month is not None and period else next(
+            first = period[0] if period else len(fp.sessions) if month is not None else next(
                 (index for index, day in enumerate(fp.sessions) if day.year >= year), len(fp.sessions))
             known = [column for column in columns if column + HORIZON < first and rows[column].size >= 50
                      and (judged is None or judged[0][column].size >= 50)]
@@ -764,7 +781,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
             cut = int(len(known) * (1 - HELD_OUT))
             held_days = known[cut:]
             train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]   # purged
-            networks, curves = [], []
+            networks, curves, states = [], [], []
             for seed in SEEDS:
                 state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture,
                                     None if version in RESIDUAL_OF else judged)
@@ -772,11 +789,19 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                 network.load_state_dict(state)
                 networks.append(network)
                 curves.append(curve)
-                files.save_beside(out / f"{year}-{seed}.pt", lambda path: torch.save(state, path))
+                states.append((seed, state))
                 if job:
                     when = f"{year} 年" + (f" {month} 月" if month is not None else "")
                     job.update(current=f"{version}：{when}第 {seed + 1}/{len(SEEDS)} 個種子，保留期前 20 名多 {max(curve):+.4f}")
+            # 2026-11-17: the networks are written once all seeds are fitted — written one by one, a run that
+            # stopped half way left some of the old month's and some of the new, and every read scored with the mix
+            for seed, state in states:
+                files.save_beside(out / f"{year}-{seed}.pt", lambda path, state=state: torch.save(state, path))
+            if version in MONTHLY and month is not None:
+                meta["networks_for"] = f"{year}-{month:02d}"
             for column in period:
+                if only_months and fp.sessions[column].isoformat() in stored:
+                    continue                           # kept as it was used (above)
                 live = np.flatnonzero(eligible[:, column])
                 values = np.full(len(fp.symbols), np.nan, dtype=np.float32)
                 if live.size:
@@ -789,7 +814,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
         # the report covers the months fitted so far: a month after the ones asked has no scores kept yet
         through = max(only_months) if only_months and version in MONTHLY else 12
         reported = [column for column in session_columns
-                    if column in weekly and column in report_labels and fp.sessions[column].month <= through]
+                    if column in weekly and column in report_labels and fp.sessions[column].month <= through
+                    and fp.sessions[column].isoformat() in stored]
         for column in reported:
             ic, gain = _top20(stored[fp.sessions[column].isoformat()], ranks[column], report_labels[column])
             if ic is not None:

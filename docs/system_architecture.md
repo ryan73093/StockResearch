@@ -334,6 +334,7 @@ flowchart LR
 | `research/numbers.py` | 每個策略的固定編號＝第一次登錄的試驗編號；實驗帳戶 E1、E2…（2026-10-28）；任何一次重跑的試驗號也找得回規則（`spec_of_run`，2026-11-15） |
 | `research/short_name.py` | 規則的短名（表格用；完整名稱在規則頁），樣板 `{{ name\|short }}`（2026-11-15，D-046 第 9 項） |
 | `dashboard/v2.py` 的 `start_view`、`month_view`、`orders_view` | 首頁「從這裡開始」（六步各一個數字、今天的狀態，背景預先算好）、每月名單加兩種錢、今天的盤後單的狀態與預設清單（2026-11-15） |
+| `dashboard/templates/v2/_nav.html` 的 `nav_sections` | 全站導覽的唯一清單，依研究的類型分類（策略研究、每天的單、模型與訊號、市場、問與紀錄、我的帳戶、系統與文件）；側欄、手機底部列、`/menu`、頁內的同類頁列都讀它（2026-11-17，D-047） |
 | `scripts/preview-site.py`、`scripts/ui-table-sweep.js` | 改介面用：5055 的原始碼預覽（只讀、不動服務）；量每張表有沒有超出卡片（2026-11-15） |
 | `research/charts.py`、`research/distribution.py`、`research/progress.py`、`research/checks.py`、`research/eras.py` | 研究總覽儀表板：桌面與手機各一份的線圖與長條圖；最後的錢的分佈圖（每一類一列）；研究成長的時間線；大搜尋的漏斗與正確性核對；同一規則分時期比 0050 |
 | `research/issues.py`、`research/issue_notes.py`、`research/history/issues_data.py` | 議題追蹤（主導覽第六項，2026-10-27／28）：每個議題一個專案（指標、警示線、告警線、來源）、手寫判讀（燈號變了 7 天內重寫）、公開資料下載（SEC、實價登錄等）；worker 每天 18:20 更新 |
