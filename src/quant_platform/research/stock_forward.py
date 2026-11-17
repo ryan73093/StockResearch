@@ -654,7 +654,6 @@ class StockForwardTracker:
         from quant_platform.research.decisions import DecisionStore
         from quant_platform.research.decisions import key as decision_key
         from quant_platform.research.decisions import rankings as kept_rankings
-        from quant_platform.research.decisions import sizing as kept_sizing
 
         if not freeze:
             self.sync(today)
@@ -747,11 +746,10 @@ class StockForwardTracker:
                 else:
                     rule = DailyRule.model_validate(item["rule"])
                     ranks = kept_rankings(factor_panel, rule, start, last, store, decision_key(item["rule_hash"], start), last)
-                    # 2026-11-17: the sizes of the days recorded are taken as they were (decisions.sizing)
-                    weights, parked, exposure = kept_sizing(data, factor_panel, rule, self._costs, ranks, start, store,
-                                                            decision_key(item["rule_hash"], start), last)
                     run = simulate_daily(data, rule, self._costs, start, last, ranks, plan, ledger=ledger,
-                                         snapshots=snapshots, weights=weights, parked=parked, exposure=exposure)
+                                         snapshots=snapshots, weights=daily_weights(factor_panel, rule, ranks),
+                                         parked=account_parking(data, factor_panel, rule, self._costs),
+                                         exposure=exposure_schedule(data, factor_panel, rule, self._costs))
                 benchmark = simulate_daily(data, None, self._costs, start, last, plan=plan)
             else:
                 rule = StockRule.model_validate(item["rule"])

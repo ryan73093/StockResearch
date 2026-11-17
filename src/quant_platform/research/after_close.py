@@ -219,7 +219,6 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
     from quant_platform.research.decisions import DecisionStore
     from quant_platform.research.decisions import key as decision_key
     from quant_platform.research.decisions import rankings as kept_rankings
-    from quant_platform.research.decisions import sizing as kept_sizing
 
     # 2026-10-15: the days already decided stay as they were; today's decisions are kept, so the 15:30 record and
     # the board hold what these orders say
@@ -267,11 +266,9 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
             else:
                 rule = DailyRule.model_validate(item["rule"])
                 ranks = kept_rankings(fp, rule, start, day, store, decision_key(item["rule_hash"], start), day)
-                # 2026-11-17: today's sizes written down with today's lists; the 15:30 record takes them
-                weights, parked, exposure = kept_sizing(data, fp, rule, costs, ranks, start, store,
-                                                        decision_key(item["rule_hash"], start), day)
                 simulate_daily(data, rule, costs, start, day, ranks, plan, ledger=ledger, snapshots=snapshots,
-                               weights=weights, parked=parked, exposure=exposure)
+                               weights=daily_weights(fp, rule, ranks), parked=account_parking(data, fp, rule, costs),
+                               exposure=exposure_schedule(data, fp, rule, costs))
         except Exception as error:                # one bad rule does not stop the others
             output.append({"rule_hash": item["rule_hash"], "name": item["name"], "error": str(error)[:200]})
             save(False)

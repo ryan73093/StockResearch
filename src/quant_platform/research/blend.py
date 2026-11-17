@@ -133,16 +133,15 @@ class BlendAccount:
                  through: date | None = None) -> None:
         """``store``/``name``/``through``: each sleeve's decisions kept as made (research/decisions.py), the sleeve
         numbered after ``#``."""
-        from quant_platform.research.decisions import rankings, sizing
+        from quant_platform.research.daily import account_parking, daily_weights, exposure_schedule
+        from quant_platform.research.decisions import rankings
 
         self.data, self.blend, self.costs = data, blend, costs
         self.parts = []
         for number, sleeve in enumerate(blend.sleeves):
             ranks = rankings(fp, sleeve.rule, start, end, store, f"{name}#{number}" if name else None, through)
-            # 2026-11-17: each sleeve's sizes kept with its lists (decisions.sizing)
-            weights, parked, exposure = sizing(data, fp, sleeve.rule, costs, ranks, start, store,
-                                               f"{name}#{number}" if name else None, through)
-            self.parts.append((sleeve, ranks, weights, parked, exposure))
+            self.parts.append((sleeve, ranks, daily_weights(fp, sleeve.rule, ranks), account_parking(data, fp, sleeve.rule, costs),
+                               exposure_schedule(data, fp, sleeve.rule, costs)))
         self.first = max(next((day for day in sorted(ranks) if ranks[day]), start) for _sleeve, ranks, *_rest in self.parts)
 
     def run(self, start: date, end: date, plan=None, ledger: list | None = None, snapshots: dict | None = None) -> RunResult:
