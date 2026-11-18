@@ -695,6 +695,41 @@ def test_the_chain_lists_each_months_part_with_its_days_and_returns():
     assert found["return"] == pytest.approx(1.10 * 0.95 - 1) and found["excess"] == pytest.approx(1.10 * 0.95 - 1.05 * 1.05)
 
 
+def test_the_chain_says_how_much_the_rule_moved_with_0050():
+    """2026-11-18 (docs/research/results.md「前向 51 天各類模型為什麼落後」): from 9/1 to 11/17 0050 fell 14% and the
+    rules ahead were mostly the ones moving less with it. Beside the excess: the slope of the rule's daily return on
+    0050's over the record's sessions — here 1.5 times 0050's move plus 0.1% a day; none under 20 sessions."""
+    from datetime import timedelta
+
+    from quant_platform.research.dashboard import chain_summary
+    from quant_platform.research.stock_forward import CHAIN_BETA_LEAST, chain
+
+    moves = [0.01, -0.02, 0.015, -0.005, 0.02, -0.03, 0.01, 0.005, -0.01, 0.02, -0.015, 0.01, -0.02, 0.03, -0.01,
+             0.005, -0.005, 0.01, -0.02, 0.015, 0.01, -0.01, 0.02, -0.03, 0.01]
+    day, value, quiet, bench = date(2026, 9, 1), 100.0, 100.0, 100.0
+    records = [{"rule_hash": "A", "since": "2026-09-01", "date": day.isoformat(), "value": value, "benchmark_value": bench,
+                "contributed": 100.0},
+               {"rule_hash": "B", "since": "2026-09-01", "date": day.isoformat(), "value": quiet, "benchmark_value": bench,
+                "contributed": 100.0}]
+    for move in moves:
+        day += timedelta(days=1)
+        value, quiet, bench = value * (1 + 1.5 * move + 0.001), quiet * (1 + 0.5 * move), bench * (1 + move)
+        records += [{"rule_hash": "A", "since": "2026-09-01", "date": day.isoformat(), "value": value,
+                     "benchmark_value": bench, "contributed": 100.0},
+                    {"rule_hash": "B", "since": "2026-09-01", "date": day.isoformat(), "value": quiet,
+                     "benchmark_value": bench, "contributed": 100.0}]
+    lists = {"2026-08-31": {"A", "B"}}
+    found = chain(records, lists, date(2026, 10, 1))                         # the list cut off 8/31 is October's
+    assert found["A"]["sessions"] == len(moves) + 1                          # the first day against the money put in
+    assert found["A"]["beta"] == pytest.approx(1.5, abs=0.03) and found["B"]["beta"] == pytest.approx(0.5, abs=0.03)
+    short = chain(records[:2 * (CHAIN_BETA_LEAST - 1)], lists, date(2026, 10, 1))
+    assert short["A"]["sessions"] == CHAIN_BETA_LEAST - 1 and short["A"]["beta"] is None
+    summary = chain_summary(found, {"A": "甲", "B": "乙"})
+    assert summary["beta"] in (found["A"]["beta"], found["B"]["beta"]) and summary["top"][0]["beta"] is not None
+    assert chain_summary({key: {name: value for name, value in row.items() if name != "beta"} for key, row in found.items()},
+                         {})["beta"] is None                                 # a record kept from before has none
+
+
 def test_a_months_list_opens_no_account_until_its_models_are_refitted(tmp_path):
     """2026-11-12 (problem register P4, the month's release): the month's list was graded first and the models
     retrained to the cutoff afterwards — and only the models that accounts already open read. So every month the

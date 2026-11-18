@@ -1475,7 +1475,11 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
     2026-11-12 (problem register「T0 兩種算法都保留」; which of the two grants the tier is the owner's decision, not made
     here): beside the money counted, ``sold_return`` and ``sold_excess`` — the rule's stocks and 0050 both sold that
     day, the selling costs taken off (the counted money plus what the held stocks are up after those costs). Without
-    ``costs`` both are the paper record."""
+    ``costs`` both are the paper record.
+
+    2026-11-18 (docs/research/results.md「前向 51 天各類模型為什麼落後」: from 9/1 to 11/17 0050 fell 14% and who led was
+    mostly who moved less with it): ``beta`` — the slope of the rule's daily return (both sold) on 0050's over the
+    record's sessions, None under CHAIN_BETA_LEAST of them. A description beside the excess, not part of the tier."""
     from quant_platform.research.rolling import cutoff_for
 
     months, month = [], CHAIN_START
@@ -1508,7 +1512,7 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
         if not run:
             continue
         rule_units, sold_units, base_units, sessions = 1.0, 1.0, 1.0, 0
-        parts = []
+        parts, moves = [], []
         for position, month in enumerate(run):
             units_before, base_before, sessions_before, first_day, last_day = rule_units, base_units, sessions, None, None
             sold_before = sold_units
@@ -1530,6 +1534,8 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
                     sold_from = float(before.get("sold_value") or before["value"])
                     sold_units *= (float(now.get("sold_value") or now["value"]) - flow) / sold_from
                     base_units *= (float(now["benchmark_value"]) - flow) / float(before["benchmark_value"])
+                    moves.append(((float(now.get("sold_value") or now["value"]) - flow) / sold_from - 1,
+                                  (float(now["benchmark_value"]) - flow) / float(before["benchmark_value"]) - 1))
                     sessions += 1
                     first_day, last_day = first_day or day, day
             if sessions > sessions_before:           # 2026-11-08 (使用者：前向觀察從九月一號開始到現在，沒有任何的結果)
@@ -1541,8 +1547,24 @@ def chain(records: list[dict], lists: dict[str, set[str]], today: date, costs=No
                              "return": round(rule_units - 1, 6), "benchmark_return": round(base_units - 1, 6),
                              "excess": round(rule_units - base_units, 6),
                              "sold_return": round(sold_units - 1, 6), "sold_excess": round(sold_units - base_units, 6),
-                             "parts": parts}
+                             "beta": _slope(moves), "parts": parts}
     return output
+
+
+CHAIN_BETA_LEAST = 20
+
+
+def _slope(moves: list[tuple[float, float]]) -> float | None:
+    """The slope of the first of each pair on the second (least squares with a constant); None with too few pairs or a
+    second that never moves."""
+    if len(moves) < CHAIN_BETA_LEAST:
+        return None
+    own = sum(pair[0] for pair in moves) / len(moves)
+    other = sum(pair[1] for pair in moves) / len(moves)
+    spread = sum((pair[1] - other) ** 2 for pair in moves)
+    if spread <= 0:
+        return None
+    return round(sum((pair[0] - own) * (pair[1] - other) for pair in moves) / spread, 3)
 
 
 def unexplained(rows: list[dict]) -> set[str]:

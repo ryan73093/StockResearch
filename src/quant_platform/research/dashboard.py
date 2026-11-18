@@ -137,7 +137,15 @@ def chain_summary(chained: dict[str, dict], names: dict[str, str], top: int = 5)
         return None
     gaps = sorted(row["excess"] for row in rows)
     sold = sorted(row.get("sold_excess", row["excess"]) for row in rows)   # 2026-11-12: both sold that day, beside it
-    return {"start": min(row["parts"][0]["from"] for row in rows), "end": max(row["parts"][-1]["to"] for row in rows), "rules": len(rows),
+    # 2026-11-18 (結果紀錄「前向 51 天各類模型為什麼落後」): how much the rules moved with 0050 — the middle one of all and
+    # of the ones not behind by both moneys, so a lead in a falling market is read with it
+    both = [row for row in rows if row["excess"] >= 0 and row.get("sold_excess", row["excess"]) >= 0]
+
+    def middle(group: list[dict]) -> float | None:
+        betas = sorted(row["beta"] for row in group if row.get("beta") is not None)
+        return betas[len(betas) // 2] if betas else None
+
+    return {"beta": middle(rows), "beta_both": middle(both), "start": min(row["parts"][0]["from"] for row in rows), "end": max(row["parts"][-1]["to"] for row in rows), "rules": len(rows),
             "sessions": longest, "ahead": sum(gap > 0 for gap in gaps), "median": gaps[len(gaps) // 2],
             "ahead_sold": sum(gap > 0 for gap in sold), "median_sold": sold[len(sold) // 2],
             # 2026-11-15 (介面檢查 R-3：同一頁「不輸 0050」31、608 和「贏 0050」30、553 兩組): T0 asks "not behind" (>= 0)
