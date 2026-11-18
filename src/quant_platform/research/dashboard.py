@@ -156,6 +156,69 @@ def chain_summary(chained: dict[str, dict], names: dict[str, str], top: int = 5)
             "benchmark": rows[0]["benchmark_return"], "top": sorted(rows, key=lambda row: -row["excess"])[:top]}
 
 
+NOW_SKIP = ("反向（學著賠）", "其他")
+# the optimization log's own family column for each kind (the window's ``family_log`` also matches words in the text,
+# which put a deep-learning row under 機器學習)
+NOW_LOG = {"深度學習": ("深度學習",), "機器學習": ("機器學習", "模型", "新資料（FinMind）", "新資料（集保）"),
+           "RL 機器人": ("強化學習",), "技術分析機器人": ("技術機器人",), "組合帳戶": ("組合", "合併"),
+           "多因子": ("搜尋", "大規模搜尋")}
+
+
+def status_now(chained: dict[str, dict], rows: list[dict], families: list[dict], optimizations: list[dict]) -> dict[str, object] | None:
+    """2026-11-18 (使用者：RL、技術分析機器人、多因子、深度學習、機器學習每一個現在的狀況是怎麼樣，你也沒有寫；我現在根本
+    不知道到底可不可以上線；要有 summary 跟說明放在研究的主頁面，一點開就知道現在的研究狀況): the overview's first
+    group — whether anything can go live, and each kind of rule: how it is made, how many were tested, pass the backtest
+    gate, stayed on every monthly list, and are not behind 0050 by both moneys in the chained forward record (what T0
+    asks), with the middle rule's gap, how much the kind moved with 0050 and its best rule. ``rows``: the pool's daily
+    rows (spec_hash, name, category); ``families``: the dashboard's families (tested, passing, the latest work)."""
+    from quant_platform.research.categories import FAMILY_HOW, FAMILY_NOTES, FAMILY_ORDER
+    from quant_platform.research.daily import FORWARD_SESSIONS
+
+    listed = {key: row for key, row in (chained or {}).items() if row.get("parts")}
+    longest = max((row["sessions"] for row in listed.values()), default=0)
+    family_of = {row["spec_hash"]: (row.get("category") or {}).get("family") or "其他" for row in rows}
+    names = {row["spec_hash"]: row.get("name") or "" for row in rows}
+    groups: dict[str, list[tuple[str, dict]]] = {}
+    for key, row in listed.items():
+        if row["sessions"] == longest and key in family_of:
+            groups.setdefault(family_of[key], []).append((key, row))
+    known = {item["family"]: item for item in families}
+    output = []
+    for family in FAMILY_ORDER:
+        item = known.get(family)
+        if family in NOW_SKIP or (item is None and family not in groups):
+            continue
+        members = groups.get(family, [])
+        counted = sorted(row["excess"] for _key, row in members)
+        sold = sorted(row.get("sold_excess", row["excess"]) for _key, row in members)
+        betas = sorted(row["beta"] for _key, row in members if row.get("beta") is not None)
+        holding = sum(row["excess"] >= 0 and row.get("sold_excess", row["excess"]) >= 0 for _key, row in members)
+        best = max(members, key=lambda pair: min(pair[1]["excess"], pair[1].get("sold_excess", pair[1]["excess"])), default=None)
+        latest = next((row for row in optimizations if row.get("family") in NOW_LOG.get(family, ())), None)
+        output.append({
+            "family": family, "how": FAMILY_HOW.get(family) or FAMILY_NOTES.get(family, ""),
+            "tested": ((item or {}).get("rules") or 0) + ((item or {}).get("short_rules") or 0),
+            "passing": (item or {}).get("passing") or 0, "listed": len(members), "holding": holding,
+            "median": counted[len(counted) // 2] if counted else None, "median_sold": sold[len(sold) // 2] if sold else None,
+            "beta": betas[len(betas) // 2] if betas else None,
+            "best": {"rule_hash": best[0], "name": names.get(best[0], ""), "excess": best[1]["excess"],
+                     "sold_excess": best[1].get("sold_excess", best[1]["excess"]), "beta": best[1].get("beta")} if best else None,
+            "latest": {"date": latest["date"], "what": latest["what"], "verdict": latest["verdict"]} if latest else None,
+        })
+    if not output:
+        return None
+    output.sort(key=lambda row: (-row["holding"], -row["listed"], -row["passing"]))
+    everyone = [row for members in groups.values() for _key, row in members]
+    return {"sessions": longest, "needed": FORWARD_SESSIONS, "rules": len(everyone),
+            "holding": sum(row["holding"] for row in output),
+            "benchmark": everyone[0]["benchmark_return"] if everyone else None,
+            "start": min((row["parts"][0]["from"] for row in everyone), default=None),
+            "end": max((row["parts"][-1]["to"] for row in everyone), default=None),
+            "families": output, "top": max((row["listed"] for row in output), default=0),
+            "latest": [{"date": row["date"], "family": row["family"], "what": row["what"], "result": row["result"],
+                        "verdict": row["verdict"]} for row in optimizations[:6]]}
+
+
 def view(research: str | Path, start: str, optimizations: list[dict], gates: dict[str, object]) -> dict[str, object]:
     """The dashboard (kept until the files it reads change: about 7 s to build)."""
     research = Path(research)
@@ -479,5 +542,6 @@ def _build(research: Path, start: str, optimizations: list[dict], gates: dict[st
             "recent": recent_all, "forward": forward, "scale": search_scale(research),
             "t0": toward_t0(tracker.chained(date.today()), pool["daily"], summary, count=0),
             "chain": chain_summary(tracker.chained(date.today()), {item["rule_hash"]: item["name"] for item in tracker.tracked()}),
+            "now": status_now(tracker.chained(date.today()), pool["daily"], families, optimizations),
             "families": families, "eras": periods, "passing": sum(row["tier"] in PASSING_TIERS for row in main),
             "rules": len(main)}

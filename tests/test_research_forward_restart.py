@@ -84,3 +84,45 @@ def test_accounts_that_double_another_are_counted_once():
             row(298_500.0, ["2330", "2317"]), row(301_000.0, ["2330", "2317"], since="2026-09-01")]
     assert distinct_accounts(rows) == {"accounts": 5, "results": 4, "holdings": 2}
     assert distinct_accounts([]) == {"accounts": 0, "results": 0, "holdings": 0}
+
+
+def test_the_overview_says_how_each_kind_of_rule_is_doing_now():
+    """2026-11-18 (使用者：RL、技術分析機器人、多因子、深度學習、機器學習每一個現在的狀況是怎麼樣，你也沒有寫；我現在根本
+    不知道到底可不可以上線): per kind — tested, passing, on every list, not behind 0050 by both moneys (what T0 asks),
+    the middle rule, the beta, the best; the kinds with the most rules holding first."""
+    from quant_platform.research.categories import FAMILY_HOW, FAMILY_ORDER
+    from quant_platform.research.dashboard import NOW_SKIP, status_now
+
+    part = {"from": "2026-09-01", "to": "2026-11-18"}
+
+    def record(counted, sold, beta, sessions=52):
+        return {"sessions": sessions, "excess": counted, "sold_excess": sold, "beta": beta, "benchmark_return": -0.14,
+                "parts": [part]}
+    chained = {"m1": record(0.09, 0.10, 0.7), "m2": record(-0.03, 0.02, 0.8), "m3": record(0.01, 0.0, 0.9),
+               "d1": record(-0.16, -0.12, 1.4), "d2": record(0.02, -0.01, 1.5),
+               "new": record(0.30, 0.30, 0.5, sessions=31),            # joined a later list: not in the longest run
+               "gone": {"sessions": 52, "excess": 0.5, "parts": []}}
+    rows = [{"spec_hash": key, "name": f"規則 {key}", "category": {"family": family}} for key, family in
+            (("m1", "多因子"), ("m2", "多因子"), ("m3", "多因子"), ("d1", "深度學習"), ("d2", "深度學習"), ("new", "機器學習"))]
+    families = [{"family": "多因子", "rules": 10, "short_rules": 2, "passing": 4},
+                {"family": "深度學習", "rules": 20, "short_rules": 0, "passing": 9},
+                {"family": "機器學習", "rules": 7, "short_rules": 0, "passing": 1},
+                {"family": "反轉", "rules": 5, "short_rules": 0, "passing": 0},
+                {"family": "其他", "rules": 1, "short_rules": 0, "passing": 0}]
+    log = [{"date": "2026-11-18", "family": "深度學習", "what": "模型 Q 的同一個標籤", "result": "沒過", "verdict": "失敗"},
+           {"date": "2026-11-18", "family": "機器學習", "what": "模型 Q", "result": "過", "verdict": "部分"}]
+    found = status_now(chained, rows, families, log)
+    assert (found["sessions"], found["needed"], found["rules"], found["holding"], found["benchmark"]) == (52, 60, 5, 2, -0.14)
+    assert [row["family"] for row in found["families"]] == ["多因子", "深度學習", "機器學習", "反轉"]   # 其他 is left out
+    many, deep, tree, none = found["families"]
+    assert (many["tested"], many["passing"], many["listed"], many["holding"]) == (12, 4, 3, 2)
+    assert (many["median"], many["median_sold"], many["beta"]) == (0.01, 0.02, 0.8)
+    assert many["best"]["rule_hash"] == "m1" and many["best"]["name"] == "規則 m1" and many["latest"] is None
+    assert (deep["listed"], deep["holding"], deep["best"]["rule_hash"]) == (2, 0, "d2")    # d2: one money only
+    assert deep["latest"]["what"] == "模型 Q 的同一個標籤"            # by the log's own family, not by the word 模型
+    assert (tree["listed"], tree["holding"], tree["median"], tree["best"]) == (0, 0, None, None)
+    assert tree["latest"]["verdict"] == "部分" and (none["passing"], none["listed"]) == (0, 0)
+    assert all(row["how"] for row in found["families"]) and found["top"] == 3 and len(found["latest"]) == 2
+    assert set(FAMILY_HOW) == set(FAMILY_ORDER) - set(NOW_SKIP)       # every kind shown says how it is made
+    assert "一億多種" in FAMILY_HOW["多因子"] and "掃描" in FAMILY_HOW["多因子"] and "組合搜尋" in FAMILY_HOW["組合帳戶"]
+    assert status_now({}, rows, [], log) is None

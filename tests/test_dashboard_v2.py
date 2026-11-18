@@ -557,6 +557,33 @@ def test_the_overview_shows_a_chain_summary_made_before_the_second_money(tmp_pat
         assert "贏 0050（兩邊當天都賣掉）" in page and "+7.0 個百分點" in page
 
 
+def test_the_overview_opens_on_what_can_go_live_and_how_each_kind_is_doing(tmp_path):
+    """2026-11-18 (使用者：要有 summary 跟說明放在研究的主頁面，一點開就知道現在的研究狀況): the first group says whether
+    anything can go live, then a row a kind — how it is made, how many hold up — and what the hundred-million searches are."""
+    from flask import render_template_string
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))
+    app = create_app(container)
+    now = {"sessions": 52, "needed": 60, "rules": 3279, "holding": 142, "benchmark": -0.14, "start": "2026-09-01",
+           "end": "2026-11-18", "top": 1264, "latest": [{"date": "2026-11-18", "family": "深度學習", "what": "dl-2.8.1",
+                                                          "result": "沒過", "verdict": "失敗"}],
+           "families": [{"family": "多因子", "how": "不用模型。", "tested": 1068, "passing": 259, "listed": 250, "holding": 56,
+                         "median": -0.025, "median_sold": 0.016, "beta": 0.76,
+                         "best": {"rule_hash": "a", "name": "甲", "excess": 0.095, "sold_excess": 0.101, "beta": 0.68},
+                         "latest": None},
+                        {"family": "反轉", "how": "買跌深的。", "tested": 15, "passing": 0, "listed": 0, "holding": 0,
+                         "median": None, "median_sold": None, "beta": None, "best": None, "latest": None}]}
+    with app.test_request_context("/research"):
+        page = render_template_string('{% from "v2/_dashboard.html" import now_panel %}{{ now_panel(now) }}', now=now)
+        assert "現在可以上線嗎：還不行" in page and "52<small>／60 個交易日" in page and "142<small> 個規則" in page
+        assert "56<small>／250 個不輸" in page and "跟 0050 的連動 0.76 倍" in page and "+9.5／+10.1 個百分點" in page
+        assert "沒有規則過回測門檻" in page and "不在名單上" in page and "「上億個」的搜尋是哪一類" in page
+        assert "這段是下跌" in page and 'data-family="多因子"' in page
+        ready = render_template_string('{% from "v2/_dashboard.html" import now_panel %}{{ now_panel(now) }}',
+                                       now={**now, "sessions": 60})
+        assert "有 142 個規則達到條件，等你核准" in ready and "已滿" in ready
+
+
 def test_my_orders_page_brings_a_rule_to_the_owners_account_and_only_shows(tmp_path):
     """2026-11-14 (使用者：先做一個只能看的頁面「照這個規則，今天你的帳戶要買賣什麼」包括沒買到時隔天怎麼調整)."""
     import json

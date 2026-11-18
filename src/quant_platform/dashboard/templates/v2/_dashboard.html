@@ -20,6 +20,45 @@
       </tbody></table>
     </figure>
 {% endmacro %}
+    {# 2026-11-18 (使用者：每一個類別現在的狀況是怎麼樣、到底可不可以上線；要有 summary 跟說明放在研究的主頁面，一點開就知道
+       現在的研究狀況): research/dashboard.py status_now #}
+{% macro now_panel(nw) %}
+    <figure data-group="now" class="dash-panel dash-panel--full now-live">
+      <figcaption><h3>現在可以上線嗎：{% if nw.sessions >= nw.needed and nw.holding %}有 {{ '{:,}'.format(nw.holding) }} 個規則達到條件，等你核准{% else %}還不行{% endif %}</h3><span>可以上線＝規則的前向紀錄滿 {{ nw.needed }} 個交易日、兩種算法都不輸 0050，再由你核准</span></figcaption>
+      <div class="kpis kpis--page">
+        <div class="kpi"><div class="kpi__label">前向紀錄</div><div class="kpi__value">{{ nw.sessions }}<small>／{{ nw.needed }} 個交易日</small></div><div class="kpi__note">{% if nw.start %}{{ nw.start[5:7]|int }}/{{ nw.start[8:10]|int }}～{{ nw.end[5:7]|int }}/{{ nw.end[8:10]|int }}；{% endif %}{% if nw.sessions < nw.needed %}第一次判定 {{ first_t0[5:7]|int }}/{{ first_t0[8:10]|int }} 收盤後{% else %}已滿{% endif %}</div></div>
+        <div class="kpi"><div class="kpi__label">到今天兩種算法都不輸 0050</div><div class="kpi__value">{{ '{:,}'.format(nw.holding) }}<small> 個規則</small></div><div class="kpi__note">一直留在每月名單上的 {{ '{:,}'.format(nw.rules) }} 個裡；判定那天還不輸的才算</div></div>
+        {% if nw.benchmark is not none %}<div class="kpi"><div class="kpi__label">同一段期間的 0050</div><div class="kpi__value {{ 'up' if nw.benchmark > 0 else 'down' }}">{{ '{:+.1%}'.format(nw.benchmark) }}</div><div class="kpi__note">{% if nw.benchmark < -0.05 %}這段是下跌：現在領先的多半是跟大盤連動低、跌得少的規則，不代表選股比較準{% else %}當天賣掉、扣費稅{% endif %}</div></div>{% endif %}
+      </div>
+    </figure>
+    <figure data-group="now" class="dash-panel dash-panel--full">
+      <figcaption><h3>每一類策略：怎麼做的、現在怎麼樣</h3><span>長條＝這一類一直留在每月名單上的規則數，深色＝其中兩種算法都不輸 0050 的・點一類看它的模型、資料與規則</span></figcaption>
+      <div class="fbars nowbars">
+        {% for f in nw.families %}
+        <button type="button" class="fbar nowbar" data-family="{{ f.family }}">
+          <span class="fbar__name">{{ f.family }}</span>
+          <span class="fbar__track">{% if nw.top %}<span class="fbar__fill nowbar__listed" style="width:{{ '%.1f'|format(f.listed / nw.top * 100) }}%"></span><span class="fbar__fill" style="width:{{ '%.1f'|format(f.holding / nw.top * 100) }}%"></span>{% endif %}</span>
+          <span class="fbar__value">{% if f.listed %}{{ '{:,}'.format(f.holding) }}<small>／{{ '{:,}'.format(f.listed) }} 個不輸</small>{% else %}<small>不在名單上</small>{% endif %}</span>
+          <span class="fbar__sub nowbar__how">{{ f.how }}</span>
+          <span class="fbar__sub">回測：測過 {{ '{:,}'.format(f.tested) }} 個、{{ '{:,}'.format(f.passing) }} 個過門檻。{% if f.listed %}前向：中間那個規則比 0050 {{ '{:+.1f}'.format(f.median * 100) }} 個百分點（已拿到的錢）、{{ '{:+.1f}'.format(f.median_sold * 100) }} 個百分點（兩邊都賣掉）{% if f.beta is not none %}；跟 0050 的連動 {{ '{:.2f}'.format(f.beta) }} 倍{% endif %}{% if f.best %}；最好的 {{ rule_no(f.best.rule_hash) }} {{ '{:+.1f}'.format(f.best.excess * 100) }}／{{ '{:+.1f}'.format(f.best.sold_excess * 100) }} 個百分點{% endif %}。{% elif f.passing %}過門檻的沒有一直留在每月名單上。{% else %}沒有規則過回測門檻。{% endif %}</span>
+          {% if f.latest %}<span class="fbar__sub">最近做的（{{ f.latest.date[5:10] }}）：{{ f.latest.what|striptags|truncate(70, True, '…') }} → {{ f.latest.verdict|striptags|truncate(40, True, '…') }}</span>{% endif %}
+        </button>
+        {% endfor %}
+      </div>
+      <div class="legend"><span><i class="sw-v1"></i>兩種算法都不輸 0050（T0 要的）</span><span><i class="sw-fiqr"></i>一直留在每月名單上</span><span>兩種算法＝已拿到的錢（賺的只算賣掉的、賠的都算）、兩邊當天都賣掉</span></div>
+      <details class="dash-how"><summary>「上億個」的搜尋是哪一類？</summary>
+        <p class="small">有兩個。<b>大搜尋</b>：約 90 個訊號 1～5 個一組，一億多種組合，規則名稱是「掃描：…」開頭——只用因子的算「多因子」，用到模型分數的算「機器學習」或「深度學習」。<b>組合搜尋</b>：把選手池的規則兩個、三個配成一個帳戶，每一輪幾億到四十幾億種，名稱是「組合搜尋：…」開頭，算「組合帳戶」。「T0 共識清單」不是搜尋，是所有 T0 候選投票出來的一張清單。每一輪的數量與結果在「搜尋規模」分頁。</p>
+      </details>
+    </figure>
+    {% if nw.latest %}
+    <figure data-group="now" class="dash-panel dash-panel--full">
+      <figcaption><h3>最近做了什麼</h3><span>最佳化紀錄最新的 {{ nw.latest|length }} 筆；全部在上面的「最佳化紀錄」分頁</span></figcaption>
+      <table class="table--stack now-latest"><thead><tr><th>日期</th><th>類別</th><th>做了什麼</th><th>判定</th></tr></thead><tbody>
+      {% for row in nw.latest %}<tr><td data-label="日期">{{ row.date[5:10] }}</td><td data-label="類別">{{ row.family }}</td><td data-primary>{{ row.what|striptags|truncate(90, True, '…') }}</td><td data-label="判定">{{ row.verdict|striptags|truncate(60, True, '…') }}</td></tr>{% endfor %}
+      </tbody></table>
+    </figure>
+    {% endif %}
+{% endmacro %}
 {% macro dashboard(d) %}
 {% if d %}
 {% set fw = d.forward %}{% set era = d.eras %}{% set c = d.charts or {} %}{% set st = d.stress %}
@@ -41,13 +80,15 @@
   {# 2026-11-15 (D-046 第 9 項；介面檢查 R-4、U5：一個分頁 14 個區塊、手機 11,278 px): the charts in four groups, one question
      each; the tiles above stay #}
   <div class="dash-groups" role="tablist" aria-label="儀表板的內容">
-    <button type="button" role="tab" data-dash-group="result" aria-selected="true">回測結果</button>
+    {% if d.now %}<button type="button" role="tab" data-dash-group="now" aria-selected="true">現在的狀況</button>{% endif %}
+    <button type="button" role="tab" data-dash-group="result" aria-selected="{{ 'false' if d.now else 'true' }}">回測結果</button>
     <button type="button" role="tab" data-dash-group="forward" id="dash-forward">前向（真正的考試）</button>
     <button type="button" role="tab" data-dash-group="search" id="dash-search">搜尋規模</button>
     <button type="button" role="tab" data-dash-group="trust" id="dash-trust">可信度</button>
   </div>
 
   <div class="dash-grid">
+    {% if d.now %}{{ now_panel(d.now) }}{% endif %}
     {% for key in ('recent', 'full') if d.spread and d.spread[key] %}{% set sp = d.spread[key] %}
     <figure data-group="result" class="dash-panel{{ ' dash-panel--full' if key == 'recent' else '' }}">
       <figcaption><h3>每個規則最後有多少錢：{{ sp.label }}</h3><span>{{ '{:,}'.format(sp.counts.lost + sp.counts.behind + sp.counts.ahead) }} 個完整回測過的規則・橫軸是期末的錢（萬元；已實現：賺的只算賣掉的、賠的都算，還沒用引擎 1.6.0 重跑的是含帳面，選手池重跑完全部換成已實現），縱軸是規則個數・投入的錢在正中間，左邊賠錢、右邊賺錢</span></figcaption>
@@ -241,7 +282,7 @@
     if (item.tagName === 'A') { event.preventDefault(); document.querySelector('.dash-groups').scrollIntoView({ block: 'start', behavior: 'smooth' }); }
   }));
   const fromHash = () => { const hit = groupButtons.find((button) => button.id && '#' + button.id === location.hash); if (hit) showGroup(hit.dataset.dashGroup); return Boolean(hit); };
-  if (!fromHash()) showGroup('result');
+  if (!fromHash()) showGroup(groupButtons.some((button) => button.dataset.dashGroup === 'now') ? 'now' : 'result');
   window.addEventListener('hashchange', fromHash);
   dialog.querySelector('.dash-dialog__close').addEventListener('click', () => dialog.close());
   dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });

@@ -938,6 +938,13 @@ td.wrap { white-space: normal; min-width: 180px; }
 .fbar__value { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .fbar__value small { color: var(--muted); font-weight: 400; }
 .fbar__sub { grid-column: 2 / 4; font-size: 12px; color: var(--muted); }
+/* 2026-11-18 (使用者：每一類怎麼做的、現在怎麼樣放在研究的主頁面): the same bars, a line of how it is made first */
+.nowbar { align-items: start; padding: 8px; border-bottom-color: var(--border); border-radius: 0; }
+.nowbar .fbar__track { margin-top: 4px; }
+.nowbar__how { color: var(--text); font-size: 13px; }
+.nowbar__listed { background: var(--text-2); opacity: .45; }
+.now-live .kpi__note { max-width: 34em; }
+.dash-how { margin-top: 8px; } .dash-how summary { cursor: pointer; color: var(--accent); font-size: 13px; }
 @media (max-width: 640px) {
   .fbar { grid-template-columns: minmax(0, 1fr) auto; }
   .fbar__name { grid-column: 1; grid-row: 1; } .fbar__value { grid-column: 2; grid-row: 1; }
