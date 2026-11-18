@@ -210,3 +210,19 @@ def test_the_months_refit_learns_the_versions_own_target(tmp_path, monkeypatch):
     asked.clear()
     model.train_until(fp, tmp_path / "gbm-2.7.0", days[-1], "ensemble", "gbm-2.7.0")
     assert asked == [("excess", 20), ("rank", 20), ("excess", 60)]
+
+
+def test_the_small_holders_veto_goes_on_36_fixed_rules_of_four_kinds():
+    """2026-11-18 (docs/research/results.md「防護：不買散戶大增的五分之一加到模型類的規則」): in the fall of 9/1-11/18
+    every pair with this veto was ahead of the same rule without it; the batch puts it on fixed trials, and the flow
+    of the same name is in both scripts."""
+    from pathlib import Path
+
+    from quant_platform.research import daily
+
+    assert len(daily.GUARD_H1) == len(set(daily.GUARD_H1)) == 36
+    assert daily.BATCHES["guardh1"] is daily.guard_h1_batch and daily.VETO_WORDS["h1"] == "不買散戶大增的五分之一"
+    root = Path(__file__).resolve().parents[1] / "scripts"
+    for name in ("research-pipeline.ps1", "start-research.ps1"):
+        assert '"guardh1"' in (root / name).read_text(encoding="utf-8-sig").splitlines()[0]
+    assert '"daily", "--name", "guardh1"' in (root / "research-pipeline.ps1").read_text(encoding="utf-8-sig")
