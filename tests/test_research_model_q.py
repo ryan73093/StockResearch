@@ -69,6 +69,42 @@ def test_the_residual_label_takes_the_stocks_share_of_the_markets_move_out():
     assert np.isnan(model.label_block(fp, [210], eligible, "residual", horizon)[0]).all()   # past the data
 
 
+def test_the_label_in_units_of_the_stocks_own_volatility_does_not_favour_the_volatile():
+    """2026-11-18 (dl-2.8.1): dl-2.8.0's top 20 kept dl-2.1.0's beta - a volatile stock is likelier to be among the
+    day's highest returns whatever is taken off. "residual_z" divides what the beta leaves by the stock's own volatility
+    net of the market over the same 120 sessions."""
+    days = weekdays(date(2021, 1, 4), 220)
+    market = market_of(len(days))
+    moves = market[1:] / market[:-1] - 1
+    rng = np.random.default_rng(11)
+    rows, sizes = [], [0.002, 0.004, 0.008, 0.016, 0.004, 0.008, 0.002, 0.016, 0.004, 0.008, 0.002, 0.016]
+    for number, size in enumerate(sizes):           # beta 1, its own noise of four sizes
+        rows.append(40 * np.concatenate([[1], np.cumprod(1 + moves + rng.normal(0, size, len(moves)))]))
+    fp = panel(rows, market, days)
+    eligible = np.ones((len(rows), len(days)), dtype=bool)
+    column, horizon = 180, 20
+    slopes, left = model.market_betas(fp, [column], spreads=True)
+    assert np.allclose(slopes, model.market_betas(fp, [column]), equal_nan=True)        # the betas are as they were
+    prices = fp.panel.filled
+    window = prices[:, column - 119:column + 1] / prices[:, column - 120:column] - 1
+    index = market[column - 119:column + 1] / market[column - 120:column] - 1
+    for row in (0, 3, 7):                           # by hand: the volatility of what the beta leaves
+        own = window[row] - window[row].mean() - slopes[0][row] * (index - index.mean())
+        assert np.isclose(left[0][row], np.sqrt((own ** 2).mean()), rtol=1e-4)
+    assert np.all(np.abs(left[0] / np.array(sizes) - 1) < 0.25)                          # about the noise put in
+    returns = prices[:, column + horizon] / prices[:, column] - 1
+    net = returns - slopes[0] * (market[column + horizon] / market[column] - 1)
+    floor = np.percentile(left[0], 5)
+    units = net / np.maximum(left[0], floor)
+    labels = model.label_block(fp, [column], eligible, "residual_z", horizon)[0]
+    inside = [row for row in np.argsort(units)[2:-2]]                                    # away from the clipped ends
+    for a, b in zip(inside, inside[1:]):
+        assert np.isclose(labels[a] - labels[b], units[a] - units[b], atol=1e-4)
+    later = panel([np.concatenate([row[:column + 1], row[column + 1:] * 2]) for row in rows], market, days)
+    assert np.allclose(model.market_betas(later, [column], spreads=True)[1], left)      # only what was known that day
+    assert np.isnan(model.label_block(fp, [210], eligible, "residual_z", horizon)[0]).all()
+
+
 def gate_panel():
     """60 stocks over 2021-2022: 30 move twice the index, 30 a fifth of it with a steady 0.05% a day of their own;
     the index rises and falls by turns of 20 sessions."""
@@ -136,7 +172,10 @@ def test_the_deep_version_is_dl_2_1_0_learning_the_net_return_and_keeps_its_gate
     from quant_platform.research.daily import MODEL_FACTORS
     from quant_platform.research.scan import SHORT, failed_models
 
-    assert model_deep2.NET_OF_MARKET == {"dl-2.8.0": "dl-2.1.0"}
+    assert model_deep2.NET_OF_MARKET == {"dl-2.8.0": "dl-2.1.0", "dl-2.8.1": "dl-2.1.0"}
+    assert model_deep2.NET_LABELS == {"dl-2.8.1": "residual_z"}            # dl-2.8.0 keeps the plain residual
+    assert model.VERSIONS["dl-2.8.1"] == {"version": "dl-2.8.1", "label": "deep2"}
+    assert model_deep2.LOSSES["dl-2.8.1"] == model_deep2.LOSSES["dl-2.1.0"]
     assert model_deep2.LOSSES["dl-2.8.0"] == model_deep2.LOSSES["dl-2.1.0"]
     assert model_deep2.gate_years("dl-2.8.0") == (2021, 2022, 2023, 2024, 2025)
     for group in (model_deep2.TECHNICAL, model_deep2.MONTHLY, model_deep2.RISK_ADJUSTED, model_deep2.WIDE):

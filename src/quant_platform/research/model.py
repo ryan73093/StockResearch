@@ -119,6 +119,9 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_deep2_holders_r": {"version": "dl-2.7.1", "label": "deep2"},
           # 2026-11-18: dl-2.1.0 learning the return net of the stock's beta (model_deep2.NET_OF_MARKET)
           "ml_deep2_net": {"version": "dl-2.8.0", "label": "deep2"},
+          # 2026-11-18: dl-2.8.0 kept high-beta picks (the top-tenth loss favours volatile stocks) - the same label in
+          # units of the stock's own volatility (model_deep2.NET_LABELS)
+          "ml_deep2_netz": {"version": "dl-2.8.1", "label": "deep2"},
           "ml_deep3_r": {"version": "dl-3.0.1", "label": "deep2"},
           # 2026-10-17 (docs/research_dl_exits_review.md D3): dl-2.1.0 with cross-stock attention and a market gate
           "ml_deep3": {"version": "dl-3.0.0", "label": "deep2"},
@@ -333,14 +336,16 @@ BETA_WINDOW = 120          # sessions a stock's beta to TAIEX is measured over, 
 BETA_LEAST = 108
 
 
-def market_betas(fp, columns: list[int], window: int = BETA_WINDOW) -> np.ndarray:
+def market_betas(fp, columns: list[int], window: int = BETA_WINDOW, spreads: bool = False):
     """len(columns) × symbols: each stock's beta to TAIEX over the ``window`` sessions ending on the column — what was
-    known that day. NaN without the index or with fewer than BETA_LEAST of the days traded."""
+    known that day. NaN without the index or with fewer than BETA_LEAST of the days traded. ``spreads`` (2026-11-18,
+    dl-2.8.1): also the daily volatility of what the beta leaves over the same sessions — (betas, volatilities)."""
     prices = np.asarray(fp.panel.filled, dtype=float)
     output = np.full((len(columns), len(fp.symbols)), np.nan, dtype=np.float32)
+    left = np.full((len(columns), len(fp.symbols)), np.nan, dtype=np.float32)
     market = getattr(fp, "market", None)
     if market is None:
-        return output
+        return (output, left) if spreads else output
     index = pd.Series(np.asarray(market, dtype=float)).ffill().to_numpy()
     for slot, column in enumerate(columns):
         if column < window:
@@ -357,15 +362,21 @@ def market_betas(fp, columns: list[int], window: int = BETA_WINDOW) -> np.ndarra
         known = np.isfinite(returns)
         enough = known.sum(axis=1) >= BETA_LEAST * window // BETA_WINDOW
         filled = np.where(known, returns, 0.0)
-        output[slot] = np.where(enough, (filled - filled.mean(axis=1, keepdims=True)) @ centred / spread, np.nan)
-    return output
+        own = filled - filled.mean(axis=1, keepdims=True)
+        slopes = own @ centred / spread
+        output[slot] = np.where(enough, slopes, np.nan)
+        if spreads:
+            left[slot] = np.where(enough, np.sqrt(((own - slopes[:, None] * centred) ** 2).mean(axis=1)), np.nan)
+    return (output, left) if spreads else output
 
 
 def label_block(fp, columns: list[int], eligible: np.ndarray, kind: str = "rank", horizon: int = HORIZON) -> np.ndarray:
     """len(columns) × symbols: the next ``horizon`` sessions' return (NaN past the data) as its percentile among
     the day's eligible stocks ("rank"), or above the day's median with the day's 1% tails clipped ("excess").
     "residual" and "residual_rank" (2026-11-18, gbm-2.12.0): the same of the return less the stock's beta
-    (``market_betas``) times TAIEX's return over those sessions."""
+    (``market_betas``) times TAIEX's return over those sessions. "residual_z" (dl-2.8.1): that return in units of the
+    stock's own volatility net of the market (the day's lowest twentieth of volatilities raised to that level), then as
+    "excess" — a volatile stock is no likelier than a quiet one to be among the day's highest."""
     prices = fp.panel.filled
     later = [column + horizon for column in columns]
     valid = [column < prices.shape[1] for column in later]
@@ -380,6 +391,17 @@ def label_block(fp, columns: list[int], eligible: np.ndarray, kind: str = "rank"
             index = pd.Series(np.asarray(fp.market, dtype=float)).ffill().to_numpy()
             moves = np.array([index[later[slot]] / index[columns[slot]] - 1 for slot in rows])
             returns = returns - market_betas(fp, [columns[slot] for slot in rows]) * moves[:, None]
+        if kind == "residual_z":
+            import warnings
+
+            index = pd.Series(np.asarray(fp.market, dtype=float)).ffill().to_numpy()
+            moves = np.array([index[later[slot]] / index[columns[slot]] - 1 for slot in rows])
+            slopes, left = market_betas(fp, [columns[slot] for slot in rows], spreads=True)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)          # a day with no stock: all NaN
+                floor = np.nanpercentile(np.where(left > 0, left, np.nan), 5, axis=1, keepdims=True)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                returns = (returns - slopes * moves[:, None]) / np.maximum(left, floor)
         if kind in ("rank", "residual_rank"):
             output[rows] = _rank(returns)
         else:

@@ -148,7 +148,12 @@ PLAIN_AGAINST["dl-2.5.2"] = "dl-2.1.0"
 # same gate the same day): dl-2.1.0 as it is, the label the 20-session return net of the stock's beta to TAIEX
 # (model.label_block "residual"); the epoch is chosen on what it learns, the years are reported on the plain excess, and
 # its gate is model.down_gate against dl-2.1.0 (the stretches TAIEX fell), kept in meta["gate"]
-NET_OF_MARKET = {"dl-2.8.0": "dl-2.1.0"}
+# dl-2.8.1 (docs/research/results.md「深度學習：扣掉連動後再除以個股自己的波動」, written before the run): dl-2.8.0 did
+# not pass - its top 20 kept dl-2.1.0's beta (1.06 against 1.07; score against beta +0.45): being in the day's top tenth
+# of a return is likelier for a volatile stock whatever the market is taken off. The label in units of the stock's own
+# volatility net of the market (model.label_block "residual_z"); the same gate
+NET_OF_MARKET = {"dl-2.8.0": "dl-2.1.0", "dl-2.8.1": "dl-2.1.0"}
+NET_LABELS = {"dl-2.8.1": "residual_z"}
 for _new in NET_OF_MARKET:
     LOSSES[_new] = "top10"
 RECENT_GATED.update(NET_OF_MARKET)
@@ -659,7 +664,7 @@ def _prepare(fp, out: Path, version: str):
         labels = {column: wide[slot] for slot, column in enumerate(columns)}
         rows = {column: np.flatnonzero(np.isfinite(labels[column]) & learned[:, column]) for column in columns}
     if version in NET_OF_MARKET:
-        net = label_block(fp, columns, eligible, "residual", HORIZON)
+        net = label_block(fp, columns, eligible, NET_LABELS.get(version, "residual"), HORIZON)
         judged = (rows, labels)
         labels = {column: net[slot] for slot, column in enumerate(columns)}
         rows = {column: np.flatnonzero(np.isfinite(labels[column]) & eligible[:, column]) for column in columns}
