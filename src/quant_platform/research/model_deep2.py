@@ -144,8 +144,27 @@ RECENT_GATED.add("dl-2.5.2")
 PLAIN_AGAINST["dl-2.5.2"] = "dl-2.1.0"
 
 
+# 2026-11-18 (docs/research/results.md「深度學習：學扣掉大盤連動後的報酬」, written before the run; model Q passed the
+# same gate the same day): dl-2.1.0 as it is, the label the 20-session return net of the stock's beta to TAIEX
+# (model.label_block "residual"); the epoch is chosen on what it learns, the years are reported on the plain excess, and
+# its gate is model.down_gate against dl-2.1.0 (the stretches TAIEX fell), kept in meta["gate"]
+NET_OF_MARKET = {"dl-2.8.0": "dl-2.1.0"}
+for _new in NET_OF_MARKET:
+    LOSSES[_new] = "top10"
+RECENT_GATED.update(NET_OF_MARKET)
+
+
 def gate_years(version: str) -> tuple[int, ...]:
     return RECENT_GATE_YEARS if version in RECENT_GATED else GATE_YEARS
+
+
+def _judge_with(fp, version: str, meta: dict, out: Path) -> dict[str, object]:
+    """The version's gate: by the scores kept so far for the ones judged by the stretches TAIEX fell, else ``_judge``."""
+    if version in NET_OF_MARKET:
+        from quant_platform.research.model import down_gate
+
+        return down_gate(fp, out, out.parent / NET_OF_MARKET[version], gate_years(version))
+    return _judge(version, meta, out.parent)
 GATE_FLOOR = 0.006
 GATE_COUNT = 4
 
@@ -591,6 +610,10 @@ def _judge(version: str, meta: dict, root: Path) -> dict[str, object]:
 
 def gate(models_root: str | Path, version: str) -> dict[str, object]:
     root = Path(models_root)
+    if version in NET_OF_MARKET:             # judged when trained (it takes the scores and the prices), kept in the meta
+        path = root / version / "meta.json"
+        kept = json.loads(path.read_text(encoding="utf-8")).get("gate") if path.is_file() else None
+        return kept or {"version": version, "passed": False, "reason": "not trained"}
     against = DIRECT_AGAINST if LOSSES.get(version) == "direct" else (AGAINST_OF.get(version)
                                                                       or PLAIN_AGAINST.get(version, AGAINST))
     paths = root / version / "meta.json", root / against / "meta.json"
@@ -635,6 +658,11 @@ def _prepare(fp, out: Path, version: str):
         judged = (rows, labels)
         labels = {column: wide[slot] for slot, column in enumerate(columns)}
         rows = {column: np.flatnonzero(np.isfinite(labels[column]) & learned[:, column]) for column in columns}
+    if version in NET_OF_MARKET:
+        net = label_block(fp, columns, eligible, "residual", HORIZON)
+        judged = (rows, labels)
+        labels = {column: net[slot] for slot, column in enumerate(columns)}
+        rows = {column: np.flatnonzero(np.isfinite(labels[column]) & eligible[:, column]) for column in columns}
     if version in RESIDUAL_OF:           # learns (and picks its epoch on) the residual; the years reported on the excess
         judged = (rows, labels)
         labels = residual_labels(fp.matrix(RESIDUAL_OF[version]), labels, rows)
@@ -667,7 +695,8 @@ def train_until(fp, out_dir: str | Path, version: str, cutoff, job=None) -> dict
     train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]           # purged
     networks, curves = [], []
     for seed in SEEDS:
-        state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+        state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture,
+                            None if version in NET_OF_MARKET else judged)
         network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
         network.load_state_dict(state)
         networks.append(network)
@@ -749,7 +778,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
     for number, year in enumerate(order):
         # 2026-10-24: gate=False — the stress test retrains a version that already passed its gate (research/stress.py)
         if gate and year not in gated and all(str(item) in meta["years"] for item in gated if item in years):
-            check = _judge(version, meta, out.parent)
+            check = _judge_with(fp, version, meta, out)
             meta["gate"] = check
             if not check["passed"]:
                 meta["stopped"] = f"{gated[0]}～{gated[-1]} 沒過門檻，其他年度不訓練"
@@ -784,7 +813,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
             networks, curves, states = [], [], []
             for seed in SEEDS:
                 state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture,
-                                    None if version in RESIDUAL_OF else judged)
+                                    None if version in RESIDUAL_OF or version in NET_OF_MARKET else judged)
                 network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
                 network.load_state_dict(state)
                 networks.append(network)
@@ -838,7 +867,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
             job.update(done=number + 1, total=len(order),
                        current=f"{year}：樣本外 IC {item['ic']}、前 20 名多 {item['top20_gain']}")
     if all(str(year) in meta["years"] for year in gate_years(version)):      # 2026-10-29: its own gate's years
-        meta["gate"] = _judge(version, meta, out.parent)
+        meta["gate"] = _judge_with(fp, version, meta, out)
     files.write_text(meta_path, json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
 

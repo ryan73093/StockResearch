@@ -85,6 +85,12 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # branch data's informed-buying signal (research/branches.py), once the download is whole; judged on 2021-2025
           # against model O
           "ml_gbm_p": {"version": "gbm-2.11.0", "label": "ensemble", "features": "extended_p"},
+          # 2026-11-18 (docs/research/results.md「模型 Q」; 使用者：繼續研究模型、要能上線的): from 9/1 to 11/17 0050
+          # fell 14% and the rules reading a model moved 1.4 to 1.65 times the market — the models' top 20 gain in a
+          # rising market and give it back in a falling one. Model K's features, learning the return left once the
+          # stock's own share of the market's move is taken out (``market_betas``); judged on 2021-2025 by the top
+          # 20's return against TAIEX in the stretches TAIEX fell (``down_gate``)
+          "ml_gbm_q": {"version": "gbm-2.12.0", "label": "ensemble", "features": "extended_k", "target": "residual"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -111,6 +117,8 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           "ml_deep2_wide_r": {"version": "dl-2.2.1", "label": "deep2", "universe": "all"},
           "ml_deep2_riskadj_r": {"version": "dl-2.4.1", "label": "deep2"},
           "ml_deep2_holders_r": {"version": "dl-2.7.1", "label": "deep2"},
+          # 2026-11-18: dl-2.1.0 learning the return net of the stock's beta (model_deep2.NET_OF_MARKET)
+          "ml_deep2_net": {"version": "dl-2.8.0", "label": "deep2"},
           "ml_deep3_r": {"version": "dl-3.0.1", "label": "deep2"},
           # 2026-10-17 (docs/research_dl_exits_review.md D3): dl-2.1.0 with cross-stock attention and a market gate
           "ml_deep3": {"version": "dl-3.0.0", "label": "deep2"},
@@ -321,9 +329,43 @@ def feature_block(fp, columns: list[int], eligible: np.ndarray, names: tuple[str
     return block
 
 
+BETA_WINDOW = 120          # sessions a stock's beta to TAIEX is measured over, ending on the deciding session
+BETA_LEAST = 108
+
+
+def market_betas(fp, columns: list[int], window: int = BETA_WINDOW) -> np.ndarray:
+    """len(columns) × symbols: each stock's beta to TAIEX over the ``window`` sessions ending on the column — what was
+    known that day. NaN without the index or with fewer than BETA_LEAST of the days traded."""
+    prices = np.asarray(fp.panel.filled, dtype=float)
+    output = np.full((len(columns), len(fp.symbols)), np.nan, dtype=np.float32)
+    market = getattr(fp, "market", None)
+    if market is None:
+        return output
+    index = pd.Series(np.asarray(market, dtype=float)).ffill().to_numpy()
+    for slot, column in enumerate(columns):
+        if column < window:
+            continue
+        with np.errstate(invalid="ignore", divide="ignore"):
+            moves = index[column - window + 1:column + 1] / index[column - window:column] - 1
+            returns = prices[:, column - window + 1:column + 1] / prices[:, column - window:column] - 1
+        if not np.isfinite(moves).all():
+            continue
+        centred = moves - moves.mean()
+        spread = float(centred @ centred)
+        if spread <= 0:
+            continue
+        known = np.isfinite(returns)
+        enough = known.sum(axis=1) >= BETA_LEAST * window // BETA_WINDOW
+        filled = np.where(known, returns, 0.0)
+        output[slot] = np.where(enough, (filled - filled.mean(axis=1, keepdims=True)) @ centred / spread, np.nan)
+    return output
+
+
 def label_block(fp, columns: list[int], eligible: np.ndarray, kind: str = "rank", horizon: int = HORIZON) -> np.ndarray:
     """len(columns) × symbols: the next ``horizon`` sessions' return (NaN past the data) as its percentile among
-    the day's eligible stocks ("rank"), or above the day's median with the day's 1% tails clipped ("excess")."""
+    the day's eligible stocks ("rank"), or above the day's median with the day's 1% tails clipped ("excess").
+    "residual" and "residual_rank" (2026-11-18, gbm-2.12.0): the same of the return less the stock's beta
+    (``market_betas``) times TAIEX's return over those sessions."""
     prices = fp.panel.filled
     later = [column + horizon for column in columns]
     valid = [column < prices.shape[1] for column in later]
@@ -334,7 +376,11 @@ def label_block(fp, columns: list[int], eligible: np.ndarray, kind: str = "rank"
         end = prices[:, [later[index] for index in rows]].T
         with np.errstate(invalid="ignore", divide="ignore"):
             returns = np.where(eligible[:, [columns[index] for index in rows]].T, end / start - 1, np.nan)
-        if kind == "rank":
+        if kind in ("residual", "residual_rank"):
+            index = pd.Series(np.asarray(fp.market, dtype=float)).ffill().to_numpy()
+            moves = np.array([index[later[slot]] / index[columns[slot]] - 1 for slot in rows])
+            returns = returns - market_betas(fp, [columns[slot] for slot in rows]) * moves[:, None]
+        if kind in ("rank", "residual_rank"):
             output[rows] = _rank(returns)
         else:
             import warnings
@@ -486,6 +532,12 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
     y20 = label_block(fp, samples, eligible, "excess", HORIZON)
     rank20 = label_block(fp, samples, eligible, "rank", HORIZON)
     y60 = label_block(fp, samples, eligible, "excess", 60)
+    # 2026-11-18 (gbm-2.12.0): what the members learn is the return net of the stock's beta; the diagnostics below stay
+    # on the plain labels, so the yearly top-20 gain reads as every other version's
+    residual = VERSIONS.get(version, {}).get("target") == "residual"
+    learn20, learn_rank, learn60 = ((label_block(fp, samples, eligible, "residual", HORIZON),
+                                     label_block(fp, samples, eligible, "residual_rank", HORIZON),
+                                     label_block(fp, samples, eligible, "residual", 60)) if residual else (y20, rank20, y60))
     years = years or list(range(FIRST_YEAR, fp.sessions[-1].year + 1))
     diagnostics = {}
     # 2026-10-20 (gbm-2.4.0): refitted every month — each month's ensemble learns the labels ended before the month's
@@ -514,7 +566,7 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
             if half_life:                    # 2026-10-28 (gbm-2.8.0): the older weeks count less
                 now = first if first is not None else next(index for index, day in enumerate(fp.sessions) if day.year == year)
                 ages = {row: 0.5 ** ((now - samples[row]) / half_life) for row in set(rows20) | set(rows60)}
-            ensemble = fit_year(x, y20, rank20, y60, rows20, rows60, PARAMS, weights=ages)
+            ensemble = fit_year(x, learn20, learn_rank, learn60, rows20, rows60, PARAMS, weights=ages)
             if month is None:
                 files.write_bytes(out / f"{year}.pkl", pickle.dumps(ensemble, protocol=5))
             else:
@@ -556,7 +608,71 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
             "kinds": list(KINDS), "step": STEP, "data": data_fingerprint,
             "trained_at": datetime.now(UTC).isoformat(timespec="seconds"), "years": diagnostics}
     files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
+    if version in DOWN_GATES and (out.parent / DOWN_GATES[version] / "meta.json").is_file():
+        meta["down_gate"] = down_gate(fp, out, out.parent / DOWN_GATES[version])
+        files.write_text(out / "meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
     return meta
+
+
+DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0"}        # the version judged by ``down_gate`` → the one it is judged against
+DOWN_YEARS = (2021, 2022, 2023, 2024, 2025)
+DOWN_BETTER = 0.01          # in the stretches TAIEX fell: the top 20 at least this much more than the other's
+DOWN_GIVEN_UP = 0.005       # over every stretch: at most this much less than the other's
+DOWN_COUNT = 4              # years of the five whose top 20 beat TAIEX
+
+
+def down_gate(fp, folder: str | Path, against: str | Path, years=DOWN_YEARS) -> dict[str, object]:
+    """The gate registered for gbm-2.12.0 (docs/research/results.md「模型 Q」, written before the run): on the weekly
+    samples of ``years``, the top 20's next-20-session return less TAIEX's — (a) in the stretches TAIEX fell at least
+    DOWN_BETTER more than the other version's, (b) over every stretch at most DOWN_GIVEN_UP less than the other's,
+    (c) above TAIEX in at least DOWN_COUNT of the years. ``top20_gain``／``against_top20_gain`` are (b)'s numbers."""
+    eligible = eligibility(fp)
+    prices = np.asarray(fp.panel.filled, dtype=float)
+    index = pd.Series(np.asarray(fp.market, dtype=float)).ffill().to_numpy()
+    tables = {"mine": scores(fp, folder), "theirs": scores(fp, against)}
+    found: dict[str, list[tuple[int, float, float]]] = {"mine": [], "theirs": []}
+    for column in sample_columns(len(fp.sessions)):
+        later = column + HORIZON
+        if fp.sessions[column].year not in years or later >= prices.shape[1]:
+            continue
+        move = index[later] / index[column] - 1
+        with np.errstate(invalid="ignore", divide="ignore"):
+            gains = prices[:, later] / prices[:, column] - 1 - move
+        if not np.isfinite(move):
+            continue
+        picks = {}
+        for name, table in tables.items():
+            values = np.where(eligible[:, column] & np.isfinite(gains), table[column], np.nan)
+            known = np.flatnonzero(np.isfinite(values))
+            if known.size >= 50:
+                picks[name] = float(gains[known[np.argsort(-values[known])[:20]]].mean())
+        if len(picks) == 2:                          # the same weeks for both
+            for name, value in picks.items():
+                found[name].append((fp.sessions[column].year, float(move), value))
+
+    def mean(rows):
+        return round(float(np.mean(rows)), 4) if rows else None
+
+    every = {name: mean([value for _year, _move, value in rows]) for name, rows in found.items()}
+    fallen = {name: mean([value for _year, move, value in rows if move < 0]) for name, rows in found.items()}
+    by_year = {str(year): mean([value for when, _move, value in found["mine"] if when == year]) for year in years}
+    ahead = sum(1 for value in by_year.values() if value is not None and value > 0)
+    judged = None not in (*every.values(), *fallen.values())
+    passed = bool(judged and fallen["mine"] - fallen["theirs"] >= DOWN_BETTER
+                  and every["mine"] - every["theirs"] >= -DOWN_GIVEN_UP and ahead >= DOWN_COUNT)
+    return {"version": Path(folder).name, "against": Path(against).name, "years": list(years),
+            "weeks": len(found["mine"]), "weeks_fallen": sum(1 for _year, move, _value in found["mine"] if move < 0),
+            "top20_gain": every["mine"], "against_top20_gain": every["theirs"],
+            "fallen": fallen["mine"], "against_fallen": fallen["theirs"], "by_year": by_year, "years_ahead": ahead,
+            "passed": passed}
+
+
+def stored_down_gate(models_root: str | Path, version: str) -> dict[str, object]:
+    """The gate kept when the version was trained ({} before that)."""
+    path = Path(models_root) / version / "meta.json"
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8")).get("down_gate") or {}
 
 
 def train_year(history: str | Path, version: str, year: int, job=None, months: list[int] | None = None) -> dict[str, object]:

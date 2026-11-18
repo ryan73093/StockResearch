@@ -75,8 +75,8 @@ SHORT = {
     "earnings_yield": "本益比低", "book_to_price": "淨值比低", "roe_ttm": "ROE", "gross_margin": "毛利率",
     "operating_margin_change": "營益率增", "eps_growth": "EPS 成長", "low_debt": "負債低", "fip_12": "趨勢連續",
     "imom_12": "日內動能", "resid_mom_12": "殘差動能", "ml_gbm": "模型A", "ml_gbm_excess": "模型B",
-    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "ml_gbm_ext": "模型G", "ml_gbm_h": "模型H", "ml_gbm_i": "模型I", "ml_gbm_j": "模型J", "ml_gbm_k": "模型K", "ml_gbm_l": "模型L", "ml_gbm_m": "模型M", "ml_gbm_o": "模型O", "ml_gbm_p": "模型P", "ml_deep_direct": "深度直接強化", "ml_deep2_holders": "深度2集保", "ml_deep2_volneutral": "深度2同波動", "ml_deep2_riskadj": "深度2波動調整", "ml_tech_deep": "技術機器人3", "ml_tech_deep_r": "技術機器人4", "ml_tech_resid": "技術機器人殘差", "ml_deep2_r": "深度模型2近年", "ml_deep2_wide_r": "深度2加上櫃近年",
-    "ml_deep2_riskadj_r": "深度2波動調整近年", "ml_deep2_holders_r": "深度2集保近年", "ml_deep3_r": "深度模型3近年", "ml_deep2_monthly": "深度2月訓", "ml_gbm_ext_monthly": "模型G月訓", "low_insider_sell_60": "內部人不賣", "buyback_60": "庫藏股", "low_pledge": "質押低", "pledge_heavy": "質押過半",
+    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "ml_gbm_ext": "模型G", "ml_gbm_h": "模型H", "ml_gbm_i": "模型I", "ml_gbm_j": "模型J", "ml_gbm_k": "模型K", "ml_gbm_l": "模型L", "ml_gbm_m": "模型M", "ml_gbm_o": "模型O", "ml_gbm_p": "模型P", "ml_gbm_q": "模型Q", "ml_deep_direct": "深度直接強化", "ml_deep2_holders": "深度2集保", "ml_deep2_volneutral": "深度2同波動", "ml_deep2_riskadj": "深度2波動調整", "ml_tech_deep": "技術機器人3", "ml_tech_deep_r": "技術機器人4", "ml_tech_resid": "技術機器人殘差", "ml_deep2_r": "深度模型2近年", "ml_deep2_wide_r": "深度2加上櫃近年",
+    "ml_deep2_riskadj_r": "深度2波動調整近年", "ml_deep2_holders_r": "深度2集保近年", "ml_deep2_net": "深度2扣連動", "ml_deep3_r": "深度模型3近年", "ml_deep2_monthly": "深度2月訓", "ml_gbm_ext_monthly": "模型G月訓", "low_insider_sell_60": "內部人不賣", "buyback_60": "庫藏股", "low_pledge": "質押低", "pledge_heavy": "質押過半",
          "industry_mom_6": "產業動能", "industry_mom_1": "產業短期動能", "industry_laggard_5": "同業落後補漲",
          "big_holder_pct": "千張大戶比例", "big_holder_up_4w": "大戶增加", "holders_down_4w": "股東人數減少",
          "retail_down_4w": "散戶減少", "margin_safe": "融資維持率高", "margin_in_profit": "融資沒套牢",
@@ -106,6 +106,7 @@ def failed_models(models_root: Path) -> set[str]:
     10-16 searches had dl-1.0.0 in, which had failed; one finalist, #4737, T3). A model not trained is not left out
     here (its scores are empty)."""
     from quant_platform.research.model_deep2 import gate as deep2_gate
+    from quant_platform.research.model import stored_down_gate
     from quant_platform.research.model_ensemble import gate as top_gate
 
     checks = {"ml_gbm_ens": lambda: top_gate(models_root),
@@ -118,6 +119,7 @@ def failed_models(models_root: Path) -> set[str]:
               "ml_gbm_m": lambda: top_gate(models_root, "gbm-2.9.0", "gbm-2.7.0", (2021, 2022, 2023, 2024, 2025)),
               "ml_gbm_o": lambda: top_gate(models_root, "gbm-2.10.0", "gbm-2.9.0", (2021, 2022, 2023, 2024, 2025)),
               "ml_gbm_p": lambda: top_gate(models_root, "gbm-2.11.0", "gbm-2.10.0", (2021, 2022, 2023, 2024, 2025)),
+              "ml_gbm_q": lambda: stored_down_gate(models_root, "gbm-2.12.0"),
               "ml_gbm_ext_monthly": lambda: top_gate(models_root, "gbm-2.4.0", "gbm-2.2.0"),
               "ml_deep2_riskadj": lambda: deep2_gate(models_root, "dl-2.4.0"),
               "ml_tech_deep": lambda: deep2_gate(models_root, "dl-2.5.0"),
@@ -128,6 +130,7 @@ def failed_models(models_root: Path) -> set[str]:
               "ml_deep2_wide_r": lambda: deep2_gate(models_root, "dl-2.2.1"),
               "ml_deep2_riskadj_r": lambda: deep2_gate(models_root, "dl-2.4.1"),
               "ml_deep2_holders_r": lambda: deep2_gate(models_root, "dl-2.7.1"),
+              "ml_deep2_net": lambda: deep2_gate(models_root, "dl-2.8.0"),
               "ml_deep3_r": lambda: deep2_gate(models_root, "dl-3.0.1"),
               "ml_deep2_monthly": lambda: deep2_gate(models_root, "dl-2.6.0"),
               "ml_deep2_holders": lambda: deep2_gate(models_root, "dl-2.7.0"),

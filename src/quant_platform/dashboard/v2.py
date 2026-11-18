@@ -760,9 +760,18 @@ def _model_gate(folder: Path, version: str, meta: dict) -> dict[str, object] | N
             if check.get("auc") is None:
                 return None
             return {"passed": check["passed"], "text": f"AUC {check['auc']:.3f} 對波動 {check['auc_volatility']:.3f}（要高 0.02）"}
+        from quant_platform.research.model import DOWN_GATES
         from quant_platform.research.model_ensemble import GATES
         from quant_platform.research.model_ensemble import gate as top_gate
 
+        if version in DOWN_GATES:              # 2026-11-18 (gbm-2.12.0): judged by the stretches TAIEX fell
+            check = meta.get("down_gate") or {}
+            if check.get("fallen") is None or check.get("against_fallen") is None:
+                return None
+            return {"passed": check["passed"],
+                    "text": (f"大盤下跌的區間 {check['fallen']:+.2%} 對 {check['against']} {check['against_fallen']:+.2%}（要多 1 點）；"
+                             f"全部區間 {check['top20_gain']:+.2%} 對 {check['against_top20_gain']:+.2%}（不少超過 0.5 點）；"
+                             f"{len(check['years'])} 年裡 {check['years_ahead']} 年贏加權指數（要 4 年）")}
         if version in GATES:
             against, years = GATES[version]
             check = top_gate(folder, version, against, years)

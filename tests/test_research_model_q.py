@@ -1,0 +1,152 @@
+"""2026-11-18 (gbm-2.12.0, docs/research/results.md「模型 Q」): from 9/1 to 11/17 0050 fell 14% and the rules reading a
+model moved 1.4 to 1.65 times the market. Model Q learns the return net of the stock's beta; its gate looks at the
+stretches the index fell."""
+from datetime import date, timedelta
+from types import SimpleNamespace
+
+import numpy as np
+
+from quant_platform.research import model
+
+
+def weekdays(start, count):
+    days, day = [], start
+    while len(days) < count:
+        if day.weekday() < 5:
+            days.append(day)
+        day += timedelta(days=1)
+    return days
+
+
+def market_of(count, seed=3):
+    rng = np.random.default_rng(seed)
+    return 100 * np.cumprod(1 + rng.normal(0, 0.01, count))
+
+
+def panel(prices, market, days):
+    return SimpleNamespace(panel=SimpleNamespace(filled=np.asarray(prices, dtype=float)), market=market, sessions=days,
+                           symbols=[f"{1101 + row}.TW" for row in range(len(prices))])
+
+
+def test_a_stocks_beta_is_its_share_of_the_markets_move_as_known_that_day():
+    days = weekdays(date(2021, 1, 4), 200)
+    market = market_of(len(days))
+    moves = market[1:] / market[:-1] - 1
+    twice = 50 * np.concatenate([[1], np.cumprod(1 + 2 * moves)])           # moves twice the market
+    steady = 30 * 1.001 ** np.arange(len(days))                             # its own way: nothing of the market's
+    half = 20 * np.concatenate([[1], np.cumprod(1 + 0.5 * moves + 0.0005)])
+    young = np.where(np.arange(len(days)) < 150, np.nan, twice)             # too few of the 120 sessions traded
+    fp = panel([twice, steady, half, young], market, days)
+    betas = model.market_betas(fp, [170, 60])
+    assert np.allclose(betas[0][:3], [2.0, 0.0, 0.5], atol=1e-4)
+    assert np.isnan(betas[0][3])                                            # 21 sessions of the 120
+    assert np.isnan(betas[1]).all()                                         # column 60: no 120 sessions before it
+    later = panel([np.concatenate([twice[:171], twice[171:] * 3])], market, days)
+    assert np.allclose(model.market_betas(later, [170])[0], [2.0], atol=1e-4)   # what comes after the day changes nothing
+
+
+def test_the_residual_label_takes_the_stocks_share_of_the_markets_move_out():
+    days = weekdays(date(2021, 1, 4), 220)
+    market = market_of(len(days))
+    moves = market[1:] / market[:-1] - 1
+    rows = []
+    for number in range(9):                         # betas 0, 0.25 … 2, each with its own steady extra a day
+        extra = 0.0002 * (number - 4)
+        rows.append(40 * np.concatenate([[1], np.cumprod(1 + number * 0.25 * moves + extra)]))
+    fp = panel(rows, market, days)
+    eligible = np.ones((9, len(days)), dtype=bool)
+    column, horizon = 180, 20
+    labels = model.label_block(fp, [column], eligible, "residual", horizon)[0]
+    prices = fp.panel.filled
+    returns = prices[:, column + horizon] / prices[:, column] - 1
+    net = returns - model.market_betas(fp, [column])[0] * (market[column + horizon] / market[column] - 1)
+    for a, b in ((2, 3), (3, 5), (4, 6)):           # away from the clipped ends: the differences are the net returns'
+        assert np.isclose(labels[a] - labels[b], net[a] - net[b], atol=1e-6)
+    plain = model.label_block(fp, [column], eligible, "excess", horizon)[0]
+    assert np.isclose(plain[3] - plain[5], returns[3] - returns[5], atol=1e-6)      # the plain label is as it was
+    ranks = model.label_block(fp, [column], eligible, "residual_rank", horizon)[0]
+    assert np.array_equal(np.argsort(ranks), np.argsort(net))                       # ranked by the net return
+    assert np.isnan(model.label_block(fp, [210], eligible, "residual", horizon)[0]).all()   # past the data
+
+
+def gate_panel():
+    """60 stocks over 2021-2022: 30 move twice the index, 30 a fifth of it with a steady 0.05% a day of their own;
+    the index rises and falls by turns of 20 sessions."""
+    days = weekdays(date(2020, 1, 1), 780)
+    rng = np.random.default_rng(5)
+    moves = np.where((np.arange(len(days) - 1) // 20) % 2 == 0, 0.004, -0.004) + rng.normal(0, 0.002, len(days) - 1)
+    market = 100 * np.concatenate([[1], np.cumprod(1 + moves)])
+    rows = [30 * np.concatenate([[1], np.cumprod(1 + 2 * moves)]) for _ in range(30)]
+    rows += [30 * np.concatenate([[1], np.cumprod(1 + 0.2 * moves + 0.0005)]) for _ in range(30)]
+    fp = panel(rows, market, days)
+    lively = np.tile(np.concatenate([np.linspace(1, 2, 30), np.linspace(0, 0.5, 30)])[None, :], (len(days), 1))
+    return fp, lively
+
+
+def test_the_gate_asks_for_less_lost_when_the_index_falls_without_giving_the_rest_up(monkeypatch):
+    fp, lively = gate_panel()
+    tables = {"calm": -lively, "lively": lively}
+    monkeypatch.setattr(model, "eligibility", lambda fp: np.ones((len(fp.symbols), len(fp.sessions)), dtype=bool))
+    monkeypatch.setattr(model, "scores", lambda fp, folder: tables[str(folder)])
+    monkeypatch.setattr(model, "DOWN_COUNT", 2)
+    check = model.down_gate(fp, "calm", "lively", years=(2021, 2022))
+    assert check["weeks"] > 60 and 0 < check["weeks_fallen"] < check["weeks"]
+    assert check["fallen"] > 0 > check["against_fallen"]            # the calm 20 beat a falling index; the lively lose to it
+    assert check["fallen"] - check["against_fallen"] >= model.DOWN_BETTER
+    assert check["years_ahead"] == 2 and check["passed"]
+    other = model.down_gate(fp, "lively", "calm", years=(2021, 2022))
+    assert not other["passed"]                                       # more lost when the index falls
+    monkeypatch.setattr(model, "DOWN_COUNT", 3)
+    assert not model.down_gate(fp, "calm", "lively", years=(2021, 2022))["passed"]   # a year short
+
+
+def test_a_version_that_gives_too_much_up_over_every_stretch_does_not_pass(monkeypatch):
+    fp, lively = gate_panel()
+    prices = fp.panel.filled
+    prices[:30] = prices[:30] * (1.002 ** np.arange(prices.shape[1]))[None, :]      # the lively ones earn 0.2% a day more
+    tables = {"calm": -lively, "lively": lively}
+    monkeypatch.setattr(model, "eligibility", lambda fp: np.ones((len(fp.symbols), len(fp.sessions)), dtype=bool))
+    monkeypatch.setattr(model, "scores", lambda fp, folder: tables[str(folder)])
+    monkeypatch.setattr(model, "DOWN_COUNT", 2)
+    check = model.down_gate(fp, "calm", "lively", years=(2021, 2022))
+    assert check["against_top20_gain"] - check["top20_gain"] > model.DOWN_GIVEN_UP
+    assert not check["passed"]
+
+
+def test_model_q_is_model_k_s_features_with_the_other_target_and_its_own_gate(tmp_path):
+    assert model.version_features("gbm-2.12.0") == model.version_features("gbm-2.7.0")
+    assert model.VERSIONS["gbm-2.12.0"]["target"] == "residual" and "target" not in model.VERSIONS["gbm-2.7.0"]
+    assert model.DOWN_GATES == {"gbm-2.12.0": "gbm-2.7.0"}
+    assert model.stored_down_gate(tmp_path, "gbm-2.12.0") == {}      # not trained: no judgment, so not "failed"
+    from quant_platform.research.daily import MODEL_FACTORS, model_q_batch
+    from quant_platform.research.scan import SHORT, failed_models
+
+    assert "ml_gbm_q" in MODEL_FACTORS and SHORT["ml_gbm_q"] == "模型Q"
+    assert "ml_gbm_q" not in failed_models(tmp_path)
+    (tmp_path / "gbm-2.12.0").mkdir()
+    (tmp_path / "gbm-2.12.0" / "meta.json").write_text(
+        '{"down_gate": {"top20_gain": 0.01, "against_top20_gain": 0.02, "passed": false}}', encoding="utf-8")
+    assert "ml_gbm_q" in failed_models(tmp_path)                      # trained and judged: left out of the searches
+    assert model_q_batch.__doc__ and "gbm-2.12.0" in model_q_batch.__doc__
+
+
+def test_the_deep_version_is_dl_2_1_0_learning_the_net_return_and_keeps_its_gate_in_the_meta(tmp_path):
+    """2026-11-18 (dl-2.8.0): the gate takes the scores and the prices, so it is judged when trained and read back."""
+    from quant_platform.research import model_deep2
+    from quant_platform.research.daily import MODEL_FACTORS
+    from quant_platform.research.scan import SHORT, failed_models
+
+    assert model_deep2.NET_OF_MARKET == {"dl-2.8.0": "dl-2.1.0"}
+    assert model_deep2.LOSSES["dl-2.8.0"] == model_deep2.LOSSES["dl-2.1.0"]
+    assert model_deep2.gate_years("dl-2.8.0") == (2021, 2022, 2023, 2024, 2025)
+    for group in (model_deep2.TECHNICAL, model_deep2.MONTHLY, model_deep2.RISK_ADJUSTED, model_deep2.WIDE):
+        assert "dl-2.8.0" not in group                              # nothing else of dl-2.1.0 changed
+    assert model.VERSIONS["dl-2.8.0"] == {"version": "dl-2.8.0", "label": "deep2"}
+    assert "ml_deep2_net" in MODEL_FACTORS and SHORT["ml_deep2_net"] == "深度2扣連動"
+    assert model_deep2.gate(tmp_path, "dl-2.8.0") == {"version": "dl-2.8.0", "passed": False, "reason": "not trained"}
+    assert "ml_deep2_net" not in failed_models(tmp_path)            # not trained is not failed
+    (tmp_path / "dl-2.8.0").mkdir()
+    kept = {"version": "dl-2.8.0", "against": "dl-2.1.0", "top20_gain": 0.02, "against_top20_gain": 0.029, "passed": False}
+    (tmp_path / "dl-2.8.0" / "meta.json").write_text(__import__("json").dumps({"gate": kept}), encoding="utf-8")
+    assert model_deep2.gate(tmp_path, "dl-2.8.0") == kept
+    assert "ml_deep2_net" in failed_models(tmp_path)
