@@ -722,9 +722,14 @@ def train_until(fp, out_dir: str | Path, cutoff, label: str, version: str, horiz
     if label == "ensemble":
         from quant_platform.research.model_ensemble import fit_year
 
-        y20 = label_block(fp, samples, eligible, "excess", HORIZON)
-        rank20 = label_block(fp, samples, eligible, "rank", HORIZON)
-        y60 = label_block(fp, samples, eligible, "excess", 60)
+        # 2026-11-18: the version's own target — the month's refit of gbm-2.12.0 learned the plain labels here (this
+        # function has its own copy of the yearly training's label lines), which made it model K from the cutoff on;
+        # found 20 minutes after its first refit, before any forward account read it
+        kinds = (("residual", "residual_rank") if VERSIONS.get(version, {}).get("target") == "residual"
+                 else ("excess", "rank"))
+        y20 = label_block(fp, samples, eligible, kinds[0], HORIZON)
+        rank20 = label_block(fp, samples, eligible, kinds[1], HORIZON)
+        y60 = label_block(fp, samples, eligible, kinds[0], 60)
         model = fit_year(x, y20, rank20, y60, rows(HORIZON), rows(60), PARAMS)
         count = len(rows(HORIZON))
     else:

@@ -150,3 +150,24 @@ def test_the_deep_version_is_dl_2_1_0_learning_the_net_return_and_keeps_its_gate
     (tmp_path / "dl-2.8.0" / "meta.json").write_text(__import__("json").dumps({"gate": kept}), encoding="utf-8")
     assert model_deep2.gate(tmp_path, "dl-2.8.0") == kept
     assert "ml_deep2_net" in failed_models(tmp_path)
+
+
+def test_the_months_refit_learns_the_versions_own_target(tmp_path, monkeypatch):
+    """2026-11-18 11:36: model Q's refit to the month's cutoff learned the plain labels - train_until had its own copy
+    of the label lines - so from the cutoff on the forward accounts would have read model K under model Q's name."""
+    from quant_platform.research import model_ensemble
+
+    days = weekdays(date(2024, 1, 1), 400)
+    fp = SimpleNamespace(sessions=days, symbols=["1101.TW"])
+    asked = []
+    monkeypatch.setattr(model, "trained_features", lambda out, version: ("momentum_3",))
+    monkeypatch.setattr(model, "eligibility", lambda fp: np.ones((1, len(days)), dtype=bool))
+    monkeypatch.setattr(model, "feature_block", lambda fp, samples, eligible, names: np.zeros((len(samples), 1, 1)))
+    monkeypatch.setattr(model, "label_block", lambda fp, samples, eligible, kind, horizon:
+                        asked.append((kind, horizon)) or np.zeros((len(samples), 1)))
+    monkeypatch.setattr(model_ensemble, "fit_year", lambda *args, **kwargs: {"fitted": True})
+    model.train_until(fp, tmp_path / "gbm-2.12.0", days[-1], "ensemble", "gbm-2.12.0")
+    assert asked == [("residual", 20), ("residual_rank", 20), ("residual", 60)]
+    asked.clear()
+    model.train_until(fp, tmp_path / "gbm-2.7.0", days[-1], "ensemble", "gbm-2.7.0")
+    assert asked == [("excess", 20), ("rank", 20), ("excess", 60)]
