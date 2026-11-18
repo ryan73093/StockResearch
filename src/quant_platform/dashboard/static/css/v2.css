@@ -944,6 +944,8 @@ td.wrap { white-space: normal; min-width: 180px; }
 .nowbar__how { color: var(--text); font-size: 13px; }
 .nowbar__listed { background: var(--text-2); opacity: .45; }
 .now-live .kpi__note { max-width: 34em; }
+.now-latest { margin: 8px 0 0; padding-left: 1.2em; display: grid; gap: 8px; font-size: 13px; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .nowbar .fbar__sub { grid-row: auto; } }
 .dash-how { margin-top: 8px; } .dash-how summary { cursor: pointer; color: var(--accent); font-size: 13px; }
 @media (max-width: 640px) {
   .fbar { grid-template-columns: minmax(0, 1fr) auto; }

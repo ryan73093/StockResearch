@@ -53,9 +53,9 @@
     {% if nw.latest %}
     <figure data-group="now" class="dash-panel dash-panel--full">
       <figcaption><h3>最近做了什麼</h3><span>最佳化紀錄最新的 {{ nw.latest|length }} 筆；全部在上面的「最佳化紀錄」分頁</span></figcaption>
-      <table class="table--stack now-latest"><thead><tr><th>日期</th><th>類別</th><th>做了什麼</th><th>判定</th></tr></thead><tbody>
-      {% for row in nw.latest %}<tr><td data-label="日期">{{ row.date[5:10] }}</td><td data-label="類別">{{ row.family }}</td><td data-primary>{{ row.what|striptags|truncate(90, True, '…') }}</td><td data-label="判定">{{ row.verdict|striptags|truncate(60, True, '…') }}</td></tr>{% endfor %}
-      </tbody></table>
+      <ul class="now-latest">
+      {% for row in nw.latest %}<li><b>{{ row.date[5:10] }}・{{ row.family }}</b>　{{ row.what|striptags|truncate(110, True, '…') }}<br><span class="muted">判定：{{ row.verdict|striptags|truncate(80, True, '…') }}</span></li>{% endfor %}
+      </ul>
     </figure>
     {% endif %}
 {% endmacro %}
