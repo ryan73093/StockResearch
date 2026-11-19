@@ -226,3 +226,18 @@ def test_the_small_holders_veto_goes_on_36_fixed_rules_of_four_kinds():
     for name in ("research-pipeline.ps1", "start-research.ps1"):
         assert '"guardh1"' in (root / name).read_text(encoding="utf-8-sig").splitlines()[0]
     assert '"daily", "--name", "guardh1"' in (root / "research-pipeline.ps1").read_text(encoding="utf-8-sig")
+
+
+def test_model_q_is_swapped_into_32_fixed_rules_reading_one_tree_model():
+    """2026-11-19 (docs/research/results.md「模型 Q 換進現有的規則」): eight rules each of models J, I, G and H; the
+    flow of the same name is in both scripts."""
+    from pathlib import Path
+
+    from quant_platform.research import daily
+
+    trials = [trial for group in daily.SWAP_Q.values() for trial in group]
+    assert set(daily.SWAP_Q) == {"ml_gbm_j", "ml_gbm_i", "ml_gbm_ext", "ml_gbm_h"} and len(trials) == len(set(trials)) == 32
+    assert daily.BATCHES["swapq"] is daily.swap_q_batch
+    root = Path(__file__).resolve().parents[1] / "scripts"
+    for name in ("research-pipeline.ps1", "start-research.ps1"):
+        assert '"swapq"' in (root / name).read_text(encoding="utf-8-sig").splitlines()[0]
