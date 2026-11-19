@@ -448,6 +448,8 @@ def main() -> int:
     parser.add_argument("--signals-from", help="scan-large：--signals-top 依據的前一輪搜尋資料夾")
     parser.add_argument("--rerank-low-beta", help="scan-large：不重篩，把這些已完成的搜尋資料夾（逗號分隔）過快篩的候選改用低連動重挑後進引擎（2026-11-19）")
     parser.add_argument("--beta-max", type=float, default=0.8, help="scan-large --rerank-low-beta：開發期對 0050 的連動上限")
+    parser.add_argument("--distinct-sets", action="store_true", help="scan-large --rerank-low-beta：每組訊號只留最穩的一個設定再排（2026-11-19）")
+    parser.add_argument("--rerank-pool", type=int, default=3000, help="scan-large --rerank-low-beta：每次搜尋進相關性篩選的候選數")
     parser.add_argument("--holds", help="scan-large：持有方式，逗號分隔（days＝固定持有 20 天、trend＝月線上續抱、free＝不設最短持有；預設三種）")
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
     parser.add_argument("--signals-max", type=int, default=3, help="scan：一組最多幾個訊號")
@@ -1745,7 +1747,8 @@ def main() -> int:
             command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
             with JobLog(RESEARCH).start(f"大搜尋改用低連動重挑：{len(folders)} 次搜尋過快篩的候選", command) as job:
                 summary = scan_large.rerank(Path(args.base), RESEARCH, broker_costs(args.broker), folders,
-                                            count=args.finalists, limit=args.beta_max, job=job)
+                                            count=args.finalists, limit=args.beta_max, job=job,
+                                            distinct=args.distinct_sets, pool=args.rerank_pool)
                 job.payload["summary"] = f"選出 {summary['finalists']} 個進引擎：{summary['tiers']}"
             print(json.dumps({key: value for key, value in summary.items() if key != "results"}, ensure_ascii=False), flush=True)
             return 0

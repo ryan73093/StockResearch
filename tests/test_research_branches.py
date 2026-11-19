@@ -184,3 +184,14 @@ def test_low_beta_rerank_reads_beta_and_the_worst_fall_from_stored_excess():
     beta, gap = scan_large.beta_and_gap(excess, bench, stretches)
     assert np.allclose(beta, [0.5, 2.0, 1.0], atol=0.02)
     assert gap[0] > 0 > gap[1] and abs(gap[2]) < 1e-3
+
+
+def test_one_row_per_signal_set_its_steadiest_setting():
+    """2026-11-19: the steadiest low-beta rows were a few signal sets in their 24 settings, near copies of each other."""
+    from quant_platform.research import scan_large
+
+    rows = [{"factors": ["a", "b"], "hold": "days", "first_half": 0.02, "second_half": 0.05, "worst_1y": -0.1},
+            {"factors": ["b", "a"], "hold": "free", "first_half": 0.04, "second_half": 0.05, "worst_1y": -0.2},
+            {"factors": ["a", "c"], "hold": "days", "first_half": 0.01, "second_half": 0.01, "worst_1y": -0.1}]
+    kept = scan_large.steadiest_per_set(rows)
+    assert sorted((tuple(sorted(row["factors"])), row["hold"]) for row in kept) == [(("a", "b"), "free"), (("a", "c"), "days")]

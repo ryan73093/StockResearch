@@ -255,7 +255,21 @@ def beta_and_gap(excess: np.ndarray, bench: np.ndarray, stretches: list[tuple[in
     return beta, gap
 
 
-def low_beta_rows(folder: Path, bench: np.ndarray, limit: float = LOW_BETA, pool: int = RERANK_POOL, job=None) -> tuple[list[dict], dict[str, int]]:
+def steadiest_per_set(rows: list[dict]) -> list[dict]:
+    """2026-11-19 (lowbeta's first search gave 4 finalists of 73,624 rows: the 3,000 steadiest were the same few
+    signal sets in their 24 settings, each a near copy of the other): one row per signal set — its steadiest setting."""
+    from quant_platform.research.scan import stability
+
+    best: dict[tuple[str, ...], dict] = {}
+    for row in rows:
+        key = tuple(sorted(row["factors"]))
+        if key not in best or stability(row) > stability(best[key]):
+            best[key] = row
+    return list(best.values())
+
+
+def low_beta_rows(folder: Path, bench: np.ndarray, limit: float = LOW_BETA, pool: int = RERANK_POOL, job=None,
+                  distinct: bool = False) -> tuple[list[dict], dict[str, int]]:
     """The passing rows of a finished streamed search (both halves ahead of 0050) whose development-period beta is at
     most ``limit`` and that fell no further than CALM_GAP beyond 0050 in any of its falls — the ``pool`` steadiest —
     and the counts (rows read, stable, low beta, low beta and calm)."""
@@ -285,13 +299,17 @@ def low_beta_rows(folder: Path, bench: np.ndarray, limit: float = LOW_BETA, pool
             counts["kept"] += 1
             kept.append({**row, "beta": round(float(row_beta), 3), "screen_fall_gap": round(float(row_gap), 4)})
         if len(kept) > 20 * pool:
-            kept = sorted(kept, key=stability, reverse=True)[:pool]
+            kept = sorted(steadiest_per_set(kept) if distinct else kept, key=stability, reverse=True)[:pool]
         if job and number % 200 == 0:
             job.update(done=number, total=len(files), current=f"{folder.name}：讀 {counts['rows']:,} 個、低連動又不多跌 {counts['kept']:,} 個")
+    if distinct:
+        kept = steadiest_per_set(kept)
+        counts["sets"] = len(kept)
     return sorted(kept, key=stability, reverse=True)[:pool], counts
 
 
-def rerank(base: Path, research: Path, costs, folders: list[Path], count: int = 80, limit: float = LOW_BETA, job=None) -> dict[str, object]:
+def rerank(base: Path, research: Path, costs, folders: list[Path], count: int = 80, limit: float = LOW_BETA, job=None,
+           distinct: bool = False, pool: int = RERANK_POOL) -> dict[str, object]:
     """2026-11-19 (docs/research/results.md「大搜尋改用低連動重挑」): the candidates the earlier streamed searches
     passed, chosen again — low beta to 0050 and no further down than 0050 in its falls, over the development period —
     ``count`` per search, apart from each other and from every earlier finalist; then the engine as a search's stage 2."""
@@ -308,8 +326,8 @@ def rerank(base: Path, research: Path, costs, folders: list[Path], count: int = 
     chosen, searched = [], {}
     for folder in folders:
         arrays = load_arrays(folder / "arrays")
-        rows, counts = low_beta_rows(folder, arrays.bench, limit, job=job)
-        picked = finalists(arrays, rows, costs, count, pool=RERANK_POOL, seeds=seeds, stable=True, calm=True)
+        rows, counts = low_beta_rows(folder, arrays.bench, limit, pool=pool, job=job, distinct=distinct)
+        picked = finalists(arrays, rows, costs, count, pool=pool, seeds=seeds, stable=True, calm=True)
         searched[folder.name] = {**counts, "finalists": len(picked)}
         print(f"{folder.name}：{counts}，選出 {len(picked)} 個", flush=True)
         seeds = seeds + [row for row in picked if set(row["factors"]) <= set(arrays.names)]
@@ -332,7 +350,8 @@ def rerank(base: Path, research: Path, costs, folders: list[Path], count: int = 
                         "screen_excess": row["excess"], "full_excess": report["full_period_excess"],
                         "since_2020": report["since_2020"]["excess"], "drawdown": report["strategy"]["max_drawdown"],
                         "tier": daily.tier(record.metrics)[0]})
-    summary = {"version": "lowbeta-1.0.0", "stamp": stamp, "limit": limit, "searched": searched, "finalists": len(chosen),
+    summary = {"version": "lowbeta-1.1.0" if distinct else "lowbeta-1.0.0", "stamp": stamp, "limit": limit,
+               "distinct_sets": distinct, "pool": pool, "searched": searched, "finalists": len(chosen),
                "results": results, "tiers": dict(Counter(item["tier"] for item in results))}
     (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     return summary
