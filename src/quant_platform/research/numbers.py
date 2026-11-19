@@ -38,6 +38,29 @@ def numbers(research: str | Path) -> dict[str, int]:
     return dict(_CACHE["found"])  # type: ignore[arg-type]
 
 
+_CREATED = re.compile(r'"created_at":\s*"(\d{4}-\d{2}-\d{2})')
+_DATES: dict[str, object] = {}
+
+
+def first_dates(research: str | Path) -> dict[str, str]:
+    """2026-11-19 (the T0 list: a rule registered after its forward record began had those days recorded afterwards):
+    spec hash -> the day its first trial was registered (kept until the file changes)."""
+    path = Path(research) / "trials.jsonl"
+    if not path.is_file():
+        return {}
+    stat = path.stat()
+    key = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+    if _DATES.get("key") != key:
+        found: dict[str, str] = {}
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                head, made = _HEAD.search(line[:400]), _CREATED.search(line)
+                if head and made and (head.group(2) not in found or made.group(1) < found[head.group(2)]):
+                    found[head.group(2)] = made.group(1)
+        _DATES.update(key=key, found=found)
+    return dict(_DATES["found"])  # type: ignore[arg-type]
+
+
 def number_of(research: str | Path, spec_hash: str | None) -> int | None:
     if not spec_hash:
         return None

@@ -27,7 +27,7 @@
       <figcaption><h3>現在可以上線嗎：{% if nw.sessions >= nw.needed and nw.holding %}有 {{ '{:,}'.format(nw.holding) }} 個規則達到條件，等你核准{% else %}還不行{% endif %}</h3><span>可以上線＝規則的前向紀錄滿 {{ nw.needed }} 個交易日、兩種算法都不輸 0050，再由你核准</span></figcaption>
       <div class="kpis kpis--page">
         <div class="kpi"><div class="kpi__label">前向紀錄</div><div class="kpi__value">{{ nw.sessions }}<small>／{{ nw.needed }} 個交易日</small></div><div class="kpi__note">{% if nw.start %}{{ nw.start[5:7]|int }}/{{ nw.start[8:10]|int }}～{{ nw.end[5:7]|int }}/{{ nw.end[8:10]|int }}；{% endif %}{% if nw.sessions < nw.needed %}第一次判定 {{ first_t0[5:7]|int }}/{{ first_t0[8:10]|int }} 收盤後{% else %}已滿{% endif %}</div></div>
-        <div class="kpi"><div class="kpi__label">到今天兩種算法都不輸 0050</div><div class="kpi__value">{{ '{:,}'.format(nw.holding) }}<small> 個規則</small></div><div class="kpi__note">一直留在每月名單上的 {{ '{:,}'.format(nw.rules) }} 個裡；判定那天還不輸的才算</div></div>
+        <div class="kpi"><div class="kpi__label">到今天兩種算法都不輸 0050</div><div class="kpi__value">{{ '{:,}'.format(nw.holding) }}<small> 個規則</small></div><div class="kpi__note">一直留在每月名單上的 {{ '{:,}'.format(nw.rules) }} 個裡；判定那天還不輸的才算。<button type="button" class="button-link" data-t0list>看是哪些規則</button></div></div>
         {% if nw.benchmark is not none %}<div class="kpi"><div class="kpi__label">同一段期間的 0050</div><div class="kpi__value {{ 'up' if nw.benchmark > 0 else 'down' }}">{{ '{:+.1%}'.format(nw.benchmark) }}</div><div class="kpi__note">{% if nw.benchmark < -0.05 %}這段是下跌：現在領先的多半是跟大盤連動低、跌得少的規則，不代表選股比較準{% else %}當天賣掉、扣費稅{% endif %}</div></div>{% endif %}
       </div>
     </figure>
@@ -267,6 +267,8 @@
   document.addEventListener('keydown', (event) => {
     if ((event.key === 'Enter' || event.key === ' ') && event.target.matches && event.target.matches('.frow') && spreadFamily(event.target)) event.preventDefault();
   });
+  document.querySelectorAll('[data-t0list]').forEach((button) => button.addEventListener('click', () =>
+    open('判定清單：現在兩種算法都不輸 0050 的規則', '/research/t0-list')));
   document.querySelectorAll('[data-searches]').forEach((button) => button.addEventListener('click', () =>
     open('大搜尋：每一輪', '/research/searches')));
   document.querySelectorAll('[data-checks]').forEach((button) => button.addEventListener('click', () =>

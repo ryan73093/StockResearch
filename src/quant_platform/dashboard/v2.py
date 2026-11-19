@@ -1689,6 +1689,24 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         era = (ready("dashboard", research_dir, lambda: dashboard_data(research_dir)) or {}).get("eras") or analyze(research_dir)
         return window_or_page(render_template("v2/research_eras.html", era=era), "各時期還適用嗎")
 
+    @blueprint.get("/research/t0-list")
+    def research_t0_list():
+        """2026-11-19 (使用者：我現在根本不知道到底可不可以上線): the dashboard's window of the rules T0 would be judged
+        on today (research/progress.py t0_list)."""
+        from quant_platform.research.numbers import first_dates
+        from quant_platform.research.pool import pool_view
+        from quant_platform.research.progress import t0_list
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        chained = ready("chained", research_dir, lambda: StockForwardTracker(research_dir).chained(datetime.now(TAIPEI).date()))
+        pool = ready("pool:seed", research_dir, lambda: pool_view(research_dir, basis="seed"))
+        summary = {row["rule_hash"]: row for row in
+                   ready("forward", research_dir, lambda: StockForwardTracker(research_dir).summary())
+                   if not row.get("stopped")}
+        return window_or_page(render_template(
+            "v2/research_t0_list.html", t=t0_list(chained, pool["daily"], summary, first_dates(research_dir))),
+            "判定清單：現在兩種算法都不輸 0050 的規則")
+
     @blueprint.get("/research/searches")
     def research_searches():
         """2026-10-26 (使用者：上億個策略訓練後的結果跟數據還有訓練狀況我完全沒有看到): the dashboard's window of every

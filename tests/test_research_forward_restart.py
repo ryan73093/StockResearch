@@ -126,3 +126,36 @@ def test_the_overview_says_how_each_kind_of_rule_is_doing_now():
     assert set(FAMILY_HOW) == set(FAMILY_ORDER) - set(NOW_SKIP)       # every kind shown says how it is made
     assert "一億多種" in FAMILY_HOW["多因子"] and "掃描" in FAMILY_HOW["多因子"] and "組合搜尋" in FAMILY_HOW["組合帳戶"]
     assert status_now({}, rows, [], log) is None
+
+
+def test_the_t0_list_names_the_rules_holding_up_with_what_to_read_beside_them(tmp_path):
+    """2026-11-19 (使用者：我現在根本不知道到底可不可以上線): the rules T0 would be judged on today — not behind 0050 by
+    both moneys over the longest run — with the beta, the reconciliation, the kind and the day first registered."""
+    import json
+
+    from quant_platform.research.numbers import first_dates
+    from quant_platform.research.progress import t0_list
+
+    part = {"from": "2026-09-01", "to": "2026-11-18"}
+
+    def record(counted, sold, beta, sessions=52):
+        return {"sessions": sessions, "excess": counted, "sold_excess": sold, "beta": beta, "return": counted - 0.14,
+                "benchmark_return": -0.14, "parts": [part]}
+    chained = {"a": record(0.09, 0.10, 0.7), "b": record(0.02, 0.01, 1.1), "c": record(-0.03, 0.02, 0.8),
+               "late": record(0.3, 0.3, 0.5, sessions=31), "t2": record(0.2, 0.2, 0.6), "half": record(0.2, 0.2, 0.6)}
+    pool = [{"spec_hash": key, "name": f"規則 {key}", "tier": tier, "category": {"family": family}, "uses_0050": uses}
+            for key, tier, family, uses in (("a", "T0 候選", "多因子", False), ("b", "T0 候選（高風險）", "機器學習", False),
+                                            ("c", "T0 候選", "多因子", False), ("late", "T0 候選", "機器學習", False),
+                                            ("t2", "T2", "多因子", False), ("half", "T0 候選", "多因子", True))]
+    found = t0_list(chained, pool, {"b": {"problems": ["11-18 接不上"]}}, {"a": "2026-10-27", "b": "2026-08-20"})
+    assert (found["sessions"], found["needed"], found["rules"], found["benchmark"]) == (52, 60, 3, -0.14)
+    assert [row["spec_hash"] for row in found["rows"]] == ["a", "b"]         # c: one money only; the worse money first
+    first, second = found["rows"]
+    assert (first["family"], first["beta"], first["reconciled"], first["first"], first["after_start"]) == ("多因子", 0.7, True, "2026-10-27", True)
+    assert (second["reconciled"], second["problems"], second["after_start"]) == (False, 1, False)
+    assert (found["beta"], found["low_beta"], found["unreconciled"], found["after_start"]) == (1.1, 1, 1, 1)
+    assert found["kinds"] == [("多因子", 1), ("機器學習", 1)]
+    lines = [{"trial_id": 5, "kind": "candidate", "spec_hash": "a" * 16, "created_at": "2026-10-27T10:00:00+08:00"},
+             {"trial_id": 9, "kind": "candidate", "spec_hash": "a" * 16, "created_at": "2026-11-02T10:00:00+08:00"}]
+    (tmp_path / "trials.jsonl").write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
+    assert first_dates(tmp_path) == {"a" * 16: "2026-10-27"}                 # the first registration, not a later run

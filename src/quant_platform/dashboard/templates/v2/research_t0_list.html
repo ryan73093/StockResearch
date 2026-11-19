@@ -1,0 +1,27 @@
+{# 2026-11-19 (使用者：我現在根本不知道到底可不可以上線): the rules T0 would be judged on today (research/progress.py
+   t0_list) — both moneys, the beta, the reconciliation, the kind and the day first registered. #}
+<p class="small" style="margin:0 0 8px">前向紀錄 {{ t.sessions }}／{{ t.needed }} 個交易日{% if t.start %}（{{ t.start }}～{{ t.end }}）{% endif %}，同期 0050 {% if t.benchmark is not none %}{{ '{:+.1%}'.format(t.benchmark) }}{% endif %}。一直留在每月名單上的 {{ '{:,}'.format(t.rules) }} 個規則裡，下面 {{ '{:,}'.format(t.rows|length) }} 個到今天兩種算法都不輸 0050。{% if t.sessions < t.needed %}滿 {{ t.needed }} 個交易日那天還不輸、對帳正常的才是 T0，再由你核准；現在還不是。{% else %}已滿 {{ t.needed }} 個交易日：對帳正常的是 T0，等你核准。{% endif %}</p>
+<ul class="small" style="margin:0 0 10px; padding-left:1.2em">
+  <li>各類：{% for name, count in t.kinds %}{{ name }} {{ count }} 個{{ '、' if not loop.last else '' }}{% endfor %}。</li>
+  {% if t.beta is not none %}<li>跟 0050 的連動：中間那個 {{ '{:.2f}'.format(t.beta) }} 倍，{{ t.low_beta }} 個低於 0.8 倍。{% if t.benchmark is not none and t.benchmark < -0.05 %}這段 0050 是跌的，連動低的規則光是跌得少就會領先，不代表選股比較準；0050 反彈時它們可能落後。{% endif %}</li>{% endif %}
+  <li>對帳有問題的 {{ t.unreconciled }} 個（有問題的不能是 T0）。</li>
+  <li>第一次登錄在前向紀錄開始之後的 {{ t.after_start }} 個：這些規則開始之前的那一段是事後補做的（只用截止日以前的資料選，但不是當時就在記）。</li>
+</ul>
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>規則</th><th>類別</th><th class="num" title="已拿到的錢：賺的只算賣掉的、賠的都算；0050 當天賣掉">比 0050（已拿到）</th><th class="num" title="規則的持股和 0050 當天都賣掉、扣費稅">比 0050（都賣掉）</th><th class="num" title="這段期間 0050 每漲跌 1%，這個規則平均跟著動幾 %">連動</th><th title="每天的持股與現金可由前一天加當天的交易算出來">對帳</th><th title="這個規則第一次登錄試驗的日期">第一次登錄</th></tr></thead>
+    <tbody>
+    {% for row in t.rows %}
+      <tr><td data-primary><a href="/research/forward/{{ row.spec_hash }}" title="{{ row.name }}">{{ rule_no(row.spec_hash) }} {{ row.name|short }}</a>{% if '高風險' in row.tier %} <span class="badge badge--bad">高風險</span>{% endif %}</td>
+        <td data-label="類別">{{ row.family }}</td>
+        <td class="num up" data-label="比 0050（已拿到）">{{ '{:+.1f}'.format(row.excess * 100) }} 點</td>
+        <td class="num up" data-label="比 0050（都賣掉）">{{ '{:+.1f}'.format(row.sold_excess * 100) }} 點</td>
+        <td class="num" data-label="連動">{% if row.beta is not none %}{{ '{:.2f}'.format(row.beta) }} 倍{% else %}—{% endif %}</td>
+        <td data-label="對帳">{{ '正常' if row.reconciled else '有 ' ~ row.problems ~ ' 個問題' }}</td>
+        <td data-label="第一次登錄">{{ row.first or "—" }}</td></tr>
+    {% else %}<tr><td colspan="7">現在沒有規則兩種算法都不輸 0050。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="col-help">「點」＝百分點。排序：兩種算法裡比較差的那個由大到小。這張表每天收盤後跟著前向紀錄更新，不是判定結果；判定在滿 {{ t.needed }} 個交易日那天收盤後。</p>

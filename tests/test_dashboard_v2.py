@@ -584,6 +584,16 @@ def test_the_overview_opens_on_what_can_go_live_and_how_each_kind_is_doing(tmp_p
         assert "有 142 個規則達到條件，等你核准" in ready and "已滿" in ready
 
 
+def test_the_t0_list_window_opens_without_any_forward_record(tmp_path):
+    """2026-11-19: the dashboard's window of the rules T0 would be judged on today; with nothing recorded it says so."""
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}", scheduler_in_web=False)
+    client = create_app(build_container(settings)).test_client()
+    page = client.get("/research/t0-list")
+    assert page.status_code == 200
+    text = page.get_data(as_text=True)
+    assert "現在沒有規則兩種算法都不輸 0050" in text and "第一次登錄" in text and "對帳" in text
+
+
 def test_my_orders_page_brings_a_rule_to_the_owners_account_and_only_shows(tmp_path):
     """2026-11-14 (使用者：先做一個只能看的頁面「照這個規則，今天你的帳戶要買賣什麼」包括沒買到時隔天怎麼調整)."""
     import json

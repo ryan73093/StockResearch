@@ -283,6 +283,45 @@ def toward_t0(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str
                          "gain": ((summary.get(key) or {}).get("sell_all") or {}).get("gain")} for key, value in nearest]}
 
 
+def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, dict], first: dict[str, str]) -> dict[str, object]:
+    """2026-11-19 (使用者：我現在根本不知道到底可不可以上線；11/30 第一次判 T0): the rules T0 would be judged on today —
+    the longest run on the monthly lists, not behind 0050 by both moneys — each with both gaps, how much it moved with
+    0050, whether its account reconciles, its kind and the day it was first registered (a day after the record's start
+    means that stretch was recorded afterwards). The worse of the two moneys first."""
+    from quant_platform.research.daily import FORWARD_SESSIONS
+
+    rows = {row["spec_hash"]: row for row in pool_rows}
+    listed = {key: value for key, value in chained.items()
+              if value.get("parts") and (rows.get(key) or {}).get("tier") in PASSING and not (rows.get(key) or {}).get("uses_0050")}
+    sessions = max((value["sessions"] for value in listed.values()), default=0)
+    longest = {key: value for key, value in listed.items() if value["sessions"] == sessions}
+    start = min((value["parts"][0]["from"] for value in longest.values()), default=None)
+    output = []
+    for key, value in longest.items():
+        sold = value.get("sold_excess", value["excess"])
+        if value["excess"] < 0 or sold < 0:
+            continue
+        row = rows[key]
+        problems = (summary.get(key) or {}).get("problems") or []
+        output.append({"spec_hash": key, "name": row["name"], "tier": row["tier"],
+                       "family": (row.get("category") or {}).get("family") or "其他",
+                       "excess": value["excess"], "sold_excess": sold, "beta": value.get("beta"),
+                       "return": value["return"], "reconciled": not problems, "problems": len(problems),
+                       "first": first.get(key), "after_start": bool(first.get(key) and start and first[key] > start)})
+    output.sort(key=lambda row: -min(row["excess"], row["sold_excess"]))
+    betas = sorted(row["beta"] for row in output if row["beta"] is not None)
+    kinds: dict[str, int] = {}
+    for row in output:
+        kinds[row["family"]] = kinds.get(row["family"], 0) + 1
+    return {"sessions": sessions, "needed": FORWARD_SESSIONS, "rules": len(longest), "start": start,
+            "end": max((value["parts"][-1]["to"] for value in longest.values()), default=None),
+            "benchmark": next(iter(longest.values()))["benchmark_return"] if longest else None,
+            "rows": output, "beta": betas[len(betas) // 2] if betas else None,
+            "low_beta": sum(1 for value in betas if value < 0.8), "unreconciled": sum(not row["reconciled"] for row in output),
+            "after_start": sum(row["after_start"] for row in output),
+            "kinds": sorted(kinds.items(), key=lambda item: -item[1])}
+
+
 def families(pool_rows: list[dict], summary: dict[str, dict]) -> list[dict[str, object]]:
     """Each family's best (100% stocks; categories.best_of — the pool's and the roles page's pick), how many rules it
     has and how many passed, its forward account."""
