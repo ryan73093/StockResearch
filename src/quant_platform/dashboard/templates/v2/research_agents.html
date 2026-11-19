@@ -115,7 +115,7 @@
         <tr><td data-primary>{{ row.label }}</td>
           <td class="num" data-label="決定（天）">{{ row.behaviour.decisions }}</td>
           <td class="num" data-label="沿用前一天（天）">{{ row.behaviour.fallbacks }}</td>
-          <td class="num" data-label="平均持有（檔）">{{ row.behaviour.average_held }}</td>
+          <td class="num" data-label="平均持有（檔）">{{ row.behaviour.average_held }}{% if row.behaviour.run_overlap is defined %}<br><span class="muted small" title="同一天跑三次，兩兩名單重疊的比例；100% 是每次都一樣">三次重疊 {{ '%.0f' % (row.behaviour.run_overlap * 100) }}%</span>{% endif %}</td>
           <td class="num" data-label="每次新買（檔）">{{ row.behaviour.bought_per_decision }}</td>
           <td class="num" data-label="平均查資料（次）">{{ row.behaviour.average_steps }}</td>
           <td class="num" data-label="模型花費（美元）">{{ '%.3f' % row.behaviour.cost_usd }}</td>

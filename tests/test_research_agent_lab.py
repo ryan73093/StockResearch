@@ -163,6 +163,8 @@ def test_behaviour_counts_fallbacks_holdings_and_new_buys():
     result = evaluate.behaviour(made)
     assert result == {"decisions": 3, "fallbacks": 1, "average_held": 2.0, "bought_per_decision": 0.5, "average_steps": 1.5,
                       "cost_usd": 0.03}
+    voted = [{"llm": {"hold": ["1", "2"], "runs": [{"hold": ["1", "2", "3"]}, {"hold": ["1", "2", "4"]}, {"hold": ["9"], "fallback": "x"}]}}]
+    assert evaluate.behaviour(voted)["run_overlap"] == 0.5                  # two lists sharing 2 of 4 stocks; the failed run is left out
 
 
 def test_the_memory_probe_scores_against_the_lists_median_and_months_are_complete_ones():

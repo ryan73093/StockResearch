@@ -63,7 +63,13 @@ def behaviour(made: list[dict]) -> dict[str, object]:
     holds = [list((item.get("llm") or {}).get("hold") or []) for item in made]
     bought = [len(set(after) - set(before)) for before, after in zip(holds[:-1], holds[1:])]
     steps = [len((item.get("llm") or {}).get("trace") or []) for item in made if (item.get("llm") or {}).get("trace") is not None]
-    return {"decisions": len(made), "fallbacks": sum(1 for item in made if (item.get("llm") or {}).get("fallback")),
+    overlaps = []                # the same design run several times a day (``vote``): how alike the runs' lists are
+    for item in made:
+        lists = [set(run.get("hold") or []) for run in (item.get("llm") or {}).get("runs") or [] if not run.get("fallback")]
+        pairs = [(one, other) for index, one in enumerate(lists) for other in lists[index + 1:] if one | other]
+        overlaps += [len(one & other) / len(one | other) for one, other in pairs]
+    extra = {"run_overlap": round(float(np.mean(overlaps)), 2)} if overlaps else {}
+    return {**extra, "decisions": len(made), "fallbacks": sum(1 for item in made if (item.get("llm") or {}).get("fallback")),
             "average_held": round(float(np.mean([len(hold) for hold in holds])), 1) if holds else 0.0,
             "bought_per_decision": round(float(np.mean(bought)), 2) if bought else 0.0,
             "average_steps": round(float(np.mean(steps)), 1) if steps else 0.0,
