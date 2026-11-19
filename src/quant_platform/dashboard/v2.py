@@ -1704,7 +1704,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                    ready("forward", research_dir, lambda: StockForwardTracker(research_dir).summary())
                    if not row.get("stopped")}
         return window_or_page(render_template(
-            "v2/research_t0_list.html", t=t0_list(chained, pool["daily"], summary, first_dates(research_dir))),
+            "v2/research_t0_list.html", t=t0_list(chained, pool["daily"], summary, first_dates(research_dir), research_dir)),
             "判定清單：現在兩種算法都不輸 0050 的規則")
 
     @blueprint.get("/research/searches")

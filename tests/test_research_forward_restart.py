@@ -159,3 +159,33 @@ def test_the_t0_list_names_the_rules_holding_up_with_what_to_read_beside_them(tm
              {"trial_id": 9, "kind": "candidate", "spec_hash": "a" * 16, "created_at": "2026-11-02T10:00:00+08:00"}]
     (tmp_path / "trials.jsonl").write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
     assert first_dates(tmp_path) == {"a" * 16: "2026-10-27"}                 # the first registration, not a later run
+
+
+def test_the_t0_list_says_whether_a_rule_kept_up_when_0050_rose_in_its_backtest(tmp_path):
+    """2026-11-19: the rules ahead in a fall are mostly the ones moving less with 0050; beside each, from its registered
+    report: its average month in the months 0050 rose and fell since 2020-10 (a backtest number, said so)."""
+    import json
+
+    from quant_platform.research.progress import market_months, t0_list
+
+    (tmp_path / "reports").mkdir()
+    curve, rule, bench, paid = {}, 100.0, 100.0, 100.0
+    for index in range(40):                                 # 2020-06 .. 2023-09: 0050 +4% and -2% by turns, the rule +5% and -1%
+        month = f"{2020 + (5 + index) // 12}-{(5 + index) % 12 + 1:02d}"
+        if index:
+            rule, bench = rule * (1.05 if index % 2 else 0.99), bench * (1.04 if index % 2 else 0.98)
+        curve[month] = [rule, bench, paid]
+    (tmp_path / "reports" / "a.json").write_text(json.dumps({"curve": curve}), encoding="utf-8")
+    found = market_months(tmp_path, "a.json")
+    assert found == {"up": 0.05, "up_bench": 0.04, "down": -0.01, "down_bench": -0.02}
+    assert market_months(tmp_path, "missing.json") is None and market_months(tmp_path, None) is None
+    (tmp_path / "reports" / "short.json").write_text(json.dumps({"curve": dict(list(curve.items())[-10:])}), encoding="utf-8")
+    assert market_months(tmp_path, "short.json") is None    # under two years of months
+    part = {"from": "2026-09-01", "to": "2026-11-18"}
+    chained = {"a": {"sessions": 52, "excess": 0.05, "sold_excess": 0.04, "beta": 0.7, "return": -0.09,
+                     "benchmark_return": -0.14, "parts": [part]}}
+    pool = [{"spec_hash": "a", "name": "甲", "tier": "T0 候選", "category": {"family": "多因子"}, "uses_0050": False,
+             "report_file": "a.json"}]
+    listed = t0_list(chained, pool, {}, {}, tmp_path)
+    assert listed["rows"][0]["months"] == found and (listed["with_months"], listed["up_too"]) == (1, 1)
+    assert t0_list(chained, pool, {}, {})["rows"][0]["months"] is None       # without the folder: no backtest columns

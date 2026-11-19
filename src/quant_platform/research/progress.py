@@ -283,7 +283,43 @@ def toward_t0(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str
                          "gain": ((summary.get(key) or {}).get("sell_all") or {}).get("gain")} for key, value in nearest]}
 
 
-def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, dict], first: dict[str, str]) -> dict[str, object]:
+_MONTHS: dict[str, dict | None] = {}
+MONTHS_FROM = "2020-10"
+MONTHS_LEAST = 24
+
+
+def market_months(research: str | Path, report_file: str | None) -> dict[str, float] | None:
+    """2026-11-19 (the T0 list: the rules ahead in a fall are mostly the ones moving less with 0050 — do they keep up
+    when it rises?): from a rule's registered report, its average month return in the months 0050 rose and in the
+    months it fell since MONTHS_FROM, with 0050's (month ends, net of the month's money; ``downside.returns``). A
+    backtest number — the rules were chosen on this period. None without the report or with under MONTHS_LEAST months.
+    Kept by report file (a report is written once)."""
+    import numpy as np
+
+    from quant_platform.research.downside import returns
+
+    if not report_file:
+        return None
+    path = Path(research) / "reports" / report_file
+    key = str(path)
+    if key not in _MONTHS:
+        found = None
+        try:
+            curve = json.loads(path.read_text(encoding="utf-8")).get("curve") or {}
+            months, rule, bench = returns(curve)
+            picked = np.array([month >= MONTHS_FROM for month in months], dtype=bool)
+            rule, bench = rule[picked], bench[picked]
+            if len(bench) >= MONTHS_LEAST and (bench > 0).any() and (bench < 0).any():
+                found = {"up": round(float(rule[bench > 0].mean()), 5), "up_bench": round(float(bench[bench > 0].mean()), 5),
+                         "down": round(float(rule[bench < 0].mean()), 5), "down_bench": round(float(bench[bench < 0].mean()), 5)}
+        except (OSError, ValueError):
+            found = None
+        _MONTHS[key] = found
+    return _MONTHS[key]
+
+
+def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, dict], first: dict[str, str],
+            research: str | Path | None = None) -> dict[str, object]:
     """2026-11-19 (使用者：我現在根本不知道到底可不可以上線；11/30 第一次判 T0): the rules T0 would be judged on today —
     the longest run on the monthly lists, not behind 0050 by both moneys — each with both gaps, how much it moved with
     0050, whether its account reconciles, its kind and the day it was first registered (a day after the record's start
@@ -304,6 +340,7 @@ def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, 
         row = rows[key]
         problems = (summary.get(key) or {}).get("problems") or []
         output.append({"spec_hash": key, "name": row["name"], "tier": row["tier"],
+                       "months": market_months(research, row.get("report_file")) if research else None,
                        "family": (row.get("category") or {}).get("family") or "其他",
                        "excess": value["excess"], "sold_excess": sold, "beta": value.get("beta"),
                        "return": value["return"], "reconciled": not problems, "problems": len(problems),
@@ -319,6 +356,8 @@ def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, 
             "rows": output, "beta": betas[len(betas) // 2] if betas else None,
             "low_beta": sum(1 for value in betas if value < 0.8), "unreconciled": sum(not row["reconciled"] for row in output),
             "after_start": sum(row["after_start"] for row in output),
+            "with_months": sum(1 for row in output if row["months"]),
+            "up_too": sum(1 for row in output if row["months"] and row["months"]["up"] >= row["months"]["up_bench"]),
             "kinds": sorted(kinds.items(), key=lambda item: -item[1])}
 
 
