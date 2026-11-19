@@ -288,7 +288,11 @@ MONTHS_FROM = "2020-10"
 MONTHS_LEAST = 24
 
 
-def market_months(research: str | Path, report_file: str | None) -> dict[str, float] | None:
+BETA_MONTHS = 60            # 2026-11-20: the months of the backtest beta shown beside a rule (rank correlation with the
+                            # forward beta +0.78, docs/research/results.md「回測的連動能事前預測前向誰撐得住」)
+
+
+def market_months(research: str | Path, report_file: str | None, until: str | None = None) -> dict[str, float] | None:
     """2026-11-19 (the T0 list: the rules ahead in a fall are mostly the ones moving less with 0050 — do they keep up
     when it rises?): from a rule's registered report, its average month return in the months 0050 rose and in the
     months it fell since MONTHS_FROM, with 0050's (month ends, net of the month's money; ``downside.returns``). A
@@ -301,7 +305,7 @@ def market_months(research: str | Path, report_file: str | None) -> dict[str, fl
     if not report_file:
         return None
     path = Path(research) / "reports" / report_file
-    key = str(path)
+    key = f"{path}|{until or ''}"
     if key not in _MONTHS:
         found = None
         try:
@@ -312,6 +316,12 @@ def market_months(research: str | Path, report_file: str | None) -> dict[str, fl
             if len(bench) >= MONTHS_LEAST and (bench > 0).any() and (bench < 0).any():
                 found = {"up": round(float(rule[bench > 0].mean()), 5), "up_bench": round(float(bench[bench > 0].mean()), 5),
                          "down": round(float(rule[bench < 0].mean()), 5), "down_bench": round(float(bench[bench < 0].mean()), 5)}
+                # 2026-11-20: the beta of the BETA_MONTHS months before ``until`` (the forward record's first month) —
+                # known before the record began
+                before = np.array([until is None or month < until for month in months], dtype=bool)[picked]
+                mine, base = rule[before][-BETA_MONTHS:], bench[before][-BETA_MONTHS:]
+                if len(base) >= MONTHS_LEAST and float(np.var(base)) > 0:
+                    found["beta"] = round(float(np.cov(mine, base)[0, 1] / np.var(base, ddof=1)), 3)
         except (OSError, ValueError):
             found = None
         _MONTHS[key] = found
@@ -340,7 +350,7 @@ def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, 
         row = rows[key]
         problems = (summary.get(key) or {}).get("problems") or []
         output.append({"spec_hash": key, "name": row["name"], "tier": row["tier"],
-                       "months": market_months(research, row.get("report_file")) if research else None,
+                       "months": market_months(research, row.get("report_file"), start[:7] if start else None) if research else None,
                        "family": (row.get("category") or {}).get("family") or "其他",
                        "excess": value["excess"], "sold_excess": sold, "beta": value.get("beta"),
                        "return": value["return"], "reconciled": not problems, "problems": len(problems),
@@ -355,10 +365,16 @@ def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, 
             "benchmark": next(iter(longest.values()))["benchmark_return"] if longest else None,
             "rows": output, "beta": betas[len(betas) // 2] if betas else None,
             "low_beta": sum(1 for value in betas if value < 0.8), "unreconciled": sum(not row["reconciled"] for row in output),
+            "backtest_beta": _middle([row["months"]["beta"] for row in output if row["months"] and row["months"].get("beta") is not None]),
             "after_start": sum(row["after_start"] for row in output),
             "with_months": sum(1 for row in output if row["months"]),
             "up_too": sum(1 for row in output if row["months"] and row["months"]["up"] >= row["months"]["up_bench"]),
             "kinds": sorted(kinds.items(), key=lambda item: -item[1])}
+
+
+def _middle(values: list[float]) -> float | None:
+    values = sorted(values)
+    return values[len(values) // 2] if values else None
 
 
 def families(pool_rows: list[dict], summary: dict[str, dict]) -> list[dict[str, object]]:

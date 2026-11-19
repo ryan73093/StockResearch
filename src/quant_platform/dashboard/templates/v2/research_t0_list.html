@@ -14,6 +14,7 @@
         <td class="num up" data-label="比 0050（已拿到）">{{ '{:+.1f}'.format(row.excess * 100) }} 點</td>
         <td class="num up" data-label="比 0050（都賣掉）">{{ '{:+.1f}'.format(row.sold_excess * 100) }} 點</td>
         <td class="num" data-label="連動">{% if row.beta is not none %}{{ '{:.2f}'.format(row.beta) }} 倍{% else %}—{% endif %}</td>
+        <td class="num" data-label="回測連動">{% if row.months and row.months.beta is defined and row.months.beta is not none %}{{ '{:.2f}'.format(row.months.beta) }} 倍{% else %}—{% endif %}</td>
         <td class="num" data-label="回測：0050 漲的月">{% if row.months %}{{ '{:+.1f}'.format(row.months.up * 100) }}%<span class="muted">（{{ '{:+.1f}'.format(row.months.up_bench * 100) }}%）</span>{% else %}—{% endif %}</td>
         <td class="num" data-label="回測：0050 跌的月">{% if row.months %}{{ '{:+.1f}'.format(row.months.down * 100) }}%<span class="muted">（{{ '{:+.1f}'.format(row.months.down_bench * 100) }}%）</span>{% else %}—{% endif %}</td>
         <td data-label="第一次登錄">{{ (row.first[5:7]|int ~ '/' ~ row.first[8:10]|int) if row.first else '—' }}</td></tr>
@@ -21,10 +22,10 @@
 {% set first_rows = 30 %}
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
-    <thead><tr><th>規則</th><th>類別</th><th class="num" title="已拿到的錢：賺的只算賣掉的、賠的都算；0050 當天賣掉">比 0050（已拿到）</th><th class="num" title="規則的持股和 0050 當天都賣掉、扣費稅">比 0050（都賣掉）</th><th class="num" title="這段期間 0050 每漲跌 1%，這個規則平均跟著動幾 %">連動</th><th class="num" title="回測 2020-10 起：0050 上漲的月份，這個規則平均一個月賺多少（括號是 0050）。看 0050 反彈時它跟不跟得上；是回測，只當參考">回測：0050 漲的月</th><th class="num" title="回測 2020-10 起：0050 下跌的月份，這個規則平均一個月（括號是 0050）">回測：0050 跌的月</th><th title="這個規則第一次登錄試驗的日期">登錄日</th></tr></thead>
+    <thead><tr><th>規則</th><th>類別</th><th class="num" title="已拿到的錢：賺的只算賣掉的、賠的都算；0050 當天賣掉">比 0050（已拿到）</th><th class="num" title="規則的持股和 0050 當天都賣掉、扣費稅">比 0050（都賣掉）</th><th class="num" title="這段期間 0050 每漲跌 1%，這個規則平均跟著動幾 %">連動</th><th class="num" title="前向紀錄開始以前最近 60 個月，回測裡 0050 每漲跌 1% 這個規則跟著動幾 %；紀錄開始前就算得出來。11/19 量過：這個數字最低的五分之一有 22.7% 撐住，最高的兩個五分之一幾乎 0%">回測連動</th><th class="num" title="回測 2020-10 起：0050 上漲的月份，這個規則平均一個月賺多少（括號是 0050）。看 0050 反彈時它跟不跟得上；是回測，只當參考">回測：0050 漲的月</th><th class="num" title="回測 2020-10 起：0050 下跌的月份，這個規則平均一個月（括號是 0050）">回測：0050 跌的月</th><th title="這個規則第一次登錄試驗的日期">登錄日</th></tr></thead>
     <tbody>
     {% for row in t.rows[:first_rows] %}{{ rule_row(row) }}
-    {% else %}<tr><td colspan="8">現在沒有規則兩種算法都不輸 0050。</td></tr>
+    {% else %}<tr><td colspan="9">現在沒有規則兩種算法都不輸 0050。</td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -33,7 +34,7 @@
 <details class="dash-how"><summary>其餘 {{ t.rows|length - first_rows }} 個（照同樣的順序）</summary>
 <div class="table-wrap table-wrap--stack">
   <table class="table--stack">
-    <thead><tr><th>規則</th><th>類別</th><th class="num" title="已拿到的錢：賺的只算賣掉的、賠的都算；0050 當天賣掉">比 0050（已拿到）</th><th class="num" title="規則的持股和 0050 當天都賣掉、扣費稅">比 0050（都賣掉）</th><th class="num" title="這段期間 0050 每漲跌 1%，這個規則平均跟著動幾 %">連動</th><th class="num" title="回測 2020-10 起：0050 上漲的月份，這個規則平均一個月賺多少（括號是 0050）。看 0050 反彈時它跟不跟得上；是回測，只當參考">回測：0050 漲的月</th><th class="num" title="回測 2020-10 起：0050 下跌的月份，這個規則平均一個月（括號是 0050）">回測：0050 跌的月</th><th title="這個規則第一次登錄試驗的日期">登錄日</th></tr></thead>
+    <thead><tr><th>規則</th><th>類別</th><th class="num" title="已拿到的錢：賺的只算賣掉的、賠的都算；0050 當天賣掉">比 0050（已拿到）</th><th class="num" title="規則的持股和 0050 當天都賣掉、扣費稅">比 0050（都賣掉）</th><th class="num" title="這段期間 0050 每漲跌 1%，這個規則平均跟著動幾 %">連動</th><th class="num" title="前向紀錄開始以前最近 60 個月，回測裡 0050 每漲跌 1% 這個規則跟著動幾 %；紀錄開始前就算得出來。11/19 量過：這個數字最低的五分之一有 22.7% 撐住，最高的兩個五分之一幾乎 0%">回測連動</th><th class="num" title="回測 2020-10 起：0050 上漲的月份，這個規則平均一個月賺多少（括號是 0050）。看 0050 反彈時它跟不跟得上；是回測，只當參考">回測：0050 漲的月</th><th class="num" title="回測 2020-10 起：0050 下跌的月份，這個規則平均一個月（括號是 0050）">回測：0050 跌的月</th><th title="這個規則第一次登錄試驗的日期">登錄日</th></tr></thead>
     <tbody>
     {% for row in t.rows[first_rows:] %}{{ rule_row(row) }}
     {% endfor %}

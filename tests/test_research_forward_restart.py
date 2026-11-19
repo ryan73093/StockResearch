@@ -177,7 +177,7 @@ def test_the_t0_list_says_whether_a_rule_kept_up_when_0050_rose_in_its_backtest(
         curve[month] = [rule, bench, paid]
     (tmp_path / "reports" / "a.json").write_text(json.dumps({"curve": curve}), encoding="utf-8")
     found = market_months(tmp_path, "a.json")
-    assert found == {"up": 0.05, "up_bench": 0.04, "down": -0.01, "down_bench": -0.02}
+    assert found == {"up": 0.05, "up_bench": 0.04, "down": -0.01, "down_bench": -0.02, "beta": 1.0}   # 2026-11-20: the backtest beta too
     assert market_months(tmp_path, "missing.json") is None and market_months(tmp_path, None) is None
     (tmp_path / "reports" / "short.json").write_text(json.dumps({"curve": dict(list(curve.items())[-10:])}), encoding="utf-8")
     assert market_months(tmp_path, "short.json") is None    # under two years of months
