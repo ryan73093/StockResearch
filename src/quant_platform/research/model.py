@@ -91,6 +91,17 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # stock's own share of the market's move is taken out (``market_betas``); judged on 2021-2025 by the top
           # 20's return against TAIEX in the stretches TAIEX fell (``down_gate``)
           "ml_gbm_q": {"version": "gbm-2.12.0", "label": "ensemble", "features": "extended_k", "target": "residual"},
+          # 2026-11-19 (docs/research/results.md「模型 R」; 使用者：FinMind 後天到期，串它的資料有什麼成效): model Q without
+          # the nine features from FinMind's paid tables (model I's list: the depository's holders stay — free from
+          # now on) — what the paid tables add to the one model that stands, and the line that goes on if the plan
+          # is not renewed; the same gate against gbm-2.7.0 so the two are read side by side
+          "ml_gbm_r": {"version": "gbm-2.13.0", "label": "ensemble", "features": "extended_i", "target": "residual"},
+          # 2026-11-19 (docs/research/results.md「模型 Q 靠哪幾份付費表」, written before the run): model R failed and its
+          # rules earn half of model Q's — which tables carry it: model Q without the five long-history features
+          # (margin maintenance, loans, block trades: PAID_LONG), and without the four that start in 2021-22
+          # (the brokers' concentration, the eight banks, the next-day flippers: PAID_SHORT). Gates only, no rules
+          "ml_gbm_q_nolong": {"version": "gbm-2.13.1", "label": "ensemble", "features": "extended_k_nolong", "target": "residual"},
+          "ml_gbm_q_noshort": {"version": "gbm-2.13.2", "label": "ensemble", "features": "extended_k_noshort", "target": "residual"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -239,6 +250,9 @@ def version_features(version: str | None) -> tuple[str, ...]:
     if kind == "extended_m":           # 2026-10-28: K's list and the market's state
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
                      and name != "branch_informed_20") + MARKET_FEATURES
+    if kind in ("extended_k_nolong", "extended_k_noshort"):       # 2026-11-19: model K's list less one half of the paid ones
+        left = PAID_LONG if kind == "extended_k_nolong" else PAID_SHORT
+        return tuple(name for name in version_features("gbm-2.7.0") if name not in left)
     if kind == "extended_k":           # 2026-10-26: every factor but the revenue, the industries and the branches
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
                      and name != "branch_informed_20")
@@ -636,7 +650,10 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
     return meta
 
 
-DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0"}        # the version judged by ``down_gate`` → the one it is judged against
+DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0", "gbm-2.13.0": "gbm-2.7.0", "gbm-2.13.1": "gbm-2.7.0", "gbm-2.13.2": "gbm-2.7.0"}
+PAID_LONG = ("margin_safe", "margin_in_profit", "low_pledge_loan_20", "block_premium_20", "block_volume_20")
+PAID_SHORT = ("broker_concentration_5", "govbank_net_20", "govbank_dip_buy_20", "low_daytrade_5")
+# DOWN_GATES:        # the version judged by ``down_gate`` → the one it is judged against
 DOWN_YEARS = (2021, 2022, 2023, 2024, 2025)
 DOWN_BETTER = 0.01          # in the stretches TAIEX fell: the top 20 at least this much more than the other's
 DOWN_GIVEN_UP = 0.005       # over every stretch: at most this much less than the other's

@@ -2,6 +2,18 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-11-19 13:30 — FinMind 付費資料的成效；模型 R（模型 Q 不讀付費資料）沒過
+
+- 使用者 11/19：「繼續研究 另外 findmind後天到期 串findmind的資料有什麼成效」。
+- 前向（描述，`build/diag_paid_now.py`、`build/diag_paid_models.py`）：兩份名單都過門檻的 3,279 個規則裡，讀付費資料的 543 個串接前向 52 天沒有一個兩種錢都不輸 0050；只讀集保的 852 個裡 40 個、都沒讀的 1,884 個裡 102 個。同一代不讀付費資料的樹模型規則（模型 G、H、I）也是 0 個，連動都在 1.3～1.6：付費資料沒有讓規則少跌也沒有多跌。
+- 模型 R（`model.py` "ml_gbm_r" gbm-2.13.0、`daily.model_r_batch`、流程 `modelr`，跑之前登錄）：模型 Q 拿掉 9 個付費特徵。12:50～13:04 訓練與回測：**沒過門檻**（全部區間 +1.46% 對模型 Q +1.94%，2024、2025 輸加權指數），三個規則 329／433／293 萬（模型 Q 634／756／589 萬），T3／T2／T3。我寫的判定 (a) 用 0.5 點當門檻、差 0.02 點沒成立，字面結論和實質相反；結果紀錄照實質寫並註明這個錯。
+- 「依波動度配置」不另外跑：名單上已有（`build/diag_weighting.py`）——機器學習類用它的 271 個裡 57 個撐住，等額的 541 個只有 1 個；多因子相反。
+- 下一個（跑之前登錄）：`modelqparts`——模型 Q 拿掉長歷史的 5 個、短歷史的 4 個付費特徵各訓練一次（gbm-2.13.1、gbm-2.13.2），只看門檻；14:40 之後跑。
+- 流程 `modelr` 12:48 啟動，最後一步（前向看板）13:29:23 結束，離 13:30 只差半分鐘；之後這類流程把後半段整段放到 14:40 以後。
+- 測試：`tests/test_research_model_q.py`、`tests/test_docs_guard.py`、`tests/test_research_pipeline_script.py`、`tests/test_research_model.py`、`tests/test_research_model_ensemble.py`、`tests/test_dashboard_v2.py` 104 個通過。`tests/test_research_scan.py` 兩次都超過時限：它走顯示卡那條路（`scan_gpu.accounts`），顯示卡當時被別的程式用到 100%、15 GB（`nvidia-smi`），不是這次的修改；整套沒有重跑。
+- 文件：`docs/finmind_renewal_2026-11-13.md` 加「11/19 更新」。
+- 回復方式：`git revert` 這個 commit；模型資料夾 `instance/research/models/gbm-2.13.*` 可留著（沒有規則在名單上讀它）。
+
 ## 2026-11-19 09:40 — 防護的三個方向都量完：否決沒過、寬度開關是反向訊號、合併不比模型 Q 好；模型 Q 換進現有規則開始跑
 
 - 使用者 11/19：「繼續研究」。

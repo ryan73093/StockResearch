@@ -152,7 +152,23 @@ def test_a_version_that_gives_too_much_up_over_every_stretch_does_not_pass(monke
 def test_model_q_is_model_k_s_features_with_the_other_target_and_its_own_gate(tmp_path):
     assert model.version_features("gbm-2.12.0") == model.version_features("gbm-2.7.0")
     assert model.VERSIONS["gbm-2.12.0"]["target"] == "residual" and "target" not in model.VERSIONS["gbm-2.7.0"]
-    assert model.DOWN_GATES == {"gbm-2.12.0": "gbm-2.7.0"}
+    assert set(model.DOWN_GATES) == {"gbm-2.12.0", "gbm-2.13.0", "gbm-2.13.1", "gbm-2.13.2"}
+    assert set(model.DOWN_GATES.values()) == {"gbm-2.7.0"}
+    whole = model.version_features("gbm-2.12.0")                     # 2026-11-19: the two halves of the paid features
+    assert set(whole) - set(model.version_features("gbm-2.13.1")) == set(model.PAID_LONG)
+    assert set(whole) - set(model.version_features("gbm-2.13.2")) == set(model.PAID_SHORT)
+    assert set(model.PAID_LONG) | set(model.PAID_SHORT) == set(whole) - set(model.version_features("gbm-2.13.0"))
+    # 2026-11-19 model R: model Q without the paid tables (model I's list), the same target and gate
+    from quant_platform.research.chips import HOLDER_FACTORS, PAID_FACTORS
+
+    listed = model.version_features("gbm-2.13.0")
+    assert listed == model.version_features("gbm-2.5.0") and not set(listed) & set(PAID_FACTORS)
+    assert set(HOLDER_FACTORS) <= set(listed) and model.VERSIONS["gbm-2.13.0"]["target"] == "residual"
+    assert set(model.version_features("gbm-2.12.0")) - set(listed) <= set(PAID_FACTORS)
+    from quant_platform.research import daily as daily_module
+
+    assert daily_module.model_r_batch() == [] or len(daily_module.model_r_batch()) == 3
+    assert "modelr" in daily_module.BATCHES and len(daily_module.MODEL_R_FRAMES) == 3
     assert model.stored_down_gate(tmp_path, "gbm-2.12.0") == {}      # not trained: no judgment, so not "failed"
     from quant_platform.research.daily import MODEL_FACTORS, model_q_batch
     from quant_platform.research.scan import SHORT, failed_models
