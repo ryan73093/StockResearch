@@ -86,3 +86,27 @@ def test_revenue_acceleration_lives_only_after_an_announcement(tmp_path):
     assert accel[first] == pytest.approx(0.30) and np.isnan(accel[days.index(date(2024, 3, 8))])
     assert accel[first + 10] == pytest.approx(0.30)
     assert np.isnan(accel[first + ACCEL_SESSIONS + 2])        # stale news is gone
+
+
+def test_revenue_growth_waits_for_a_month_filed_late():
+    """2026-11-19: the growth read the year-ago month from the day the row itself was filed, though that month was
+    filed (again) later; and the 3-month sum took the three rows before, whatever months they were."""
+    import pandas as pd
+
+    from quant_platform.research.chips import revenue_growth
+
+    rows = []
+    for year in (2023, 2024):
+        for month in (1, 2, 3):
+            rows.append({"code": "1101", "date": f"{year}-{month:02d}-01", "year": year, "month": month,
+                         "revenue": 100.0 if year == 2023 else 120.0,
+                         "available": f"{year}-{month + 1:02d}-10"})
+    rows[0]["available"] = "2024-03-20"                    # January 2023 filed again after January 2024's row
+    table = revenue_growth(pd.DataFrame(rows)).set_index(["year", "month"])
+    assert abs(table.loc[(2024, 1), "yoy"] - 0.2) < 1e-9
+    assert str(table.loc[(2024, 1), "yoy_known"])[:10] == "2024-03-20"       # not 2024-02-10
+    assert str(table.loc[(2024, 2), "yoy_known"])[:10] == "2024-03-10"
+    assert abs(table.loc[(2024, 3), "yoy3"] - 0.2) < 1e-9
+    assert str(table.loc[(2024, 3), "yoy3_known"])[:10] == "2024-04-10"
+    gap = revenue_growth(pd.DataFrame([row for row in rows if not (row["year"] == 2024 and row["month"] == 2)]))
+    assert gap.set_index(["year", "month"]).loc[(2024, 3), ["yoy3"]].isna().all()   # February missing: no 3-month sum

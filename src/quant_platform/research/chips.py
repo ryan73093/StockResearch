@@ -424,6 +424,50 @@ def corporate_events(rows: list[dict]) -> list[tuple[date, float | None, float |
     return sorted(events, key=lambda event: event[0])
 
 
+def revenue_growth(table: pd.DataFrame, accel: bool = False) -> pd.DataFrame:
+    """Month revenue rows (code, year, month, revenue, available) with the year-on-year growth ``yoy``, the 3-month
+    sum's ``yoy3`` (``accel``: the growth less the three earlier months' average) and the day each is known
+    (``yoy_known``…). 2026-11-19 (docs/research/results.md「月營收因子用到晚申報的月份」): a growth is known only
+    once every month it reads has been filed — a month filed late or again used to be read from the day the row itself
+    was filed (the weekly truncation check: 3168 on 2025-02-21), and the 3-month sum took the three rows before it,
+    whatever months they were."""
+    table = table.sort_values(["code", "date"]).copy()
+    table["key"] = table["year"] * 12 + table["month"]
+    table["available"] = pd.to_datetime(table["available"])
+    keyed = table.drop_duplicates(["code", "key"], keep="last").set_index(["code", "key"])
+    own = table["available"].to_numpy()
+    revenue = table["revenue"].to_numpy(dtype=float)
+
+    def month(lag: int) -> tuple[np.ndarray, np.ndarray]:
+        index = pd.MultiIndex.from_arrays([table["code"], table["key"] - lag])
+        return keyed["revenue"].reindex(index).to_numpy(dtype=float), keyed["available"].reindex(index).to_numpy()
+
+    def latest(*days: np.ndarray) -> np.ndarray:
+        known = own.copy()
+        for day in days:
+            later = ~pd.isna(day) & (day > known)
+            known = np.where(later, day, known)
+        return known
+
+    months = {lag: month(lag) for lag in (1, 2, 3, 12, 13, 14, 15)}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        table["yoy"] = revenue / months[12][0] - 1
+        table["yoy_known"] = latest(months[12][1])
+        three = revenue + months[1][0] + months[2][0]
+        table["yoy3"] = three / (months[12][0] + months[13][0] + months[14][0]) - 1
+        table["yoy3_known"] = latest(*(months[lag][1] for lag in (1, 2, 12, 13, 14)))
+        if accel:
+            earlier = []
+            for lag in (1, 2, 3):
+                growth = months[lag][0] / months[lag + 12][0] - 1
+                late = (months[lag][1] > own) | (months[lag + 12][1] > own)      # not filed yet when this row was
+                earlier.append(np.where(late, np.nan, growth))
+            table["accel"] = table["yoy"].to_numpy() - np.nanmean(np.column_stack(earlier), axis=1)   # none known: unknown
+            table["accel_known"] = table["yoy_known"]
+    return table
+
+
 class ChipStore:
     """The chip and fundamental factors on a factor panel's sessions × stocks (symbols × sessions)."""
 
@@ -852,29 +896,12 @@ class ChipStore:
         table = pq.read_table(self._folder / "TaiwanStockMonthRevenue.parquet").to_pandas()
         if self.until is not None:
             table = table[pd.to_datetime(table["available"]) < pd.Timestamp(self.until)]
-        table = table.sort_values(["code", "date"])
-        table["key"] = table["year"] * 12 + table["month"]
-        by_key = table.set_index(["code", "key"])["revenue"]
-        previous = by_key.reindex(list(zip(table["code"], table["key"] - 12))).to_numpy()
-        table["yoy"] = table["revenue"].to_numpy() / previous - 1
-        three = table.groupby("code")["revenue"].transform(lambda values: values.rolling(3).sum())
-        table["three"] = three
-        three_by_key = table.set_index(["code", "key"])["three"]
-        previous_three = three_by_key.reindex(list(zip(table["code"], table["key"] - 12))).to_numpy()
-        table["yoy3"] = table["three"].to_numpy() / previous_three - 1
+        table = revenue_growth(table, accel)
         sessions = pd.to_datetime(pd.Index(self.sessions))
-        columns = [("yoy", 70), ("yoy3", 70)]
-        if accel:
-            yoy_by_key = table.set_index(["code", "key"])["yoy"]
-            earlier = np.column_stack([yoy_by_key.reindex(list(zip(table["code"], table["key"] - lag))).to_numpy()
-                                       for lag in (1, 2, 3)])
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", RuntimeWarning)       # no earlier month known: unknown
-                table["accel"] = table["yoy"].to_numpy() - np.nanmean(earlier, axis=1)
-            columns = [("accel", ACCEL_SESSIONS)]
+        columns = [("accel", ACCEL_SESSIONS)] if accel else [("yoy", 70), ("yoy3", 70)]
         outputs = []
         for column, limit in columns:
-            frame = table.pivot_table(index="available", columns="code", values=column, aggfunc="last")
+            frame = table.pivot_table(index=f"{column}_known", columns="code", values=column, aggfunc="last")
             frame.index = pd.to_datetime(frame.index) + pd.Timedelta(days=1)   # usable the day after
             frame = frame.reindex(sessions.union(frame.index)).ffill(limit=limit).reindex(sessions)
             outputs.append(frame.reindex(columns=self._codes))
