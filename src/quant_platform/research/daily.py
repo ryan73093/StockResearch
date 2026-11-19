@@ -343,10 +343,40 @@ META_FACTORS = {"factor_momentum": "因子動能（最近一年已實現表現�
 # picking volatile stocks (factor neutralization). Not a model feature (not in FACTOR_LABELS).
 NEUTRAL_FACTORS = {"ml_deep2_volneutral": "深度學習第二版前一成・同波動組內排名（去掉挑高波動的成分）"}
 NEUTRAL_OF = {"ml_deep2_volneutral": "ml_deep2_top"}
+# 2026-11-19 (docs/research/results.md「連動因子」): a stock's beta to the market over 250 sessions, and over the
+# sessions the market fell — the rules that held up from 9/1 were the low-beta ones and no signal said so. Rule
+# factors outside FACTOR_LABELS (as the earnings family): no model, robot or earlier search list changes.
+BETA_FACTORS = {"low_beta_250": "對大盤連動低（250 日 beta，反向）",
+                "low_down_beta_250": "大盤下跌日連動低（250 日內大盤下跌那些天的 beta，反向）"}
+BETA_WINDOW, BETA_LEAST, DOWN_LEAST = 250, 200, 60
 # 2026-10-28: EARNINGS_FACTORS (fundamentals.py) are rule factors but not in FACTOR_LABELS, whose list the models,
 # the robots, factor momentum and the searches are built from
 RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FACTORS, **META_FACTORS, **NEUTRAL_FACTORS,
-                **EARNINGS_FACTORS}
+                **EARNINGS_FACTORS, **BETA_FACTORS}
+
+
+def rolling_beta(returns: pd.DataFrame, market: pd.Series, window: int = BETA_WINDOW, least: int = BETA_LEAST,
+                 down_only: bool = False, down_least: int = DOWN_LEAST) -> pd.DataFrame:
+    """sessions × symbols: each stock's beta to ``market`` over the ``window`` sessions to the session (both day
+    returns; at least ``least`` of the stock's). ``down_only``: over the sessions of the window the market fell (at
+    least ``down_least`` of them)."""
+    market = pd.Series(np.asarray(market, dtype=float), index=returns.index)
+    if down_only:
+        fell = market < 0
+        returns = returns.where(fell, axis=0)
+        market = market.where(fell)
+        least = down_least
+    both = returns.notna() & market.notna().to_numpy()[:, None]
+    stock = returns.where(both)
+    index = pd.DataFrame(np.where(both, market.to_numpy()[:, None], np.nan), index=returns.index, columns=returns.columns)
+    count = both.astype(float).rolling(window, min_periods=1).sum()
+    mean_s = stock.rolling(window, min_periods=1).mean()
+    mean_m = index.rolling(window, min_periods=1).mean()
+    cross = (stock * index).rolling(window, min_periods=1).mean()
+    square = (index ** 2).rolling(window, min_periods=1).mean()
+    variance = square - mean_m ** 2
+    beta = (cross - mean_s * mean_m) / variance.where(variance > 0)
+    return beta.where(count >= least)
 WINDOWS = {"1y": 12, "3y": 36}
 
 
@@ -852,6 +882,11 @@ class FactorPanel:
             return self._trend_quality(factor)
         if factor in RAW_V2:
             return self._raw_v2(factor)
+        if factor in BETA_FACTORS:              # 2026-11-19: low beta ranks high
+            returns = p.pct_change(fill_method=None)
+            market = (pd.Series(self.market).pct_change(fill_method=None) if self.market is not None
+                      else returns.mean(axis=1))
+            return (-rolling_beta(returns, market, down_only=factor == "low_down_beta_250")).to_numpy()
         if factor in INDUSTRY_FACTORS:
             return self._industry_factor(factor)
         raise ValueError(factor)

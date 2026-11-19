@@ -156,3 +156,23 @@ def test_the_novelty_gate_drops_a_copy_of_an_existing_signal(monkeypatch):
     gate = scan.novelty(fp, ["range_position_60", "high_52w"])
     assert gate["high_52w"]["with"] is not None and set(gate) == {"range_position_60", "high_52w"}
     assert all(isinstance(item["kept"], bool) for item in gate.values())
+
+
+def test_rolling_beta_and_the_beta_on_the_days_the_market_fell():
+    """2026-11-19: a stock moving twice the market has beta 2; one that follows it only on its falling days has a
+    high down beta and a low one over every day; nothing leaks from later sessions."""
+    import pandas as pd
+
+    from quant_platform.research.daily import BETA_FACTORS, FACTOR_LABELS, rolling_beta
+
+    rng = np.random.default_rng(0)
+    market = pd.Series(rng.normal(0, 0.01, 400))
+    frame = pd.DataFrame({"double": 2 * market, "half": 0.5 * market,
+                          "down": np.where(market < 0, 1.5 * market, rng.normal(0, 0.01, 400))})
+    beta = rolling_beta(frame, market, window=250, least=200)
+    assert beta.iloc[:199].isna().all().all() and np.allclose(beta.iloc[-1][["double", "half"]], [2.0, 0.5])
+    down = rolling_beta(frame, market, window=250, least=200, down_only=True, down_least=60)
+    assert abs(down.iloc[-1]["down"] - 1.5) < 1e-6 and beta.iloc[-1]["down"] < 1.0
+    cut = rolling_beta(frame.iloc[:300], market.iloc[:300], window=250, least=200)
+    assert np.allclose(cut.iloc[-1], beta.iloc[299])                 # the same with the later sessions cut off
+    assert not set(BETA_FACTORS) & set(FACTOR_LABELS)                # no model or robot list changes
