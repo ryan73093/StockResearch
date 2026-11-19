@@ -195,3 +195,24 @@ def test_one_row_per_signal_set_its_steadiest_setting():
             {"factors": ["a", "c"], "hold": "days", "first_half": 0.01, "second_half": 0.01, "worst_1y": -0.1}]
     kept = scan_large.steadiest_per_set(rows)
     assert sorted((tuple(sorted(row["factors"])), row["hold"]) for row in kept) == [(("a", "b"), "free"), (("a", "c"), "days")]
+
+
+def test_the_full_search_chosen_again_by_recent_beta():
+    """2026-11-19 (third version): one row per signal set by score; the lowest fifth by the last sessions' beta, apart
+    from each other."""
+    from quant_platform.research import scan_full
+
+    rows = [{"factors": ["a", "b"], "score": 0.3, "recent": 0.1, "hold": "days"},
+            {"factors": ["b", "a"], "score": 0.5, "recent": 0.1, "hold": "free"},
+            {"factors": ["c"], "score": 0.4, "recent": 0.1, "hold": "days"}]
+    kept = scan_full.best_per_set(iter(rows), 5)
+    assert [(tuple(sorted(row["factors"])), row["hold"]) for row in kept] == [(("a", "b"), "free"), (("c",), "days")]
+    rng = np.random.default_rng(1)
+    bench = rng.normal(0, 0.01, 300)
+    assert abs(scan_full.recent_beta(0.5 * bench, bench, 200) - 0.5) < 1e-9
+    noise = [rng.normal(0, 0.01, 300) for _ in range(10)]
+    scored = [({"factors": [f"s{index}"], "score": 1 - index / 10}, noise[index].astype(np.float32), 0.5 + index / 10)
+              for index in range(10)]
+    scored[1] = (scored[1][0], scored[0][1], 0.55)                # the second lowest beta: a copy of the first
+    chosen = scan_full.low_beta_choice(scored, [], 5, share=0.3)
+    assert [row["factors"][0] for row in chosen] == ["s0", "s2"]   # beta 0.5, 0.55 (a copy: skipped), 0.7

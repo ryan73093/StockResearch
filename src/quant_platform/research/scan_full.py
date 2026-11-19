@@ -483,3 +483,108 @@ def run_phase(base: Path, research: Path, costs, broker: str, phase: str, cutoff
                    / 60 for state in states) / max(1, len(states)), 1)}
     (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     return summary
+
+
+# --- 2026-11-19: the passing settings chosen again by their recent beta (docs/research/results.md「大搜尋改用低連動重挑」第三版) ---
+BETA_SESSIONS = 1225        # about five years: the span whose beta ranked the forward betas best (+0.78)
+BETA_SHARE = 0.2            # the lowest fifth of the pool by that beta
+RERANK_POOL = 20_000
+RERANK_OWN = 0.7            # among the chosen; against earlier finalists CORRELATION
+
+
+def recent_beta(returns: np.ndarray, bench: np.ndarray, sessions: int = BETA_SESSIONS) -> float:
+    """The beta of daily ``returns`` to 0050's ``bench`` over the last ``sessions`` of them."""
+    mine = np.asarray(returns[-sessions:], dtype=np.float64)
+    base = np.asarray(bench[: len(returns)][-sessions:], dtype=np.float64)
+    centred = base - base.mean()
+    return float((mine - mine.mean()) @ centred / max(float(centred @ centred), 1e-12))
+
+
+def best_per_set(rows, pool: int) -> list[dict]:
+    """Of an iterable of passing rows: the ``pool`` signal sets with the highest score, each by its best setting."""
+    import heapq
+
+    best = heapq.nlargest(20 * pool, rows, key=lambda row: (row["score"], row["recent"]))
+    seen, output = set(), []
+    for row in best:
+        key = tuple(sorted(row["factors"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(row)
+        if len(output) >= pool:
+            break
+    return output
+
+
+def low_beta_choice(scored: list[tuple[dict, np.ndarray, float]], seeds: list[np.ndarray], count: int,
+                    share: float = BETA_SHARE) -> list[dict]:
+    """``scored``: (row, daily excess, recent beta) in the pool's order (best score first). The lowest ``share`` by beta,
+    taken in that order while their excess correlates at most RERANK_OWN with a taken one and CORRELATION with a seed."""
+    if not scored:
+        return []
+    limit = float(np.quantile([beta for _row, _excess, beta in scored], share))
+    taken: list[tuple[dict, np.ndarray]] = []
+    for row, excess, beta in scored:
+        if len(taken) >= count:
+            break
+        if beta > limit or np.std(excess) == 0:
+            continue
+        if any(np.corrcoef(excess, seed)[0, 1] > CORRELATION for seed in seeds):
+            continue
+        if any(np.corrcoef(excess, other)[0, 1] > RERANK_OWN for _row, other in taken):
+            continue
+        taken.append(({**row, "beta": round(beta, 3), "beta_limit": round(limit, 3)}, excess))
+    return [row for row, _excess in taken]
+
+
+def rerank_low_beta(base: Path, research: Path, costs, broker: str, cutoff: date, phase: str = "a", count: int = 80,
+                    pool: int = RERANK_POOL, job=None) -> dict[str, object]:
+    """The phase's passing settings chosen again: the best ``pool`` signal sets simulated (processors), the lowest
+    fifth by the last five years' beta to 0050, apart from each other and from the earlier finalists, ``count`` into
+    the engine; the summary (scans/lowbeta-1.2.0-<stamp>)."""
+    from collections import Counter
+
+    from quant_platform.research import scan
+    from quant_platform.research.pool import record_sources
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = folder(research, cutoff, phase)
+    arrays = scan.load_arrays(folder(research, cutoff, "a") / "arrays")
+    if job:
+        job.update(current=f"讀 {out.name} 過初篩的設定，每組訊號留分數最高的", force=True)
+    rows = best_per_set(passing_rows(out), pool)
+    bench = arrays.bench
+    scored = []
+    for index, row in enumerate(rows):
+        candidate = {key: row[key] for key in ("factors", *KEY) if key in row}
+        if not set(candidate["factors"]) <= set(arrays.names):
+            continue
+        _metrics, (returns, _entries) = scan.evaluate(arrays, candidate, costs)
+        scored.append((row, (returns - bench[: len(returns)]).astype(np.float32), recent_beta(returns, bench)))
+        if job and index % 200 == 0:
+            job.update(done=index, total=len(rows) + count, current=f"重算每日報酬與最近 5 年連動（{index:,}／{len(rows):,}）")
+    seeds = []
+    for seed in scan.earlier_finalists(research):
+        if set(seed["factors"]) <= set(arrays.names):
+            _metrics, (returns, _entries) = scan.evaluate(arrays, seed, costs)
+            if np.std(returns) > 0:
+                seeds.append((returns - bench[: len(returns)]).astype(np.float32))
+    chosen = low_beta_choice(scored, seeds, count)
+    betas = [beta for _row, _excess, beta in scored]
+    rules = [scan.to_rule({**row, "named_hold": True}) for row in chosen]
+    label = f"低連動重挑 {out.name}（{stamp}）"
+    record_sources(research, rules, label)
+    results = engine(rules, base, broker, job=job, label="低連動重挑")
+    for row, result in zip(chosen, results, strict=True):
+        result.update(beta=row["beta"], screen_excess=row["excess"], screen_recent=row["recent"], screen_score=row["score"],
+                      hold=row.get("hold"))
+    target = research / "scans" / f"lowbeta-1.2.0-{stamp}"
+    target.mkdir(parents=True, exist_ok=True)
+    summary = {"version": "lowbeta-1.2.0", "stamp": stamp, "from": out.name, "pool": len(scored),
+               "beta_sessions": BETA_SESSIONS, "beta_share": BETA_SHARE,
+               "beta_quantiles": [round(float(value), 3) for value in np.quantile(betas, [0.0, 0.1, 0.2, 0.5, 0.8, 1.0])] if betas else [],
+               "beta_limit": chosen[0]["beta_limit"] if chosen else None, "finalists": len(chosen), "results": results,
+               "tiers": dict(Counter(str(result.get("tier")) for result in results))}
+    (target / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    return summary

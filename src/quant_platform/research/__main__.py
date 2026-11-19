@@ -964,6 +964,17 @@ def main() -> int:
         # the search keeps the cutoff it started with: a run resumed after a reboot in the next month, or phase b
         # started then, goes on with phase a's months and arrays (scans/scan-full-current.json; --cutoff to set it)
         marker = RESEARCH / "scans" / "scan-full-current.json"
+        if args.rerank_low_beta:                # 2026-11-19: a finished phase's passing settings chosen again
+            cutoff = datetime.fromisoformat(args.cutoff).date()
+            command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+            with JobLog(RESEARCH).start(f"全段大搜尋改用最近 5 年低連動重挑（截止 {cutoff}，{args.rerank_low_beta} 段）", command) as job:
+                summary = scan_full.rerank_low_beta(Path(args.base), RESEARCH, broker_costs(args.broker), args.broker, cutoff,
+                                                    phase=args.rerank_low_beta, count=args.finalists,
+                                                    pool=args.rerank_pool if args.rerank_pool != 3000 else scan_full.RERANK_POOL,
+                                                    job=job)
+                job.payload["summary"] = f"選出 {summary['finalists']} 個進引擎：{summary['tiers']}"
+            print(json.dumps({key: value for key, value in summary.items() if key != "results"}, ensure_ascii=False), flush=True)
+            return 0
         if args.cutoff:
             cutoff = datetime.fromisoformat(args.cutoff).date()
         elif marker.is_file():
