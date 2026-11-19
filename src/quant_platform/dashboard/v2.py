@@ -1860,6 +1860,16 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                                chosen=chosen, result=result, recorded=recorded, money=money,
                                jobs=JobLog(research_dir).jobs())
 
+    @blueprint.get("/research/agents")
+    def research_agents():
+        """2026-11-20 (使用者：專門研究透過 AI Agent 做股票投資的策略 AI; D-050): the agent lab — every design's decision
+        of the day, the board, behaviour, replays and the memory probe, read from the lab's files (research/agent_lab)."""
+        from quant_platform.research.agent_lab import view as lab_view
+
+        research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+        return render_template("v2/research_agents.html", active_nav="research", research_tab="agents",
+                               jobs=JobLog(research_dir).jobs(), **lab_view.page(research_dir))
+
     @blueprint.get("/research/forward/<rule_hash>")
     def research_forward(rule_hash: str):
         """One forward-observed rule: holdings, every trade since it started, value against 0050."""

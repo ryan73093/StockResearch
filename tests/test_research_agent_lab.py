@@ -183,3 +183,49 @@ def test_records_are_appended_per_variant_and_a_replay_is_kept_apart(tmp_path):
     text = runner.summary([{"date": "2026-11-20", "variant": "info", "llm": {"hold": ["2330"], "cost_usd": 0.01}}])
     assert "info 1 檔" in text and "US$0.010" in text
     assert datetime.fromisoformat("2026-11-20T15:40:00+08:00") == decision_moment(date(2026, 11, 20))
+
+
+def test_the_page_shows_each_designs_decision_the_board_a_replay_and_the_probe(tmp_path):
+    """2026-11-20 (D-050): 研究 › AI 代理人 — read from the lab's files, empty or not."""
+    from quant_platform.config.settings import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+    from quant_platform.research.agent_lab import view
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'v2.db'}", scheduler_in_web=False)
+    client = create_app(build_container(settings)).test_client()
+    empty = client.get("/research/agents")
+    body = empty.get_data(as_text=True)
+    assert empty.status_code == 200 and "還沒有實際的決定" in body and "<span>AI 代理人</span>" in body
+    research = tmp_path / "research"
+    runner.append(research, "info", {"date": "2026-11-19", "llm": {"hold": ["2330", "2317"]}})
+    runner.append(research, "info", {"date": "2026-11-20", "llm": {
+        "hold": ["2330", "2454"], "reasons": {"2454": "營收創高"}, "view": "大盤偏弱", "lesson": "少換股",
+        "trace": [{"tool": "card"}, {"tool": "card"}, {"tool": "mood"}], "cost_usd": 0.0088}})
+    runner.append(research, "veto", {"date": "2026-11-20", "llm": {"hold": ["1101"], "vetoed": {"3026": "20 日跌 54%"}}})
+    row = {"key": "info", "label": variants.BY_KEY["info"].label, "counted": 301000, "sold": 302000, "counted_ahead_of_0050": 1000,
+           "sold_ahead_of_0050": -500, "beta": 0.8, "fees_and_tax": 900, "orders": 12, "against": "plain",
+           "versus": {"counted": 2000, "sold": 1500}, "verdict": "觀察中（3／60 個交易日）",
+           "behaviour": {"decisions": 3, "fallbacks": 0, "average_held": 9.0, "bought_per_decision": 1.5, "average_steps": 5.0,
+                         "cost_usd": 0.026}, "placebo": {"percentile": 0.62}}
+    result = {"rows": [row, {"key": "team", "label": "分析師團隊", "error": "沒有資料"}], "start": "2026-11-23", "through": "2026-11-25",
+              "sessions": 3, "first_decision": "2026-11-20", "benchmark": {"contributed": 300000, "sold": 300500, "value": 301000}}
+    evaluate.write(research, result)
+    evaluate.write(research, {**result, "run": "neutral-20261120", "replayed": True})
+    evaluate.write(research, {**result, "run": "dry-20261120", "replayed": True})          # dry runs are not listed
+    probe_folder = research / "agent_lab" / "probe"
+    probe_folder.mkdir(parents=True)
+    (probe_folder / "gpt-6-luna.json").write_text(json.dumps({"model": "gpt-6-luna", "made_at": "2026-11-20T01:35:00+08:00", "stocks": 40,
+        "months": [{"month": "2025-03", "right": 27, "wrong": 13}, {"month": "2025-09", "right": 20, "wrong": 20},
+                   {"month": "2026-06", "right": 0, "wrong": 0, "unknown": 40}, {"month": "2026-07", "error": "x"}]}), encoding="utf-8")
+    found = view.page(research)
+    info = next(item for item in found["designs"] if item["key"] == "info")
+    assert [(row["code"], row["new"]) for row in info["holdings"]] == [("2330", False), ("2454", True)]
+    assert [row["code"] for row in info["sold"]] == ["2317"] and info["tools"][0] == {"name": "個股資料", "count": 2}
+    assert [replay["name"] for replay in found["replays"]] == ["neutral-20261120"]
+    assert [(row["period"], row["asked"]) for row in found["probes"][0]["rows"]] == [("2025 上半年", 40), ("2025 下半年", 40)]
+    body = client.get("/research/agents").get_data(as_text=True)
+    for text in ("營收創高", "大盤偏弱", "個股資料 2 次", "20 日跌 54%", "301,000", "+1,000", "-500", "觀察中（3／60 個交易日）",
+                 "算不出來：沒有資料", "neutral-20261120", "2025 上半年", "67.5", "2027-02-25", "不能當成代理人有本事的證據"):
+        assert text in body, text
+    assert "dry-20261120" not in body

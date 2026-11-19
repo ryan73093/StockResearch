@@ -1,0 +1,177 @@
+{% extends "v2/base.html" %}
+{# 2026-11-20 (使用者：專門研究透過 AI Agent 做股票投資的策略 AI…放在某一個模組分類裡面; D-050): the agent lab
+   (research/agent_lab, docs/agent_lab.md). Read-only; simulated accounts only. Tabs: today's decisions, the board,
+   behaviour, replays (never evidence), what the model remembers, how to read. #}
+{% block title %}AI 代理人 · 交易研究分析平台{% endblock %}
+{% block heading %}
+<header class="page-head">
+  <div>
+    <h1>AI 代理人</h1>
+    <p class="page-head__sub">六個用語言模型的選股設計，同一天開始、每天收盤後各自決定；模擬帳戶，永遠不下真的單。{% if latest_day %}最近一次決定 {{ latest_day }}。{% endif %}第一次判定 {{ judge_day }}（滿 {{ sessions_to_judge }} 個交易日）。</p>
+  </div>
+  <div class="page-head__meta"><a href="/research">研究總覽</a></div>
+</header>
+{% endblock %}
+{% block content %}
+{% include "v2/_research_tabs.html" %}
+{% macro money(value) %}{{ '{:,}'.format(value|int) }}{% endmacro %}
+{% macro signed(value) %}{{ '{:+,}'.format(value|int) }}{% endmacro %}
+{% macro board_table(found) %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr>
+        <th>設計</th>
+        <th class="num" title="賺的只算已經賣掉的，賠的不管賣了沒都算">已拿到的錢<br>（元）</th>
+        <th class="num" title="今天把持股全部賣掉、扣費稅後有多少">都賣掉<br>（元）</th>
+        <th class="num" title="兩種錢各自減掉 0050 今天全部賣掉的錢；正的是贏">比 0050<br>拿到／都賣（元）</th>
+        <th class="num" title="兩種錢各自減掉它的比較對象；正的是贏">比它的比較對象<br>拿到／都賣（元）</th>
+        <th class="num" title="帳戶每天的漲跌相對 0050 的幅度；1 是一樣，比 1 大是跌的時候跌更多">連動<br>（倍）</th>
+        <th class="num">費稅（元）<br>／筆數</th>
+        <th>判定</th>
+      </tr></thead>
+      <tbody>
+      {% for row in found.rows %}
+        <tr>
+          <td data-primary>{{ row.label }}</td>
+          {% if row.error %}
+          <td colspan="7" class="muted small">算不出來：{{ row.error }}</td>
+          {% else %}
+          <td class="num" data-label="已拿到的錢（元）">{{ money(row.counted) }}</td>
+          <td class="num" data-label="都賣掉（元）">{{ money(row.sold) }}</td>
+          <td class="num" data-label="比 0050：拿到／都賣（元）">{{ signed(row.counted_ahead_of_0050) }}<br>{{ signed(row.sold_ahead_of_0050) }}</td>
+          <td class="num" data-label="比它的比較對象（元）">{% if row.versus %}{{ signed(row.versus.counted) }}<br>{{ signed(row.versus.sold) }}<br><span class="muted small">對 {{ labels.get(row.against, row.against)[:8] }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="num" data-label="連動（倍）">{{ row.beta if row.beta is not none else '—' }}</td>
+          <td class="num" data-label="費稅（元）／筆數">{{ money(row.fees_and_tax) }}<br>{{ row.orders }} 筆</td>
+          <td data-label="判定">{{ row.verdict }}</td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endmacro %}
+
+<section class="card" data-tab="今天的決定" data-tab-default id="agents-today">
+  <div class="card__head"><h2>每個設計現在持有什麼</h2><span class="muted small">今天收盤後決定、明天收盤成交；帳戶的錢全部平均放在名單上</span></div>
+  {% if not latest_day %}
+  <p class="muted" style="margin:0">還沒有實際的決定。每個交易日 15:40 以後，第一版代理人決定完接著做這六個。</p>
+  {% else %}
+  {% for item in designs %}
+  <details class="agent-design"{% if loop.index <= 2 %} open{% endif %} style="margin:0 0 10px">
+    <summary><b>{{ item.label }}</b>
+      <span class="muted small">・{{ item.holdings|length }} 檔{% if item.date %}・{{ item.date }}{% endif %}{% if item.fallback %}・<span class="badge badge--warn">沿用前一天</span>{% endif %}</span></summary>
+    <p class="small" style="margin:6px 0 4px"><b>它要回答的問題</b>：{{ item.question }}（和「{{ labels.get(item.against, item.against) }}」比）</p>
+    {% if item.fallback %}<p class="small" style="margin:0 0 4px"><b>這次沒有新的決定</b>：{{ item.fallback }}。</p>{% endif %}
+    {% if item.view %}<p class="small" style="margin:0 0 4px"><b>它對市場的看法</b>：{{ item.view }}</p>{% endif %}
+    {% if item.lesson %}<p class="small" style="margin:0 0 4px"><b>它寫給之後的自己</b>：{{ item.lesson }}</p>{% endif %}
+    {% if item.tools %}<p class="small" style="margin:0 0 4px"><b>這次查了</b>：{% for tool in item.tools %}{{ tool.name }} {{ tool.count }} 次{% if not loop.last %}、{% endif %}{% endfor %}{% if item.cost_usd %}；花費 {{ '%.4f' % item.cost_usd }} 美元{% endif %}</p>{% endif %}
+    {% if item.runs %}<p class="small" style="margin:0 0 4px"><b>三次各自選了</b>：{% for run in item.runs %}{{ run.hold|length }} 檔{% if run.fallback %}（不合規）{% endif %}{% if not loop.last %}、{% endif %}{% endfor %}；兩次以上都選的才持有。</p>{% endif %}
+    {% if item.vetoed %}<p class="small" style="margin:0 0 4px"><b>它剔掉的</b>：{% for row in item.vetoed %}{{ row.code }} {{ row.name }}（{{ row.reason }}）{% if not loop.last %}；{% endif %}{% endfor %}</p>{% endif %}
+    {% if item.holdings %}
+    <div class="table-wrap table-wrap--stack">
+      <table class="table--stack">
+        <thead><tr><th>股票</th><th>它的理由</th><th title="和它前一次的決定比">變動</th></tr></thead>
+        <tbody>
+        {% for row in item.holdings %}
+          <tr><td data-primary><a href="/stock?code={{ row.code }}"><strong>{{ row.code }}</strong></a> {{ row.name }}</td>
+              <td data-label="它的理由" class="small">{{ row.reason or '—' }}</td>
+              <td data-label="變動">{% if row.new %}<span class="badge">新買</span>{% else %}<span class="muted small">續抱</span>{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% if item.sold %}<p class="small muted" style="margin:4px 0 0">這次賣掉：{% for row in item.sold %}{{ row.code }} {{ row.name }}{% if not loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
+  </details>
+  {% endfor %}
+  {% endif %}
+</section>
+
+<section class="card" data-tab="成績" id="agents-board">
+  <div class="card__head"><h2>成績：和對照組、和 0050 比</h2></div>
+  {% if board and board.rows %}
+  <p class="small" style="margin:0 0 8px">帳戶從 <b>{{ board.start }}</b> 起算到 <b>{{ board.through }}</b>（{{ board.sessions }}／{{ sessions_to_judge }} 個交易日），每個帳戶投入 {{ money(board.benchmark.contributed) }} 元；同樣的錢全部買 0050、今天賣掉是 <b>{{ money(board.benchmark.sold) }} 元</b>。未滿 {{ sessions_to_judge }} 個交易日只列數字、不判定。</p>
+  {{ board_table(board) }}
+  {% else %}
+  <p class="muted" style="margin:0">{{ (board.note if board else '') or '第一次決定之後的下一個交易日收盤才成交，再過一個交易日才有可以比的數字。' }}</p>
+  {% endif %}
+  <details style="margin-top:8px"><summary class="small">怎麼算的</summary>
+    <p class="small" style="margin:6px 0 0">每個設計的名單交給平台同一個回測引擎：隔天收盤成交、扣手續費與交易稅、30 萬元加每月 5 日 1 萬元。「已拿到的錢」賺的只算已經賣掉的、賠的都算；「都賣掉」是今天全部賣掉能拿回多少。兩種都不輸才算不輸。六個設計彼此很像、只有 {{ sessions_to_judge }} 天，小的差距是運氣；判定時差距落在逐日差額重抽的範圍內會寫「分不出來」。</p></details>
+</section>
+
+<section class="card" data-tab="行為" id="agents-behaviour">
+  <div class="card__head"><h2>每個設計怎麼做決定</h2></div>
+  {% set rows = (board.rows if board else [])|selectattr('behaviour', 'defined')|list %}
+  {% if rows %}
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>設計</th><th class="num">決定<br>（天）</th>
+        <th class="num" title="模型沒回合規的答案，照前一天的名單">沿用前一天<br>（天）</th>
+        <th class="num">平均持有<br>（檔）</th><th class="num" title="每次決定平均新買幾檔；越多費稅越高">每次新買<br>（檔）</th>
+        <th class="num">平均查資料<br>（次）</th><th class="num">模型花費<br>（美元）</th>
+        <th class="num" title="每天從它查過的股票裡隨機抽同樣檔數 500 次；它自己的選擇贏過其中百分之幾。50 是和亂抽一樣">選股贏過<br>隨機的（%）</th></tr></thead>
+      <tbody>
+      {% for row in rows %}
+        <tr><td data-primary>{{ row.label }}</td>
+          <td class="num" data-label="決定（天）">{{ row.behaviour.decisions }}</td>
+          <td class="num" data-label="沿用前一天（天）">{{ row.behaviour.fallbacks }}</td>
+          <td class="num" data-label="平均持有（檔）">{{ row.behaviour.average_held }}</td>
+          <td class="num" data-label="每次新買（檔）">{{ row.behaviour.bought_per_decision }}</td>
+          <td class="num" data-label="平均查資料（次）">{{ row.behaviour.average_steps }}</td>
+          <td class="num" data-label="模型花費（美元）">{{ '%.3f' % row.behaviour.cost_usd }}</td>
+          <td class="num" data-label="選股贏過隨機的（%）">{% if row.placebo %}{{ '%.0f' % (row.placebo.percentile * 100) }}{% else %}—{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin:0">有了第一個可以比的交易日之後才有。到現在六個設計的模型花費一共 {{ '%.3f' % month_cost }} 美元。</p>
+  {% endif %}
+</section>
+
+<section class="card" data-tab="補做（不是證據）" id="agents-replay">
+  <div class="card__head"><h2>補做：事後用當天的資料重做過去的日子</h2></div>
+  <p class="small" style="margin:0 0 8px"><b>這一頁的數字不能當成代理人有本事的證據。</b>語言模型可能讀過那段期間、工具是看過那段行情才設計的。補做只用來看行為、費用，和設計之間的差別。</p>
+  {% for found in replays %}
+  <h3 class="dash-h">{{ found.name }}：{{ found.start }}～{{ found.through }}（{{ found.sessions }} 個交易日），0050 今天賣掉 {{ money(found.benchmark.sold) }} 元</h3>
+  {{ board_table(found) }}
+  {% else %}
+  <p class="muted" style="margin:0">還沒有做完的補做。</p>
+  {% endfor %}
+</section>
+
+<section class="card" data-tab="模型記得多少" id="agents-memory">
+  <div class="card__head"><h2>模型對過去的記憶</h2></div>
+  <p class="small" style="margin:0 0 8px">不給任何資料，每個月問模型 40 檔成交最大的股票「那個月的漲跌幅高於還是低於這 40 檔的中位數」。什麼都不知道的話答對一半。答對明顯超過一半的期間，模型讀過——那段期間的補做沒有意義。</p>
+  {% for probe in probes %}
+  <h3 class="dash-h">{{ probe.model }}（{{ (probe.made_at or '')[:10] }} 測）</h3>
+  <div class="table-wrap table-wrap--stack">
+    <table class="table--stack">
+      <thead><tr><th>期間</th><th class="num">問了（題）</th><th class="num">答對（題）</th><th class="num">答對（%）<br>亂猜是 50</th>
+        <th class="num" title="比亂猜多幾個標準誤；2 以上不太可能是運氣">比亂猜多<br>（標準誤）</th></tr></thead>
+      <tbody>
+      {% for row in probe.rows %}
+        <tr><td data-primary>{{ row.period }}</td><td class="num" data-label="問了（題）">{{ row.asked }}</td>
+          <td class="num" data-label="答對（題）">{{ row.right }}</td>
+          <td class="num" data-label="答對（%）">{{ '%.1f' % (row.accuracy * 100) }}</td>
+          <td class="num" data-label="比亂猜多（標準誤）">{{ '%+.1f' % row.errors }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin:0">還沒有測過。</p>
+  {% endfor %}
+</section>
+
+<section class="card" data-tab="怎麼看" id="agents-how">
+  <div class="card__head"><h2>這一頁在做什麼</h2></div>
+  <ul class="small" style="margin:0;padding-left:18px;line-height:1.8">
+    <li>每個設計每天收盤後讀當天以前知道的資料（大盤、過門檻的量化規則共同挑的股票、82 個訊號、個股資料與新聞、市場情緒、平台自己的研究結論、它自己過去交易的對錯），決定明天收盤要持有哪 5～20 檔。</li>
+    <li>六個設計各回答一個問題：{% for item in designs %}<b>{{ item.label.split('：')[0].split('（')[0] }}</b>——{{ item.question }}{% if not loop.last %}；{% endif %}{% endfor %}。</li>
+    <li>硬規則由程式檢查：只能是當天查過或已持有的可交易上市普通股、同產業最多 6 檔；不合規就沿用前一天。</li>
+    <li>只有從 {{ board.first_decision if board and board.first_decision else '第一次決定' }} 起的實際紀錄算數；{{ judge_day }} 收盤後第一次判定，那之前只看行為與淘汰明顯不行的設計。</li>
+    <li>架構、分期與文獻：專案資訊裡的 <code>docs/agent_lab.md</code>；判定準則與結果：研究結果紀錄「AI 代理人實驗室」。</li>
+  </ul>
+</section>
+{% endblock %}
