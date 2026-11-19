@@ -2,6 +2,17 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-11-19 18:50 — 修正偷看後模型 Q 沒過、付費資料沒有成效；使用者：沒叫停不准停，兩輪大量搜尋排上
+
+- 量測（`modelqparts` 14:44～14:59、`modelqparts2` 15:01～15:08）：模型 Q 拿掉長歷史 5 個付費特徵 +1.90%、5 年、過；拿掉短歷史 4 個 +1.34%、3 年、沒過；只拿掉「隔日沖少」+1.16%、3 年、沒過。照跑之前寫的判定：模型 Q 的優勢主要來自分點涵蓋名單的偷看。
+- 修正（流程 `branchfix` 15:10 起）：分點訊號照當時已知的名單重建（531 檔）、模型 K～Q 與 R 重訓、128 個規則重跑、兩份名單重評、120 個前向帳戶重記。模型 Q 重訓後 +1.45%、3 年，沒過，和不讀付費資料的模型 R 一樣；單獨的規則都掉到 T2。11 月名單讀到的規則過門檻 119 → 75 個，整份 3,876 → 3,832；10 月名單 32 → 34 個。
+- 新檢查：每天 16:00「分點訊號只用當時已知的涵蓋名單」（`invariants.branch_coverage_check`）。
+- 使用者 18:00 左右：「繼續去研究其他方法…我就是要你去研究大量策略，你都給我停下來是怎樣，叫你停了嗎…要記憶體要 gpu 不是都給你了嗎」。登記 D-048；助理早上寫的「大搜尋等 11/30」作廢。
+- 排上兩輪（判定都在跑之前寫進結果紀錄）：`lowbeta`——四次串流搜尋過快篩的約 1,107 萬個候選，改用「開發期連動最低的一成、0050 下跌時不多跌」重挑，每次 80 個進引擎（`scan_large.rerank`，不用重篩）；`bigscan5`——5 個沒搜過的模型訊號，約 914 萬個設定，開發期到當月截止日。顯示卡被別的專案用滿（三個 UnrealEditor、ComfyUI），`bigscan5` 會慢。
+- 我的錯：回報完付費資料就停下來等流程；`tests/test_research_invariants.py` 的新測試第一次寫壞（字串多了一層跳脫），重跑才過。
+- 測試：`tests/test_research_invariants.py`、`tests/test_research_branches.py`、`tests/test_research_pipeline_script.py`、`tests/test_docs_guard.py` 通過（35 個兩次）；整套沒有重跑。
+- 回復方式：`git revert` 這幾個 commit；舊模型在 `instance/research/models/*.leaky-20261119`、修正前的名單在 `build/branchfix_before/`。
+
 ## 2026-11-19 13:30 — FinMind 付費資料的成效；模型 R（模型 Q 不讀付費資料）沒過
 
 - 使用者 11/19：「繼續研究 另外 findmind後天到期 串findmind的資料有什麼成效」。
