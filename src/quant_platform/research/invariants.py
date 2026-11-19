@@ -646,6 +646,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     # 2026-11-02: the paid tables were downloaded once and stopped on 10-21/22; 147 forward accounts read them (directly
     # or through models J-P) and decided on "no block trade, no branch buying" for eight sessions before anyone saw it
     checks.append(paid_check(research, today, now))
+    checks.append(branch_coverage_check(research))
     # 2026-10-29 (使用者：你他媽當我電腦資源很多是不是): the research took the whole CPU and another project's UE build ran
     # 9% in 8 hours; research, pipelines and the worker run at the idle priority so other work goes first
     checks.append(priority_check(processes, research.parent.parent))
@@ -696,6 +697,35 @@ def paid_check(research: Path, today: date, now: datetime | None = None) -> dict
     late = {table: covered.get(table, "沒有") for table in sorted(set(PAID_SOURCES.values())) if covered.get(table, "") < due}
     return _check(name, source, not late, f"應涵蓋到 {due}" + ("；落後：" + "、".join(f"{table} {day}" for table, day in late.items())
                                                             if late else "，全部涵蓋"))
+
+
+def early_branch_rows(first_rows: dict[str, int], usable: dict[str, int]) -> list[str]:
+    """The stocks whose branch signals begin before the year they may (``usable``: finmind_daily.usable_from) — or that
+    may never; ``first_rows``: the year of each stock's first row in the signals table."""
+    return sorted(code for code, year in first_rows.items() if code not in usable or year < usable[code])
+
+
+def branch_coverage_check(research: Path) -> dict[str, object]:
+    """2026-11-19: the branch tables are downloaded for the stocks among the top 300 by turnover in ANY year to now, so
+    a past day's "has a value" told the future. The signals table must hold a stock only from the year after it was
+    first among the top. Should be: no stock with an earlier row; is: the table's first year per stock."""
+    name, source = "分點訊號只用當時已知的涵蓋名單", "結果紀錄 2026-11-19「分點資料的涵蓋範圍偷看了未來」"
+    history = research / "history"
+    try:
+        import pyarrow.parquet as pq
+
+        from quant_platform.research.history.finmind_daily import usable_from
+
+        frame = pq.read_table(history / "paid" / "BranchSignals.parquet", columns=["date", "code"]).to_pandas()
+    except (OSError, ValueError, ImportError):
+        return _check(name, source, True, "沒有分點訊號表，不檢查")
+    if frame.empty:
+        return _check(name, source, True, "分點訊號表是空的")
+    years = frame["date"].astype(str).str[:4].astype(int)
+    first_rows = {str(code): int(year) for code, year in years.groupby(frame["code"].astype(str)).min().items()}
+    early = early_branch_rows(first_rows, usable_from(history))
+    return _check(name, source, not early, f"{len(first_rows)} 檔有訊號；早於可用年的 {len(early)} 檔"
+                  + ("：" + "、".join(early[:10]) if early else ""))
 
 
 def priority_check(processes: list[dict[str, object]] | None, root: Path) -> dict[str, object]:

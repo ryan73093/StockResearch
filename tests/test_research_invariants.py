@@ -546,3 +546,9 @@ def test_the_weekly_watch_of_the_factors_and_models_has_run(tmp_path):
     assert found["ok"] and "2 個因子與模型，變弱或反過來了 1 個" in found["detail"]
     found = {item["name"]: item for item in invariants.run(tmp_path, date(2026, 11, 23), windows=[], memory=[])}[name]
     assert not found["ok"]
+
+
+def test_branch_signals_before_the_year_a_stock_may_be_used_are_red():
+    """2026-11-19: a stock covered in 2022 only because it became a top-300 stock in 2024 told the backtest its future."""
+    assert invariants.early_branch_rows({"1101": 2022, "1103": 2024}, {"1101": 2022, "1103": 2024}) == []
+    assert invariants.early_branch_rows({"1101": 2022, "1103": 2022, "1105": 2023}, {"1101": 2022, "1103": 2024}) == ["1103", "1105"]
