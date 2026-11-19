@@ -229,3 +229,28 @@ def test_the_page_shows_each_designs_decision_the_board_a_replay_and_the_probe(t
                  "算不出來：沒有資料", "neutral-20261120", "2025 上半年", "67.5", "2027-02-25", "不能當成代理人有本事的證據"):
         assert text in body, text
     assert "dry-20261120" not in body
+
+
+def test_the_daily_check_wants_every_designs_decision_and_lists_days_kept_from_before(tmp_path):
+    """2026-11-20 (D-050): the 16:00 check of the lab."""
+    from zoneinfo import ZoneInfo
+
+    from quant_platform.research import invariants
+
+    research = tmp_path / "research"
+    taipei = ZoneInfo("Asia/Taipei")
+    friday = date(2026, 11, 20)
+    before = invariants.agent_lab_check(research, date(2026, 11, 19), datetime(2026, 11, 19, 16, 0, tzinfo=taipei))
+    assert before["ok"] and "之前不檢查" in before["detail"]
+    early = invariants.agent_lab_check(research, friday, datetime(2026, 11, 20, 10, 0, tzinfo=taipei))
+    assert early["ok"]                                                    # 15:40 has not come: 11/19 is before the first day
+    none = invariants.agent_lab_check(research, friday, datetime(2026, 11, 20, 16, 0, tzinfo=taipei))
+    assert not none["ok"] and "twin" in none["detail"] and "team" in none["detail"]
+    for variant in variants.COHORT:
+        llm = {"hold": ["2330"]} if variant.key != "vote" else {"hold": [], "fallback": "沿用前一天：預算用完"}
+        runner.append(research, variant.key, {"date": "2026-11-20", "llm": llm})
+    kept = invariants.agent_lab_check(research, friday, datetime(2026, 11, 20, 16, 0, tzinfo=taipei))
+    assert not kept["ok"] and "vote 連續 1 天" in kept["detail"] and "沒有的" not in kept["detail"]
+    runner.append(research, "vote", {"date": "2026-11-23", "llm": {"hold": ["2330"]}})
+    weekend = invariants.agent_lab_check(research, date(2026, 11, 22), datetime(2026, 11, 22, 16, 0, tzinfo=taipei))
+    assert weekend["ok"] and "六個設計都有" in weekend["detail"]            # Sunday: Friday's decisions are the latest due

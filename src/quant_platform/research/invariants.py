@@ -647,6 +647,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     # or through models J-P) and decided on "no block trade, no branch buying" for eight sessions before anyone saw it
     checks.append(paid_check(research, today, now))
     checks.append(branch_coverage_check(research))
+    checks.append(agent_lab_check(research, today, now))            # 2026-11-20 (D-050)
     # 2026-10-29 (使用者：你他媽當我電腦資源很多是不是): the research took the whole CPU and another project's UE build ran
     # 9% in 8 hours; research, pipelines and the worker run at the idle priority so other work goes first
     checks.append(priority_check(processes, research.parent.parent))
@@ -726,6 +727,39 @@ def branch_coverage_check(research: Path) -> dict[str, object]:
     early = early_branch_rows(first_rows, usable_from(history))
     return _check(name, source, not early, f"{len(first_rows)} 檔有訊號；早於可用年的 {len(early)} 檔"
                   + ("：" + "、".join(early[:10]) if early else ""))
+
+
+def agent_lab_check(research: Path, today: date, now: datetime | None = None) -> dict[str, object]:
+    """2026-11-20 (D-050): every design of the agent lab has decided the latest session due (the flow llmagent's second
+    step, 15:40 on trading days), with a model call that answered — a day kept from the day before is listed, and more
+    than five in a row is the lab's own reason to drop a design (docs/research/results.md「AI 代理人實驗室」)."""
+    from quant_platform.research.agent_lab import runner, variants
+
+    name, source = "AI 代理人實驗室每個交易日每個設計都有決定", "D-050；結果紀錄「AI 代理人實驗室」"
+    from zoneinfo import ZoneInfo
+
+    now = now or datetime.now(ZoneInfo("Asia/Taipei"))
+    after = today < now.date() or (now.hour, now.minute) >= (15, 55)        # the flow starts at 15:40
+    due = _calendar(research).previous_trading_day(today, inclusive=after).isoformat()
+    if due < "2026-11-20":
+        return _check(name, source, True, "第一次決定是 2026-11-20，之前不檢查")
+    missing, kept = [], []
+    for variant in variants.COHORT:
+        made = runner.records(research, variant.key)
+        if not made or made[-1]["date"] < due:
+            missing.append(variant.key)
+            continue
+        streak = 0
+        for item in reversed(made):
+            if not (item.get("llm") or {}).get("fallback"):
+                break
+            streak += 1
+        if streak:
+            kept.append(f"{variant.key} 連續 {streak} 天")
+    detail = f"應有 {due} 的決定" + ("；沒有的：" + "、".join(missing) if missing else "，六個設計都有")
+    if kept:
+        detail += "；沿用前一天的：" + "、".join(kept)
+    return _check(name, source, not missing and not kept, detail)
 
 
 def priority_check(processes: list[dict[str, object]] | None, root: Path) -> dict[str, object]:
