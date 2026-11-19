@@ -192,6 +192,10 @@ class Desk:
             from quant_platform.research.rolling import cutoff_for
 
             path = self.research / "rolling" / f"{cutoff_for(self.day).isoformat()}.json"
+            if not path.is_file():      # 2026-11-19: 9/30's month (cutoff 7/31) has no list — the latest list cut off by the day
+                earlier = sorted(item for item in (self.research / "rolling").glob("20??-??-??.json")
+                                 if item.stem <= self.day.isoformat())
+                path = earlier[-1] if earlier else path
             best: dict[str, tuple[float, dict]] = {}
             if path.is_file():
                 for row in json.loads(path.read_text(encoding="utf-8")).get("graded") or []:
