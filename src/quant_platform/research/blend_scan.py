@@ -903,6 +903,49 @@ def counted_reach_batch(research: str | Path = Path("instance") / "research", to
         DEV_END = kept
 
 
+BETA_MONTHS = 60              # 2026-11-19 (組合搜尋第十五輪): the months of the beta that told the forward betas (+0.78)
+DEFENSE_SHARE = 0.10          # 第十五輪: the defenders, the pool's lowest tenth by that beta
+
+
+def month_beta(returns: np.ndarray, bench_returns: np.ndarray, months: int = BETA_MONTHS) -> np.ndarray:
+    """Each row's beta to 0050 over the last ``months`` month returns."""
+    mine, base = returns[:, -months:], bench_returns[-months:]
+    centred = base - base.mean()
+    return (mine - mine.mean(axis=1, keepdims=True)) @ centred / max(float(centred @ centred), 1e-12)
+
+
+def beta_roles(members: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+    """2026-11-19 (docs/research/results.md「組合搜尋第十五輪」): the attackers — the top ATTACK_SHARE by money at the
+    cutoff — and the defenders: the lowest DEFENSE_SHARE by the last BETA_MONTHS months' beta to 0050, not attackers.
+    (bear_roles' defenders are those that fell no further than 0050 in its falls; the forward record from 9/1 says
+    the backtest beta is what tells who holds up.)"""
+    paid, bench = members[0]["paid"], members[0]["bench"]
+    values = np.stack([member["values"] for member in members])
+    money = values[:, -1]
+    attack = np.flatnonzero(money >= np.quantile(money, 1 - ATTACK_SHARE))
+    beta = month_beta(month_returns(values, paid), month_returns(bench, paid))
+    low = np.flatnonzero(beta <= np.quantile(beta, DEFENSE_SHARE))
+    return attack, np.setdiff1d(low, attack)
+
+
+def beta_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
+    """組合搜尋第十五輪 (written before the run): one attacker with one or two low-beta defenders, shares by the usual
+    volatility, gated as 空頭防護第十二版 (beating 0050 from 2020-10, the drawdown at most DRAWDOWN_ROOM deeper, never
+    further than 0050 in its falls, beyond the pool's frontier); BEAR_FINALISTS of them."""
+    from datetime import date
+
+    from quant_platform.research.rolling import cutoff_for
+
+    global DEV_END
+    kept = DEV_END
+    DEV_END = cutoff_for(today or date.today()).strftime("%Y-%m")
+    try:
+        return batch(research, recent=True, near_copy=FRONTIER_COPY, frontier=True, roles=beta_roles, calm_floor=0.0,
+                     room=DRAWDOWN_ROOM, count=BEAR_FINALISTS)
+    finally:
+        DEV_END = kept
+
+
 def bear13_batch(research: str | Path = Path("instance") / "research", today=None) -> list:
     """2026-10-29 (research_method §7「空頭防護第十三版」; written before the run): 第十二版 with each member adding the
     same to the blend's CVaR (contribution_shares) instead of shares by its own loss in 0050's falls."""

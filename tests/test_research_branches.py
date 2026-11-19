@@ -216,3 +216,21 @@ def test_the_full_search_chosen_again_by_recent_beta():
     scored[1] = (scored[1][0], scored[0][1], 0.55)                # the second lowest beta: a copy of the first
     chosen = scan_full.low_beta_choice(scored, [], 5, share=0.3)
     assert [row["factors"][0] for row in chosen] == ["s0", "s2"]   # beta 0.5, 0.55 (a copy: skipped), 0.7
+
+
+def test_blend_defenders_are_the_lowest_beta_rules():
+    """2026-11-19 (組合搜尋第十五輪): the attackers by money at the cutoff, the defenders by the last months' beta."""
+    from quant_platform.research import blend_scan
+
+    rng = np.random.default_rng(2)
+    bench_returns = rng.normal(0.01, 0.04, 80)
+    paid = np.full(81, 300_000.0)
+    bench = 300_000.0 * np.concatenate([[1.0], np.cumprod(1 + bench_returns)])
+    members = []
+    for index in range(20):
+        beta = 0.3 + 0.1 * index
+        returns = beta * bench_returns + (0.02 if index == 19 else 0.0)
+        members.append({"values": 300_000.0 * np.concatenate([[1.0], np.cumprod(1 + returns)]), "bench": bench, "paid": paid})
+    attack, defense = blend_scan.beta_roles(members)
+    assert 19 in attack and set(defense) == {0, 1}
+    assert abs(blend_scan.month_beta(np.stack([0.5 * bench_returns]), bench_returns)[0] - 0.5) < 1e-9

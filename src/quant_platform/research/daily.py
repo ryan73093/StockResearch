@@ -3597,6 +3597,13 @@ def stale_results(research=None) -> int:
     return len(stale_engine(research))
 
 
+def beta_blend_batch() -> list:
+    """2026-11-19: attackers with the lowest-beta rules (blend_scan.beta_batch, 組合搜尋第十五輪)."""
+    from quant_platform.research.blend_scan import beta_batch
+
+    return beta_batch()
+
+
 def bear13_blend_batch() -> list:
     """2026-10-29: 空頭防護第十二版 with equal parts in the blend's CVaR (blend_scan.bear13_batch, 第十三版)."""
     from quant_platform.research.blend_scan import bear13_batch
@@ -6030,7 +6037,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
