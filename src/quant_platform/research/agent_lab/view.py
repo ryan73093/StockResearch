@@ -8,12 +8,11 @@ from collections import Counter
 from pathlib import Path
 
 from quant_platform.research.agent_lab import runner, variants
-from quant_platform.research.agent_lab.evaluate import SESSIONS_TO_JUDGE
+from quant_platform.research.agent_lab.evaluate import SESSIONS_TO_JUDGE, first_common_day, judge_day
 
 TOOL_NAMES = {"market": "大盤", "consensus": "規則共識", "screen": "訊號篩選", "card": "個股資料", "portfolio": "持股",
               "journal": "日誌", "headlines": "新聞標題", "mood": "市場情緒", "lessons": "研究知識庫", "review": "交易檢討",
               "check": "名單檢查"}
-JUDGE_DAY = "2027-02-25"          # the 60th session from 2026-11-23 by the exchange's calendar (docs/research/results.md)
 
 
 def _load(path: Path) -> dict | None:
@@ -87,7 +86,9 @@ def page(research: str | Path) -> dict[str, object]:
     probes = [summary for path in sorted((root / "probe").glob("*.json")) if (root / "probe").is_dir()
               for summary in [probe_summary(_load(path))] if summary]
     decided = [item["date"] for item in designs if item["date"]]
+    first = first_common_day(research, None)
     return {"designs": designs, "board": board, "replays": replays, "probes": probes, "labels": labels,
-            "latest_day": max(decided) if decided else None, "sessions_to_judge": SESSIONS_TO_JUDGE, "judge_day": JUDGE_DAY,
+            "latest_day": max(decided) if decided else None, "sessions_to_judge": SESSIONS_TO_JUDGE,
+            "first_decision": first, "judge_day": judge_day(research, first) if first else None,
             "month_cost": round(sum(float((item.get("llm") or {}).get("cost_usd") or 0) for variant in variants.COHORT
                                     for item in runner.records(research, variant.key)), 4)}

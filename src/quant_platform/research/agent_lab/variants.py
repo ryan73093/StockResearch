@@ -9,7 +9,9 @@ from dataclasses import dataclass
 FIRST_TOOLS = ("market", "consensus", "screen", "card", "portfolio", "journal")       # the first agent's (llm_agent.TOOLS)
 LAB_TOOLS = ("headlines", "mood", "lessons", "review", "check")
 MOST, LEAST = 20, 5              # stocks held: the account is always all in the stocks chosen, each an equal part
-VETO_MOST = 6
+VETO_MOST = 6                    # stocks kept out at once
+VETO_NEW, VETO_SESSIONS = 2, 10  # new vetoes a day; a vetoed stock stays out this many decisions (2026-11-20: the
+#                                  replay vetoed 5.1 stocks a day afresh, 578 orders against the twin's 322)
 VOTES, VOTES_NEEDED = 3, 2
 ANALYST_CARDS = 16               # the stocks the analysts read: the holdings and the most agreed
 

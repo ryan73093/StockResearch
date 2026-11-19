@@ -47,15 +47,25 @@ def test_three_runs_vote_and_a_short_agreement_is_filled_from_the_first_run():
     assert filled[0] == "1" and len(filled) == 5 and set(filled) == {"1", "2", "3", "4", "5"}
 
 
-def test_a_veto_removes_only_listed_stocks_up_to_the_limit_and_the_reserves_fill_in():
+def test_a_veto_removes_a_few_listed_stocks_keeps_them_out_and_the_reserves_fill_in():
     base = [str(1000 + i) for i in range(20)]
     reserves = [str(3000 + i) for i in range(10)]
     answer = {"veto": [{"code": "1000", "reason": "利空"}, {"code": "9999", "reason": "不在名單"}]
               + [{"code": str(1001 + i), "reason": "x"} for i in range(10)]}
     kept, out = runner.vetoed(base, reserves, answer)
-    assert len(out) == variants.VETO_MOST and "9999" not in out and "1000" not in kept
-    assert len(kept) == 20 and kept[-variants.VETO_MOST:] == reserves[:variants.VETO_MOST]
+    assert list(out) == ["1000", "1001"] and "9999" not in out                 # at most VETO_NEW new ones a day
+    assert len(kept) == 20 and kept[-2:] == reserves[:2] and "1000" not in kept
     assert runner.vetoed(base, reserves, {"veto": []}) == (base, {})
+    # a stock vetoed on an earlier day stays out without being vetoed again, and is not counted as new
+    earlier = {"1005": "2026-11-18", "1006": "2026-11-19"}
+    kept, out = runner.vetoed(base, reserves, {"veto": [{"code": "1005", "reason": "再剔"}, {"code": "1007", "reason": "新"}]},
+                              kept_out=earlier)
+    assert list(out) == ["1007"] and not {"1005", "1006", "1007"} & set(kept) and len(kept) == 20
+    full = {str(1010 + i): "2026-11-19" for i in range(variants.VETO_MOST)}
+    assert runner.vetoed(base, reserves, {"veto": [{"code": "1000", "reason": "x"}]}, kept_out=full)[1] == {}     # six out already
+    history = [{"date": f"2026-11-{day:02d}", "llm": {"vetoed": {str(day): "x"}}} for day in range(1, 21)]
+    assert sorted(runner.barred(history), key=int) == [str(day) for day in range(12, 21)]     # the last nine; today is the tenth
+    assert "10 個交易日" in runner.instructions(variants.BY_KEY["veto"])
 
 
 def _desk(tmp_path, day=date(2026, 11, 19), decided_at=None):
@@ -182,6 +192,14 @@ def test_records_are_appended_per_variant_and_a_replay_is_kept_apart(tmp_path):
     assert [item["date"] for item in runner.records(tmp_path, "info")] == ["2026-11-20"]
     assert [item["date"] for item in runner.records(tmp_path, "info", "check")] == ["2026-11-19"]
     assert evaluate.first_common_day(tmp_path, None) is None                        # the other variants have none yet
+    for variant in variants.COHORT:                                                 # a day kept from before is not a first decision
+        llm = {"hold": [], "fallback": "沿用前一天：沒有額度"} if variant.key == "team" else {"hold": ["2330"]}
+        runner.append(tmp_path, variant.key, {"date": "2026-11-23", "llm": llm})
+    assert evaluate.first_common_day(tmp_path, None) is None
+    runner.append(tmp_path, "team", {"date": "2026-11-24", "llm": {"hold": ["2330"]}})
+    assert evaluate.first_common_day(tmp_path, None) == "2026-11-24"
+    # counted on the exchange's calendar from the session after the first decision (Friday 11/20: Monday is the first)
+    assert evaluate.judge_day(tmp_path / "research", "2026-11-20", sessions=3) == "2026-11-25"
     text = runner.summary([{"date": "2026-11-20", "variant": "info", "llm": {"hold": ["2330"], "cost_usd": 0.01}}])
     assert "info 1 檔" in text and "US$0.010" in text
     assert datetime.fromisoformat("2026-11-20T15:40:00+08:00") == decision_moment(date(2026, 11, 20))
@@ -228,7 +246,7 @@ def test_the_page_shows_each_designs_decision_the_board_a_replay_and_the_probe(t
     assert [(row["period"], row["asked"]) for row in found["probes"][0]["rows"]] == [("2025 上半年", 40), ("2025 下半年", 40)]
     body = client.get("/research/agents").get_data(as_text=True)
     for text in ("營收創高", "大盤偏弱", "個股資料 2 次", "20 日跌 54%", "301,000", "+1,000", "-500", "觀察中（3／60 個交易日）",
-                 "算不出來：沒有資料", "neutral-20261120", "2025 上半年", "67.5", "2027-02-25", "不能當成代理人有本事的證據"):
+                 "算不出來：沒有資料", "neutral-20261120", "2025 上半年", "67.5", "滿 60 個交易日判定", "不能當成代理人有本事的證據"):
         assert text in body, text
     assert "dry-20261120" not in body
 

@@ -77,16 +77,37 @@ def behaviour(made: list[dict]) -> dict[str, object]:
 
 
 def first_common_day(research: Path, run: str | None) -> str | None:
-    """The first day every variant has a record of (in a replay: every variant the replay covers)."""
+    """The first day every variant has a decision of its own (in a replay: every variant the replay covers). A day
+    kept from the day before — no answer, no credit at the model's — is not one: an account that never chose holds
+    nothing, and comparing it would be comparing cash (2026-11-20: the model account ran out of credit)."""
     firsts = []
     for variant in variants.COHORT:
-        made = runner.records(research, variant.key, run)
+        made = [item for item in runner.records(research, variant.key, run) if not (item.get("llm") or {}).get("fallback")]
         if not made:
-            if run:                 # a replay may cover some of the designs only
+            if run and not runner.records(research, variant.key, run):      # a replay may cover some of the designs only
                 continue
             return None
         firsts.append(min(item["date"] for item in made))
     return max(firsts) if firsts else None
+
+
+def judge_day(research: Path, first_decision: str, sessions: int = SESSIONS_TO_JUDGE) -> str | None:
+    """The day the accounts reach ``sessions`` sessions: counted on the exchange's calendar from the session after the
+    first decision (D-008: dates are counted, not estimated)."""
+    from datetime import timedelta
+
+    from quant_platform.market_calendar.store import MarketCalendarStore
+
+    try:
+        calendar = MarketCalendarStore(Path(research).parent).calendar("TW")
+        day, count = date.fromisoformat(first_decision), 0
+        while count < sessions:
+            day += timedelta(days=1)
+            if calendar.is_trading_day(day):
+                count += 1
+        return day.isoformat()
+    except Exception:  # noqa: BLE001 - no calendar: the page says the rule instead of a date
+        return None
 
 
 def board(base: str | Path, research: str | Path, run: str | None = None, broker: str = "cathay", loaded=None,

@@ -7,7 +7,7 @@
 <header class="page-head">
   <div>
     <h1>AI 代理人</h1>
-    <p class="page-head__sub">六個用語言模型的選股設計，同一天開始、每天收盤後各自決定；模擬帳戶，永遠不下真的單。{% if latest_day %}最近一次決定 {{ latest_day }}。{% endif %}第一次判定 {{ judge_day }}（滿 {{ sessions_to_judge }} 個交易日）。</p>
+    <p class="page-head__sub">六個用語言模型的選股設計，同一天開始、每天收盤後各自決定；模擬帳戶，永遠不下真的單。{% if latest_day %}最近一次決定 {{ latest_day }}。{% endif %}{% if judge_day %}第一次判定 {{ judge_day }}（滿 {{ sessions_to_judge }} 個交易日）。{% else %}每個設計都做出第一次決定之後滿 {{ sessions_to_judge }} 個交易日判定。{% endif %}</p>
   </div>
   <div class="page-head__meta"><a href="/research">研究總覽</a></div>
 </header>
@@ -170,7 +170,7 @@
     <li>每個設計每天收盤後讀當天以前知道的資料（大盤、過門檻的量化規則共同挑的股票、82 個訊號、個股資料與新聞、市場情緒、平台自己的研究結論、它自己過去交易的對錯），決定明天收盤要持有哪 5～20 檔。</li>
     <li>六個設計各回答一個問題：{% for item in designs %}<b>{{ item.label.split('：')[0].split('（')[0] }}</b>——{{ item.question }}{% if not loop.last %}；{% endif %}{% endfor %}。</li>
     <li>硬規則由程式檢查：只能是當天查過或已持有的可交易上市普通股、同產業最多 6 檔；不合規就沿用前一天。</li>
-    <li>只有從 {{ board.first_decision if board and board.first_decision else '第一次決定' }} 起的實際紀錄算數；{{ judge_day }} 收盤後第一次判定，那之前只看行為與淘汰明顯不行的設計。</li>
+    <li>只有從{% if first_decision %} {{ first_decision }} {% else %}每個設計都做出第一次決定的那一天{% endif %}起的實際紀錄算數；{% if judge_day %}{{ judge_day }} 收盤後{% else %}滿 {{ sessions_to_judge }} 個交易日{% endif %}第一次判定，那之前只看行為與淘汰明顯不行的設計。</li>
     <li>架構、分期與文獻：專案資訊裡的 <code>docs/agent_lab.md</code>；判定準則與結果：研究結果紀錄「AI 代理人實驗室」。</li>
   </ul>
 </section>
