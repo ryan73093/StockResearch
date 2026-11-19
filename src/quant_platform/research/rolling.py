@@ -143,13 +143,13 @@ def _grade(item: dict, cutoff: str) -> dict:
 
 
 def select(base: str | Path, research: str | Path, cutoff: date, broker: str = "cathay", workers: int = 2,
-           progress=None, skip: set[str] | None = None) -> list[dict]:
+           progress=None, skip: set[str] | None = None, only: set[str] | None = None) -> list[dict]:
     """Every rule graded on 2015-06..cutoff, in ``workers`` processes (each loads the data once); 2026-10-18: but
     the rules in ``skip`` (already graded this month — only the new ones are added). 2026-10-20 (the audit): ``skip``
     holds rule hashes, not trial numbers — a trial's spec graded under another hash is graded again."""
     from quant_platform.research.blend import parse_spec
 
-    items = [item for item in rules(research) if parse_spec(item["spec"]).rule_hash not in (skip or set())]
+    items = wanted([(parse_spec(item["spec"]).rule_hash, item) for item in rules(research)], skip, only)
     output = []
     with ProcessPoolExecutor(max_workers=max(1, workers), initializer=_init,
                              initargs=(str(base), broker, str(research))) as pool:
@@ -158,6 +158,12 @@ def select(base: str | Path, research: str | Path, cutoff: date, broker: str = "
             if progress:
                 progress(done, len(items), row)
     return output
+
+
+def wanted(items: list[tuple[str, dict]], skip: set[str] | None, only: set[str] | None) -> list[dict]:
+    """The rules to grade: not those in ``skip``; 2026-11-19 with ``only`` (an earlier month's list graded again after
+    a fix — the rules registered since are not that month's) just those."""
+    return [item for key, item in items if key not in (skip or set()) and (only is None or key in only)]
 
 
 HOPELESS = 0.7          # 2026-10-21: under 70% of 0050's account — a month cannot lift it over 0050

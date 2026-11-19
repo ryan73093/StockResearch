@@ -2811,6 +2811,10 @@ ZERO_FILLED = ("block_volume_20", "block_premium_20", "govbank_net_20", "govbank
 ZERO_FILL_VERSION = "every-code-2026-10-26"
 # 2026-10-26: what read the leaky block_volume_20 — model J learned from it, the robot 3.5 from model J
 LEAK_20261026 = ("block_volume_20", "ml_gbm_j", "rl_rolling35", "rolling35_equal")
+# 2026-11-19 (docs/research/results.md「分點資料的涵蓋範圍偷看了未來」): the two branch factors had a value only for the
+# stocks among the top 300 by turnover in any year to 2026; the models with low_daytrade_5 among their features
+LEAK_20261119 = ("low_daytrade_5", "branch_informed_20", "ml_gbm_k", "ml_gbm_l", "ml_gbm_m", "ml_gbm_o", "ml_gbm_p",
+                 "ml_gbm_q")
 
 
 def reads_any(spec: dict, names) -> bool:
@@ -5721,7 +5725,17 @@ def rerun_half(part: int) -> list:
     return [rule for rule in rerun_all_batch() if int(rule.rule_hash[-1], 16) % 2 == part]
 
 
+def branchfix_batch() -> list:
+    """2026-11-19: every latest 100%-stock rule and blend reading LEAK_20261119, run again once the branch signals are
+    rebuilt with the coverage known at the time and models K, L, M, O, P and Q are retrained (new inputs: new trials)."""
+    return _reading(LEAK_20261119)
+
+
 def leakfix_batch() -> list:
+    return _reading(LEAK_20261026)
+
+
+def _reading(names) -> list:
     """2026-10-26 (the leak check: block_volume_20 knew whether a stock would ever have a block trade; model J
     learned from it, the robot 3.5 reads model J): every latest 100%-stock rule and blend reading them, run again
     with the fixed factor, model J and the robot 3.5 retrained (new inputs, so new trials)."""
@@ -5741,7 +5755,7 @@ def leakfix_batch() -> list:
             spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
         except (OSError, ValueError, KeyError):
             continue
-        if uses_0050(spec) or not reads_any(spec, LEAK_20261026):
+        if uses_0050(spec) or not reads_any(spec, names):
             continue
         try:
             rules.append(parse_spec(spec))
@@ -5981,7 +5995,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],

@@ -58,19 +58,38 @@ def sessions(base: str | Path, start: date = FIRST, end: date | None = None) -> 
     return sorted(day for day in days if day >= start and (end is None or day <= end))
 
 
-def branch_codes(base: str | Path, start: date = FIRST, top: int = TOP) -> list[str]:
-    """The listed common stocks among the ``top`` by turnover in any calendar year from ``start``'s."""
-    import pandas as pd
+def top_years(base: str | Path, start: date = FIRST, top: int = TOP) -> dict[int, set[str]]:
+    """Each calendar year from ``start``'s: the listed common stocks among the ``top`` by turnover that year."""
     import pyarrow.parquet as pq
 
-    codes: set[str] = set()
+    found: dict[int, set[str]] = {}
     for path in sorted((Path(base) / "stocks" / "twse").glob("*.parquet")):
         if int(path.stem) < start.year:
             continue
         frame = pq.read_table(path, columns=["code", "turnover"]).to_pandas()
         frame = frame[frame["code"].str.len().eq(4) & frame["code"].str[0].ne("0") & ~frame["code"].str.startswith("91")]
-        codes.update(frame.groupby("code")["turnover"].sum().nlargest(top).index)
-    return sorted(codes)
+        found[int(path.stem)] = set(frame.groupby("code")["turnover"].sum().nlargest(top).index)
+    return found
+
+
+def branch_codes(base: str | Path, start: date = FIRST, top: int = TOP) -> list[str]:
+    """The listed common stocks among the ``top`` by turnover in any calendar year from ``start``'s — the stocks whose
+    branch reports are downloaded. Not what a past day may know: see ``usable_from``."""
+    return sorted(set().union(*top_years(base, start, top).values()))
+
+
+def usable_from(base: str | Path, start: date = FIRST, top: int = TOP) -> dict[str, int]:
+    """2026-11-19 (docs/research/results.md「分點資料的涵蓋範圍偷看了未來」): the first calendar year a stock's branch
+    reports may be used — the year after the first year it was among the top. The download list is every stock that
+    is among the top in ANY year to now, so a stock covered in 2022 only because it became a top-300 stock in 2024
+    told a backtest its future through "the branch factors have a value" (the stocks covered only because of a later
+    year returned +36% in 2024, the others -5.5% and -2.2%). The same rule for the forward test: a stock first among
+    the top this year counts from next January."""
+    first: dict[str, int] = {}
+    for year, codes in sorted(top_years(base, start, top).items()):
+        for code in codes:
+            first.setdefault(code, year + 1)
+    return first
 
 
 def _get(token: str, params: dict) -> list[dict]:

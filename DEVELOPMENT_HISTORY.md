@@ -12,6 +12,7 @@
 - 流程 `modelr` 12:48 啟動，最後一步（前向看板）13:29:23 結束，離 13:30 只差半分鐘；之後這類流程把後半段整段放到 14:40 以後。
 - 測試：`tests/test_research_model_q.py`、`tests/test_docs_guard.py`、`tests/test_research_pipeline_script.py`、`tests/test_research_model.py`、`tests/test_research_model_ensemble.py`、`tests/test_dashboard_v2.py` 104 個通過。`tests/test_research_scan.py` 兩次都超過時限：它走顯示卡那條路（`scan_gpu.accounts`），顯示卡當時被別的程式用到 100%、15 GB（`nvidia-smi`），不是這次的修改；整套沒有重跑。
 - **發現一個回測偷看（13:35）**：分點資料只下載 2021～2026 任何一年成交值前 300 名的 554 檔（`finmind_daily.branch_codes`），沒涵蓋的股票「隔日沖少」「分點跟著買」是空值——回測裡有沒有值洩漏了這檔以後會不會變熱門（`build/diag_branch_coverage.py`：以後才被涵蓋的股票 2024 年中位數 +36.0%，其他 −5.5%、−2.2%）。模型 K、L、M、O、Q 的特徵都有「隔日沖少」（10/31、11/18 訓練時已有資料），模型 P 兩個都有。每週的截斷檢查照日期截、抓不到。前向紀錄不受影響。`modelqparts2`（gbm-2.13.3：模型 Q 只拿掉這一個特徵）跑之前登錄，排在 `modelqparts` 後面。修正（照時點的涵蓋、重訓、重評）是下一個工作包。
+- 修正（13:40）：`finmind_daily.top_years`／`usable_from`、`branches.known_then`（一檔股票的分點資料從第一次進前 300 名的下一年起才算）、`rolling --regrade-only`（重評以前月份的名單時不加後來才有的規則）、`daily.branchfix_batch`、流程 `branchfix`（舊模型留在 `*.leaky-20261119`）。其他付費表查過沒有同樣的問題（`build/diag_paid_coverage.py`）。測試 66 個通過。commit 6d7f3f4 的標題又誤用了前一個的（文件檢查擋下時訊息檔還沒重寫），內容是這個發現與 gbm-2.13.3；之後先寫訊息檔再跑檢查。
 - 文件：`docs/finmind_renewal_2026-11-13.md` 加「11/19 更新」。
 - 回復方式：`git revert` 這個 commit；模型資料夾 `instance/research/models/gbm-2.13.*` 可留著（沒有規則在名單上讀它）。
 

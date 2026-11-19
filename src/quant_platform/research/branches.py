@@ -293,15 +293,27 @@ def _stats(values: list[float] | tuple[float, float, float]) -> dict[str, object
             "t": round(mean / math.sqrt(variance / count), 2) if variance > 0 else None}
 
 
+def known_then(columns: np.ndarray, years: np.ndarray, first_year: int | None) -> np.ndarray:
+    """2026-11-19: the rows (sessions ``columns``) of a stock's reports a past day may use — the sessions of the
+    calendar years from ``first_year`` (finmind_daily.usable_from: the year after the stock was first among the top by
+    turnover); none without one."""
+    if first_year is None:
+        return np.zeros(len(columns), dtype=bool)
+    return years[columns] >= first_year
+
+
 def run(history: str | Path, research: str | Path, job=None) -> Path:
     import pandas as pd
 
     from quant_platform.research import daily
+    from quant_platform.research.history.finmind_daily import usable_from
 
     history, research = Path(history), Path(research)
     _data, fp = daily.load(history)
     sessions = list(fp.sessions)
     index = {day: column for column, day in enumerate(sessions)}
+    years = np.array([day.year for day in sessions])
+    usable = usable_from(history)               # 2026-11-19: a stock's reports count from the year after it was top-300
     rows_of = {}
     for row, symbol in enumerate(fp.symbols):
         code, _dot, market = str(symbol).partition(".")
@@ -325,6 +337,8 @@ def run(history: str | Path, research: str | Path, job=None) -> Path:
         if job and number % 10 == 0:
             job.update(done=number, total=2 * len(codes), current=f"挑分點 {code}")
         columns, ids, bought, sold = place(loaded, index, names)
+        keep = known_then(columns, years, usable.get(code))
+        columns, bought, sold = columns[keep], bought[keep], sold[keep]
         if not len(columns):
             continue
         row = rows_of[code]
@@ -359,6 +373,8 @@ def run(history: str | Path, research: str | Path, job=None) -> Path:
         if job and number % 10 == 0:
             job.update(done=len(codes) + number, total=2 * len(codes), current=f"分點訊號 {code}")
         columns, ids, bought, sold = place(loaded, index, names)
+        keep = known_then(columns, years, usable.get(code))
+        columns, bought, sold = columns[keep], bought[keep], sold[keep]
         if not len(columns):
             continue
         row = rows_of[code]

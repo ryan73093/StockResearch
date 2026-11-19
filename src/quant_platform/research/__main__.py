@@ -475,6 +475,8 @@ def main() -> int:
     parser.add_argument("--part", help="scan-full：只跑第一階段的第 k／n 份（k/n，由 scan-full 自己開的程序用）")
     parser.add_argument("--regrade-uses",
                         help="rolling --step select --only-new：讀這些因子（逗號分隔）的規則也重評（2026-10-26 防偷看修正）")
+    parser.add_argument("--regrade-only", action="store_true",
+                        help="rolling --step select --only-new --regrade-uses：只重評那些規則，不加新規則（修正後重評以前月份的名單，2026-11-19）")
     parser.add_argument("--all-rules", action="store_true",
                         help="rolling --step select：全部重評（預設：上月比 0050 少三成以上的 T3 沿用上月結果，每季全部重評）")
     parser.add_argument("--calm", action="store_true",
@@ -1279,18 +1281,21 @@ def main() -> int:
                 def progress(done, total, row):
                     job.update(done=done, total=total, current=f"{row.get('name', '')[:40]}：{'過' if row.get('passed') else '沒過'}")
                 kept = [row for row in payload.get("graded") or [] if not row.get("error")] if args.only_new else []
+                only = None
                 if args.regrade_uses:           # 2026-10-26: the rules reading a fixed factor graded again
                     names = tuple(name.strip() for name in args.regrade_uses.split(",") if name.strip())
                     again = [row for row in kept if row.get("spec") and daily_research.reads_any(row["spec"], names)]
                     kept = [row for row in kept if row not in again]
                     print(f"重評讀 {'、'.join(names)} 的規則 {len(again)} 個", flush=True)
+                    if args.regrade_only:       # 2026-11-19: an earlier month's list — the rules made since are not its
+                        only = {row["rule_hash"] for row in again}
                 # 2026-10-21 (使用者：每個月都要跑那麼久，我時間很多是不是): a T3 rule that ended under 70% of 0050 last
                 # month cannot pass a month later — its grade is carried; every rule again each quarter
                 carried = ([] if args.only_new or args.all_rules
                            else rolling.carried(RESEARCH, cutoff, daily_research.ENGINE_VERSION))
                 kept = kept + carried
                 graded = kept + rolling.select(Path(args.base), RESEARCH, cutoff, args.broker, args.workers, progress,
-                                               skip={row["rule_hash"] for row in kept})
+                                               skip={row["rule_hash"] for row in kept}, only=only)
                 payload.update(graded=graded, selected_at=datetime.now().isoformat(timespec="seconds"),
                                engine=daily_research.ENGINE_VERSION)
                 rolling.save(RESEARCH, cutoff, payload)

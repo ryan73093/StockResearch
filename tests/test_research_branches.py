@@ -133,3 +133,37 @@ def test_the_signals_cover_the_last_day_every_stock_has(tmp_path):
         for name in ("2026-10-21", "2026-10-22", last):
             (folder / code / f"{name}.json.gz").write_bytes(b"")
     assert branches.through(folder) == date(2026, 10, 22)                # 2317's 10-23 not stored yet
+
+
+def test_a_stocks_reports_count_only_from_the_year_after_it_was_first_among_the_top(tmp_path):
+    """2026-11-19: the download list is every stock among the top 300 by turnover in ANY year to now; a stock covered
+    in 2022 only because it became a top stock in 2024 told the backtest its future by having a value at all."""
+    import pandas as pd
+
+    from quant_platform.research.history import finmind_daily
+
+    folder = tmp_path / "stocks" / "twse"
+    folder.mkdir(parents=True)
+    for year, money in ((2021, {"1101": 9.0, "1102": 1.0, "1103": 2.0}), (2022, {"1101": 9.0, "1102": 8.0, "1103": 2.0}),
+                        (2023, {"1101": 1.0, "1102": 8.0, "1103": 9.0})):
+        pd.DataFrame({"code": list(money), "turnover": list(money.values())}).to_parquet(folder / f"{year}.parquet")
+    tops = finmind_daily.top_years(tmp_path, date(2021, 6, 30), top=1)
+    assert tops == {2021: {"1101"}, 2022: {"1101"}, 2023: {"1103"}}
+    assert finmind_daily.branch_codes(tmp_path, date(2021, 6, 30), top=1) == ["1101", "1103"]     # what is downloaded
+    assert finmind_daily.usable_from(tmp_path, date(2021, 6, 30), top=1) == {"1101": 2022, "1103": 2024}
+    years = np.array([2021, 2022, 2022, 2023, 2024])
+    columns = np.array([0, 1, 3, 4])
+    assert branches.known_then(columns, years, 2022).tolist() == [False, True, True, True]
+    assert branches.known_then(columns, years, 2024).tolist() == [False, False, False, True]     # 1103: not before 2024
+    assert not branches.known_then(columns, years, None).any()
+
+
+def test_an_earlier_list_graded_again_after_a_fix_takes_only_those_rules():
+    """2026-11-19: --only-new on the August list would add every rule registered since; ``only`` keeps it to the rules
+    being graded again."""
+    from quant_platform.research import rolling
+
+    items = [("a", {"n": 1}), ("b", {"n": 2}), ("c", {"n": 3})]
+    assert rolling.wanted(items, {"a"}, None) == [{"n": 2}, {"n": 3}]
+    assert rolling.wanted(items, {"a"}, {"b"}) == [{"n": 2}]
+    assert rolling.wanted(items, None, set()) == []
