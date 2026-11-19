@@ -1,0 +1,61 @@
+"""The cohort: the agent designs observed forward side by side from the same day. Each answers one question fixed
+before it starts (docs/research/results.md「AI 代理人實驗室」) and is compared with one other row, so sixty sessions are
+not spent on one design at a time. No heavy import here: the names are read by the dashboard and the tests."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+FIRST_TOOLS = ("market", "consensus", "screen", "card", "portfolio", "journal")       # the first agent's (llm_agent.TOOLS)
+LAB_TOOLS = ("headlines", "mood", "lessons", "review", "check")
+MOST, LEAST = 20, 5              # stocks held: the account is always all in the stocks chosen, each an equal part
+VETO_MOST = 6
+VOTES, VOTES_NEEDED = 3, 2
+ANALYST_CARDS = 16               # the stocks the analysts read: the holdings and the most agreed
+
+
+@dataclass(frozen=True)
+class Variant:
+    key: str
+    label: str                   # 繁體中文, shown to the owner
+    mode: str                    # "twin" | "single" | "vote" | "veto" | "team"
+    tools: tuple[str, ...]
+    question: str                # the one question this row answers
+    against: str                 # the row it is compared with (a variant key, "llm_agent" or "0050")
+    steps: int = 8
+    calls: int = 0               # model calls a day at most (the budget's arithmetic)
+
+    @property
+    def factor(self) -> str:
+        return f"lab_{self.key}"
+
+
+COHORT: tuple[Variant, ...] = (
+    Variant("twin", "對照組：規則共識最多的 20 檔（沒有語言模型）", "twin", (),
+            "基準線：代理人起點看到的同一份共識，照固定做法持有", "0050"),
+    Variant("plain", "單一代理人・中性指示（第一版的六個工具）", "single", FIRST_TOOLS,
+            "第一版的指示裡有事後才知道的提示（跌市少跌、連動高跌更多）；拿掉以後還贏不贏對照組", "twin", calls=8),
+    Variant("info", "單一代理人・加市場新聞、情緒、研究知識庫、交易檢討、組合檢查", "single", FIRST_TOOLS + LAB_TOOLS,
+            "多給資訊（新聞、情緒、知識、自己過去交易的對錯）有沒有用", "plain", calls=8),
+    Variant("vote", "三次獨立決定投票（同一個設計跑三次，兩票以上才持有）", "vote", FIRST_TOOLS + LAB_TOOLS,
+            "同一個代理人每次跑的結果不一樣；投票能不能去掉運氣的成分", "info", calls=24),
+    Variant("veto", "只否決：從對照組的 20 檔裡最多剔掉 6 檔，由後面的遞補", "veto", ("market", "mood", "card", "headlines"),
+            "語言模型當「否決的人」是不是比當「選股的人」好", "twin", steps=1, calls=1),
+    Variant("team", "分析師團隊：多方、空方各寫意見，經理人決定", "team", ("market", "mood", "headlines", "consensus", "card",
+                                                                "portfolio", "review"),
+            "多個角色分工再合議，是不是比一個代理人自己查好", "info", steps=3, calls=3),
+)
+BY_KEY = {variant.key: variant for variant in COHORT}
+FACTORS = {variant.factor: f"AI 代理人實驗室・{variant.label}" for variant in COHORT}
+# the rows the board also shows, read from their own stores (the first agent's 60 sessions start the same day)
+OUTSIDE = (("llm_agent", "第一版 AI 選股代理人（11/19 的指示）"), ("llm_agent_control", "第一版的對照組"),
+           ("llm_trader", "LLM 交易員（10/20，一次問答、60 檔候選）"))
+
+
+def register() -> None:
+    """The lab's factors known to the rule model (``DailyRule`` checks a factor's name), for this process only: their
+    scores are put into the panel by ``evaluate`` — the engine itself has no code of the lab's."""
+    from quant_platform.research import daily
+
+    for name, label in FACTORS.items():
+        daily.RULE_FACTORS.setdefault(name, label)

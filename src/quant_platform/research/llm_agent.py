@@ -20,6 +20,10 @@ rewritten) and become the scores of two rule factors, ``llm_agent`` and ``llm_ag
 choice ranks its stocks on the next session, so the forward accounts trade them at the next close. A language model
 read the years a backtest would cover, so only the forward record judges it (as the LLM trader); the days before it
 existed are decided afterwards with that day's information and marked ``replayed`` — not evidence from before.
+
+2026-11-20 (research/agent_lab): rule 2 of the instructions said the money not placed stays in cash; the engine puts
+the whole account in the stocks chosen, each an equal part (``simulate_daily``: 1 / len(picks)). The sentence now says
+what happens (the prompt version changes with it; the 60 sessions judged start with this day's decision).
 """
 
 from __future__ import annotations
@@ -71,7 +75,7 @@ B. 做出決定：{"hold": [{"code": "2330", "reason": "30 字內的理由"}], "
 
 規則：
 1. 只能持有上市普通股（四位數代號、不是 00 開頭的 ETF），而且必須是你今天查到過或已經持有的股票。
-2. 同一產業最多 6 檔；最多 20 檔，不確定可以少於 20 檔（剩下的放現金）。
+2. 同一產業最多 6 檔；最多 20 檔，可以少於 20 檔——帳戶的錢會全部平均放在你選的股票上、不會留現金，選得少每一檔的比重就大。
 3. 你的價值在於把各種資訊合起來判斷：量化規則的共識、因子、連動（連動高的股票大盤跌時跌更多）、新聞、你自己過去的對錯。
    不要只照某一個名次排，也不要每天大幅換股（每次買賣都有費用）。
 4. 最多查 7 次，第 8 步一定要做出決定。資料夠了就早點決定。
