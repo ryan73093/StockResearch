@@ -5,26 +5,41 @@
   <li>各類：{% for name, count in t.kinds %}{{ name }} {{ count }} 個{{ '、' if not loop.last else '' }}{% endfor %}。</li>
   {% if t.beta is not none %}<li>跟 0050 的連動：中間那個 {{ '{:.2f}'.format(t.beta) }} 倍，{{ t.low_beta }} 個低於 0.8 倍。{% if t.benchmark is not none and t.benchmark < -0.05 %}這段 0050 是跌的，連動低的規則光是跌得少就會領先，不代表選股比較準；0050 反彈時它們可能落後。{% endif %}</li>{% endif %}
   {% if t.with_months %}<li>0050 反彈時跟不跟得上（看回測，2020-10 起的每個月）：{{ t.with_months }} 個有回測月資料的規則裡，{{ t.up_too }} 個在 0050 上漲的月份平均也不輸 0050。這是回測——規則就是在這段期間選出來的，只能當參考；真正的答案要等前向紀錄裡出現上漲的月份。</li>{% endif %}
-  <li>對帳有問題的 {{ t.unreconciled }} 個（有問題的不能是 T0）。</li>
+  <li>對帳（每天的持股與現金要能由前一天加當天的交易算出來）有問題的 {{ t.unreconciled }} 個；有問題的不能是 T0，會標在規則名稱後面。</li>
   <li>第一次登錄在前向紀錄開始之後的 {{ t.after_start }} 個：這些規則開始之前的那一段是事後補做的（只用截止日以前的資料選，但不是當時就在記）。</li>
 </ul>
-<div class="table-wrap table-wrap--stack">
-  <table class="table--stack">
-    <thead><tr><th>規則</th><th>類別</th><th class="num" title="已拿到的錢：賺的只算賣掉的、賠的都算；0050 當天賣掉">比 0050（已拿到）</th><th class="num" title="規則的持股和 0050 當天都賣掉、扣費稅">比 0050（都賣掉）</th><th class="num" title="這段期間 0050 每漲跌 1%，這個規則平均跟著動幾 %">連動</th><th class="num" title="回測 2020-10 起：0050 上漲的月份，這個規則平均一個月賺多少（括號是 0050）。看 0050 反彈時它跟不跟得上；是回測，只當參考">回測：0050 漲的月</th><th class="num" title="回測 2020-10 起：0050 下跌的月份，這個規則平均一個月（括號是 0050）">回測：0050 跌的月</th><th title="每天的持股與現金可由前一天加當天的交易算出來">對帳</th><th title="這個規則第一次登錄試驗的日期">第一次登錄</th></tr></thead>
-    <tbody>
-    {% for row in t.rows %}
-      <tr><td data-primary><a href="/research/forward/{{ row.spec_hash }}" title="{{ row.name }}">{{ rule_no(row.spec_hash) }} {{ row.name|short }}</a>{% if '高風險' in row.tier %} <span class="badge badge--bad">高風險</span>{% endif %}</td>
+{% macro rule_row(row) %}
+      <tr><td data-primary><a href="/research/forward/{{ row.spec_hash }}" title="{{ row.name }}">{{ rule_no(row.spec_hash) }} {{ row.name|short }}</a>{% if '高風險' in row.tier %} <span class="badge badge--bad">高風險</span>{% endif %}{% if not row.reconciled %} <span class="badge badge--bad" title="每天的持股與現金要能由前一天加當天的交易算出來；有問題的不能是 T0">對帳有 {{ row.problems }} 個問題</span>{% endif %}</td>
         <td data-label="類別">{{ row.family }}</td>
         <td class="num up" data-label="比 0050（已拿到）">{{ '{:+.1f}'.format(row.excess * 100) }} 點</td>
         <td class="num up" data-label="比 0050（都賣掉）">{{ '{:+.1f}'.format(row.sold_excess * 100) }} 點</td>
         <td class="num" data-label="連動">{% if row.beta is not none %}{{ '{:.2f}'.format(row.beta) }} 倍{% else %}—{% endif %}</td>
         <td class="num" data-label="回測：0050 漲的月">{% if row.months %}{{ '{:+.1f}'.format(row.months.up * 100) }}%<span class="muted">（{{ '{:+.1f}'.format(row.months.up_bench * 100) }}%）</span>{% else %}—{% endif %}</td>
         <td class="num" data-label="回測：0050 跌的月">{% if row.months %}{{ '{:+.1f}'.format(row.months.down * 100) }}%<span class="muted">（{{ '{:+.1f}'.format(row.months.down_bench * 100) }}%）</span>{% else %}—{% endif %}</td>
-        <td data-label="對帳">{{ '正常' if row.reconciled else '有 ' ~ row.problems ~ ' 個問題' }}</td>
-        <td data-label="第一次登錄">{{ row.first or "—" }}</td></tr>
-    {% else %}<tr><td colspan="9">現在沒有規則兩種算法都不輸 0050。</td></tr>
+        <td data-label="第一次登錄">{{ (row.first[5:7]|int ~ '/' ~ row.first[8:10]|int) if row.first else '—' }}</td></tr>
+{% endmacro %}
+{% set first_rows = 30 %}
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>規則</th><th>類別</th><th class="num" title="已拿到的錢：賺的只算賣掉的、賠的都算；0050 當天賣掉">比 0050（已拿到）</th><th class="num" title="規則的持股和 0050 當天都賣掉、扣費稅">比 0050（都賣掉）</th><th class="num" title="這段期間 0050 每漲跌 1%，這個規則平均跟著動幾 %">連動</th><th class="num" title="回測 2020-10 起：0050 上漲的月份，這個規則平均一個月賺多少（括號是 0050）。看 0050 反彈時它跟不跟得上；是回測，只當參考">回測：0050 漲的月</th><th class="num" title="回測 2020-10 起：0050 下跌的月份，這個規則平均一個月（括號是 0050）">回測：0050 跌的月</th><th title="這個規則第一次登錄試驗的日期">登錄日</th></tr></thead>
+    <tbody>
+    {% for row in t.rows[:first_rows] %}{{ rule_row(row) }}
+    {% else %}<tr><td colspan="8">現在沒有規則兩種算法都不輸 0050。</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
+{% if t.rows|length > first_rows %}
+<details class="dash-how"><summary>其餘 {{ t.rows|length - first_rows }} 個（照同樣的順序）</summary>
+<div class="table-wrap table-wrap--stack">
+  <table class="table--stack">
+    <thead><tr><th>規則</th><th>類別</th><th class="num" title="已拿到的錢：賺的只算賣掉的、賠的都算；0050 當天賣掉">比 0050（已拿到）</th><th class="num" title="規則的持股和 0050 當天都賣掉、扣費稅">比 0050（都賣掉）</th><th class="num" title="這段期間 0050 每漲跌 1%，這個規則平均跟著動幾 %">連動</th><th class="num" title="回測 2020-10 起：0050 上漲的月份，這個規則平均一個月賺多少（括號是 0050）。看 0050 反彈時它跟不跟得上；是回測，只當參考">回測：0050 漲的月</th><th class="num" title="回測 2020-10 起：0050 下跌的月份，這個規則平均一個月（括號是 0050）">回測：0050 跌的月</th><th title="這個規則第一次登錄試驗的日期">登錄日</th></tr></thead>
+    <tbody>
+    {% for row in t.rows[first_rows:] %}{{ rule_row(row) }}
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+</details>
+{% endif %}
 <p class="col-help">「點」＝百分點。排序：兩種算法裡比較差的那個由大到小。這張表每天收盤後跟著前向紀錄更新，不是判定結果；判定在滿 {{ t.needed }} 個交易日那天收盤後。</p>
