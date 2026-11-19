@@ -4676,6 +4676,21 @@ def deep_netz_batch() -> list[DailyRule]:
     return deep_net_batch("dl-2.8.1", "ml_deep2_netz", "扣掉大盤連動、除以自己的波動")
 
 
+# 2026-11-19 (docs/research/results.md「模型 Q 自己的規則：九個框架」, written before the run): model Q stands only in
+# its own rule (#35585: alone, weekly, no minimum holding) - one setting changed at a time
+MODEL_Q_FRAMES = (("前 10 名", {"top": 10}), ("前 40 名", {"top": 40}), ("每天決策", {"check": "daily"}),
+                  ("看成本才換股", {"switching": "cost1"}), ("依波動度配置", {"weighting": "inverse_vol"}),
+                  ("開盤賣、收盤買", {"execution": "split"}), ("隔天收盤成交", {"execution": "next"}),
+                  ("隔天開盤成交", {"execution": "open"}), ("不買股東大增的五分之一", {"exclude": "h2"}))
+
+
+def model_q_frames_batch() -> list[DailyRule]:
+    base = {"factors": {"ml_gbm_q": 1.0}, "check": "weekly", "industry_cap": 0.3, "min_hold": 0}
+    return [DailyRule.model_validate({**base, **change,
+                                      "name": f"模型 Q 單獨（扣掉大盤連動）、同產業最多 3 成、不設最短持有：{word}"})
+            for word, change in MODEL_Q_FRAMES]
+
+
 def model_q_batch() -> list[DailyRule]:
     """2026-11-18 (docs/research/results.md「模型 Q」, written before the run): gbm-2.12.0 (model K's features, learning
     the return net of the stock's beta) - only if it passes its registered gate (model.down_gate) - alone and with the
@@ -5939,7 +5954,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "blendrecent": blend_recent_batch, "blendfrontier": blend_frontier_batch, "blendfour": blend_four_batch, "blendsize": blend_size_batch, "bear12": bear_blend_batch, "bear13": bear13_blend_batch, "blendreach": blend_reach_batch, "blendreach14": blend_counted_reach_batch, "techsecond": tech_second_batch, "techveto": tech_veto_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "techdeep4": tech_deep4_batch, "deepregate": deep_regate_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
-           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear9": bear9_batch, "bear10": bear10_batch, "bear11": bear11_batch, "modelo": model_o_batch, "modelp": model_p_batch, "modelq": model_q_batch, "deepnet": deep_net_batch, "guardh1": guard_h1_batch, "swapq": swap_q_batch, "deepnetz": deep_netz_batch, "deepdirect": deep_direct_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear9": bear9_batch, "bear10": bear10_batch, "bear11": bear11_batch, "modelo": model_o_batch, "modelp": model_p_batch, "modelq": model_q_batch, "deepnet": deep_net_batch, "guardh1": guard_h1_batch, "swapq": swap_q_batch, "modelq2": model_q_frames_batch, "deepnetz": deep_netz_batch, "deepdirect": deep_direct_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,

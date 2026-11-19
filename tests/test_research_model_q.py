@@ -241,3 +241,15 @@ def test_model_q_is_swapped_into_32_fixed_rules_reading_one_tree_model():
     root = Path(__file__).resolve().parents[1] / "scripts"
     for name in ("research-pipeline.ps1", "start-research.ps1"):
         assert '"swapq"' in (root / name).read_text(encoding="utf-8-sig").splitlines()[0]
+
+
+def test_model_q_s_own_rule_is_tried_in_nine_frames_one_change_each():
+    """2026-11-19 (docs/research/results.md「模型 Q 自己的規則：九個框架」): #35585 with one setting changed at a time."""
+    from quant_platform.research import daily
+
+    rules = daily.model_q_frames_batch()
+    assert len(rules) == len({rule.name for rule in rules}) == 9 and daily.BATCHES["modelq2"] is daily.model_q_frames_batch
+    base = daily.DailyRule(name="x", factors={"ml_gbm_q": 1.0}, check="weekly", industry_cap=0.3, min_hold=0).model_dump()
+    for rule, (_word, change) in zip(rules, daily.MODEL_Q_FRAMES, strict=True):
+        made = rule.model_dump()
+        assert {key for key in made if made[key] != base[key]} == {"name", *change}
