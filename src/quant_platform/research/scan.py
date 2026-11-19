@@ -55,7 +55,7 @@ LARGE = 100
 CORRELATION_LIMIT = 0.9
 # overlays; 2026-10-19 the insiders' notices and the buybacks failed their registered event study (research_method §7):
 # features for the models (model H), not signals for the search
-LEFT_OUT = ("ml_gbm_q_nolong", "ml_gbm_q_noshort",          # 2026-11-19: measurements, not signals
+LEFT_OUT = ("ml_gbm_q_nolong", "ml_gbm_q_noshort", "ml_gbm_q_nobranch",          # 2026-11-19: measurements, not signals
             "revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "dl_risk", "dl_risk2", "low_insider_sell_60",
             "buyback_60", "pledge_heavy", "low_pledge",     # 2026-10-20: the pledges wait for their event study
             # 2026-10-21: the holder brackets and the paid FinMind tables waited for their strength analysis; 10-22 the
@@ -76,7 +76,7 @@ SHORT = {
     "earnings_yield": "本益比低", "book_to_price": "淨值比低", "roe_ttm": "ROE", "gross_margin": "毛利率",
     "operating_margin_change": "營益率增", "eps_growth": "EPS 成長", "low_debt": "負債低", "fip_12": "趨勢連續",
     "imom_12": "日內動能", "resid_mom_12": "殘差動能", "ml_gbm": "模型A", "ml_gbm_excess": "模型B",
-    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "ml_gbm_ext": "模型G", "ml_gbm_h": "模型H", "ml_gbm_i": "模型I", "ml_gbm_j": "模型J", "ml_gbm_k": "模型K", "ml_gbm_l": "模型L", "ml_gbm_m": "模型M", "ml_gbm_o": "模型O", "ml_gbm_p": "模型P", "ml_gbm_q": "模型Q", "ml_gbm_r": "模型R", "ml_gbm_q_nolong": "模型Q少長歷史付費", "ml_gbm_q_noshort": "模型Q少短歷史付費", "ml_deep_direct": "深度直接強化", "ml_deep2_holders": "深度2集保", "ml_deep2_volneutral": "深度2同波動", "ml_deep2_riskadj": "深度2波動調整", "ml_tech_deep": "技術機器人3", "ml_tech_deep_r": "技術機器人4", "ml_tech_resid": "技術機器人殘差", "ml_deep2_r": "深度模型2近年", "ml_deep2_wide_r": "深度2加上櫃近年",
+    "ml_gbm_statements": "模型C", "ml_gbm_60": "模型D", "ml_gbm_quality": "模型E", "ml_gbm_ens": "模型F", "ml_tech_ens": "技術模型", "ml_gbm_ext": "模型G", "ml_gbm_h": "模型H", "ml_gbm_i": "模型I", "ml_gbm_j": "模型J", "ml_gbm_k": "模型K", "ml_gbm_l": "模型L", "ml_gbm_m": "模型M", "ml_gbm_o": "模型O", "ml_gbm_p": "模型P", "ml_gbm_q": "模型Q", "ml_gbm_r": "模型R", "ml_gbm_q_nolong": "模型Q少長歷史付費", "ml_gbm_q_noshort": "模型Q少短歷史付費", "ml_gbm_q_nobranch": "模型Q少隔日沖", "ml_deep_direct": "深度直接強化", "ml_deep2_holders": "深度2集保", "ml_deep2_volneutral": "深度2同波動", "ml_deep2_riskadj": "深度2波動調整", "ml_tech_deep": "技術機器人3", "ml_tech_deep_r": "技術機器人4", "ml_tech_resid": "技術機器人殘差", "ml_deep2_r": "深度模型2近年", "ml_deep2_wide_r": "深度2加上櫃近年",
     "ml_deep2_riskadj_r": "深度2波動調整近年", "ml_deep2_holders_r": "深度2集保近年", "ml_deep2_net": "深度2扣連動", "ml_deep2_netz": "深度2扣連動除波動", "ml_deep3_r": "深度模型3近年", "ml_deep2_monthly": "深度2月訓", "ml_gbm_ext_monthly": "模型G月訓", "low_insider_sell_60": "內部人不賣", "buyback_60": "庫藏股", "low_pledge": "質押低", "pledge_heavy": "質押過半",
          "industry_mom_6": "產業動能", "industry_mom_1": "產業短期動能", "industry_laggard_5": "同業落後補漲",
          "big_holder_pct": "千張大戶比例", "big_holder_up_4w": "大戶增加", "holders_down_4w": "股東人數減少",

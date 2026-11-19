@@ -102,6 +102,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # (the brokers' concentration, the eight banks, the next-day flippers: PAID_SHORT). Gates only, no rules
           "ml_gbm_q_nolong": {"version": "gbm-2.13.1", "label": "ensemble", "features": "extended_k_nolong", "target": "residual"},
           "ml_gbm_q_noshort": {"version": "gbm-2.13.2", "label": "ensemble", "features": "extended_k_noshort", "target": "residual"},
+          # 2026-11-19 (docs/research/results.md「分點資料的涵蓋範圍偷看了未來」): the branch tables hold only the stocks
+          # among the 300 largest by turnover in ANY year 2021-2026, so "low_daytrade_5 is not missing" says the stock
+          # is or will be a top-300 one. Model Q without that one feature: how much of model Q is this
+          "ml_gbm_q_nobranch": {"version": "gbm-2.13.3", "label": "ensemble", "features": "extended_k_nobranch", "target": "residual"},
           # 2026-10-16 (使用者：deep learning 的項目有沒有研究？): a recurrent network over each stock's last 40 sessions
           # (research/model_deep.py)
           "ml_deep": {"version": "dl-1.0.0", "label": "deep"},
@@ -250,8 +254,8 @@ def version_features(version: str | None) -> tuple[str, ...]:
     if kind == "extended_m":           # 2026-10-28: K's list and the market's state
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
                      and name != "branch_informed_20") + MARKET_FEATURES
-    if kind in ("extended_k_nolong", "extended_k_noshort"):       # 2026-11-19: model K's list less one half of the paid ones
-        left = PAID_LONG if kind == "extended_k_nolong" else PAID_SHORT
+    if kind in ("extended_k_nolong", "extended_k_noshort", "extended_k_nobranch"):   # 2026-11-19: model K's list less some paid ones
+        left = {"extended_k_nolong": PAID_LONG, "extended_k_noshort": PAID_SHORT}.get(kind, ("low_daytrade_5",))
         return tuple(name for name in version_features("gbm-2.7.0") if name not in left)
     if kind == "extended_k":           # 2026-10-26: every factor but the revenue, the industries and the branches
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
@@ -650,7 +654,8 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
     return meta
 
 
-DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0", "gbm-2.13.0": "gbm-2.7.0", "gbm-2.13.1": "gbm-2.7.0", "gbm-2.13.2": "gbm-2.7.0"}
+DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0", "gbm-2.13.0": "gbm-2.7.0", "gbm-2.13.1": "gbm-2.7.0", "gbm-2.13.2": "gbm-2.7.0",
+              "gbm-2.13.3": "gbm-2.7.0"}
 PAID_LONG = ("margin_safe", "margin_in_profit", "low_pledge_loan_20", "block_premium_20", "block_volume_20")
 PAID_SHORT = ("broker_concentration_5", "govbank_net_20", "govbank_dip_buy_20", "low_daytrade_5")
 # DOWN_GATES:        # the version judged by ``down_gate`` → the one it is judged against
