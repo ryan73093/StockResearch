@@ -234,3 +234,105 @@ def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count:
     (folder / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     (research / "scans" / "bigscan-current.txt").unlink(missing_ok=True)                   # finished
     return summary
+
+
+LOW_BETA = 0.8              # 2026-11-19: the daily beta to 0050 over the development period a "low-beta" set may have
+RERANK_POOL = 3000
+
+
+def beta_and_gap(excess: np.ndarray, bench: np.ndarray, stretches: list[tuple[int, int]]) -> tuple[np.ndarray, np.ndarray]:
+    """Each row of stored daily excess returns: its beta to the 0050 daily returns ``bench``, and over 0050's falls
+    ``stretches`` (downside.falls) the worst of "the set's change less 0050's" (0 when there is no fall)."""
+    base = np.asarray(bench[: excess.shape[1]], dtype=np.float64)
+    returns = excess.astype(np.float64) + base[None, :]
+    centred = base - base.mean()
+    beta = (returns - returns.mean(axis=1, keepdims=True)) @ centred / max(float(centred @ centred), 1e-12)
+    gap = np.zeros(len(returns))
+    for number, (peak, trough) in enumerate(stretches):
+        mine = np.prod(1 + returns[:, peak:trough], axis=1) - 1
+        theirs = float(np.prod(1 + base[peak:trough]) - 1)
+        gap = mine - theirs if number == 0 else np.minimum(gap, mine - theirs)
+    return beta, gap
+
+
+def low_beta_rows(folder: Path, bench: np.ndarray, limit: float = LOW_BETA, pool: int = RERANK_POOL, job=None) -> tuple[list[dict], dict[str, int]]:
+    """The passing rows of a finished streamed search (both halves ahead of 0050) whose development-period beta is at
+    most ``limit`` and that fell no further than CALM_GAP beyond 0050 in any of its falls — the ``pool`` steadiest —
+    and the counts (rows read, stable, low beta, low beta and calm)."""
+    from quant_platform.research.downside import falls
+    from quant_platform.research.scan import CALM_GAP, passes, stability
+
+    stretches = falls(np.asarray(bench, dtype=np.float64))
+    counts = {"rows": 0, "stable": 0, "low_beta": 0, "kept": 0}
+    kept: list[dict] = []
+    files = sorted(folder.glob("screen-s*.jsonl"))
+    for number, path in enumerate(files):
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        excess = np.load(path.with_name(path.name.replace(".jsonl", ".excess.npy")))
+        if len(rows) != len(excess):
+            continue
+        beta, gap = beta_and_gap(excess, bench, stretches)
+        counts["rows"] += len(rows)
+        for row, row_beta, row_gap in zip(rows, beta, gap, strict=True):
+            if not passes(row, True):
+                continue
+            counts["stable"] += 1
+            if row_beta > limit:
+                continue
+            counts["low_beta"] += 1
+            if row_gap < -CALM_GAP:
+                continue
+            counts["kept"] += 1
+            kept.append({**row, "beta": round(float(row_beta), 3), "screen_fall_gap": round(float(row_gap), 4)})
+        if len(kept) > 20 * pool:
+            kept = sorted(kept, key=stability, reverse=True)[:pool]
+        if job and number % 200 == 0:
+            job.update(done=number, total=len(files), current=f"{folder.name}：讀 {counts['rows']:,} 個、低連動又不多跌 {counts['kept']:,} 個")
+    return sorted(kept, key=stability, reverse=True)[:pool], counts
+
+
+def rerank(base: Path, research: Path, costs, folders: list[Path], count: int = 80, limit: float = LOW_BETA, job=None) -> dict[str, object]:
+    """2026-11-19 (docs/research/results.md「大搜尋改用低連動重挑」): the candidates the earlier streamed searches
+    passed, chosen again — low beta to 0050 and no further down than 0050 in its falls, over the development period —
+    ``count`` per search, apart from each other and from every earlier finalist; then the engine as a search's stage 2."""
+    from collections import Counter
+
+    from quant_platform.research import daily
+    from quant_platform.research.registry import TrialRegistry
+    from quant_platform.research.scan import earlier_finalists, finalists, load_arrays, to_rule
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = research / "scans" / f"lowbeta-1.0.0-{stamp}"
+    out.mkdir(parents=True, exist_ok=True)
+    seeds = earlier_finalists(research)
+    chosen, searched = [], {}
+    for folder in folders:
+        arrays = load_arrays(folder / "arrays")
+        rows, counts = low_beta_rows(folder, arrays.bench, limit, job=job)
+        picked = finalists(arrays, rows, costs, count, pool=RERANK_POOL, seeds=seeds, stable=True, calm=True)
+        searched[folder.name] = {**counts, "finalists": len(picked)}
+        print(f"{folder.name}：{counts}，選出 {len(picked)} 個", flush=True)
+        seeds = seeds + [row for row in picked if set(row["factors"]) <= set(arrays.names)]
+        chosen += [(folder.name, row) for row in picked]
+        (out / "chosen.json").write_text(json.dumps({"searched": searched, "chosen": [row for _name, row in chosen]},
+                                                    ensure_ascii=False, indent=1), encoding="utf-8")
+        del arrays
+    data, fp = daily.load(base)
+    fingerprint = daily.fingerprint(base)
+    registry = TrialRegistry(research / "trials.jsonl")
+    cache: dict = {}
+    results = []
+    for index, (source, row) in enumerate(chosen):
+        rule = to_rule(row)
+        if job:
+            job.update(done=index, total=len(chosen), current=f"引擎（{index + 1}／{len(chosen)}）：{rule.name}", force=True)
+        record, report = daily.run_trial(rule, base, registry, research / "reports", costs, data, fp, fingerprint, cache, stamp)
+        results.append({"trial_id": record.trial_id, "name": rule.name, "from": source, "hold": row.get("hold"),
+                        "beta": row.get("beta"), "screen_fall_gap": row.get("screen_fall_gap"),
+                        "screen_excess": row["excess"], "full_excess": report["full_period_excess"],
+                        "since_2020": report["since_2020"]["excess"], "drawdown": report["strategy"]["max_drawdown"],
+                        "tier": daily.tier(record.metrics)[0]})
+    summary = {"version": "lowbeta-1.0.0", "stamp": stamp, "limit": limit, "searched": searched, "finalists": len(chosen),
+               "results": results, "tiers": dict(Counter(item["tier"] for item in results))}
+    (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    return summary

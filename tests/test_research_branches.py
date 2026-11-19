@@ -167,3 +167,20 @@ def test_an_earlier_list_graded_again_after_a_fix_takes_only_those_rules():
     assert rolling.wanted(items, {"a"}, None) == [{"n": 2}, {"n": 3}]
     assert rolling.wanted(items, {"a"}, {"b"}) == [{"n": 2}]
     assert rolling.wanted(items, None, set()) == []
+
+
+def test_low_beta_rerank_reads_beta_and_the_worst_fall_from_stored_excess():
+    """2026-11-19: the earlier searches kept each passing candidate's daily excess; its beta to 0050 and how much
+    further it fell in 0050's falls come from that, without screening again."""
+    from quant_platform.research import scan_large
+    from quant_platform.research.downside import falls
+
+    bench = np.array([0.01, -0.06, -0.06, 0.02, 0.01, -0.01, 0.03, 0.02])
+    half = 0.5 * bench                                   # beta 0.5: falls half as far
+    double = 2.0 * bench
+    excess = np.stack([half - bench, double - bench, np.zeros(len(bench))]).astype(np.float16)
+    stretches = falls(bench)
+    assert stretches
+    beta, gap = scan_large.beta_and_gap(excess, bench, stretches)
+    assert np.allclose(beta, [0.5, 2.0, 1.0], atol=0.02)
+    assert gap[0] > 0 > gap[1] and abs(gap[2]) < 1e-3
