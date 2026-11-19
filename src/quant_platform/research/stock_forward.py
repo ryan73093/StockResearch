@@ -179,13 +179,20 @@ def forward_only() -> list[tuple[object, str]]:
                                  top=20, keep=1, min_hold=0, industry_cap=0.3),
                        "LLM 交易員前向實驗（和對照組同一天開始比）" if factor == "llm_trader"
                        else "LLM 交易員的對照組：同樣候選、固定規則（和上一列比）"))
+    # 2026-11-19 (使用者：做一個選股的 AI agent): the stock-picking agent and its twin (research/llm_agent.py)
+    agents = [(DailyRule(name=f"{label}：隔天收盤成交", factors={factor: 1.0}, top=20, keep=1, min_hold=0, industry_cap=0.3),
+               reason)
+              for factor, label, reason in (
+                  ("llm_agent", "AI 選股代理人（自己查資料、最多 8 步、最多 20 檔）", "AI 選股代理人前向實驗（和對照組同一天開始比）"),
+                  ("llm_agent_control", "AI 選股代理人對照組（過門檻規則共同挑得最多的 20 檔）",
+                   "AI 選股代理人的對照組：同樣的起點資料、固定規則（和上一列比）"))]
     # 2026-10-20 (使用者：ML、DL、RL、技術分析、LLM 都要加入評估；持有方式都是策略): the same pair in the other two
     # holding styles, forward only (no news before 2026-10-05)
     for label, style in (("月線上續抱", {"hold": "trend", "min_hold": 0}), ("不設最短持有", {"min_hold": 0})):
         for rule, reason in list(output[:2]):
             output.append((DailyRule.model_validate({**rule.model_dump(), **style, "name": f"{rule.name}｜持有：{label}"}),
                            f"{reason}（持有：{label}）"))
-    return output
+    return output + agents
 
 
 def llm_trader_start(research_dir: str | Path) -> str | None:
@@ -341,6 +348,13 @@ class StockForwardTracker:
         if llm_first is None or llm_first > cutoff.isoformat():
             for rule, _reason in (forward_only() if self._experiments else []):
                 if any(name in rule.factors for name in ("llm_trader", "llm_control")):
+                    experiments.pop(rule.rule_hash, None)
+        from quant_platform.research.llm_agent import first_decision as agent_first_decision
+
+        agent_first = agent_first_decision(self._base)          # 2026-11-19: the agent's pair, the same way
+        if agent_first is None or agent_first > cutoff.isoformat():
+            for rule, _reason in (forward_only() if self._experiments else []):
+                if any(name in rule.factors for name in ("llm_agent", "llm_agent_control")):
                     experiments.pop(rule.rule_hash, None)
         month_path = rolling_folder(self._base) / f"{cutoff.isoformat()}.json"
         month = None
@@ -1124,6 +1138,11 @@ class StockForwardTracker:
             from quant_platform.research.llm_trader import trade_reasons
 
             for day, notes in trade_reasons(self._base, days).items():
+                why.setdefault(day, {}).update(notes)
+        if "llm_agent" in ((item.get("rule") or {}).get("factors") or {}):    # 2026-11-19: the agent's own words
+            from quant_platform.research.llm_agent import trade_reasons as agent_reasons
+
+            for day, notes in agent_reasons(self._base, days).items():
                 why.setdefault(day, {}).update(notes)
         trades, results = explain_trades(days, why, float((item.get("rule") or {}).get("trim_above") or 0.0))
         # 2026-10-28 (使用者：每一筆交易的紀錄都要顯示買入的價格跟賣出的價格，我怎麼驗證你買賣的正確性): the traded day's

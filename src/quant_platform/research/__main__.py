@@ -348,7 +348,7 @@ def main() -> int:
     parser.add_argument(
         "command", choices=("baselines", "trial", "batch", "trials", "stats", "schema", "agent", "promote", "legacy", "stocks",
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
-                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "retry-check", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
+                            "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "retry-check", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "llm-agent", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
                             "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
     )
@@ -1713,6 +1713,41 @@ def main() -> int:
         print(JobLog(RESEARCH).waiting(args.pipeline or "?", args.wait_reason or "", int(args.pid or 0)), flush=True)
         return 0
 
+    if args.command == "llm-agent":
+        # 2026-11-19 (使用者：做一個選股的 AI agent): the day's decision of the stock-picking agent and its twin
+        from quant_platform.config.settings import Settings
+        from quant_platform.research import llm_agent
+        from quant_platform.research.jobs import JobLog
+
+        day = date.fromisoformat(args.decision_day) if args.decision_day else datetime.now(TAIPEI).date()
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        if args.replay_from:
+            first = date.fromisoformat(args.replay_from)
+            with JobLog(RESEARCH).start(f"AI 選股代理人：補做 {first}～{day} 每天收盤後的決定（只用當天以前的資料）", command) as job:
+                client = llm_agent.build_client(Settings.from_env(), RESEARCH)
+                made = llm_agent.replay(Path(args.base), RESEARCH, first, day, client, job)
+                fallback = sum(1 for record in made if record["llm"].get("fallback"))
+                spent = sum(float(record["llm"].get("cost_usd") or 0) for record in made)
+                job.payload["summary"] = (f"補做 {len(made)} 天" + (f"（{fallback} 天沿用前一天）" if fallback else "")
+                                          + f"，花費 US${spent:.3f}")
+            print(job.payload["summary"], flush=True)
+            return 0
+        with JobLog(RESEARCH).start(f"AI 選股代理人：{day} 收盤後的決定", command) as job:
+            client = llm_agent.build_client(Settings.from_env(), RESEARCH)
+            record = None
+            for attempt in range(7):                # the day's prices may still be on their way (15:15 refresh)
+                if attempt:
+                    job.update(current=f"還沒有 {day} 的收盤資料，5 分鐘後再試（第 {attempt} 次）", force=True)
+                    time.sleep(300)
+                record = llm_agent.run_day(Path(args.base), RESEARCH, day, client)
+                if record is not None or any(item["date"] == day.isoformat() for item in llm_agent.decisions(RESEARCH)):
+                    break
+            job.payload["summary"] = ("已經決定過或不是交易日" if record is None else
+                                      f"代理人持有 {len(record['llm']['hold'])} 檔、查了 {len(record['llm'].get('trace') or [])} 次"
+                                      + (f"（{record['llm']['fallback']}）" if record['llm'].get('fallback') else "")
+                                      + f"；對照組 {len(record['control']['hold'])} 檔")
+        print(job.payload["summary"], flush=True)
+        return 0
     if args.command == "llm-trader":
         # 2026-10-20 (使用者：LLM 有沒有辦法做成交易 agent): the day's decision of the LLM trader and its twin
         from quant_platform.config.settings import Settings

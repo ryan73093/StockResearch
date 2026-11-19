@@ -640,6 +640,27 @@ def start_llm_trader(container: "Container", now: datetime | None = None, launch
     return "llmtrader"
 
 
+def start_llm_agent(container: "Container", now: datetime | None = None, launch=None) -> str | None:
+    """2026-11-19 (使用者：做一個選股的 AI agent): on trading days at 15:40, the stock-picking agent's decision in its
+    own process (scripts/start-research.ps1 -Name llmagent; research/llm_agent.py)."""
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+
+    zone = ZoneInfo(container.settings.scheduler_timezone)
+    local_now = (now or datetime.now(zone)).astimezone(zone)
+    if not container.market_calendar.calendar("TW").is_trading_day(local_now.date()):
+        return None
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch("llmagent")
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Name",
+                        "llmagent"], check=False, timeout=120)
+    return "llmagent"
+
+
 def start_live_flow(container: "Container", now: datetime | None = None, launch=None) -> str | None:
     """2026-10-22 (使用者 2026-10-20：我也要這個——盤中資金流向): on trading days at 08:57, the session's snapshots in their
     own process until 13:30 (scripts/start-research.ps1 -Name liveflow; research/live_flow.py; it stops at once
@@ -1449,6 +1470,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=12 * 3600,
+    )
+    scheduler.add_job(
+        start_llm_agent,
+        args=[container],
+        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=40, timezone=timezone),
+        id="llm_agent",
+        name="AI 選股代理人（交易日 15:40 收盤資料進來後決定，隔天收盤成交；前向實驗）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=2 * 3600,
     )
     scheduler.add_job(
         start_llm_trader,

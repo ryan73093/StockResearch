@@ -369,6 +369,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "weekly_test_suite",
             "invariant_checks",
             "llm_trader",
+            "llm_agent",                      # 2026-11-19: the stock-picking agent, 15:40
             "finmind_paid",
             "paid_daily",
             "close_catch_up",
