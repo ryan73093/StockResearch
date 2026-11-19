@@ -86,7 +86,7 @@ def _read(path: Path) -> list[dict]:
     return json.loads(gzip.decompress(path.read_bytes()).decode("utf-8")).get("data") or []
 
 
-def build(history: str | Path) -> dict[str, int]:
+def build(history: str | Path, today: date | None = None) -> dict[str, int]:
     """history/fundamentals/quarterly.parquet: code, quarter, available and the statement items."""
     base = Path(history)
     raw = base / "raw" / "finmind"
@@ -114,7 +114,96 @@ def build(history: str | Path) -> dict[str, int]:
     partial = out.with_suffix(".parquet.partial")
     pq.write_table(table, partial, compression="zstd")
     partial.replace(out)
-    return {"rows": table.num_rows, "codes": len({row["code"] for row in ordered})}
+    added = record_versions(base, table.to_pandas(), today or date.today())
+    return {"rows": table.num_rows, "codes": len({row["code"] for row in ordered}), "versions_added": added}
+
+
+# --- 2026-11-19: the statements as they were seen (docs/research/results.md「財報只追加」) ---------------------------
+VERSIONS = Path("fundamentals") / "quarterly_versions.parquet"
+ITEMS = list(INCOME.values()) + list(BALANCE.values())
+
+
+def versions(history: str | Path) -> pd.DataFrame:
+    """Every version of a company's quarter with the day it was first seen (``seen``). Before the first refresh after
+    2026-11-19 there is only the table as it is: each row seen on the day it became usable — what was downloaded
+    before is not kept, so the 11/15 refresh's changes cannot be undone, only later ones told apart."""
+    base = Path(history)
+    if (base / VERSIONS).is_file():
+        return pq.read_table(base / VERSIONS).to_pandas()
+    frame = pq.read_table(base / FILE).to_pandas()
+    frame["seen"] = frame["available"]
+    return frame
+
+
+def changed_rows(known: pd.DataFrame, fresh: pd.DataFrame) -> pd.DataFrame:
+    """The rows of ``fresh`` (code, quarter, items) that are new or differ from the newest version in ``known``."""
+    newest = known.sort_values("seen").drop_duplicates(["code", "quarter"], keep="last").set_index(["code", "quarter"])
+    keyed = fresh.set_index(["code", "quarter"])
+    before = newest.reindex(keyed.index)
+    is_new = before["seen"].isna().to_numpy()
+    differ = np.zeros(len(keyed), dtype=bool)
+    for name in ITEMS:
+        a, b = keyed[name].to_numpy(dtype=float), before[name].to_numpy(dtype=float)
+        both = ~np.isnan(a) & ~np.isnan(b)
+        differ |= np.isnan(a) != np.isnan(b)
+        differ[both] |= ~np.isclose(a[both], b[both], rtol=1e-9, atol=1e-9)
+    return fresh[is_new | differ]
+
+
+def record_versions(history: str | Path, fresh: pd.DataFrame, today: date) -> int:
+    """Append the rows of the table just built that are new or changed, seen ``today``; the count."""
+    base = Path(history)
+    known = versions(base) if (base / VERSIONS).is_file() or (base / FILE).is_file() else None
+    if not (base / VERSIONS).is_file():                      # the first time: the table as it is, seen when usable
+        known = fresh.copy()
+        known["seen"] = known["available"]
+        added = known.iloc[0:0]
+    else:
+        added = changed_rows(known, fresh).copy()
+        added["seen"] = today
+    out = pd.concat([known, added], ignore_index=True) if len(added) else known
+    partial = (base / VERSIONS).with_suffix(".parquet.partial")
+    out.to_parquet(partial, index=False, compression="zstd")
+    partial.replace(base / VERSIONS)
+    return len(added)
+
+
+def factor_table_as_seen(table: pd.DataFrame) -> pd.DataFrame:
+    """The factors on each day they were knowable, from the versions (code, quarter, available, seen, items): a
+    quarter counts from the later of its filing deadline and the day it was first seen; a version that replaces an
+    earlier one (or arrives after a later quarter) changes the company's factors from the day it was seen, not
+    before. A company with no such version is computed as before, in one pass."""
+    table = table.copy()
+    table["available"], table["seen"] = pd.to_datetime(table["available"]), pd.to_datetime(table["seen"])
+    table = table.sort_values(["code", "quarter", "seen"]).reset_index(drop=True)
+    table["usable"] = table[["available", "seen"]].max(axis=1)
+    first = ~table.duplicated(["code", "quarter"], keep="first")
+    newer_known = table.groupby("code")["usable"].cummax().shift(1).where(table["code"].eq(table["code"].shift(1)))
+    revision = ~first | (first & (table["usable"] < newer_known))      # replaces a version, or older than one known
+    revised = set(table.loc[revision, "code"])
+    plain = table[~table["code"].isin(revised)].copy()
+    plain["available"] = plain["usable"]
+    output = [factor_table(plain.drop(columns=["seen", "usable"]))] if len(plain) else []
+    for _code, group in table[table["code"].isin(revised)].groupby("code", sort=False):
+        events = sorted(set(group["usable"]))
+        rows = []
+        for event in events:
+            known = group[group["seen"] <= event]
+            known = known[known["available"] <= event].drop_duplicates("quarter", keep="last")
+            if known.empty:
+                continue
+            factors = factor_table(known.drop(columns=["seen", "usable"]))
+            if len(factors):
+                last = factors.iloc[[-1]].copy()
+                last["available"] = event
+                rows.append(last)
+        if rows:
+            output.append(pd.concat(rows))
+    if not output:
+        return pd.DataFrame(columns=["code", "available", *STATEMENT_FACTORS, *EARNINGS_FACTORS])
+    result = pd.concat(output)
+    result["available"] = pd.to_datetime(result["available"]).dt.date
+    return result
 
 
 def factor_table(frame: pd.DataFrame) -> pd.DataFrame:
@@ -168,7 +257,8 @@ class FundamentalStore:
 
     def _table(self) -> pd.DataFrame:
         if self._factors is None:
-            self._factors = factor_table(pq.read_table(self._path).to_pandas())
+            # 2026-11-19: the versions as they were seen — a later revision does not reach back
+            self._factors = factor_table_as_seen(versions(self._path.parent.parent))
         return self._factors
 
     def matrix(self, factor: str) -> np.ndarray:

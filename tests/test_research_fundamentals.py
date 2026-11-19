@@ -83,7 +83,7 @@ def test_the_store_shows_a_quarter_only_from_its_deadline(tmp_path):
             balance_rows.append({"date": day, "type": name, "value": row[item]})
     (income / "1101.json.gz").write_bytes(gzip.compress(json.dumps({"data": income_rows}).encode()))
     (balance / "1101.json.gz").write_bytes(gzip.compress(json.dumps({"data": balance_rows}).encode()))
-    assert build(tmp_path) == {"rows": 6, "codes": 1}
+    assert build(tmp_path) == {"rows": 6, "codes": 1, "versions_added": 0}   # 2026-11-19: the versions seeded
     sessions = [date(2025, 3, 31), date(2025, 4, 1), date(2025, 5, 15), date(2025, 5, 16)]
     store = FundamentalStore(tmp_path, sessions, ["1101.TW", "2330.TW"])
     roe = store.matrix("roe_ttm")
@@ -191,3 +191,37 @@ def test_the_statement_factors_of_a_panel_share_one_table(tmp_path, monkeypatch)
         alone = FundamentalStore(tmp_path, panel.sessions, panel.symbols).matrix(name)
         assert np.array_equal(found[name], alone, equal_nan=True), name
     assert np.isfinite(found["roe_ttm"]).any()
+
+
+def test_a_revised_quarter_changes_the_factors_only_from_the_day_it_was_seen():
+    """2026-11-19: the 11/15 refresh downloaded every company's statements again and October's EPS changed under 2,400
+    forward accounts. Versions keep the day each was seen; the factors of an earlier day read the earlier version."""
+    import pandas as pd
+
+    from quant_platform.research import fundamentals
+
+    def row(quarter, eps, seen=None, code="1101"):
+        day = date.fromisoformat(quarter)
+        return {"code": code, "quarter": day, "available": fundamentals.deadline(day), "seen": seen or fundamentals.deadline(day),
+                "revenue": 100.0, "gross_profit": 30.0, "operating_income": 10.0, "net_income": 8.0, "eps": eps,
+                "assets": 500.0, "liabilities": 200.0, "equity": 300.0}
+
+    quarters = ["2023-03-31", "2023-06-30", "2023-09-30", "2023-12-31", "2024-03-31", "2024-06-30"]
+    plain = pd.DataFrame([row(quarter, 1.0 if quarter < "2024" else 2.0) for quarter in quarters]
+                         + [row(quarter, 1.0, code="1102") for quarter in quarters])
+    same = fundamentals.factor_table_as_seen(plain).sort_values(["code", "available"]).reset_index(drop=True)
+    old = fundamentals.factor_table(plain.drop(columns=["seen"])).sort_values(["code", "available"]).reset_index(drop=True)
+    pd.testing.assert_frame_equal(same[old.columns], old, check_dtype=False)              # no revision: as before
+    revised = pd.concat([plain, pd.DataFrame([row("2023-06-30", 0.5, seen=date(2024, 10, 1))])], ignore_index=True)
+    table = fundamentals.factor_table_as_seen(revised)
+    mine = table[table["code"] == "1101"].sort_values("available")
+    at_deadline = mine[mine["available"] == fundamentals.deadline(date(2024, 6, 30))]["eps_growth"].iloc[0]
+    assert abs(at_deadline - 1.0) < 1e-9                                                    # 2.0 against the 1.0 known then
+    after = mine[mine["available"] == date(2024, 10, 1)]["eps_growth"].iloc[0]
+    assert abs(after - 3.0) < 1e-9                                                          # against 0.5 once it was seen
+    other = table[table["code"] == "1102"]
+    assert len(other) == len(quarters)                                                      # the other company untouched
+    fresh = plain.drop(columns=["seen"]).copy()
+    fresh.loc[(fresh["code"] == "1102") & (fresh["quarter"] == date(2024, 3, 31)), "eps"] = 9.0
+    changed = fundamentals.changed_rows(plain, fresh)
+    assert changed[["code", "quarter"]].to_dict("records") == [{"code": "1102", "quarter": date(2024, 3, 31)}]
