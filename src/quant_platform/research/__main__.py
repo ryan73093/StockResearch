@@ -350,7 +350,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "retry-check", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "llm-agent", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "volume-bias", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
+                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "volume-bias", "noise-check", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
@@ -1173,6 +1173,20 @@ def main() -> int:
             print(job.payload["summary"], f"已寫入 {path}", flush=True)
         return 1 if found["differing"] else 0
 
+    if args.command == "noise-check":
+        # 2026-11-20: the sample's results under small turnover noise, against their forward record
+        from quant_platform.research import noise_check
+        from quant_platform.research.jobs import JobLog
+
+        command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
+        with JobLog(RESEARCH).start("回測對小雜訊的穩定度：抽樣用成交量雜訊重跑，對照前向", command) as job:
+            found = noise_check.run(Path(args.base), RESEARCH, broker_costs(args.broker), count=args.sample or noise_check.SAMPLE,
+                                    job=job)
+            verdict = noise_check.judge(found)
+            job.payload["summary"] = (f"{found['rules']} 個規則（撐住的 {verdict.get('held_up')} 個）；"
+                                      f"連動五分之一裡撐住的比較穩的有 {verdict.get('fifths_favouring')}／{verdict.get('fifths_compared')} 組")
+        print(json.dumps(verdict, ensure_ascii=False), flush=True)
+        return 0
     if args.command == "volume-bias":
         # 2026-11-20 (D-046 第 3 項): the sample with every day's turnover the previous session's, against as usual
         from quant_platform.research import volume_bias
