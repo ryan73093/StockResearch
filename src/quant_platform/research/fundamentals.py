@@ -124,7 +124,9 @@ def build(history: str | Path, today: date | None = None) -> dict[str, int]:
     pq.write_table(table, partial, compression="zstd")
     partial.replace(out)
     added = record_versions(base, table.to_pandas(), today or date.today())
-    return {"rows": table.num_rows, "codes": len({row["code"] for row in ordered}), "versions_added": added}
+    cash = build_cash(base, today)                           # 2026-11-20: the cash flows with the statements
+    return {"rows": table.num_rows, "codes": len({row["code"] for row in ordered}), "versions_added": added,
+            "cash_rows": cash["rows"], "cash_versions_added": cash["versions_added"]}
 
 
 # --- 2026-11-19: the statements as they were seen (docs/research/results.md「財報只追加」) ---------------------------
@@ -132,26 +134,26 @@ VERSIONS = Path("fundamentals") / "quarterly_versions.parquet"
 ITEMS = list(INCOME.values()) + list(BALANCE.values())
 
 
-def versions(history: str | Path) -> pd.DataFrame:
+def versions(history: str | Path, file: Path = FILE, versions_file: Path = VERSIONS) -> pd.DataFrame:
     """Every version of a company's quarter with the day it was first seen (``seen``). Before the first refresh after
     2026-11-19 there is only the table as it is: each row seen on the day it became usable — what was downloaded
     before is not kept, so the 11/15 refresh's changes cannot be undone, only later ones told apart."""
     base = Path(history)
-    if (base / VERSIONS).is_file():
-        return pq.read_table(base / VERSIONS).to_pandas()
-    frame = pq.read_table(base / FILE).to_pandas()
+    if (base / versions_file).is_file():
+        return pq.read_table(base / versions_file).to_pandas()
+    frame = pq.read_table(base / file).to_pandas()
     frame["seen"] = frame["available"]
     return frame
 
 
-def changed_rows(known: pd.DataFrame, fresh: pd.DataFrame) -> pd.DataFrame:
+def changed_rows(known: pd.DataFrame, fresh: pd.DataFrame, items: list[str] = ITEMS) -> pd.DataFrame:
     """The rows of ``fresh`` (code, quarter, items) that are new or differ from the newest version in ``known``."""
     newest = known.sort_values("seen").drop_duplicates(["code", "quarter"], keep="last").set_index(["code", "quarter"])
     keyed = fresh.set_index(["code", "quarter"])
     before = newest.reindex(keyed.index)
     is_new = before["seen"].isna().to_numpy()
     differ = np.zeros(len(keyed), dtype=bool)
-    for name in ITEMS:
+    for name in items:
         a, b = keyed[name].to_numpy(dtype=float), before[name].to_numpy(dtype=float)
         both = ~np.isnan(a) & ~np.isnan(b)
         differ |= np.isnan(a) != np.isnan(b)
@@ -159,29 +161,32 @@ def changed_rows(known: pd.DataFrame, fresh: pd.DataFrame) -> pd.DataFrame:
     return fresh[is_new | differ]
 
 
-def record_versions(history: str | Path, fresh: pd.DataFrame, today: date) -> int:
+def record_versions(history: str | Path, fresh: pd.DataFrame, today: date, versions_file: Path = VERSIONS,
+                    items: list[str] = ITEMS) -> int:
     """Append the rows of the table just built that are new or changed, seen ``today``; the count."""
     base = Path(history)
-    known = versions(base) if (base / VERSIONS).is_file() or (base / FILE).is_file() else None
-    if not (base / VERSIONS).is_file():                      # the first time: the table as it is, seen when usable
+    if not (base / versions_file).is_file():                 # the first time: the table as it is, seen when usable
         known = fresh.copy()
         known["seen"] = known["available"]
         added = known.iloc[0:0]
     else:
-        added = changed_rows(known, fresh).copy()
+        known = pq.read_table(base / versions_file).to_pandas()
+        added = changed_rows(known, fresh, items).copy()
         added["seen"] = today
     out = pd.concat([known, added], ignore_index=True) if len(added) else known
-    partial = (base / VERSIONS).with_suffix(".parquet.partial")
+    partial = (base / versions_file).with_suffix(".parquet.partial")
     out.to_parquet(partial, index=False, compression="zstd")
-    partial.replace(base / VERSIONS)
+    partial.replace(base / versions_file)
     return len(added)
 
 
-def factor_table_as_seen(table: pd.DataFrame) -> pd.DataFrame:
+def factor_table_as_seen(table: pd.DataFrame, compute=None, names: list[str] | None = None) -> pd.DataFrame:
     """The factors on each day they were knowable, from the versions (code, quarter, available, seen, items): a
     quarter counts from the later of its filing deadline and the day it was first seen; a version that replaces an
     earlier one (or arrives after a later quarter) changes the company's factors from the day it was seen, not
-    before. A company with no such version is computed as before, in one pass."""
+    before. A company with no such version is computed as before, in one pass. ``compute`` and ``names``: another table's factors (2026-11-20, the cash flows)."""
+    compute = compute or factor_table
+    names = names if names is not None else [*STATEMENT_FACTORS, *EARNINGS_FACTORS, *BALANCE_FACTORS]
     table = table.copy()
     table["available"], table["seen"] = pd.to_datetime(table["available"]), pd.to_datetime(table["seen"])
     table = table.sort_values(["code", "quarter", "seen"]).reset_index(drop=True)
@@ -192,7 +197,7 @@ def factor_table_as_seen(table: pd.DataFrame) -> pd.DataFrame:
     revised = set(table.loc[revision, "code"])
     plain = table[~table["code"].isin(revised)].copy()
     plain["available"] = plain["usable"]
-    output = [factor_table(plain.drop(columns=["seen", "usable"]))] if len(plain) else []
+    output = [compute(plain.drop(columns=["seen", "usable"]))] if len(plain) else []
     for _code, group in table[table["code"].isin(revised)].groupby("code", sort=False):
         events = sorted(set(group["usable"]))
         rows = []
@@ -201,7 +206,7 @@ def factor_table_as_seen(table: pd.DataFrame) -> pd.DataFrame:
             known = known[known["available"] <= event].drop_duplicates("quarter", keep="last")
             if known.empty:
                 continue
-            factors = factor_table(known.drop(columns=["seen", "usable"]))
+            factors = compute(known.drop(columns=["seen", "usable"]))
             if len(factors):
                 last = factors.iloc[[-1]].copy()
                 last["available"] = event
@@ -209,7 +214,7 @@ def factor_table_as_seen(table: pd.DataFrame) -> pd.DataFrame:
         if rows:
             output.append(pd.concat(rows))
     if not output:
-        return pd.DataFrame(columns=["code", "available", *STATEMENT_FACTORS, *EARNINGS_FACTORS, *BALANCE_FACTORS])
+        return pd.DataFrame(columns=["code", "available", *names])
     result = pd.concat(output)
     result["available"] = pd.to_datetime(result["available"]).dt.date
     return result
@@ -286,11 +291,120 @@ class FundamentalStore:
         return np.ascontiguousarray(frame.to_numpy(dtype=np.float32).T)
 
 
-def digest(history: str | Path, until: date) -> str:
+def digest(history: str | Path, until: date, file: Path = FILE) -> str:
     """The statements a period could see (usable by ``until``): part of a statement rule's trial input."""
-    path = Path(history) / FILE
+    path = Path(history) / file
     if not path.is_file():
         return "missing"
     frame = pq.read_table(path).to_pandas()
     frame = frame[frame["available"] <= until].sort_values(["code", "quarter"]).reset_index(drop=True)
     return hashlib.sha256(pd.util.hash_pandas_object(frame, index=False).to_numpy().tobytes()).hexdigest()
+
+
+# --- 2026-11-20: the cash flow statement (docs/research/results.md「新方法：應計項目與現金獲利」, written before the run)
+# FinMind's cash flow statements (downloaded with the others since 10-06, never read) are year-to-date: the June filing
+# holds the half year. A quarter's own operating cash flow is its filing less the previous quarter's of the same year.
+# Financial companies (banks, insurers, brokers) are left out: their operating cash flow moves with deposits and
+# securities, not earnings quality. A table of its own (cash.parquet, its own versions and digest), so the statements
+# table and every rule reading it stay as they are.
+CASH_FACTORS = {
+    "low_accruals": "應計項目低（近四季稅後淨利減營業現金流量，÷總資產，反向；盈餘裡現金少的之後輸，Sloan 1996；金融保險業不算）",
+    "cash_profit": "現金獲利（近四季營業現金流量÷總資產；金融保險業不算）",
+}
+CASH_ITEMS = ("CashFlowsFromOperatingActivities", "NetCashInflowFromOperatingActivities")    # the first one found
+CASH_FILE = Path("fundamentals") / "cash.parquet"
+CASH_VERSIONS = Path("fundamentals") / "cash_versions.parquet"
+CASH_COLUMNS = ["net_income", "assets", "operating_cash"]
+FINANCIAL_INDUSTRY = "金融保險"
+QUARTER_BEFORE = {6: (3, 31), 9: (6, 30), 12: (9, 30)}
+
+
+def financial_codes(raw: Path) -> set[str]:
+    """The codes FinMind's stock list files under the financial industry."""
+    path = raw / "TaiwanStockInfo.json"
+    if not path.is_file():
+        return set()
+    rows = json.loads(path.read_text(encoding="utf-8")).get("data") or []
+    return {str(row.get("stock_id")) for row in rows if FINANCIAL_INDUSTRY in str(row.get("industry_category") or "")}
+
+
+def quarter_cash(raw: Path) -> dict[tuple[str, date], float]:
+    """(code, quarter) → the quarter's own operating cash flow: the year-to-date filing less the previous quarter's
+    of the same year (a quarter without that one is left out)."""
+    output: dict[tuple[str, date], float] = {}
+    for path in sorted((raw / "TaiwanStockCashFlowsStatement").glob("*.json.gz")):
+        code = path.name.split(".")[0]
+        found: dict[date, tuple[int, float]] = {}
+        for item in _read(path):
+            value = item.get("value")
+            if item.get("type") not in CASH_ITEMS or not isinstance(value, (int, float)):
+                continue
+            quarter = date.fromisoformat(item["date"])
+            if quarter.month not in (3, 6, 9, 12):
+                continue
+            rank = CASH_ITEMS.index(item["type"])
+            if quarter not in found or rank < found[quarter][0]:
+                found[quarter] = (rank, float(value))
+        for quarter, (_rank, value) in found.items():
+            if quarter.month == 3:
+                output[(code, quarter)] = value
+                continue
+            month, day = QUARTER_BEFORE[quarter.month]
+            before = found.get(date(quarter.year, month, day))
+            if before is not None:
+                output[(code, quarter)] = value - before[1]
+    return output
+
+
+def build_cash(history: str | Path, today: date | None = None) -> dict[str, int]:
+    """history/fundamentals/cash.parquet: code, quarter, available, the quarter's net income and assets (from the
+    statements table) and its own operating cash flow; versions kept as the statements' are."""
+    base = Path(history)
+    raw = base / "raw" / "finmind"
+    if not (base / FILE).is_file():
+        return {"rows": 0, "versions_added": 0}
+    statements = pq.read_table(base / FILE, columns=["code", "quarter", "available", "net_income", "assets"]).to_pandas()
+    cash = quarter_cash(raw)
+    statements["operating_cash"] = [cash.get((code, quarter), np.nan)
+                                    for code, quarter in zip(statements["code"], statements["quarter"], strict=True)]
+    table = statements[~statements["code"].isin(financial_codes(raw))]
+    table = table[table["operating_cash"].notna()].sort_values(["code", "quarter"]).reset_index(drop=True)
+    out = base / CASH_FILE
+    out.parent.mkdir(parents=True, exist_ok=True)
+    partial = out.with_suffix(".parquet.partial")
+    table.to_parquet(partial, index=False, compression="zstd")
+    partial.replace(out)
+    added = record_versions(base, table, today or date.today(), CASH_VERSIONS, CASH_COLUMNS)
+    return {"rows": len(table), "versions_added": added}
+
+
+def cash_factor_table(frame: pd.DataFrame) -> pd.DataFrame:
+    """One row per company and quarter with CASH_FACTORS (from four consecutive quarters only)."""
+    frame = frame.sort_values(["code", "quarter"]).reset_index(drop=True)
+    frame["index"] = frame["quarter"].map(lambda day: day.year * 4 + (day.month - 1) // 3)
+    output = []
+    for _code, group in frame.groupby("code", sort=False):
+        full = group.set_index("index").reindex(range(group["index"].min(), group["index"].max() + 1))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            assets = full["assets"].where(full["assets"] > 0)
+            cash = full["operating_cash"].rolling(4, min_periods=4).sum()
+            income = full["net_income"].rolling(4, min_periods=4).sum()
+            factors = pd.DataFrame({"low_accruals": (-(income - cash) / assets).clip(-5, 5),
+                                    "cash_profit": (cash / assets).clip(-5, 5)}, index=full.index)
+        factors["code"], factors["available"] = full["code"], full["available"]
+        output.append(factors[full["code"].notna()])
+    return pd.concat(output) if output else pd.DataFrame(columns=["code", "available", *CASH_FACTORS])
+
+
+class CashStore(FundamentalStore):
+    """CASH_FACTORS on a factor panel's sessions × stocks, from the cash table's versions as they were seen."""
+
+    def __init__(self, history: str | Path, sessions: list[date], symbols: list[str], until: date | None = None) -> None:
+        super().__init__(history, sessions, symbols, until)
+        self._path = Path(history) / CASH_FILE
+
+    def _table(self) -> pd.DataFrame:
+        if self._factors is None:
+            self._factors = factor_table_as_seen(versions(self._path.parent.parent, CASH_FILE, CASH_VERSIONS),
+                                                 cash_factor_table, list(CASH_FACTORS))
+        return self._factors

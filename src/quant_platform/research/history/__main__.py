@@ -53,7 +53,7 @@ def _summary(manifest: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
-                                            "chips", "tpex", "fundamentals", "alerts", "reductions", "insider", "buyback", "pledge", "tdcc",
+                                            "chips", "tpex", "fundamentals", "cash", "alerts", "reductions", "insider", "buyback", "pledge", "tdcc",
                                             "holders", "paid", "finmind-daily", "paid-daily"))
     parser.add_argument("--kind", choices=("govbank", "branches"), default="govbank", help="finmind-daily：八大行庫或分點")
     parser.add_argument("--part", help="finmind-daily --kind branches：第幾份／共幾份（例如 0/2），兩個下載分工")
@@ -214,6 +214,12 @@ def main() -> int:
                 per_hour = min(int(limit * PAID_SHARE), args.per_hour or limit)   # 2026-10-21: downloaders share it
             result = fetch_all(base, token, codes, datasets, job=job, refresh_before=refresh, per_hour=per_hour)
         print(json.dumps(result, ensure_ascii=False)[:2000], flush=True)
+        return 0
+
+    if args.command == "cash":              # 2026-11-20: the cash flow table alone (the statements table untouched)
+        from quant_platform.research.fundamentals import build_cash
+
+        print(json.dumps(build_cash(base), ensure_ascii=False), flush=True)
         return 0
 
     if args.command == "fundamentals":      # 2026-10-06: the quarterly statement table

@@ -1958,7 +1958,7 @@ def main() -> int:
         data, fp = daily_research.load(Path(args.base))
         factors = [*daily_research.FACTOR_LABELS, *daily_research.MODEL_FACTORS, *daily_research.CONSENSUS_FACTORS,
                    *daily_research.EARNINGS_FACTORS, *daily_research.BETA_FACTORS, *daily_research.BEHAVIOR_FACTORS,
-                   *daily_research.BALANCE_FACTORS]
+                   *daily_research.BALANCE_FACTORS, *daily_research.CASH_FACTORS]
         days = leakcheck.sample_days(fp.sessions, 5, daily_research.RECENT_START)
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         with JobLog(RESEARCH).start(f"防偷看檢查：{len(days)} 個日期截斷重算 {len(factors)} 個因子", command,

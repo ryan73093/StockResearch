@@ -30,7 +30,7 @@ FAMILY_FACTORS = {
     "公司事件": ("dividend_raise", "no_cash_issue", "low_issuance_250", "dividend_ahead",
                  "low_insider_sell_60", "buyback_60", "low_pledge", "pledge_heavy"),
     "營收財報": ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "roe_ttm", "gross_margin", "operating_margin_change", "eps_growth", "eps_surprise", "eps_accel", "eps_streak",
-                 "low_debt", "low_asset_growth", "gp_assets"),
+                 "low_debt", "low_asset_growth", "gp_assets", "low_accruals", "cash_profit"),
     "成交量規模": ("liquidity", "volume_surge", "market_cap", "low_pv_corr_20", "illiquidity_60"),
 }
 FACTOR_FAMILY = {factor: family for family, factors in FAMILY_FACTORS.items() for factor in factors}

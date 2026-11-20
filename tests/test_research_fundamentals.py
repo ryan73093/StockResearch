@@ -83,7 +83,8 @@ def test_the_store_shows_a_quarter_only_from_its_deadline(tmp_path):
             balance_rows.append({"date": day, "type": name, "value": row[item]})
     (income / "1101.json.gz").write_bytes(gzip.compress(json.dumps({"data": income_rows}).encode()))
     (balance / "1101.json.gz").write_bytes(gzip.compress(json.dumps({"data": balance_rows}).encode()))
-    assert build(tmp_path) == {"rows": 6, "codes": 1, "versions_added": 0}   # 2026-11-19: the versions seeded
+    assert build(tmp_path) == {"rows": 6, "codes": 1, "versions_added": 0,   # 2026-11-19: the versions seeded
+                               "cash_rows": 0, "cash_versions_added": 0}     # 2026-11-20: no cash flows filed here
     sessions = [date(2025, 3, 31), date(2025, 4, 1), date(2025, 5, 15), date(2025, 5, 16)]
     store = FundamentalStore(tmp_path, sessions, ["1101.TW", "2330.TW"])
     roe = store.matrix("roe_ttm")
