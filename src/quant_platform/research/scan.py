@@ -654,9 +654,12 @@ def earlier_finalists(research: Path) -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
+        hold = spec.get("hold", "days")
+        if hold == "days" and spec.get("min_hold") == 0:     # 2026-11-20: to_rule writes "free" as days, no minimum
+            hold = "free"
         output.append({"factors": list(spec["factors"]), "universe": "large" if spec.get("large_caps") else "all",
                        "weighting": spec.get("weighting", "equal"), "check": spec.get("check", "daily"),
-                       "hold": spec.get("hold", "days")})
+                       "hold": hold})
     return output
 
 

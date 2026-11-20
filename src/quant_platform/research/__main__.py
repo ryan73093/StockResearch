@@ -448,7 +448,8 @@ def main() -> int:
     parser.add_argument("--signals-from", help="scan-large：--signals-top 依據的前一輪搜尋資料夾")
     parser.add_argument("--rerank-low-beta", help="scan-large：不重篩，把這些已完成的搜尋資料夾（逗號分隔）過快篩的候選改用低連動重挑後進引擎（2026-11-19）")
     parser.add_argument("--beta-max", type=float, default=0.8, help="scan-large --rerank-low-beta：開發期對 0050 的連動上限")
-    parser.add_argument("--distinct-sets", action="store_true", help="scan-large --rerank-low-beta：每組訊號只留最穩的一個設定再排（2026-11-19）")
+    parser.add_argument("--distinct-sets", action="store_true", help="scan-large：每組訊號只留最穩的一個設定再排（2026-11-19；2026-11-20 起一般搜尋的第二階段也可用）")
+    parser.add_argument("--stage2-pool", type=int, default=600, help="scan-large：第二階段看過快篩的前幾個去挑最後名單（預設 600；2026-11-20）")
     parser.add_argument("--rerank-pool", type=int, default=3000, help="scan-large --rerank-low-beta：每次搜尋進相關性篩選的候選數")
     parser.add_argument("--holds", help="scan-large：持有方式，逗號分隔（days＝固定持有 20 天、trend＝月線上續抱、free＝不設最短持有；預設三種）")
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
@@ -1819,7 +1820,7 @@ def main() -> int:
             required = [name.strip() for name in (args.require_any or "").split(",") if name.strip()] or None
             summary = scan_large.run(Path(args.base), RESEARCH, broker_costs(args.broker), sizes, holds,
                                      count=args.finalists, job=job, folder=folder, universes=universes, only=only,
-                                     required=required)
+                                     required=required, pool=args.stage2_pool, distinct=args.distinct_sets)
             job.payload["summary"] = (f"{summary['candidates']:,} 個策略、{summary['passed_screen']:,} 個過第一階段、"
                                       f"{summary['finalists']} 個進引擎：{summary['tiers']}")
         print(json.dumps({key: value for key, value in summary.items() if key != "results"}, ensure_ascii=False), flush=True)

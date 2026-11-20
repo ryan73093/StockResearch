@@ -170,9 +170,13 @@ def screen_stream(arrays_folder: Path, names: list[str], sizes: list[int], costs
 
 def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count: int = 80, job=None,
         folder: Path | None = None, universes=UNIVERSES, only: list[str] | None = None,
-        required: list[str] | None = None) -> dict[str, object]:
+        required: list[str] | None = None, pool: int = 600, distinct: bool = False) -> dict[str, object]:
     """Stage 1 streamed (``folder``: an unfinished run to go on with), then stage 2 as the scan's; the summary.
-    ``only``: the signals to combine (default every scan signal); a resumed run keeps the ones it started with."""
+    ``only``: the signals to combine (default every scan signal); a resumed run keeps the ones it started with.
+    2026-11-20 (docs/research/results.md「大搜尋第二階段只看前 600 個」): ``pool`` — how many of the passing
+    candidates stage 2 looks through for ``count`` finalists apart from the earlier ones; ``distinct`` — one row per
+    signal set (its steadiest setting) first. A finished folder run again keeps its earlier summary
+    (summary-<its stamp>.json)."""
     from collections import Counter
 
     from quant_platform.research import daily
@@ -205,7 +209,13 @@ def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count:
     rows = [json.loads(line) for path in sorted(folder.glob("screen-s*.jsonl"))
             for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     seeds = earlier_finalists(research)
-    chosen = finalists(arrays, rows, costs, count, seeds=seeds, stable=True)
+    if distinct:
+        rows = steadiest_per_set(rows)
+    chosen = finalists(arrays, rows, costs, count, pool=pool, seeds=seeds, stable=True)
+    earlier_summary = folder / "summary.json"
+    if earlier_summary.is_file():           # 2026-11-20: stage 2 again on a finished search — the first one kept
+        kept_stamp = json.loads(earlier_summary.read_text(encoding="utf-8")).get("stamp", "earlier")
+        earlier_summary.replace(folder / f"summary-{kept_stamp}.json")
     effective = effective_trials(folder, pattern="sample-*.excess.npy", screened=progress["screened"])
     registry = TrialRegistry(research / "trials.jsonl")
     cache: dict = {}
@@ -224,6 +234,8 @@ def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count:
                                    base, registry, research / "reports", costs, data, fp, fingerprint, cache, stamp,
                                    f"大規模搜尋 {folder.name}（減碼一半版本）", job)
     summary = {"version": VERSION, "stamp": stamp, "development": [str(arrays.days[0]), str(DEV_END)],
+               "stage2": {"pool": pool, "distinct_sets": distinct, "rows": len(rows), "earlier": len(seeds),
+                          "pool_ran_out": len(chosen) < count},
                "signals": names, "sizes": sizes, "holds": list(holds), "universes": list(progress.get("universes") or universes),
                "candidates": progress["screened"],
                "passed_screen": sum(passes(row) for row in rows), "effective_trials": effective,

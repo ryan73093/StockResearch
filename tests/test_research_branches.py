@@ -234,3 +234,21 @@ def test_blend_defenders_are_the_lowest_beta_rules():
     attack, defense = blend_scan.beta_roles(members)
     assert 19 in attack and set(defense) == {0, 1}
     assert abs(blend_scan.month_beta(np.stack([0.5 * bench_returns]), bench_returns)[0] - 0.5) < 1e-9
+
+
+def test_earlier_finalists_written_as_days_without_a_minimum_are_free(tmp_path):
+    """2026-11-20: to_rule writes the "free" holding as hold "days" with no minimum; the earlier finalists read back as
+    "free", or the correlation check against them compares a different rule."""
+    import json
+
+    from quant_platform.research import scan
+
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    rows = []
+    for number, (hold, minimum) in enumerate((("days", 0), ("days", 20), ("trend", 20))):
+        (reports / f"r{number}.json").write_text(json.dumps({"spec": {"factors": {"trend_200": 1.0}, "hold": hold,
+                                                                     "min_hold": minimum}}), encoding="utf-8")
+        rows.append({"spec_name": f"掃描：{number}", "report_file": f"r{number}.json", "spec_hash": f"h{number}"})
+    (tmp_path / "trials.jsonl").write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    assert [item["hold"] for item in scan.earlier_finalists(tmp_path)] == ["free", "days", "trend"]
