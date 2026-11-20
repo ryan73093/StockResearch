@@ -109,8 +109,13 @@ def signals(models_root: Path | None = None) -> list[str]:
     failed = failed_models(models_root or Path("instance") / "research" / "models")
     from quant_platform.research.daily import BEHAVIOR_FACTORS, BETA_FACTORS   # 2026-11-20: rule factors outside FACTOR_LABELS
 
-    return [name for name in (*FACTOR_LABELS, *MODEL_FACTORS, *BETA_FACTORS, *BEHAVIOR_FACTORS)
+    return [name for name in (*FACTOR_LABELS, *MODEL_FACTORS, *BETA_FACTORS, *BEHAVIOR_FACTORS, *JUDGED_IN)
             if name not in LEFT_OUT and name not in failed]
+
+
+# 2026-11-21 (docs/research/results.md「存貨與應收帳款增加」): rule factors outside FACTOR_LABELS whose strength analysis
+# said 強 and that passed the novelty gate — the searches take them up
+JUDGED_IN = ("low_inventory_build",)
 
 
 def failed_models(models_root: Path) -> set[str]:

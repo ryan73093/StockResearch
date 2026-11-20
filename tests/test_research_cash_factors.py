@@ -81,7 +81,8 @@ def test_cash_factors_are_rule_factors_with_their_own_input():
 
     for name in CASH_FACTORS:
         assert name in daily.RULE_FACTORS and name not in daily.FACTOR_LABELS and name in scan.SHORT
-        assert name not in scan.signals() and categories.FACTOR_FAMILY[name] == "營收財報"
+        assert (name in scan.signals()) == (name in scan.JUDGED_IN) and categories.FACTOR_FAMILY[name] == "營收財報"
+    assert scan.JUDGED_IN == ("low_inventory_build",)          # 2026-11-21: 強 and new; the others weak
     assert not set(CASH_FACTORS) & set(model.features())
     digests = daily.input_digests(fundamentals.Path("nowhere"), ["cash_profit"], False)
     assert "cash" in digests and "statements" not in digests
