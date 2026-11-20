@@ -211,7 +211,7 @@ class ResearchAgent:
     def check(self) -> dict[str, object]:
         """A tiny call that proves the key, the model and the JSON format work (not research)."""
         if self._client is None:
-            raise LLMError("AI 研究員未啟用或沒有 OPENAI_API_KEY")
+            raise LLMError("AI 研究員未啟用或沒有模型金鑰（Claude：ANTHROPIC_API_KEY）")
         payload, usage = self._client.json_call(
             "只輸出 JSON 物件。", '請回傳 {"ok": true, "model_ready": true}', "connection_check",
         )
@@ -372,7 +372,7 @@ class ResearchAgent:
 
 def build_agent(settings, research_dir: str | Path) -> ResearchAgent:
     """The agent with a model client when enabled and a key is configured."""
-    from quant_platform.research.agent.llm import UsageLedger, resolve_openai_key
+    from quant_platform.research.agent.llm import UsageLedger, key_name, model_client
 
     research_dir = Path(research_dir)
     limits = AgentLimits(
@@ -380,29 +380,20 @@ def build_agent(settings, research_dir: str | Path) -> ResearchAgent:
         settings.research_agent_trials_per_night,
     )
     client = None
-    if settings.research_agent_enabled:
-        try:
-            key = resolve_openai_key(settings.openai_api_key)
-        except LLMError as exc:
-            logger.warning("AI researcher has no key: %s", exc)
-            key = ""
-        if key:
-            client = ResponsesClient(
-                key, settings.research_agent_model, UsageLedger(research_dir / "agent" / "usage.jsonl"),
-                settings.research_agent_monthly_budget_usd,
-            )
+    if settings.research_agent_enabled:          # 2026-11-20 (D-051): the provider follows the configured model
+        client = model_client(settings, UsageLedger(research_dir / "agent" / "usage.jsonl"),
+                              settings.research_agent_monthly_budget_usd)
+        if client is None:
+            logger.warning("AI researcher has no %s", key_name(settings.research_agent_model))
     return ResearchAgent(research_dir, client, limits)
 
 
 def agent_status(settings, research_dir: str | Path, now: datetime | None = None) -> dict[str, object]:
     """What the research page shows; reads only local files (no model call)."""
-    from quant_platform.research.agent.llm import UsageLedger, resolve_openai_key
+    from quant_platform.research.agent.llm import UsageLedger, key_configured
 
     research_dir = Path(research_dir)
-    try:
-        configured = bool(resolve_openai_key(settings.openai_api_key))
-    except LLMError:
-        configured = False
+    configured = key_configured(settings)        # 2026-11-20 (D-051): the key of the configured model's provider
     entries = Journal(research_dir / "journal.jsonl").entries()
     spent = UsageLedger(research_dir / "agent" / "usage.jsonl").month_spend(now or datetime.now(UTC))
     trials = sum(

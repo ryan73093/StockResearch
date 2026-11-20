@@ -53,19 +53,15 @@ def _clean(title: str) -> str:
 def build_client(settings, research_dir: str | Path):
     """The model client for the scoring, inside its own share of the monthly LLM budget; None when off or
     without a key."""
-    from quant_platform.research.agent.llm import LLMError, ResponsesClient, UsageLedger, resolve_openai_key
+    from quant_platform.research.agent.llm import UsageLedger, model_client
 
     if not settings.news_events_enabled:
         return None
-    try:
-        key = resolve_openai_key(settings.openai_api_key)
-    except LLMError:
-        return None
-    if not key:
-        return None
-    return ResponsesClient(key, settings.research_agent_model, UsageLedger(Path(research_dir) / "agent" / "usage.jsonl"),
-                           settings.news_events_monthly_budget_usd, operations=(OPERATION,),
-                           total_budget_usd=settings.llm_monthly_budget_usd, label="新聞事件評分")
+    # 2026-11-20 (D-051): the provider follows the configured model; None without its key. Each scored row keeps the
+    # model's name, so the days scored by gpt-6-luna and by Claude stay told apart.
+    return model_client(settings, UsageLedger(Path(research_dir) / "agent" / "usage.jsonl"),
+                        settings.news_events_monthly_budget_usd, operations=(OPERATION,),
+                        total_budget_usd=settings.llm_monthly_budget_usd, label="新聞事件評分")
 
 
 def collected_days(history: str | Path) -> list[date]:

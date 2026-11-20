@@ -53,17 +53,12 @@ PROMPT_VERSION = hashlib.sha256(INSTRUCTIONS.encode("utf-8")).hexdigest()[:12]
 
 def build_client(settings, research: str | Path):
     """The model client inside its own share of the monthly LLM budget; None without a key."""
-    from quant_platform.research.agent.llm import LLMError, ResponsesClient, UsageLedger, resolve_openai_key
+    from quant_platform.research.agent.llm import UsageLedger, model_client
 
-    try:
-        key = resolve_openai_key(settings.openai_api_key)
-    except LLMError:
-        return None
-    if not key:
-        return None
-    return ResponsesClient(key, settings.research_agent_model, UsageLedger(Path(research) / "agent" / "usage.jsonl"),
-                           settings.llm_trader_monthly_budget_usd, operations=(OPERATION,),
-                           total_budget_usd=settings.llm_monthly_budget_usd, label="LLM 交易員")
+    # 2026-11-20 (D-051): the provider follows the configured model; None without its key
+    return model_client(settings, UsageLedger(Path(research) / "agent" / "usage.jsonl"),
+                        settings.llm_trader_monthly_budget_usd, operations=(OPERATION,),
+                        total_budget_usd=settings.llm_monthly_budget_usd, label="LLM 交易員")
 
 
 def folder(research: str | Path) -> Path:
@@ -226,6 +221,8 @@ def decide(fp, base: Path, research: Path, day: date, client=None, now: datetime
             f"候選股（{len(cands)} 檔，來源是量化策略各子帳戶的前 {TOP_EACH} 名）：\n" + "\n".join(lines)
             + "\n請以 JSON 回覆。")
     record = {"date": day.isoformat(), "version": VERSION, "prompt_version": PROMPT_VERSION,
+              # 2026-11-20 (D-051): which model decided — gpt-6-luna until 11/19, Claude Haiku 5.5 from 11/20
+              "model": getattr(client, "model", None),
               "decided_at": (now or datetime.now(TAIPEI)).isoformat(timespec="seconds"),
               "candidates": [item["code"] for item in cands],
               "control": {"hold": control_choice(cands, held_control)}}

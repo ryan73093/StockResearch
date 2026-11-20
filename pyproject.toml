@@ -23,6 +23,8 @@ dependencies = [
   # 2026-10-22 (使用者：向量資料庫可用 BGE-M3、Qdrant): the research knowledge base's vectors (research/knowledge_vectors.py;
   # torch is already in the environment for the deep models)
   "transformers>=5.16,<6",
+  # 2026-11-20 (使用者：使用 claude api haiku; D-051): every model call on the Claude API, through the official SDK
+  "anthropic>=2.11,<3",
   "qdrant-client>=1.19,<2",
 ]
 

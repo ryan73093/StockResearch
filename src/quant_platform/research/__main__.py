@@ -571,7 +571,7 @@ def main() -> int:
 
         client = news_events.build_client(Settings.from_env(), RESEARCH)
         if client is None:
-            print("新聞事件評分沒有啟用或沒有 OPENAI_API_KEY", file=sys.stderr)
+            print("新聞事件評分沒有啟用或沒有模型金鑰（Claude：.env 的 ANTHROPIC_API_KEY）", file=sys.stderr)
             return 1
         with JobLog(RESEARCH).start("新聞事件評分（LLM，每月預算內）", "python -m quant_platform.research news-events") as job:
             outcome = news_events.run(client, Path(args.base), job=job)

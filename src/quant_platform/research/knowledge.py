@@ -587,17 +587,12 @@ def ask(research: str | Path, question: str, client=None, now: datetime | None =
 
 def build_client(settings, research: str | Path):
     """The model inside its own share of the monthly LLM budget; None without a key."""
-    from quant_platform.research.agent.llm import LLMError, ResponsesClient, UsageLedger, resolve_openai_key
+    from quant_platform.research.agent.llm import UsageLedger, model_client
 
-    try:
-        key = resolve_openai_key(settings.openai_api_key)
-    except LLMError:
-        return None
-    if not key:
-        return None
-    return ResponsesClient(key, settings.research_agent_model, UsageLedger(Path(research) / "agent" / "usage.jsonl"),
-                           settings.knowledge_monthly_budget_usd, operations=(OPERATION,),
-                           total_budget_usd=settings.llm_monthly_budget_usd, label="研究知識庫", max_output_tokens=2000)
+    # 2026-11-20 (D-051): the provider follows the configured model; None without its key
+    return model_client(settings, UsageLedger(Path(research) / "agent" / "usage.jsonl"),
+                        settings.knowledge_monthly_budget_usd, operations=(OPERATION,),
+                        total_budget_usd=settings.llm_monthly_budget_usd, label="研究知識庫", max_output_tokens=2000)
 
 
 def recent_questions(research: str | Path, limit: int = 10) -> list[dict[str, object]]:
@@ -678,7 +673,9 @@ def ai_status(settings, research: str | Path):
     except Exception:                                   # noqa: BLE001
         client = None
     if client is None:
-        return None, {"ready": False, "note": "沒有設定 OpenAI 金鑰：只能搜尋紀錄。"}
+        from quant_platform.research.agent.llm import key_name
+
+        return None, {"ready": False, "note": f"沒有設定模型金鑰（.env 的 {key_name(settings.research_agent_model)}）：只能搜尋紀錄。"}
     remaining = float(client.budget_status().get("remaining_usd") or 0.0)
     if remaining <= 0:
         return None, {"ready": False, "note": "本月 AI 預算用完：只能搜尋紀錄。"}

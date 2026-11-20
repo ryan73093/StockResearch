@@ -91,18 +91,12 @@ def append(research: str | Path, key: str, record: dict, run: str | None = None)
 
 def build_client(settings, research: str | Path):
     """The model client inside the lab's share of the monthly total; None without a key."""
-    from quant_platform.research.agent.llm import LLMError, ResponsesClient, UsageLedger, resolve_openai_key
+    from quant_platform.research.agent.llm import UsageLedger, model_client
 
-    try:
-        key = resolve_openai_key(settings.openai_api_key)
-    except LLMError:
-        return None
-    if not key:
-        return None
     budget = max(0.0, float(os.getenv("AGENT_LAB_MONTHLY_BUDGET_USD", str(MONTHLY_BUDGET_USD))))
-    return ResponsesClient(key, settings.research_agent_model, UsageLedger(Path(research) / "agent" / "usage.jsonl"),
-                           budget, operations=(OPERATION,), total_budget_usd=settings.llm_monthly_budget_usd,
-                           label="AI 代理人實驗室")
+    # 2026-11-20 (D-051): the provider follows the configured model (Claude Haiku 5.5); None without its key
+    return model_client(settings, UsageLedger(Path(research) / "agent" / "usage.jsonl"), budget, operations=(OPERATION,),
+                        total_budget_usd=settings.llm_monthly_budget_usd, label="AI 代理人實驗室")
 
 
 # --- the hard rules -------------------------------------------------------------------------------------------------
@@ -117,7 +111,7 @@ def validate(answer: dict, allowed, seen: set[str], industry) -> tuple[list[str]
     return codes, reasons, problem
 
 
-def _call(client, system: str, prompt: str, context: str) -> tuple[dict, float]:
+def _call(client, system: str, prompt: str | list[str], context: str) -> tuple[dict, float]:
     from quant_platform.research.agent.llm import call_cost
 
     answer, usage = client.json_call(system, prompt, OPERATION, context=context)
@@ -137,16 +131,18 @@ def opening(desk: LabDesk, variant: Variant) -> str:
 
 
 def converse(desk: LabDesk, client, variant: Variant, context: str) -> tuple[dict | None, list[dict], float]:
-    """One agent in steps: each step it asks for one of its tools or decides; the last step must decide."""
+    """One agent in steps: each step it asks for one of its tools or decides; the last step must decide. What was said
+    goes as parts — the conversation so far, then the step's question — so a Claude model reads the part it read the
+    step before from its prompt cache (2026-11-20, D-051; OpenAI gets the parts joined, the same text)."""
     system = instructions(variant)
     said = [opening(desk, variant)]
     trace: list[dict] = []
     cost = 0.0
     for step in range(1, variant.steps + 1):
         last = step == variant.steps
-        prompt = "\n\n".join(said) + (f"\n\n這是第 {step} 步（最多 {variant.steps} 步）。"
-                                      + ("這一步一定要做出決定（回覆 B 的 JSON）。" if last else "請回覆一個 JSON 物件：查資料（A）或做出決定（B）。"))
-        answer, spent = _call(client, system, prompt, f"{context}-{step}")
+        question = (f"這是第 {step} 步（最多 {variant.steps} 步）。"
+                    + ("這一步一定要做出決定（回覆 B 的 JSON）。" if last else "請回覆一個 JSON 物件：查資料（A）或做出決定（B）。"))
+        answer, spent = _call(client, system, said + [question], f"{context}-{step}")
         cost += spent
         if isinstance(answer, dict) and "hold" in answer:
             return answer, trace, cost

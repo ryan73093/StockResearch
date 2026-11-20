@@ -6,6 +6,11 @@ have been billed), and the monthly budget is checked before every call with a
 hard stop. Every call, failed or not, is appended to the usage ledger with the
 price in force at that moment. Prompts, keys and response bodies are never
 logged.
+
+2026-11-20 (使用者：使用 claude api haiku 並繼續; D-051): the OpenAI account ran out of credit. A ``claude-…`` model
+(the default is ``claude-haiku-5-5``) is called on the Claude Messages API through the official SDK (``ClaudeClient``)
+with the same contract — one call answers one JSON object — the same ledger and the same monthly caps. Every caller
+builds its client with ``model_client``, which picks the provider from the configured model's name.
 """
 
 from __future__ import annotations
@@ -26,7 +31,15 @@ RESPONSES_URL = "https://api.openai.com/v1/responses"
 # (2026-09-24～30); cached input estimated at 10% of input.
 PRICES: dict[str, dict[str, float]] = {
     "gpt-6-luna": {"input": 0.125, "cached_input": 0.0125, "output": 0.50},
+    # Claude Haiku 5.5 (Anthropic's price card, 2026-11): US$0.10 / 0.50 per 1M input / output tokens while the prompt
+    # is at most 100K tokens, five times that above; cache reads 0.1x input, 5-minute cache writes 1.25x
+    "claude-haiku-5-5": {"input": 0.10, "cached_input": 0.01, "cache_write": 0.125, "output": 0.50,
+                         "long_above": 100_000, "long_factor": 5.0},
 }
+CLAUDE_BASE_URL = "https://api.anthropic.com"
+CLAUDE_MAX_TOKENS = 16_000        # its thinking counts toward the cap (Claude Haiku 5.5 thinks by default)
+CLAUDE_RETRIES = 2                # the SDK's own retries of 408/409/429/5xx and dropped connections
+CLAUDE_EFFORT = "medium"          # Claude Haiku 5.5's default effort, sent explicitly
 
 
 class LLMError(RuntimeError):
@@ -56,6 +69,29 @@ def resolve_openai_key(direct: str = "") -> str:
     raise LLMError("OPENAI_KEY_ENV_FILE 指定的檔案沒有 OPENAI_API_KEY")
 
 
+def is_claude(model: str) -> bool:
+    return str(model or "").startswith("claude-")
+
+
+def resolve_anthropic_key(direct: str = "") -> str:
+    """ANTHROPIC_API_KEY — Settings.from_env puts the project's .env into the environment first."""
+    return direct or os.getenv("ANTHROPIC_API_KEY", "")
+
+
+def key_name(model: str) -> str:
+    return "ANTHROPIC_API_KEY" if is_claude(model) else "OPENAI_API_KEY"
+
+
+def key_configured(settings) -> bool:
+    """Whether the configured model's provider has a key (no call is made)."""
+    if is_claude(settings.research_agent_model):
+        return bool(resolve_anthropic_key(getattr(settings, "anthropic_api_key", "")))
+    try:
+        return bool(resolve_openai_key(settings.openai_api_key))
+    except LLMError:
+        return False
+
+
 def token_counts(usage: object) -> tuple[int, int, int]:
     """Input, cached input and output tokens from a Responses API usage block."""
     usage = usage if isinstance(usage, dict) else {}
@@ -70,13 +106,19 @@ def token_counts(usage: object) -> tuple[int, int, int]:
 
 
 def call_cost(model: str, usage: object) -> float | None:
+    """US$ of one call. ``input_tokens`` counts every prompt token, ``cached_tokens`` the ones read from the cache and
+    ``cache_creation_input_tokens`` (Claude) the ones written to it; a prompt above ``long_above`` tokens is billed at
+    ``long_factor`` times every rate."""
     price = PRICES.get(model)
     if price is None:
         return None
     input_tokens, cached, output_tokens = token_counts(usage)
+    written = usage.get("cache_creation_input_tokens") if isinstance(usage, dict) else 0
+    written = written if type(written) is int and 0 <= written <= input_tokens - cached else 0
+    factor = price.get("long_factor", 1.0) if input_tokens > price.get("long_above", float("inf")) else 1.0
     return round(
-        ((input_tokens - cached) * price["input"] + cached * price["cached_input"]
-         + output_tokens * price["output"]) / 1_000_000,
+        factor * ((input_tokens - cached - written) * price["input"] + cached * price["cached_input"]
+                  + written * price.get("cache_write", price["input"]) + output_tokens * price["output"]) / 1_000_000,
         8,
     )
 
@@ -142,6 +184,7 @@ class ResponsesClient:
         self._max_output_tokens = max_output_tokens
         self._post = post or _post_json
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._no_key = "尚未設定 OPENAI_API_KEY（.env 或 OPENAI_KEY_ENV_FILE）"
 
     def budget_status(self) -> dict[str, float]:
         now = self._clock()
@@ -153,10 +196,10 @@ class ResponsesClient:
                           remaining_usd=max(0.0, min(self._budget - spent, self._total - total)))
         return status
 
-    def json_call(self, instructions: str, user_input: str, operation: str, context: str = "") -> tuple[dict, dict]:
-        """One Responses call that must answer with a JSON object; returns (object, usage)."""
+    def _guard(self) -> None:
+        """Before anything is sent: a key, a price for the model and room in this month's budgets."""
         if not self._key:
-            raise LLMError("尚未設定 OPENAI_API_KEY（.env 或 OPENAI_KEY_ENV_FILE）")
+            raise LLMError(self._no_key)
         if self.model not in PRICES:
             raise LLMError(f"沒有 {self.model} 的單價，無法控管預算；請先在 research/agent/llm.py 加入")
         status = self.budget_status()
@@ -168,6 +211,36 @@ class ResponsesClient:
             raise BudgetExceeded(
                 f"本月 LLM 總預算 US${self._total:.2f} 已用完（已用 US${status['total_spent_usd']:.4f}），停止呼叫"
             )
+
+    def _record(self, operation: str, context: str, outcome: str, started: float, usage: dict) -> None:
+        """Every call, failed or not, with the price in force (no prompt, key or reply)."""
+        now = self._clock()
+        input_tokens, cached, output_tokens = token_counts(usage)
+        entry = {
+            "at": now.isoformat(timespec="seconds"),
+            "month": f"{now.astimezone(TAIPEI):%Y-%m}",
+            "model": self.model,
+            "operation": operation,
+            "context": context,
+            "status": outcome,
+            "elapsed_ms": round((time.perf_counter() - started) * 1000),
+            "input_tokens": input_tokens,
+            "cached_input_tokens": cached,
+            "output_tokens": output_tokens,
+            "cost_usd": call_cost(self.model, usage),
+        }
+        written = usage.get("cache_creation_input_tokens") if isinstance(usage, dict) else None
+        if written:
+            entry["cache_write_input_tokens"] = written
+        self._ledger.record(entry)
+
+    def json_call(self, instructions: str, user_input: str | list[str], operation: str,
+                  context: str = "") -> tuple[dict, dict]:
+        """One Responses call that must answer with a JSON object; returns (object, usage). ``user_input`` may be a
+        list of parts (a stable beginning, then what changes): they are sent joined."""
+        self._guard()
+        if isinstance(user_input, (list, tuple)):
+            user_input = "\n\n".join(str(part) for part in user_input if part)
         if "json" not in user_input.lower():
             # The json_object format requires the word in the input messages (HTTP 400 otherwise).
             user_input += "\n請以 JSON 物件回覆。"
@@ -206,21 +279,171 @@ class ResponsesClient:
             outcome = "completed"
             return payload, usage
         finally:
-            now = self._clock()
-            input_tokens, cached, output_tokens = token_counts(usage)
-            self._ledger.record({
-                "at": now.isoformat(timespec="seconds"),
-                "month": f"{now.astimezone(TAIPEI):%Y-%m}",
-                "model": self.model,
-                "operation": operation,
-                "context": context,
-                "status": outcome,
-                "elapsed_ms": round((time.perf_counter() - started) * 1000),
-                "input_tokens": input_tokens,
-                "cached_input_tokens": cached,
-                "output_tokens": output_tokens,
-                "cost_usd": call_cost(self.model, usage),
-            })
+            self._record(operation, context, outcome, started, usage)
+
+
+def _get(item: object, name: str) -> object:
+    return item.get(name) if isinstance(item, dict) else getattr(item, name, None)
+
+
+def claude_usage(usage: object) -> dict:
+    """A Messages API usage block in the ledger's terms: every prompt token in ``input_tokens``, the ones read from the
+    cache in ``input_tokens_details.cached_tokens``, the ones written to it in ``cache_creation_input_tokens``."""
+    if usage is None:
+        return {}
+
+    def count(name: str) -> int:
+        value = _get(usage, name)
+        return value if type(value) is int and value >= 0 else 0
+
+    read, written, fresh = count("cache_read_input_tokens"), count("cache_creation_input_tokens"), count("input_tokens")
+    return {"input_tokens": fresh + read + written, "input_tokens_details": {"cached_tokens": read},
+            "cache_creation_input_tokens": written, "output_tokens": count("output_tokens")}
+
+
+def json_object(text: str) -> dict:
+    """The JSON object a reply holds: the whole reply, a fenced block, or the outermost braces in it."""
+    value = _strip_fence(text)
+    try:
+        payload = json.loads(value)
+    except ValueError:
+        start, end = value.find("{"), value.rfind("}")
+        if start < 0 or end <= start:
+            raise LLMError("模型回傳的不是 JSON") from None
+        try:
+            payload = json.loads(value[start: end + 1])
+        except ValueError:
+            raise LLMError("模型回傳的不是 JSON") from None
+    if not isinstance(payload, dict):
+        raise LLMError("模型回傳的 JSON 不是物件")
+    return payload
+
+
+def claude_error(exc: Exception, model: str) -> LLMError:
+    """An SDK error as an LLMError in the owner's language: the status and the API's own message, never the key."""
+    if isinstance(exc, LLMError):
+        return exc
+    try:
+        import anthropic
+    except ImportError:
+        return LLMError("沒有安裝 anthropic 套件（pip install anthropic）")
+    detail = str(getattr(exc, "message", "") or "")[:200]
+    if isinstance(exc, anthropic.AuthenticationError):
+        return LLMError("Claude API 金鑰無效（HTTP 401）：請檢查 .env 的 ANTHROPIC_API_KEY")
+    if isinstance(exc, anthropic.PermissionDeniedError):
+        return LLMError(f"Claude API 沒有權限（HTTP 403）：{detail or '這把金鑰不能用這個模型'}")
+    if isinstance(exc, anthropic.NotFoundError):
+        return LLMError(f"Claude API 找不到模型 {model}（HTTP 404）")
+    if isinstance(exc, anthropic.RateLimitError):
+        return LLMError(f"Claude API 速率限制（HTTP 429，已自動重試 {CLAUDE_RETRIES} 次）：{detail}")
+    if isinstance(exc, anthropic.BadRequestError):
+        return LLMError(f"Claude API HTTP 400：{detail or '請求格式不對'}")
+    if isinstance(exc, anthropic.APIStatusError):
+        return LLMError(f"Claude API HTTP {exc.status_code}：{detail or '伺服器錯誤'}")
+    if isinstance(exc, anthropic.APITimeoutError):
+        return LLMError(f"Claude API 逾時（已自動重試 {CLAUDE_RETRIES} 次）")
+    if isinstance(exc, anthropic.APIConnectionError):
+        return LLMError(f"Claude API 連線失敗（已自動重試 {CLAUDE_RETRIES} 次）")
+    return LLMError(f"Claude API 呼叫失敗（{exc.__class__.__name__}）")
+
+
+class ClaudeClient(ResponsesClient):
+    """2026-11-20 (D-051): ``json_call`` on the Claude Messages API through the official SDK, with the budget checks and
+    the ledger of ``ResponsesClient``. The instructions are the system prompt; the input is one user turn whose parts
+    are text blocks, the one before the last marked for the prompt cache — a caller that sends a growing conversation as
+    parts (a stable beginning, then the step's question) pays a tenth for the part it sent before. The reply's text is
+    parsed as JSON (no prefill, no sampling settings: the model accepts neither). A refusal or a reply cut off at
+    ``max_tokens`` is an LLMError."""
+
+    def __init__(self, api_key: str, model: str, ledger: UsageLedger, monthly_budget_usd: float,
+                 timeout: float = 180.0, max_output_tokens: int = CLAUDE_MAX_TOKENS,
+                 create: Callable[..., object] | None = None, clock: Callable[[], datetime] | None = None,
+                 operations: tuple[str, ...] | None = None, total_budget_usd: float | None = None,
+                 label: str = "AI 研究員", base_url: str = CLAUDE_BASE_URL, effort: str | None = CLAUDE_EFFORT) -> None:
+        super().__init__(api_key, model, ledger, monthly_budget_usd, timeout=timeout,
+                         max_output_tokens=max(int(max_output_tokens), CLAUDE_MAX_TOKENS), clock=clock,
+                         operations=operations, total_budget_usd=total_budget_usd, label=label)
+        self._no_key = "尚未設定 ANTHROPIC_API_KEY（.env）"
+        self._create = create
+        self._base_url = base_url or CLAUDE_BASE_URL
+        self._effort = effort
+        self._sdk = None
+
+    def sdk(self):
+        """The SDK client, made once. The base URL is given explicitly: an ANTHROPIC_BASE_URL another program left in
+        the environment must not send the research calls elsewhere."""
+        if self._sdk is None:
+            import anthropic
+
+            self._sdk = anthropic.Anthropic(api_key=self._key, base_url=self._base_url, timeout=self._timeout,
+                                            max_retries=CLAUDE_RETRIES)
+        return self._sdk
+
+    def body(self, instructions: str, user_input: str | list[str]) -> dict:
+        parts = [str(part) for part in user_input] if isinstance(user_input, (list, tuple)) else [str(user_input)]
+        content: list[dict] = [{"type": "text", "text": part} for part in parts if part.strip()]
+        if not content or "json" not in (instructions + content[-1]["text"]).lower():
+            content.append({"type": "text", "text": "請以 JSON 物件回覆。"})
+        if len(content) >= 2:
+            content[-2]["cache_control"] = {"type": "ephemeral"}
+        body = {"model": self.model, "max_tokens": self._max_output_tokens, "system": instructions,
+                "messages": [{"role": "user", "content": content}]}
+        if self._effort:
+            body["output_config"] = {"effort": self._effort}
+        return body
+
+    def json_call(self, instructions: str, user_input: str | list[str], operation: str,
+                  context: str = "") -> tuple[dict, dict]:
+        self._guard()
+        body = self.body(instructions, user_input)
+        started = time.perf_counter()
+        usage: dict = {}
+        outcome = "failed"
+        try:
+            try:
+                message = (self._create or self.sdk().messages.create)(**body)
+            except Exception as exc:  # noqa: BLE001 - every SDK error becomes an LLMError without the key
+                raise claude_error(exc, self.model) from None
+            usage = claude_usage(_get(message, "usage"))
+            stop = _get(message, "stop_reason")
+            if stop == "refusal":
+                category = _get(_get(message, "stop_details"), "category")
+                raise LLMError(f"模型拒絕回答（{category or '沒有說明類別'}）")
+            if stop == "max_tokens":
+                raise LLMError("模型未完成回覆（max_tokens）")
+            text = "\n".join(str(_get(block, "text") or "") for block in _get(message, "content") or []
+                           if _get(block, "type") == "text").strip()
+            if not text:
+                raise LLMError("模型沒有回傳文字")
+            payload = json_object(text)
+            outcome = "completed"
+            return payload, usage
+        finally:
+            self._record(operation, context, outcome, started, usage)
+
+
+def model_client(settings, ledger: UsageLedger, monthly_budget_usd: float, *, operations: tuple[str, ...] | None = None,
+                 total_budget_usd: float | None = None, label: str = "AI 研究員",
+                 max_output_tokens: int = 6000) -> ResponsesClient | None:
+    """The client for ``settings.research_agent_model`` inside the given monthly share: a ``claude-…`` model on the
+    Claude API (ANTHROPIC_API_KEY), any other on OpenAI (OPENAI_API_KEY); None without that provider's key."""
+    model = settings.research_agent_model
+    if is_claude(model):
+        key = resolve_anthropic_key(getattr(settings, "anthropic_api_key", ""))
+        if not key:
+            return None
+        return ClaudeClient(key, model, ledger, monthly_budget_usd, operations=operations,
+                            total_budget_usd=total_budget_usd, label=label, max_output_tokens=max_output_tokens,
+                            base_url=getattr(settings, "claude_api_base_url", "") or CLAUDE_BASE_URL,
+                            effort=getattr(settings, "research_agent_effort", "") or CLAUDE_EFFORT)
+    try:
+        key = resolve_openai_key(settings.openai_api_key)
+    except LLMError:
+        return None
+    if not key:
+        return None
+    return ResponsesClient(key, model, ledger, monthly_budget_usd, operations=operations,
+                           total_budget_usd=total_budget_usd, label=label, max_output_tokens=max_output_tokens)
 
 
 def _strip_fence(text: str) -> str:

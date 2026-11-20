@@ -282,20 +282,14 @@ def signature(factors: dict, core: float) -> str:
 
 
 def build(settings, research_dir: str | Path) -> DailyResearcher:
-    from quant_platform.research.agent.llm import UsageLedger, resolve_openai_key
+    from quant_platform.research.agent.llm import UsageLedger, model_client
 
     client = None
-    if settings.research_agent_enabled:
-        try:
-            key = resolve_openai_key(settings.openai_api_key)
-        except LLMError:
-            key = ""
-        if key:
-            client = ResponsesClient(key, settings.research_agent_model,
-                                     UsageLedger(Path(research_dir) / "agent" / "usage.jsonl"),
-                                     settings.research_agent_monthly_budget_usd,
-                                     operations=(OPERATION, "research_round", "connection_check"),
-                                     total_budget_usd=settings.llm_monthly_budget_usd, label="AI 研究員")
+    if settings.research_agent_enabled:          # 2026-11-20 (D-051): the provider follows the configured model
+        client = model_client(settings, UsageLedger(Path(research_dir) / "agent" / "usage.jsonl"),
+                              settings.research_agent_monthly_budget_usd,
+                              operations=(OPERATION, "research_round", "connection_check"),
+                              total_budget_usd=settings.llm_monthly_budget_usd, label="AI 研究員")
     return DailyResearcher(research_dir, client)
 
 

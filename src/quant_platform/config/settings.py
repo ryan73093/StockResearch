@@ -126,7 +126,14 @@ class Settings:
     openai_timeout_seconds: int = 45
     # AI researcher (S4-W04, research/agent/): OpenAI Responses API like VectorDB.
     research_agent_enabled: bool = True
-    research_agent_model: str = "gpt-6-luna"
+    # 2026-11-20 (使用者：使用 claude api haiku 並繼續; D-051): every model call of the research platform (researcher,
+    # news scoring, knowledge base, hypotheses, LLM trader, stock-picking agent, agent lab) on the Claude API; a
+    # "claude-…" model needs ANTHROPIC_API_KEY, any other the OpenAI key (research/agent/llm.py ``model_client``)
+    research_agent_model: str = "claude-haiku-5-5"
+    anthropic_api_key: str = ""
+    research_agent_effort: str = "medium"
+    # not ANTHROPIC_BASE_URL: another program's environment (an AI tool's proxy) must not redirect the research calls
+    claude_api_base_url: str = "https://api.anthropic.com"
     research_agent_monthly_budget_usd: float = 1.0
     research_agent_rounds_per_night: int = 3
     research_agent_specs_per_round: int = 4
@@ -233,7 +240,10 @@ class Settings:
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             openai_timeout_seconds=int(os.getenv("OPENAI_TIMEOUT_SECONDS", "45")),
             research_agent_enabled=os.getenv("RESEARCH_AGENT_ENABLED", "true").lower() in {"1", "true", "yes"},
-            research_agent_model=os.getenv("RESEARCH_AGENT_MODEL", "gpt-6-luna").strip(),
+            research_agent_model=os.getenv("RESEARCH_AGENT_MODEL", "claude-haiku-5-5").strip(),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            research_agent_effort=os.getenv("RESEARCH_AGENT_EFFORT", "medium").strip(),
+            claude_api_base_url=os.getenv("CLAUDE_API_BASE_URL", "https://api.anthropic.com").strip(),
             research_agent_monthly_budget_usd=max(0.0, float(os.getenv("RESEARCH_AGENT_MONTHLY_BUDGET_USD", "1"))),
             llm_monthly_budget_usd=max(0.0, float(os.getenv("LLM_MONTHLY_BUDGET_USD", "5"))),
             news_events_enabled=os.getenv("NEWS_EVENTS_ENABLED", "true").lower() in {"1", "true", "yes"},

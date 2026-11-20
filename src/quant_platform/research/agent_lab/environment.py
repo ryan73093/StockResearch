@@ -102,8 +102,10 @@ class ScriptedClient:
         self._script = script
         self.calls = 0
 
-    def json_call(self, instructions: str, prompt: str, operation: str, context: str = "") -> tuple[dict, dict]:
+    def json_call(self, instructions: str, prompt: str | list[str], operation: str, context: str = "") -> tuple[dict, dict]:
         self.calls += 1
+        if isinstance(prompt, (list, tuple)):        # parts, as the model clients take them: the same text joined
+            prompt = "\n\n".join(str(part) for part in prompt if part)
         return self._script(instructions, prompt, context), {}
 
 

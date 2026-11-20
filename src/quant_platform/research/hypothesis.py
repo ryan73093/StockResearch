@@ -212,17 +212,12 @@ def run_one(research: Path, history: Path, item: dict, client, data, fp, fingerp
 
 
 def build_client(settings, research: Path):
-    from quant_platform.research.agent.llm import LLMError, ResponsesClient, UsageLedger, resolve_openai_key
+    from quant_platform.research.agent.llm import UsageLedger, model_client
 
-    try:
-        key = resolve_openai_key(settings.openai_api_key)
-    except LLMError:
-        return None
-    if not key:
-        return None
-    return ResponsesClient(key, settings.research_agent_model, UsageLedger(Path(research) / "agent" / "usage.jsonl"),
-                           settings.hypothesis_monthly_budget_usd, operations=(OPERATION,),
-                           total_budget_usd=settings.llm_monthly_budget_usd, label="假設檢驗")
+    # 2026-11-20 (D-051): the provider follows the configured model; None without its key
+    return model_client(settings, UsageLedger(Path(research) / "agent" / "usage.jsonl"),
+                        settings.hypothesis_monthly_budget_usd, operations=(OPERATION,),
+                        total_budget_usd=settings.llm_monthly_budget_usd, label="假設檢驗")
 
 
 def run_pending(research: Path, history: Path, settings, costs, job=None) -> list[dict[str, object]]:
