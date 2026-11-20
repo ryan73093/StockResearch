@@ -272,3 +272,35 @@ def test_weights_by_beta_and_the_highest_beta_fifth_vetoed():
     assert "low_beta_250" in daily.rule_inputs(rule)
     assert daily.VETO_FACTORS["b1"] == ("low_beta_250",) and daily.VETO_WORDS["b1"] == "不買連動最高的五分之一"
     assert daily.DailyRule(name="t", factors={"trend_200": 1.0}).weighting == "equal"
+
+
+def test_the_lagged_panel_reads_the_previous_sessions_turnover():
+    """2026-11-20 (D-046 第 3 項): the volume-bias measurement moves every day's turnover one session later."""
+    from quant_platform.research import volume_bias
+
+    class Panel:
+        def __init__(self, data):
+            self.turnover = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+            self.sessions, self.symbols, self.close = [0, 1, 2], ["A", "B"], np.ones((2, 3))
+
+    seen = {}
+
+    class FactorPanel:
+        def __init__(self, panel, *rest):
+            seen["turnover"] = panel.turnover.copy()
+
+    import quant_platform.research.daily as daily
+    import quant_platform.research.stock_rules as stock_rules
+
+    saved = (stock_rules.Panel, daily.FactorPanel, daily.ChipStore, daily.Industries, daily.load_industries, daily.market_closes)
+    try:
+        stock_rules.Panel, daily.FactorPanel = Panel, FactorPanel
+        daily.ChipStore = lambda *args, **kwargs: None
+        daily.Industries = lambda *args, **kwargs: None
+        daily.load_industries = lambda *args, **kwargs: {}
+        daily.market_closes = lambda *args, **kwargs: None
+        volume_bias.lagged_panel(__import__("pathlib").Path("."), None)
+    finally:
+        (stock_rules.Panel, daily.FactorPanel, daily.ChipStore, daily.Industries, daily.load_industries,
+         daily.market_closes) = saved
+    assert np.isnan(seen["turnover"][:, 0]).all() and seen["turnover"][:, 1:].tolist() == [[1.0, 2.0], [4.0, 5.0]]
