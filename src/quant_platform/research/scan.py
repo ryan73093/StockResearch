@@ -98,6 +98,7 @@ SHORT = {
     "low_iskew_250": "特質偏態低", "high_iskew_250": "特質偏態高", "short_cover_ahead": "融券回補前",
     "eps_surprise": "盈餘驚喜", "eps_accel": "盈餘加速", "eps_streak": "盈餘連續成長",
     "low_asset_growth": "資產成長低", "gp_assets": "毛利÷總資產", "low_accruals": "應計項目低", "cash_profit": "現金獲利",
+    "low_net_financing": "外部融資少",
 }
 
 
@@ -524,7 +525,11 @@ def novelty(fp, new: list[str], limit: float = 0.7) -> dict[str, dict]:
                 mask = fp.eligible(base, position) & np.isfinite(values[:, position]) & np.isfinite(others[:, position])
                 if mask.sum() < 30:
                     continue
-                correlations.append(pd.Series(values[mask, position]).rank().corr(pd.Series(others[mask, position]).rank()))
+                found = pd.Series(values[mask, position]).rank().corr(pd.Series(others[mask, position]).rank())
+                # 2026-11-20: a week one of them is the same for every stock has no correlation — left out; the
+                # sparse short_cover_ahead (0 for most stocks most weeks) had its mean turned NaN and passed as 0.0
+                if np.isfinite(found):
+                    correlations.append(found)
             if correlations and abs(float(np.mean(correlations))) > abs(worst):
                 worst, against = float(np.mean(correlations)), other
         output[name] = {"max_correlation": round(worst, 3), "with": against, "kept": abs(worst) < limit}

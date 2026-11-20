@@ -85,3 +85,25 @@ def test_cash_factors_are_rule_factors_with_their_own_input():
     assert not set(CASH_FACTORS) & set(model.features())
     digests = daily.input_digests(fundamentals.Path("nowhere"), ["cash_profit"], False)
     assert "cash" in digests and "statements" not in digests
+
+
+def test_net_financing_and_a_column_kept_from_now_on(tmp_path):
+    """2026-11-20 (外部融資淨額): the financing cash flow split as the operating one; a versions file written before
+    the column existed takes the values as first seen, and no row counts as revised for it."""
+    write_raw(tmp_path, "1101", YEAR_TO_DATE)
+    write_statements(tmp_path, ["1101"])
+    build_cash(tmp_path, date(2026, 11, 20))
+    old = pq.read_table(tmp_path / CASH_VERSIONS).to_pandas().drop(columns=["financing_cash"])
+    old.to_parquet(tmp_path / CASH_VERSIONS, index=False)                     # as written before 20:4x
+    folder = tmp_path / "raw" / "finmind" / "TaiwanStockCashFlowsStatement"
+    rows = [{"date": quarter.isoformat(), "type": item, "value": value} for quarter, ytd, financing in
+            zip(QUARTERS, YEAR_TO_DATE, [5.0, -5.0, 15.0, 40.0, 0.0, 10.0], strict=True)
+            for item, value in (("CashFlowsFromOperatingActivities", ytd),
+                                ("CashFlowsProvidedFromFinancingActivities", financing))]
+    (folder / "1101.json.gz").write_bytes(gzip.compress(json.dumps({"data": rows}).encode("utf-8")))
+    assert build_cash(tmp_path, date(2026, 11, 21))["versions_added"] == 0
+    kept = pq.read_table(tmp_path / CASH_VERSIONS).to_pandas()
+    assert list(kept["financing_cash"]) == [5.0, -10.0, 20.0, 25.0, 0.0, 10.0]
+    factors = cash_factor_table(kept.drop(columns=["seen"])).reset_index(drop=True)
+    assert factors.loc[3, "low_net_financing"] == pytest.approx(-40 / 1000)
+    assert factors.loc[5, "low_net_financing"] == pytest.approx(-(20 + 25 + 0 + 10) / 1000)

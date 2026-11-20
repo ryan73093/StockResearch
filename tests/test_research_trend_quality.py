@@ -158,6 +158,31 @@ def test_the_novelty_gate_drops_a_copy_of_an_existing_signal(monkeypatch):
     assert all(isinstance(item["kept"], bool) for item in gate.values())
 
 
+def test_the_novelty_gate_leaves_out_the_weeks_a_sparse_signal_is_the_same_for_all(monkeypatch):
+    """2026-11-20: short_cover_ahead is 0 for most stocks most weeks; a week without a correlation turned the mean NaN
+    and the gate passed it as 0.0. A copy of high_52w that is flat for the first half is caught by the other half."""
+    from quant_platform.research import scan
+
+    rng = np.random.default_rng(3)
+    days = weekdays(date(2014, 1, 1), date(2020, 9, 30))
+    closes = {f"{1101 + n}.TW": dict(zip(days, np.maximum(20 * np.cumprod(1 + rng.normal(0.0003, 0.015, len(days))), 10.5)))
+              for n in range(40)}
+    fp = FactorPanel(Panel(market(days, closes)))
+    usual = fp.matrix
+
+    def matrix(name):
+        if name != "sparse":
+            return usual(name)
+        values = usual("high_52w").copy()
+        values[:, : values.shape[1] // 2] = 0.0
+        return values
+
+    monkeypatch.setattr(fp, "matrix", matrix)
+    monkeypatch.setattr(scan, "signals", lambda: ["momentum_3", "high_52w"])
+    gate = scan.novelty(fp, ["sparse"])["sparse"]
+    assert gate["with"] == "high_52w" and gate["max_correlation"] > 0.9 and gate["kept"] is False
+
+
 def test_rolling_beta_and_the_beta_on_the_days_the_market_fell():
     """2026-11-19: a stock moving twice the market has beta 2; one that follows it only on its falling days has a
     high down beta and a low one over every day; nothing leaks from later sessions."""

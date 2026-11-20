@@ -171,6 +171,12 @@ def record_versions(history: str | Path, fresh: pd.DataFrame, today: date, versi
         added = known.iloc[0:0]
     else:
         known = pq.read_table(base / versions_file).to_pandas()
+        # 2026-11-20: an item kept from now on (a new column) — the earlier versions take the values as first seen
+        # now; what they were before cannot be known (as the statements' versions on 11/19)
+        keys = fresh.set_index(["code", "quarter"])
+        for name in items:
+            if name not in known.columns:
+                known[name] = keys[name].reindex(pd.MultiIndex.from_frame(known[["code", "quarter"]])).to_numpy()
         added = changed_rows(known, fresh, items).copy()
         added["seen"] = today
     out = pd.concat([known, added], ignore_index=True) if len(added) else known
@@ -310,11 +316,15 @@ def digest(history: str | Path, until: date, file: Path = FILE) -> str:
 CASH_FACTORS = {
     "low_accruals": "應計項目低（近四季稅後淨利減營業現金流量，÷總資產，反向；盈餘裡現金少的之後輸，Sloan 1996；金融保險業不算）",
     "cash_profit": "現金獲利（近四季營業現金流量÷總資產；金融保險業不算）",
+    # 2026-11-20 (docs/research/results.md「外部融資淨額」): Bradshaw, Richardson & Sloan 2006 — firms raising money
+    # (shares, bonds, loans, less repayments, buybacks and dividends) earn less afterwards
+    "low_net_financing": "外部融資少（近四季籌資活動現金流量÷總資產，反向：借錢、增資多的低；金融保險業不算）",
 }
+FINANCING_ITEMS = ("CashFlowsProvidedFromFinancingActivities",)
 CASH_ITEMS = ("CashFlowsFromOperatingActivities", "NetCashInflowFromOperatingActivities")    # the first one found
 CASH_FILE = Path("fundamentals") / "cash.parquet"
 CASH_VERSIONS = Path("fundamentals") / "cash_versions.parquet"
-CASH_COLUMNS = ["net_income", "assets", "operating_cash"]
+CASH_COLUMNS = ["net_income", "assets", "operating_cash", "financing_cash"]
 FINANCIAL_INDUSTRY = "金融保險"
 QUARTER_BEFORE = {6: (3, 31), 9: (6, 30), 12: (9, 30)}
 
@@ -328,7 +338,7 @@ def financial_codes(raw: Path) -> set[str]:
     return {str(row.get("stock_id")) for row in rows if FINANCIAL_INDUSTRY in str(row.get("industry_category") or "")}
 
 
-def quarter_cash(raw: Path) -> dict[tuple[str, date], float]:
+def quarter_cash(raw: Path, items: tuple[str, ...] = CASH_ITEMS) -> dict[tuple[str, date], float]:
     """(code, quarter) → the quarter's own operating cash flow: the year-to-date filing less the previous quarter's
     of the same year (a quarter without that one is left out)."""
     output: dict[tuple[str, date], float] = {}
@@ -337,12 +347,12 @@ def quarter_cash(raw: Path) -> dict[tuple[str, date], float]:
         found: dict[date, tuple[int, float]] = {}
         for item in _read(path):
             value = item.get("value")
-            if item.get("type") not in CASH_ITEMS or not isinstance(value, (int, float)):
+            if item.get("type") not in items or not isinstance(value, (int, float)):
                 continue
             quarter = date.fromisoformat(item["date"])
             if quarter.month not in (3, 6, 9, 12):
                 continue
-            rank = CASH_ITEMS.index(item["type"])
+            rank = items.index(item["type"])
             if quarter not in found or rank < found[quarter][0]:
                 found[quarter] = (rank, float(value))
         for quarter, (_rank, value) in found.items():
@@ -364,9 +374,10 @@ def build_cash(history: str | Path, today: date | None = None) -> dict[str, int]
     if not (base / FILE).is_file():
         return {"rows": 0, "versions_added": 0}
     statements = pq.read_table(base / FILE, columns=["code", "quarter", "available", "net_income", "assets"]).to_pandas()
-    cash = quarter_cash(raw)
-    statements["operating_cash"] = [cash.get((code, quarter), np.nan)
-                                    for code, quarter in zip(statements["code"], statements["quarter"], strict=True)]
+    keys = list(zip(statements["code"], statements["quarter"], strict=True))
+    cash, financing = quarter_cash(raw), quarter_cash(raw, FINANCING_ITEMS)
+    statements["operating_cash"] = [cash.get(key, np.nan) for key in keys]
+    statements["financing_cash"] = [financing.get(key, np.nan) for key in keys]
     table = statements[~statements["code"].isin(financial_codes(raw))]
     table = table[table["operating_cash"].notna()].sort_values(["code", "quarter"]).reset_index(drop=True)
     out = base / CASH_FILE
@@ -389,8 +400,11 @@ def cash_factor_table(frame: pd.DataFrame) -> pd.DataFrame:
             assets = full["assets"].where(full["assets"] > 0)
             cash = full["operating_cash"].rolling(4, min_periods=4).sum()
             income = full["net_income"].rolling(4, min_periods=4).sum()
+            raised = (full["financing_cash"] if "financing_cash" in full else full["assets"] * np.nan).rolling(
+                4, min_periods=4).sum()                  # a table built before 11-20 20:4x has no financing column
             factors = pd.DataFrame({"low_accruals": (-(income - cash) / assets).clip(-5, 5),
-                                    "cash_profit": (cash / assets).clip(-5, 5)}, index=full.index)
+                                    "cash_profit": (cash / assets).clip(-5, 5),
+                                    "low_net_financing": (-raised / assets).clip(-5, 5)}, index=full.index)
         factors["code"], factors["available"] = full["code"], full["available"]
         output.append(factors[full["code"].notna()])
     return pd.concat(output) if output else pd.DataFrame(columns=["code", "available", *CASH_FACTORS])
