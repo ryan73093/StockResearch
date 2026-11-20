@@ -107,3 +107,32 @@ def test_net_financing_and_a_column_kept_from_now_on(tmp_path):
     factors = cash_factor_table(kept.drop(columns=["seen"])).reset_index(drop=True)
     assert factors.loc[3, "low_net_financing"] == pytest.approx(-40 / 1000)
     assert factors.loc[5, "low_net_financing"] == pytest.approx(-(20 + 25 + 0 + 10) / 1000)
+
+
+def test_the_fscore_by_hand():
+    """2026-11-20 (Piotroski F 分數): nine signals on four quarters against the same four a year before."""
+    quarters = [date(2023, 3, 31), date(2023, 6, 30), date(2023, 9, 30), date(2023, 12, 31), date(2024, 3, 31),
+                date(2024, 6, 30), date(2024, 9, 30), date(2024, 12, 31)]
+    rows = []
+    for number, quarter in enumerate(quarters):
+        later = number >= 4
+        rows.append({"code": "1101", "quarter": quarter, "available": deadline(quarter),
+                     "net_income": 12.0 if later else 10.0, "assets": 1000.0, "operating_cash": 15.0,
+                     "financing_cash": 0.0, "liabilities": 380.0 if later else 400.0,
+                     "gross_profit": 33.0 if later else 30.0, "revenue": 110.0 if later else 100.0,
+                     "current_assets": 300.0, "current_liabilities": 200.0 if later else 150.0,
+                     "ordinary_share": 100.0})
+    table = cash_factor_table(pd.DataFrame(rows)).reset_index(drop=True)
+    assert np.isnan(table.loc[6, "fscore"])                                   # no year before: 4 of 9 known
+    # ROA > 0, cash > 0, ROA up, cash > income, leverage down, shares not up, turnover up: 7; the margin is flat
+    # (132 / 440 against 120 / 400) and the current ratio fell (2.0 → 1.5): 7 of 9
+    assert table.loc[7, "fscore"] == pytest.approx(7.0)
+
+
+def test_no_new_buy_in_the_fifth_with_the_least_cash_profit():
+    from quant_platform.research import daily
+
+    assert daily.VETO_FACTORS["c1"] == ("cash_profit",) and "c1" in daily.VETO_WORDS
+    rule = daily.DailyRule(name="t", factors={"momentum_3": 1.0}, exclude="c1")
+    assert "cash_profit" in daily.rule_inputs(rule)
+    assert "cash" in daily.input_digests(fundamentals.Path("nowhere"), daily.rule_inputs(rule), False)

@@ -319,12 +319,20 @@ CASH_FACTORS = {
     # 2026-11-20 (docs/research/results.md「外部融資淨額」): Bradshaw, Richardson & Sloan 2006 — firms raising money
     # (shares, bonds, loans, less repayments, buybacks and dividends) earn less afterwards
     "low_net_financing": "外部融資少（近四季籌資活動現金流量÷總資產，反向：借錢、增資多的低；金融保險業不算）",
+    # 2026-11-20 (docs/research/results.md「Piotroski F 分數」): nine yes-or-no signals of a company getting stronger
+    "fscore": "Piotroski F 分數（9 項：獲利為正、營業現金流為正、ROA 比去年高、現金多於盈餘、負債比下降、流動比率上升、"
+              "股本沒增加、毛利率上升、資產週轉上升；至少 7 項算得出來，換算成 9 分；金融保險業不算）",
 }
+# 2026-11-20: the balance sheet items only the F-score reads (point in time, not year-to-date)
+BALANCE_EXTRA = {"CurrentAssets": "current_assets", "CurrentLiabilities": "current_liabilities",
+                 "OrdinaryShare": "ordinary_share"}
+FSCORE_LEAST = 7
 FINANCING_ITEMS = ("CashFlowsProvidedFromFinancingActivities",)
 CASH_ITEMS = ("CashFlowsFromOperatingActivities", "NetCashInflowFromOperatingActivities")    # the first one found
 CASH_FILE = Path("fundamentals") / "cash.parquet"
 CASH_VERSIONS = Path("fundamentals") / "cash_versions.parquet"
-CASH_COLUMNS = ["net_income", "assets", "operating_cash", "financing_cash"]
+CASH_COLUMNS = ["net_income", "assets", "operating_cash", "financing_cash", "liabilities", "gross_profit", "revenue",
+                *BALANCE_EXTRA.values()]
 FINANCIAL_INDUSTRY = "金融保險"
 QUARTER_BEFORE = {6: (3, 31), 9: (6, 30), 12: (9, 30)}
 
@@ -366,6 +374,21 @@ def quarter_cash(raw: Path, items: tuple[str, ...] = CASH_ITEMS) -> dict[tuple[s
     return output
 
 
+def balance_extra(raw: Path) -> dict[tuple[str, date], dict[str, float]]:
+    """(code, quarter) → BALANCE_EXTRA's items from the balance sheet filings."""
+    output: dict[tuple[str, date], dict[str, float]] = {}
+    for path in sorted((raw / "TaiwanStockBalanceSheet").glob("*.json.gz")):
+        code = path.name.split(".")[0]
+        for item in _read(path):
+            name, value = BALANCE_EXTRA.get(item.get("type")), item.get("value")
+            if name is None or not isinstance(value, (int, float)):
+                continue
+            quarter = date.fromisoformat(item["date"])
+            if quarter.month in (3, 6, 9, 12):
+                output.setdefault((code, quarter), {})[name] = float(value)
+    return output
+
+
 def build_cash(history: str | Path, today: date | None = None) -> dict[str, int]:
     """history/fundamentals/cash.parquet: code, quarter, available, the quarter's net income and assets (from the
     statements table) and its own operating cash flow; versions kept as the statements' are."""
@@ -373,8 +396,16 @@ def build_cash(history: str | Path, today: date | None = None) -> dict[str, int]
     raw = base / "raw" / "finmind"
     if not (base / FILE).is_file():
         return {"rows": 0, "versions_added": 0}
-    statements = pq.read_table(base / FILE, columns=["code", "quarter", "available", "net_income", "assets"]).to_pandas()
+    wanted = ["code", "quarter", "available", "net_income", "assets", "liabilities", "gross_profit", "revenue"]
+    present = set(pq.read_schema(base / FILE).names)
+    statements = pq.read_table(base / FILE, columns=[name for name in wanted if name in present]).to_pandas()
+    for name in wanted:
+        if name not in statements:                       # a table without the item: unknown, not zero
+            statements[name] = np.nan
     keys = list(zip(statements["code"], statements["quarter"], strict=True))
+    extra = balance_extra(raw)
+    for name in BALANCE_EXTRA.values():
+        statements[name] = [extra.get(key, {}).get(name, np.nan) for key in keys]
     cash, financing = quarter_cash(raw), quarter_cash(raw, FINANCING_ITEMS)
     statements["operating_cash"] = [cash.get(key, np.nan) for key in keys]
     statements["financing_cash"] = [financing.get(key, np.nan) for key in keys]
@@ -404,10 +435,40 @@ def cash_factor_table(frame: pd.DataFrame) -> pd.DataFrame:
                 4, min_periods=4).sum()                  # a table built before 11-20 20:4x has no financing column
             factors = pd.DataFrame({"low_accruals": (-(income - cash) / assets).clip(-5, 5),
                                     "cash_profit": (cash / assets).clip(-5, 5),
-                                    "low_net_financing": (-raised / assets).clip(-5, 5)}, index=full.index)
+                                    "low_net_financing": (-raised / assets).clip(-5, 5),
+                                    "fscore": _fscore(full, assets, income, cash)}, index=full.index)
         factors["code"], factors["available"] = full["code"], full["available"]
         output.append(factors[full["code"].notna()])
     return pd.concat(output) if output else pd.DataFrame(columns=["code", "available", *CASH_FACTORS])
+
+
+def _fscore(full: pd.DataFrame, assets: pd.Series, income: pd.Series, cash: pd.Series) -> pd.Series:
+    """Piotroski (2000)'s nine signals on the last four quarters, each against the same quarters a year before; 1 or
+    0, unknown where an input is missing; the count over the known ones × 9, with at least FSCORE_LEAST known."""
+    def column(name: str) -> pd.Series:
+        return full[name] if name in full else pd.Series(np.nan, index=full.index)
+
+    def four(name: str) -> pd.Series:
+        return column(name).rolling(4, min_periods=4).sum()
+
+    roa = income / assets
+    leverage = column("liabilities") / assets
+    liquid = column("current_assets") / column("current_liabilities").where(column("current_liabilities") > 0)
+    margin = four("gross_profit") / four("revenue").where(four("revenue") > 0)
+    turnover = four("revenue") / assets
+    shares = column("ordinary_share")
+    tests = [(roa > 0, [roa]), (cash > 0, [cash]), (roa > roa.shift(4), [roa, roa.shift(4)]),
+             (cash > income, [cash, income]), (leverage < leverage.shift(4), [leverage, leverage.shift(4)]),
+             (liquid > liquid.shift(4), [liquid, liquid.shift(4)]), (shares <= shares.shift(4), [shares, shares.shift(4)]),
+             (margin > margin.shift(4), [margin, margin.shift(4)]),
+             (turnover > turnover.shift(4), [turnover, turnover.shift(4)])]
+    passed = pd.Series(0.0, index=full.index)
+    known = pd.Series(0, index=full.index)
+    for condition, inputs in tests:
+        usable = np.logical_and.reduce([np.isfinite(values.to_numpy(dtype=float)) for values in inputs])
+        passed += np.where(usable, condition.to_numpy(dtype=float), 0.0)
+        known += usable.astype(int)
+    return (passed / known.where(known >= FSCORE_LEAST) * 9).astype(float)
 
 
 class CashStore(FundamentalStore):

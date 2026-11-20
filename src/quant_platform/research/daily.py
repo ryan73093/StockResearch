@@ -556,7 +556,8 @@ class DailyRule(BaseModel):
     # sessions; holdings are kept by the usual rules. Left out of the hash when "none".
     # 2026-10-22 (集保因子第三版): "h1" = no new buys of the fifth whose small holders' share rose the most in 4 weeks
     # (retail_down_4w lowest), "h2" = of the fifth whose holders grew the most (holders_down_4w lowest)
-    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm", "t1", "e1", "he", "s1", "l1", "x1", "b1"] = "none"
+    # 2026-11-20 (docs/research/results.md「不買現金獲利最差的五分之一」): "c1"
+    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm", "t1", "e1", "he", "s1", "l1", "x1", "b1", "c1"] = "none"
     # 2026-10-12 (全面研究「之後再試」第 1 項): "cost1" = a holding that leaves the keep zone is replaced only when
     # the replacement's expected next-20-session excess beats the holding's by more than a round trip (about
     # 0.99%: fee both ways, the sell tax, slippage both ways). The expectation is the rule's own score
@@ -4109,7 +4110,10 @@ VETO_FACTORS = {**{key: (value,) for key, value in HOLDER_EXCLUDES.items()}, "hm
                 # 2026-10-29 (技術分析機器人第六版): the fifth the price-and-volume robot (dl-2.5.1) ranks lowest
                 "x1": ("ml_tech_deep_r",),
                 # 2026-11-20: the fifth that moves most with the market (low_beta_250 is stored negated)
-                "b1": ("low_beta_250",)}
+                "b1": ("low_beta_250",),
+                # 2026-11-20: the fifth with the least operating cash flow for its assets (cash_profit's strength sits
+                # in its bottom fifth: 5.5% a year between the fifths since 2020-10, the top fifth +0.6%)
+                "c1": ("cash_profit",)}
 HOLDER_VETO_SHARE = 0.2
 
 # 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」, written before the
@@ -4237,7 +4241,8 @@ VETO_WORDS = {"h1": "不買散戶大增的五分之一", "h2": "不買股東大�
               "hm": "不買股東大增或融資快斷頭的五分之一", "t1": "不買離年線最遠的五分之一",
               "e1": "不買獲利衰退最多的五分之一", "he": "不買股東大增或獲利衰退最多的五分之一",
               "s1": "不買借券賣出最多的五分之一", "l1": "不買借券費率最高的五分之一",
-              "x1": "不買技術機器人最不看好的五分之一", "b1": "不買連動最高的五分之一"}
+              "x1": "不買技術機器人最不看好的五分之一", "b1": "不買連動最高的五分之一",
+              "c1": "不買現金獲利最差的五分之一"}
 # 2026-10-22 (research_method §7「否決第三版」, written before the run; the lists frozen at 14:4x from the passing single
 # rules ranking the top 20 without a veto, by end value): the holders' veto on the 120 richest, both vetoes together on
 # the 20 richest and on the three top-10 rules the margin veto moved onto the frontier
@@ -4300,6 +4305,12 @@ def rank_weight_batch() -> list[DailyRule]:
         base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
         output.append(_variant(base, f"依分數高低配錢（#{trial} 的設定）", weighting="rank"))
     return output
+
+
+def cash_veto_batch() -> list[DailyRule]:
+    """2026-11-20 (docs/research/results.md「不買現金獲利最差的五分之一」, written before the run): the 44 BETA_GUARD
+    rules with no new buy in the fifth with the least operating cash flow for their assets (exclude "c1")."""
+    return _veto_rules([(trial, "c1") for group in BETA_GUARD.values() for trial in group])
 
 
 def beta_guard_batch() -> list[DailyRule]:
@@ -6410,7 +6421,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "betaguard": beta_guard_batch, "rankweight": rank_weight_batch, "poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "betaguard": beta_guard_batch, "rankweight": rank_weight_batch, "cashveto": cash_veto_batch, "poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
