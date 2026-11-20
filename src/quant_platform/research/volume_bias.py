@@ -44,6 +44,23 @@ def lagged_panel(history: Path, data, ratios: np.ndarray | None = None, seed: in
                        market_closes(history, panel.sessions), models_root(history))
 
 
+def today_panel(history: Path, data, ratio: float):
+    """A factor panel whose 20- and 120-session average turnovers take the session's own turnover at ``ratio`` (the
+    earlier sessions whole): what a decision at 13:50 reads. The factors built on those averages (eligibility, the
+    liquidity and the volume-surge factors, the tie-break) follow; the ones reading the day's turnover itself are left."""
+    from quant_platform.research.daily import ChipStore, FactorPanel, Industries, load_industries, market_closes
+    from quant_platform.research.model import models_root
+    from quant_platform.research.stock_rules import Panel
+
+    panel = Panel(data)
+    fp = FactorPanel(panel, Industries(load_industries(history)), ChipStore(history, panel.sessions, panel.symbols, panel.close),
+                     market_closes(history, panel.sessions), models_root(history))
+    today = np.nan_to_num(panel.turnover, nan=0.0)
+    fp.turnover_20 = fp.turnover_20 - (1 - ratio) * today / 20
+    fp.turnover_120 = fp.turnover_120 - (1 - ratio) * today / 120
+    return fp
+
+
 def table_ratios(research: Path, history: Path) -> np.ndarray:
     """Every listed stock-day the after-close orders kept a 13:50 table for: its turnover in the table ÷ the day's final
     turnover (1.0 where they agree; a stock with no final turnover left out)."""
@@ -112,14 +129,17 @@ def run(history: Path, research: Path, costs, count: int = SAMPLE, job=None, mod
     data, fp = load(history)
     # 2026-11-20: "table" draws each stock-day's ratio from what the 13:50 tables held; "scale" multiplies every
     # stock-day by their median (the bias alone, no noise); "noise" draws them divided by that median (the noise alone)
-    measured = table_ratios(research, history) if mode in ("table", "scale", "noise") else None
+    measured = table_ratios(research, history) if mode in ("table", "scale", "noise", "today") else None
     if mode == "scale":
         ratios = np.array([float(np.median(measured))])
     elif mode == "noise":
         ratios = measured / float(np.median(measured))
     else:
         ratios = measured
-    lagged = lagged_panel(history, data, ratios)
+    if mode == "today":           # 2026-11-20: only the deciding session's own turnover short, as at 13:50
+        lagged = today_panel(history, data, float(np.median(measured)))
+    else:
+        lagged = lagged_panel(history, data, ratios)
     rules = sample_rules(research, count)
     rows = []
     for number, (trial, rule) in enumerate(rules):

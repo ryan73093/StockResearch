@@ -95,7 +95,7 @@ SHORT = {
     "low_attention_20": "不過熱", "low_disposition_60": "未被處置",
     "low_beta_250": "低連動", "low_down_beta_250": "跌時低連動",
     "cgo_250": "處分效果", "beta_resid_mom_12": "扣連動殘差動能", "illiquidity_60": "流動性差", "pair_gap_20": "落後配對",
-    "low_iskew_250": "特質偏態低",
+    "low_iskew_250": "特質偏態低", "high_iskew_250": "特質偏態高",
     "eps_surprise": "盈餘驚喜", "eps_accel": "盈餘加速", "eps_streak": "盈餘連續成長",
 }
 

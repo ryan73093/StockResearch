@@ -368,6 +368,8 @@ BEHAVIOR_FACTORS = {
     "illiquidity_60": "流動性差（Amihud 2002：60 日平均每百萬元成交的漲跌幅）",
     "pair_gap_20": "落後配對股（Gatev-Goetzmann-Rouwenhorst 2006 配對交易的買方：比同產業走勢最像的那檔近 20 日落後多少）",
     "low_iskew_250": "特質偏態低（Boyer-Mitton-Vorkink 2010：250 日扣大盤後日報酬的偏態，反向）",
+    # 2026-11-20: the strength analysis found it reversed in Taiwan (the top fifth -5.1% a year): the other way round
+    "high_iskew_250": "特質偏態高（250 日扣大盤後日報酬的偏態；台灣 2015 年起偏態高的反而多賺，和美國文獻相反）",
 }
 CGO_WARMUP = 250             # sessions of a stock's own history before its reference price counts
 PAIR_WINDOW, PAIR_LEAST, PAIR_GAP = 250, 200, 20
@@ -1096,8 +1098,9 @@ class FactorPanel:
             return pair_gaps(logs, groups, starts)
         beta = rolling_beta(returns, market).shift(1)                 # as known before the session
         residual = returns - beta.mul(market, axis=0)
-        if factor == "low_iskew_250":
-            return (-residual.rolling(250, min_periods=200).skew()).to_numpy()
+        if factor in ("low_iskew_250", "high_iskew_250"):
+            skew = residual.rolling(250, min_periods=200).skew().to_numpy()
+            return -skew if factor == "low_iskew_250" else skew
         # beta_resid_mom_12: the residuals over sessions -251..-21, summed over their spread (as resid_mom_12)
         total = residual.rolling(QUALITY_WINDOW, min_periods=QUALITY_WINDOW // 2).sum()
         spread = residual.rolling(QUALITY_WINDOW, min_periods=QUALITY_WINDOW // 2).std()

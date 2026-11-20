@@ -16,7 +16,7 @@ FAMILY_FACTORS = {
                  "high_52w_count_60", "range_position_60", "industry_mom_6", "industry_mom_1", "cgo_250", "beta_resid_mom_12"),
     "反轉": ("reversal_1", "reversal_5d", "overnight_reversal_12", "industry_laggard_5", "pair_gap_20"),
     "低波動": ("low_volatility_60", "low_volatility_250", "low_max_return", "low_ivol_60", "low_beta_250", "low_down_beta_250",
-              "low_iskew_250"),
+              "low_iskew_250", "high_iskew_250"),
     "價值殖利率": ("dividend_yield", "earnings_yield", "book_to_price"),
     "籌碼": ("foreign_holding", "foreign_holding_change", "foreign_buy_20", "trust_buy_20", "margin_growth_20",
              "short_margin_ratio", "dealer_buy_20", "dealer_hedge_20", "trust_quarter_end",

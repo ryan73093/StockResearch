@@ -450,7 +450,7 @@ def main() -> int:
     parser.add_argument("--beta-max", type=float, default=0.8, help="scan-large --rerank-low-beta：開發期對 0050 的連動上限")
     parser.add_argument("--distinct-sets", action="store_true", help="scan-large：每組訊號只留最穩的一個設定再排（2026-11-19；2026-11-20 起一般搜尋的第二階段也可用）")
     parser.add_argument("--stage2-pool", type=int, default=600, help="scan-large：第二階段看過快篩的前幾個去挑最後名單（預設 600；2026-11-20）")
-    parser.add_argument("--volume-mode", default="lag", choices=("lag", "table", "scale", "noise"),
+    parser.add_argument("--volume-mode", default="lag", choices=("lag", "table", "scale", "noise", "today"),
                         help="volume-bias：lag＝每天的量換成前一天的；table＝照 13:50 表對正式資料的實測比例隨機打折；"
                              "scale＝全部乘實測的中位數（只有偏差）；noise＝實測比例除以中位數（只有雜訊）（2026-11-20）")
     parser.add_argument("--weightings", help="scan-large：配置方式（逗號分隔：equal、inverse_vol、inverse_beta；預設前兩種；2026-11-20）")
