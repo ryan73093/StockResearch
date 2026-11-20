@@ -29,15 +29,18 @@ def test_the_instructions_say_what_the_engine_does_and_give_no_hindsight():
     assert "headlines" not in runner.instructions(variants.BY_KEY["plain"])
 
 
-def test_a_list_too_short_is_refused_because_the_account_is_all_in_it():
+def test_a_short_list_passes_the_rules_and_is_filled_to_twenty_later():
+    """2026-11-20 (docs/research/results.md「代理人的硬規則依據」): a short list is no longer refused; the decision
+    fills it to 20 from the agreed stocks (llm_agent.complete)."""
     allowed = lambda code: True                                           # noqa: E731
     apart = lambda code: code                                             # noqa: E731
     seen = {str(2000 + i) for i in range(30)}
-    few = {"hold": [{"code": str(2000 + i), "reason": "x"} for i in range(variants.LEAST - 1)]}
-    assert "少於" in runner.validate(few, allowed, seen, apart)[2]
-    enough = {"hold": [{"code": str(2000 + i), "reason": "x"} for i in range(variants.LEAST)]}
-    assert runner.validate(enough, allowed, seen, apart)[2] is None
+    few = {"hold": [{"code": str(2000 + i), "reason": "x"} for i in range(3)]}
+    codes, _reasons, problem = runner.validate(few, allowed, seen, apart)
+    assert problem is None and codes == ["2000", "2001", "2002"]
     assert "沒有查過" in runner.validate({"hold": [{"code": "9999"}] * 5}, allowed, seen, apart)[2]
+    text = runner.instructions(variants.BY_KEY["info"])
+    assert "請選 20 檔" in text and "處置中的股票不能新買" in text
 
 
 def test_three_runs_vote_and_a_short_agreement_is_filled_from_the_first_run():
@@ -336,6 +339,9 @@ def test_company_events_are_read_only_from_the_session_after_their_announcement(
     assert "處置中：11-17～11-23（第 1 次" in text
     assert "2330 台積電｜電子零組件" in text and "最近沒有公告的公司事件" in text
     assert "9999：不是可交易的上市普通股" in text and desk.seen == {"6108", "2330"}
+    # the platform's own evidence on the kinds shown, once (insider sales have not been bad news since 2020-10)
+    assert text.count("平台自己研究過的結果") == 1 and "2020-10 起反過來 +0.31%" in text and "沒有顯著的超額" in text
+    assert "適合當排除條件" in text
 
 
 def test_news_lines_mark_a_figure_and_a_follow_up_report(tmp_path):

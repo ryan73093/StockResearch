@@ -24,6 +24,13 @@ existed are decided afterwards with that day's information and marked ``replayed
 2026-11-20 (research/agent_lab): rule 2 of the instructions said the money not placed stays in cash; the engine puts
 the whole account in the stocks chosen, each an equal part (``simulate_daily``: 1 / len(picks)). The sentence now says
 what happens (the prompt version changes with it; the 60 sessions judged start with this day's decision).
+
+2026-11-20 (使用者：看研究中交易的策略、勝率較高的再參考；設規則要有依據; version 1.1.0, before its first Haiku decision):
+the account holds 20 — the agent is asked for 20 and ``complete`` fills a shorter list from the agreed stocks — and no
+stock under the exchange's disposition is bought anew. The evidence is in docs/research/results.md「代理人的硬規則依據」:
+of the forward rules on the longest chained record, every one that held up against 0050 by both moneys holds 20 and
+none of the 104 holding 10 did; the platform's factor study found the attention and disposition lists fit as
+exclusions.
 """
 
 from __future__ import annotations
@@ -36,7 +43,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
-VERSION = "llm-agent-1.0.0"
+VERSION = "llm-agent-1.1.0"           # 2026-11-20: 20 held (filled from the agreed), no new buys under disposition
 OPERATION = "llm_agent"
 HOLD = 20
 STEPS = 8                     # tool rounds a day; the last step must be the decision
@@ -75,7 +82,7 @@ B. 做出決定：{"hold": [{"code": "2330", "reason": "30 字內的理由"}], "
 
 規則：
 1. 只能持有上市普通股（四位數代號、不是 00 開頭的 ETF），而且必須是你今天查到過或已經持有的股票。
-2. 同一產業最多 6 檔；最多 20 檔，可以少於 20 檔——帳戶的錢會全部平均放在你選的股票上、不會留現金，選得少每一檔的比重就大。
+2. 持有 20 檔：請選 20 檔，同一產業最多 6 檔；不夠 20 檔時，程式照規則共識的順序補滿。帳戶的錢平均放在這 20 檔、不會留現金。處置中的股票不能新買（已經持有的可以續抱）。
 3. 你的價值在於把各種資訊合起來判斷：量化規則的共識、因子、連動（連動高的股票大盤跌時跌更多）、新聞、你自己過去的對錯。
    不要只照某一個名次排，也不要每天大幅換股（每次買賣都有費用）。
 4. 最多查 7 次，第 8 步一定要做出決定。資料夠了就早點決定。
@@ -377,15 +384,59 @@ class Desk:
 TOOLS = ("market", "consensus", "screen", "card", "portfolio", "journal")
 
 
-def control_choice(agreed: list[str], held: list[str]) -> list[str]:
-    """The twin: holdings still among the agreed stocks, then the most agreed, up to HOLD."""
+def disposition(base: str | Path, day: date) -> set[str]:
+    """The stocks under the exchange's disposition on ``day`` as known before it: announced on an earlier day (after
+    a close), still running (chips/AlertDisposition.parquet, research/history/alerts.py). 2026-11-20: no agent buys
+    them anew (docs/research/results.md「代理人的硬規則依據」)."""
+    import pandas as pd
+
+    path = Path(base) / "chips" / "AlertDisposition.parquet"
+    if not path.is_file():
+        return set()
+    try:
+        frame = pd.read_parquet(path, columns=["date", "code", "end"])
+    except Exception:  # noqa: BLE001 - no table: nothing is blocked
+        return set()
+    announced, ends = pd.to_datetime(frame["date"], errors="coerce"), pd.to_datetime(frame["end"], errors="coerce")
+    stamp = pd.Timestamp(day)
+    return set(frame.loc[(announced < stamp) & (ends >= stamp), "code"].astype(str))
+
+
+def control_choice(agreed: list[str], held: list[str], blocked: set[str] | frozenset = frozenset()) -> list[str]:
+    """The twin: holdings still among the agreed stocks, then the most agreed, up to HOLD; ``blocked`` stocks are
+    not bought anew (2026-11-20: under disposition), holdings are kept as usual."""
     kept = [code for code in held if code in agreed][:HOLD]
     for code in agreed:
         if len(kept) >= HOLD:
             break
-        if code not in kept:
+        if code not in kept and code not in blocked:
             kept.append(code)
     return kept
+
+
+def complete(codes: list[str], agreed: list[str], held: list[str], blocked: set[str], industry,
+             most: int = HOLD) -> tuple[list[str], list[str], list[str]]:
+    """2026-11-20 (使用者：設規則要有依據; docs/research/results.md「代理人的硬規則依據」): an agent's list as the account
+    will hold it — (codes, filled, dropped). A new buy of a ``blocked`` stock is dropped (a holding stays); the list
+    is filled to ``most`` from the agreed stocks in their order, never past a third of the places in one industry.
+    Evidence: every forward rule that held up holds 20; none of the 104 holding 10 did."""
+    held_set = set(held)
+    dropped = [code for code in codes if code in blocked and code not in held_set]
+    output = [code for code in codes if code not in dropped][:most]
+    limit = max(1, int(most * INDUSTRY_SHARE))
+    counts: dict[str, int] = {}
+    for code in output:
+        counts[industry(code)] = counts.get(industry(code), 0) + 1
+    filled = []
+    for code in agreed:
+        if len(output) >= most:
+            break
+        if code in output or code in blocked or counts.get(industry(code), 0) >= limit:
+            continue
+        output.append(code)
+        filled.append(code)
+        counts[industry(code)] = counts.get(industry(code), 0) + 1
+    return output, filled, dropped
 
 
 def validate(answer: dict, allowed, seen: set[str], industry) -> tuple[list[str], list[str], str | None]:
@@ -456,12 +507,13 @@ def decide(fp, base: Path, research: Path, day: date, client=None, now: datetime
     held_control = list((previous[-1].get("control") or {}).get("hold") or []) if previous else []
     desk = Desk(fp, base, research, day, held_llm, previous)
     agreed = [code for code, _count, _families in desk.agreed(CONSENSUS_TOP)]
+    blocked = disposition(base, day)
     record = {"date": day.isoformat(), "version": VERSION, "prompt_version": PROMPT_VERSION,
               # 2026-11-20 (D-051): which model decided — gpt-6-luna until 11/19, Claude Haiku 5.5 from 11/20
               "model": getattr(client, "model", None),
               "decided_at": (now or datetime.now(TAIPEI)).isoformat(timespec="seconds"),
               "panel": [family for family, _rule in desk.panel()], "agreed": agreed,
-              "control": {"hold": control_choice(agreed, held_control)}}
+              "control": {"hold": control_choice(agreed, held_control, blocked)}}
     if replayed:
         record["replayed"] = True
     llm: dict[str, object] = {"hold": held_llm, "fallback": "沒有呼叫模型"}
@@ -476,9 +528,14 @@ def decide(fp, base: Path, research: Path, day: date, client=None, now: datetime
                     llm = {"hold": held_llm, "fallback": f"沿用前一天：{problem}", "raw": answer, "trace": trace,
                            "cost_usd": cost}
                 else:
-                    llm = {"hold": codes, "reasons": dict(zip(codes, reasons, strict=True)),
+                    named = dict(zip(codes, reasons, strict=True))
+                    codes, filled, dropped = complete(codes, agreed, held_llm, blocked,
+                                                      lambda code: fp.industry(f"{code}.TW"))
+                    llm = {"hold": codes, "reasons": {code: named.get(code, "程式依規則共識的順序補滿") for code in codes},
                            "view": str(answer.get("view", ""))[:120], "lesson": str(answer.get("lesson", ""))[:120],
                            "trace": trace, "cost_usd": cost}
+                    if filled or dropped:            # 2026-11-20: what the program added or took out, kept apart
+                        llm.update(filled=filled, dropped=dropped)
         except Exception as error:  # noqa: BLE001 - a failed call keeps yesterday's choice, recorded
             llm = {"hold": held_llm, "fallback": f"沿用前一天：{str(error)[:120]}"}
     record["llm"] = llm

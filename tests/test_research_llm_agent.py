@@ -82,3 +82,34 @@ def test_a_choice_ranks_its_stocks_from_the_next_session(tmp_path):
     assert np.isnan(scores[:2]).all() and scores[2, 1] > scores[2, 0]
     assert np.isnan(llm_agent.scores(fp, tmp_path, "control")[2, 1])
     assert llm_agent.first_decision(tmp_path) == "2026-11-17"
+
+
+def test_a_short_list_is_filled_to_twenty_and_a_stock_under_disposition_is_not_bought_anew():
+    """2026-11-20 (使用者：看研究中交易的策略再參考；設規則要有依據): every forward rule that held up holds 20, none of
+    the 104 holding 10 did; the disposition list fits as an exclusion (docs/research/results.md「代理人的硬規則依據」)."""
+    agreed = [str(3000 + i) for i in range(30)]
+    industry = lambda code: "半導體" if code in ("3000", "3001", "3002", "3003", "3004", "3005", "3006") else code  # noqa: E731
+    codes, filled, dropped = llm_agent.complete(["2330", "9999"], agreed, held=["9999"], blocked={"2330", "9999", "3007"},
+                                                industry=industry)
+    assert dropped == ["2330"] and codes[0] == "9999"                     # a new buy blocked; a holding kept
+    assert len(codes) == 20 and "3007" not in codes                       # filled from the agreed, never a blocked one
+    assert [code for code in codes if industry(code) == "半導體"] == ["3000", "3001", "3002", "3003", "3004", "3005"]
+    assert filled == codes[1:]
+    already = [str(4000 + i) for i in range(20)]
+    assert llm_agent.complete(already, agreed, [], set(), lambda code: code) == (already, [], [])
+    twin = llm_agent.control_choice(["5000", "5001", "5002"], held=["5001"], blocked={"5001", "5002"})
+    assert twin == ["5001", "5000"]                                       # the holding stays; the blocked one not bought
+
+
+def test_the_disposition_list_is_known_only_after_its_announcement(tmp_path):
+    import pandas as pd
+
+    (tmp_path / "chips").mkdir()
+    pd.DataFrame([{"date": date(2026, 11, 16), "code": "6108", "start": date(2026, 11, 17), "end": date(2026, 11, 23), "order": 1},
+                  {"date": date(2026, 11, 20), "code": "2466", "start": date(2026, 11, 23), "end": date(2026, 12, 4), "order": 2},
+                  {"date": date(2026, 11, 2), "code": "1101", "start": date(2026, 11, 3), "end": date(2026, 11, 14), "order": 1}]
+                 ).to_parquet(tmp_path / "chips" / "AlertDisposition.parquet")
+    assert llm_agent.disposition(tmp_path, date(2026, 11, 20)) == {"6108"}       # announced that day: tonight's news
+    assert llm_agent.disposition(tmp_path, date(2026, 11, 23)) == {"6108", "2466"}
+    assert llm_agent.disposition(tmp_path / "missing", date(2026, 11, 20)) == set()
+    assert "請選 20 檔" in llm_agent.INSTRUCTIONS and llm_agent.VERSION == "llm-agent-1.1.0"

@@ -43,6 +43,15 @@ EVENT_DAYS = 60                # insider filings and attention listings looked b
 BUYBACK_DAYS = 120             # buyback programs resolved within
 BUYBACK_PURPOSE = {"1": "轉讓給員工", "2": "給可轉債或認股權轉換", "3": "維護公司信用與股東權益"}
 ON_MARKET = ("一般交易", "盤後", "鉅額")      # an insider's transfer on the market is a sale; a gift or trust is not
+# 2026-11-20 (使用者：設規則要有依據): what the platform's own studies found of each kind of event
+# (docs/research/results.md「公司公告的兩個新因子」, 現行結論「因子」), shown once under the events so an agent weighs
+# them by evidence, not by how they sound — on 11/20 Haiku vetoed a stock for its insiders' transfers
+EVIDENCE = {
+    "庫藏股": "庫藏股：董事會決議買回之後 20 個交易日沒有顯著的超額（2015-06～2020-10 +0.40%，t＝1.27；2020-10 起 −0.06%）。",
+    "內部人申報轉讓": "內部人在市場賣：2015-06～2020-10 之後 20 個交易日 −0.51%（t＝−5.44），但 2020-10 起反過來 +0.31%（t＝2.2）、"
+                     "2024 起 +0.57%——近年不是利空，平台沒有拿它當排除條件。",
+    "注意股": "注意股與處置股：平台的因子研究認為適合當排除條件；處置中的股票不能新買。",
+}
 
 
 def decision_moment(day: date) -> datetime:
@@ -363,15 +372,19 @@ class LabDesk(Desk):
 
     def tool_events(self, args: dict) -> str:
         codes = [str(code).strip() for code in (args.get("codes") or [])][:8]
-        blocks = []
+        blocks, kinds = [], set()
         for code in codes:
             if not self.allowed(code):
                 blocks.append(f"{code}：不是可交易的上市普通股，不能持有。")
                 continue
             self.seen.add(code)
             lines = self.company_events(code)
+            kinds |= {kind for kind in EVIDENCE for line in lines
+                      if line.startswith(kind) or (kind == "注意股" and line.startswith("處置"))}
             blocks.append(f"{self.label(code)}｜{self.fp.industry(code + '.TW')}\n"
                           + ("\n".join(f"  {line}" for line in lines) if lines else "  最近沒有公告的公司事件"))
+        if kinds:                                     # the platform's evidence on the kinds shown, once
+            blocks.append("平台自己研究過的結果：\n" + "\n".join(f"  {EVIDENCE[kind]}" for kind in EVIDENCE if kind in kinds))
         return "\n".join(blocks) if blocks else "沒有給股票代號。"
 
     def tool_check(self, args: dict) -> str:

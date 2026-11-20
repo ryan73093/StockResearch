@@ -10,7 +10,10 @@ FIRST_TOOLS = ("market", "consensus", "screen", "card", "portfolio", "journal") 
 # 2026-11-20 (A2, before any design's first real decision): the company events (buyback, insider filings, pledges,
 # the exchange's attention and disposition lists)
 LAB_TOOLS = ("headlines", "mood", "lessons", "review", "check", "events")
-MOST, LEAST = 20, 5              # stocks held: the account is always all in the stocks chosen, each an equal part
+# MOST: the account holds MOST, each an equal part — a shorter list is filled from the agreed stocks (2026-11-20,
+# llm_agent.complete; evidence in docs/research/results.md「代理人的硬規則依據」). LEAST: a vote whose runs agree on
+# fewer is first filled from its first run.
+MOST, LEAST = 20, 5
 VETO_MOST = 6                    # stocks kept out at once
 VETO_NEW, VETO_SESSIONS = 2, 10  # new vetoes a day; a vetoed stock stays out this many decisions (2026-11-20: the
 #                                  replay vetoed 5.1 stocks a day afresh, 578 orders against the twin's 322)
