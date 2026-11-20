@@ -97,6 +97,7 @@ SHORT = {
     "cgo_250": "處分效果", "beta_resid_mom_12": "扣連動殘差動能", "illiquidity_60": "流動性差", "pair_gap_20": "落後配對",
     "low_iskew_250": "特質偏態低", "high_iskew_250": "特質偏態高", "short_cover_ahead": "融券回補前",
     "eps_surprise": "盈餘驚喜", "eps_accel": "盈餘加速", "eps_streak": "盈餘連續成長",
+    "low_asset_growth": "資產成長低", "gp_assets": "毛利÷總資產",
 }
 
 

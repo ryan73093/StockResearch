@@ -52,6 +52,15 @@ EARNINGS_FACTORS = {
     "eps_accel": "盈餘加速（這季比去年同季的增減，減上一季的增減，÷ 過去 8 季增減的標準差）",
     "eps_streak": "盈餘連續成長（每股盈餘連續幾季比去年同季高，最多 8 季）",
 }
+# 2026-11-20 (使用者：繼續，還有什麼; docs/research/results.md「新方法：資產成長與毛利÷總資產」, written before the
+# run): two balance-sheet anomalies the platform never measured — the investment factor (firms growing their assets
+# slowly earn more: Cooper, Gulen & Schill 2008; Fama-French CMA; Hou, Xue & Zhang I/A) and gross profitability
+# (Novy-Marx 2013). Rule factors outside FACTOR_LABELS and outside EARNINGS_FACTORS (model O's feature list reads
+# that one), so no model, robot or search list changes until they are judged
+BALANCE_FACTORS = {
+    "low_asset_growth": "資產成長低（總資產比去年同季增加的比例，反向；投資因子）",
+    "gp_assets": "毛利÷總資產（近四季毛利÷總資產；Novy-Marx 的獲利因子）",
+}
 SURPRISE_QUARTERS = 8        # eps_surprise: the earlier seasonal changes its expectation and spread come from
 SURPRISE_LEAST = 4           # at least this many of them
 STREAK_MOST = 8
@@ -200,7 +209,7 @@ def factor_table_as_seen(table: pd.DataFrame) -> pd.DataFrame:
         if rows:
             output.append(pd.concat(rows))
     if not output:
-        return pd.DataFrame(columns=["code", "available", *STATEMENT_FACTORS, *EARNINGS_FACTORS])
+        return pd.DataFrame(columns=["code", "available", *STATEMENT_FACTORS, *EARNINGS_FACTORS, *BALANCE_FACTORS])
     result = pd.concat(output)
     result["available"] = pd.to_datetime(result["available"]).dt.date
     return result
@@ -218,6 +227,7 @@ def factor_table(frame: pd.DataFrame) -> pd.DataFrame:
         four = lambda column, quarters=full: quarters[column].rolling(4, min_periods=4).sum()     # noqa: E731
         with np.errstate(divide="ignore", invalid="ignore"):
             equity = full["equity"].where(full["equity"] > 0)
+            assets = full["assets"].where(full["assets"] > 0)
             revenue4 = four("revenue").where(four("revenue") > 0)
             margin = full["operating_income"] / full["revenue"].where(full["revenue"] > 0)
             previous_eps = full["eps"].shift(4)
@@ -235,11 +245,13 @@ def factor_table(frame: pd.DataFrame) -> pd.DataFrame:
                 "eps_surprise": ((change - earlier.mean()) / spread.where(spread > 0)).clip(-10, 10),
                 "eps_accel": ((change - change.shift(1)) / spread.where(spread > 0)).clip(-10, 10),
                 "eps_streak": run.clip(upper=STREAK_MOST).where(change.notna()),
+                "low_asset_growth": -(assets / assets.shift(4) - 1).clip(-5, 5),
+                "gp_assets": four("gross_profit") / assets,
             }, index=full.index)
         factors["code"], factors["available"] = full["code"], full["available"]
         output.append(factors[full["code"].notna()])
     return (pd.concat(output) if output
-            else pd.DataFrame(columns=["code", "available", *STATEMENT_FACTORS, *EARNINGS_FACTORS]))
+            else pd.DataFrame(columns=["code", "available", *STATEMENT_FACTORS, *EARNINGS_FACTORS, *BALANCE_FACTORS]))
 
 
 class FundamentalStore:

@@ -184,7 +184,7 @@ from quant_platform.research.chips import (
     SHORT_FACTORS,
     ChipStore,
 )
-from quant_platform.research.fundamentals import EARNINGS_FACTORS, STATEMENT_FACTORS, FundamentalStore
+from quant_platform.research.fundamentals import BALANCE_FACTORS, EARNINGS_FACTORS, STATEMENT_FACTORS, FundamentalStore
 
 # 2026-10-06: five quarterly statement factors (research/fundamentals.py), dated by the filing deadline
 # 2026-10-10 (Taiwan-quant review, reports/台股量化 開源專案與實證.md): three trend-quality measures over the
@@ -357,7 +357,7 @@ BETA_WINDOW, BETA_LEAST, DOWN_LEAST = 250, 200, 60
 # 2026-10-28: EARNINGS_FACTORS (fundamentals.py) are rule factors but not in FACTOR_LABELS, whose list the models,
 # the robots, factor momentum and the searches are built from
 RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FACTORS, **META_FACTORS, **NEUTRAL_FACTORS,
-                **EARNINGS_FACTORS, **BETA_FACTORS}
+                **EARNINGS_FACTORS, **BETA_FACTORS, **BALANCE_FACTORS}
 
 
 # 2026-11-20 (使用者：繼續 其他方法研究; docs/research/results.md「新方法：處分效果、扣連動的殘差動能、流動性、配對、偏態」):
@@ -860,7 +860,7 @@ class FactorPanel:
             from quant_platform.research.model import MODELS, scores
 
             return scores(self, Path(self.models) / MODELS[factor]["version"])      # sessions × symbols
-        if factor in STATEMENT_FACTORS or factor in EARNINGS_FACTORS:
+        if factor in STATEMENT_FACTORS or factor in EARNINGS_FACTORS or factor in BALANCE_FACTORS:
             # the statements sit next to the chip files: the store follows the chip store's history
             if self.chips is None:
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
@@ -3087,7 +3087,8 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         factor_names = list(dict.fromkeys([*factor_names, *payload["factor_momentum"]]))
     if any(name in ZERO_FILLED for name in factor_names):
         payload["paid_fill"] = ZERO_FILL_VERSION
-    if any(name in STATEMENT_FACTORS or name in EARNINGS_FACTORS for name in factor_names):  # the statements too
+    if any(name in STATEMENT_FACTORS or name in EARNINGS_FACTORS or name in BALANCE_FACTORS     # the statements too
+           for name in factor_names):
         from quant_platform.research.fundamentals import digest as statements_digest
 
         payload["statements"] = statements_digest(history, RECENT_END)
