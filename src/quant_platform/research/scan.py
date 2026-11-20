@@ -56,6 +56,8 @@ CORRELATION_LIMIT = 0.9
 # overlays; 2026-10-19 the insiders' notices and the buybacks failed their registered event study (research_method §7):
 # features for the models (model H), not signals for the search
 LEFT_OUT = ("ml_gbm_q_nolong", "ml_gbm_q_noshort", "ml_gbm_q_nobranch",          # 2026-11-19: measurements, not signals
+            # 2026-11-20: the five literature factors wait for their strength analysis (as the paid tables did)
+            "cgo_250", "beta_resid_mom_12", "illiquidity_60", "pair_gap_20", "low_iskew_250",
             "revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "dl_risk", "dl_risk2", "low_insider_sell_60",
             "buyback_60", "pledge_heavy", "low_pledge",     # 2026-10-20: the pledges wait for their event study
             # 2026-10-21: the holder brackets and the paid FinMind tables waited for their strength analysis; 10-22 the
@@ -92,6 +94,8 @@ SHORT = {
     "dealer_buy_20": "自營商自行買超", "dealer_hedge_20": "自營商避險買超",
     "low_attention_20": "不過熱", "low_disposition_60": "未被處置",
     "low_beta_250": "低連動", "low_down_beta_250": "跌時低連動",
+    "cgo_250": "處分效果", "beta_resid_mom_12": "扣連動殘差動能", "illiquidity_60": "流動性差", "pair_gap_20": "落後配對",
+    "low_iskew_250": "特質偏態低",
     "eps_surprise": "盈餘驚喜", "eps_accel": "盈餘加速", "eps_streak": "盈餘連續成長",
 }
 
@@ -100,9 +104,10 @@ def signals(models_root: Path | None = None) -> list[str]:
     from quant_platform.research.daily import FACTOR_LABELS, MODEL_FACTORS
 
     failed = failed_models(models_root or Path("instance") / "research" / "models")
-    from quant_platform.research.daily import BETA_FACTORS          # 2026-11-19: rule factors outside FACTOR_LABELS
+    from quant_platform.research.daily import BEHAVIOR_FACTORS, BETA_FACTORS   # 2026-11-20: rule factors outside FACTOR_LABELS
 
-    return [name for name in (*FACTOR_LABELS, *MODEL_FACTORS, *BETA_FACTORS) if name not in LEFT_OUT and name not in failed]
+    return [name for name in (*FACTOR_LABELS, *MODEL_FACTORS, *BETA_FACTORS, *BEHAVIOR_FACTORS)
+            if name not in LEFT_OUT and name not in failed]
 
 
 def failed_models(models_root: Path) -> set[str]:

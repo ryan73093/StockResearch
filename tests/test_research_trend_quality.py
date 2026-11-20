@@ -176,3 +176,40 @@ def test_rolling_beta_and_the_beta_on_the_days_the_market_fell():
     cut = rolling_beta(frame.iloc[:300], market.iloc[:300], window=250, least=200)
     assert np.allclose(cut.iloc[-1], beta.iloc[299])                 # the same with the later sessions cut off
     assert not set(BETA_FACTORS) & set(FACTOR_LABELS)                # no model or robot list changes
+
+
+def test_the_reference_price_follows_the_turnover_and_the_pair_gap_buys_the_laggard():
+    """2026-11-20: Grinblatt and Han's reference price, and the long side of a pair."""
+    prices = np.array([[10.0], [12.0], [12.0], [12.0]])
+    share = np.array([[0.5], [0.5], [0.0], [1.0]])
+    reference = daily.reference_prices(prices, share, warmup=1)
+    assert np.isnan(reference[0, 0])                                   # nothing known before the first session
+    assert reference[1, 0] == pytest.approx(10.0)                      # the first price
+    assert reference[2, 0] == pytest.approx(0.5 * 12 + 0.5 * 10)       # half the holders bought at 12
+    assert reference[3, 0] == pytest.approx(11.0)                      # nobody traded: unchanged
+    rng = np.random.default_rng(5)
+    common = rng.normal(0, 0.01, 300)
+    logs = np.column_stack([common + rng.normal(0, 0.002, 300), common + rng.normal(0, 0.002, 300),
+                            rng.normal(0, 0.01, 300)])
+    logs[-20:, 0] -= 0.01                                              # the first one trails its twin lately
+    gaps = daily.pair_gaps(logs, {"x": [0, 1, 2]}, [0, 280], window=250, least=200, gap=20)
+    assert np.isnan(gaps[:280]).all()                                  # no month start with a year behind it before
+    assert gaps[-1, 0] > 0 > gaps[-1, 1]                               # the laggard ranks high, its twin low
+    cut = daily.pair_gaps(logs[:290], {"x": [0, 1, 2]}, [0, 280], window=250, least=200, gap=20)
+    assert np.allclose(cut[285], gaps[285], equal_nan=True)            # later sessions change nothing before them
+
+
+def test_the_literature_factors_from_prices_alone_are_causal():
+    """2026-11-20: the residual momentum, the skewness and the illiquidity use nothing after the session."""
+    rng = np.random.default_rng(9)
+    days = weekdays(date(2022, 1, 3), date(2024, 6, 28))
+    closes = {f"{2301 + number}.TW": dict(zip(days, 20 * np.cumprod(1 + rng.normal(0.0003, 0.015, len(days)))))
+              for number in range(5)}
+    fp = FactorPanel(Panel(market(days, closes)))
+    later = {symbol: {**series, **{day: 1.0 for day in days[-15:]}} for symbol, series in closes.items()}
+    changed = FactorPanel(Panel(market(days, later)))
+    at = len(days) - 16
+    for name in ("beta_resid_mom_12", "low_iskew_250", "illiquidity_60"):
+        a, b = fp.matrix(name)[:, at], changed.matrix(name)[:, at]
+        assert np.isfinite(a).any(), name
+        assert np.allclose(a, b, equal_nan=True), name

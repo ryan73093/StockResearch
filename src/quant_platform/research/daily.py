@@ -359,6 +359,77 @@ RULE_FACTORS = {**FACTOR_LABELS, **MODEL_FACTORS, **TECH_FACTORS, **CONSENSUS_FA
                 **EARNINGS_FACTORS, **BETA_FACTORS}
 
 
+# 2026-11-20 (使用者：繼續 其他方法研究; docs/research/results.md「新方法：處分效果、扣連動的殘差動能、流動性、配對、偏態」):
+# five factors from the literature that none of the platform's measured. Rule factors outside FACTOR_LABELS (as the
+# beta and earnings families): no model, robot or earlier search list changes.
+BEHAVIOR_FACTORS = {
+    "cgo_250": "資本利得懸置（處分效果，Grinblatt-Han 2005：收盤價比成交量加權的平均持有成本高多少）",
+    "beta_resid_mom_12": "扣大盤連動的殘差動能（Blitz-Huij-Martens 2011：12 個月扣最近 1 個月，扣掉 beta×大盤後的累積報酬÷標準差）",
+    "illiquidity_60": "流動性差（Amihud 2002：60 日平均每百萬元成交的漲跌幅）",
+    "pair_gap_20": "落後配對股（Gatev-Goetzmann-Rouwenhorst 2006 配對交易的買方：比同產業走勢最像的那檔近 20 日落後多少）",
+    "low_iskew_250": "特質偏態低（Boyer-Mitton-Vorkink 2010：250 日扣大盤後日報酬的偏態，反向）",
+}
+CGO_WARMUP = 250             # sessions of a stock's own history before its reference price counts
+PAIR_WINDOW, PAIR_LEAST, PAIR_GAP = 250, 200, 20
+
+
+def reference_prices(prices: np.ndarray, share: np.ndarray, warmup: int = CGO_WARMUP) -> np.ndarray:
+    """sessions × symbols: Grinblatt and Han's reference price before each session — RP(t) = V(t-1) P(t-1) +
+    (1 - V(t-1)) RP(t-1), V the share of the company traded that session (0..1): what the holders paid on average,
+    each day's buyers replacing that share of them. NaN until ``warmup`` sessions of the stock's prices."""
+    reference = np.full(prices.shape, np.nan)
+    current = np.full(prices.shape[1], np.nan)
+    seen = np.zeros(prices.shape[1])
+    for t in range(prices.shape[0]):
+        reference[t] = np.where(seen >= warmup, current, np.nan)
+        price = prices[t]
+        known = np.isfinite(price)
+        fresh = known & np.isnan(current)
+        moved = known & ~fresh
+        traded = np.clip(np.nan_to_num(share[t], nan=0.0), 0.0, 1.0)
+        current = np.where(fresh, price, current)
+        current = np.where(moved, traded * price + (1 - traded) * current, current)
+        seen += known
+    return reference
+
+
+def pair_gaps(log_returns: np.ndarray, groups: dict[str, list[int]], month_starts: list[int],
+              window: int = PAIR_WINDOW, least: int = PAIR_LEAST, gap: int = PAIR_GAP) -> np.ndarray:
+    """sessions × symbols: how far each stock's last ``gap`` sessions trail its pair's, in units of that gap's usual
+    size — the pair being, from each month's first session, the stock of its industry whose daily returns moved most
+    like its own over the ``window`` sessions before (at least ``least`` of them both). NaN without a pair."""
+    import pandas as pd
+
+    sessions, symbols = log_returns.shape
+    output = np.full((sessions, symbols), np.nan)
+    summed = pd.DataFrame(log_returns).rolling(gap, min_periods=gap).sum().to_numpy()
+    bounds = list(month_starts) + [sessions]
+    for start, end in zip(bounds, bounds[1:]):
+        if start < window:
+            continue
+        past = log_returns[start - window:start]
+        for columns in groups.values():
+            if len(columns) < 2:
+                continue
+            block = pd.DataFrame(past[:, columns])
+            corr = block.corr(min_periods=least).to_numpy().copy()        # pandas may hand back a read-only view
+            np.fill_diagonal(corr, np.nan)
+            for place, column in enumerate(columns):
+                row = corr[place]
+                if not np.isfinite(row).any():
+                    continue
+                other = columns[int(np.nanargmax(row))]
+                spread = past[:, column] - past[:, other]
+                size = np.nanstd(spread) * np.sqrt(gap)
+                if not np.isfinite(size) or size <= 0:
+                    continue
+                output[start:end, column] = (summed[start:end, column] - summed[start:end, other]) / size
+    return -output
+
+
+RULE_FACTORS.update(BEHAVIOR_FACTORS)          # 2026-11-20: rule factors too
+
+
 def rolling_beta(returns: pd.DataFrame, market: pd.Series, window: int = BETA_WINDOW, least: int = BETA_LEAST,
                  down_only: bool = False, down_least: int = DOWN_LEAST) -> pd.DataFrame:
     """sessions × symbols: each stock's beta to ``market`` over the ``window`` sessions to the session (both day
@@ -894,6 +965,8 @@ class FactorPanel:
             return self._trend_quality(factor)
         if factor in RAW_V2:
             return self._raw_v2(factor)
+        if factor in BEHAVIOR_FACTORS:          # 2026-11-20: the five from the literature
+            return self._behavior(factor)
         if factor in BETA_FACTORS:              # 2026-11-19: low beta ranks high
             returns = p.pct_change(fill_method=None)
             market = (pd.Series(self.market).pct_change(fill_method=None) if self.market is not None
@@ -993,6 +1066,42 @@ class FactorPanel:
             gaps = pd.DataFrame(np.log(adjusted_open / previous).T)
         moved = gaps.rolling(QUALITY_WINDOW, min_periods=QUALITY_WINDOW // 2).sum().shift(QUALITY_SKIP)
         return (-moved).to_numpy()
+
+    def _behavior(self, factor: str) -> np.ndarray:
+        """sessions × symbols; BEHAVIOR_FACTORS, each from data up to the session (the momentum one to 21 before)."""
+        p = self._prices
+        returns = p.pct_change(fill_method=None)
+        market = (pd.Series(self.market).pct_change(fill_method=None) if self.market is not None
+                  else returns.mean(axis=1))
+        market = pd.Series(np.asarray(market, dtype=float), index=returns.index)
+        if factor == "cgo_250":
+            with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                value = np.exp(self.matrix("market_cap").T)              # shares × the previous close, NT$
+                share = self.panel.turnover.T / value
+            reference = reference_prices(p.to_numpy(dtype=float), share)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                return (p.to_numpy(dtype=float) - reference) / p.to_numpy(dtype=float)
+        if factor == "illiquidity_60":
+            traded = pd.DataFrame(self.panel.turnover.T) / 1e6
+            return (returns.abs() / traded.where(traded > 0)).rolling(60, min_periods=40).mean().to_numpy()
+        if factor == "pair_gap_20":
+            groups: dict[str, list[int]] = defaultdict(list)
+            for column, symbol in enumerate(self.symbols):
+                groups[self.industry(symbol)].append(column)
+            groups.pop("未分類", None)
+            starts = [index for index, day in enumerate(self.sessions)
+                      if index == 0 or day.month != self.sessions[index - 1].month]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                logs = np.log1p(returns.to_numpy(dtype=float))
+            return pair_gaps(logs, groups, starts)
+        beta = rolling_beta(returns, market).shift(1)                 # as known before the session
+        residual = returns - beta.mul(market, axis=0)
+        if factor == "low_iskew_250":
+            return (-residual.rolling(250, min_periods=200).skew()).to_numpy()
+        # beta_resid_mom_12: the residuals over sessions -251..-21, summed over their spread (as resid_mom_12)
+        total = residual.rolling(QUALITY_WINDOW, min_periods=QUALITY_WINDOW // 2).sum()
+        spread = residual.rolling(QUALITY_WINDOW, min_periods=QUALITY_WINDOW // 2).std()
+        return (total / spread.where(spread > 0)).shift(QUALITY_SKIP).to_numpy()
 
     def _trend_quality(self, factor: str) -> np.ndarray:
         """sessions × symbols; every value uses sessions -251..-21 only (TREND_QUALITY)."""

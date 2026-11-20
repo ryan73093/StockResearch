@@ -13,9 +13,10 @@ from __future__ import annotations
 FAMILY_FACTORS = {
     "趨勢動能": ("trend_200", "momentum_12_1", "momentum_6", "momentum_3", "high_52w", "breakout_55",
                  "ma_cross_20_60", "macd_hist", "rsi_14", "kd_k", "bollinger_b", "fip_12", "imom_12", "resid_mom_12",
-                 "high_52w_count_60", "range_position_60", "industry_mom_6", "industry_mom_1"),
-    "反轉": ("reversal_1", "reversal_5d", "overnight_reversal_12", "industry_laggard_5"),
-    "低波動": ("low_volatility_60", "low_volatility_250", "low_max_return", "low_ivol_60", "low_beta_250", "low_down_beta_250"),
+                 "high_52w_count_60", "range_position_60", "industry_mom_6", "industry_mom_1", "cgo_250", "beta_resid_mom_12"),
+    "反轉": ("reversal_1", "reversal_5d", "overnight_reversal_12", "industry_laggard_5", "pair_gap_20"),
+    "低波動": ("low_volatility_60", "low_volatility_250", "low_max_return", "low_ivol_60", "low_beta_250", "low_down_beta_250",
+              "low_iskew_250"),
     "價值殖利率": ("dividend_yield", "earnings_yield", "book_to_price"),
     "籌碼": ("foreign_holding", "foreign_holding_change", "foreign_buy_20", "trust_buy_20", "margin_growth_20",
              "short_margin_ratio", "dealer_buy_20", "dealer_hedge_20", "trust_quarter_end",
@@ -30,7 +31,7 @@ FAMILY_FACTORS = {
                  "low_insider_sell_60", "buyback_60", "low_pledge", "pledge_heavy"),
     "營收財報": ("revenue_yoy", "revenue_yoy_3m", "revenue_accel", "roe_ttm", "gross_margin", "operating_margin_change", "eps_growth", "eps_surprise", "eps_accel", "eps_streak",
                  "low_debt"),
-    "成交量規模": ("liquidity", "volume_surge", "market_cap", "low_pv_corr_20"),
+    "成交量規模": ("liquidity", "volume_surge", "market_cap", "low_pv_corr_20", "illiquidity_60"),
 }
 FACTOR_FAMILY = {factor: family for family, factors in FAMILY_FACTORS.items() for factor in factors}
 OPPOSITE = {"趨勢動能": "反轉", "反轉": "趨勢動能"}
