@@ -2,6 +2,23 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-11-20 20:57 — 舊的資料庫備份四份（56.65 GiB）從 C 槽搬到 D 槽；下載資料與資料庫放哪裡查清楚
+
+- 起因：使用者 11/20 問下載的資料（他說的「FiveMy」，我當作 FinMind）是不是都存在資料庫、是不是 PostgreSQL、是不是在 D 槽，並說不要把一大堆資料都存在 C 槽。查完回報後問「要我把 C 槽的舊備份搬到 D 槽嗎」，使用者答「好，搬舊備份」（D-054）。
+- 查到（程式輸出，只讀）：
+  - 主資料庫是 SQLite：`DATABASE_URL` 種類 sqlite；`instance/quant_platform.db` 0.607 GiB（WAL）、53 張表共 1,084,232 筆，`market_bars` 台股日線 839,159 筆（2020-01-02～2026-10-06）、美股日線 33,747 筆（到 2026-11-19）。`docs/rules/data.md` 寫約 9.6 GiB，已改。
+  - 本機 PostgreSQL（`C:\Dev\DBPostgreSQL`，127.0.0.1:5432）有開，但沒有程式連著；本專案沒用它（程式有支援的寫法，儀表板寫「尚未遷移」）。
+  - 下載資料是 `instance/research/history` 的一般檔案：`raw`（FinMind 29 種資料集、證交所、櫃買、集保等的 JSON.gz）5.575 GiB、819,778 個檔，其餘約 2.1 GiB，全在 C 槽。知識庫向量在共用的 Qdrant（`C:\Dev\DBQdrant\storage` 2.4 GiB）。
+  - 磁碟：C 槽 NVMe SSD、D 槽硬碟 HDD（ST4000DM004）、E 槽 NVMe SSD。這個專案在 C 槽約 93 GiB（量到的各資料夾加起來），在 D 槽約 141 GiB。
+- 做了：
+  - 四份舊備份搬到 `D:\StockResearch-data\old-db-backups`：9/30 的 `pre-s1w03`（連同 -shm、-wal）與 `pre-vacuum` 各 22.292 GiB、10/04 的 `pre-slim` 10.638 GiB、10/07 的 `pre-slim` 1.430 GiB，共 60,828,934,144 位元組（56.65 GiB）。robocopy 複製（20:30～20:45，最低優先權、不開視窗）、核對大小與修改時間，再 C 槽與 D 槽各算 SHA-256，六個檔都相同才刪 C 槽原檔；C 槽 `instance\backups` 留 `搬到D槽說明.txt`。完成後 C 槽剩 146.2 GiB（程式輸出；研究流程同時還在寫 C 槽）。
+  - 搬移腳本在算完雜湊後、比對前停了（PowerShell 5.1 的 `Start-Process` 讀不到結束碼），沒刪任何東西；雜湊已算好，改用同樣的比對與刪除步驟收尾。
+  - 速度（搬移時量到，機器同時在跑研究）：D 槽寫入約 42～83 MB/s、讀取約 95 MB/s，C 槽讀取約 294 MB/s。
+  - 文件：D-054；`AGENTS.md` 一句；`docs/rules/data.md`；交接檔改 9/30 兩份備份的新位置並加「D 槽誤複製資料夾刪不刪」。
+- 測試：`scripts\run-tests.ps1 tests\test_docs_guard.py` 18 passed。
+- 沒做／待使用者決定：D 槽 `_誤複製-instance-20261120-1906`（23.5 GiB，今天 19:05 搬家腳本的錯，C 槽沒刪任何東西）刪不刪；每天被研究讀的資料（`history`、模型、資料庫檔）要不要搬到 D 槽（D 槽是硬碟，速度見上）；正在跑的搜尋資料夾（C 槽 7.7 GiB）等跑完再照 D-053 搬。
+- commit：本筆所在的 commit；回復：把 `D:\StockResearch-data\old-db-backups` 的檔照相對路徑複製回 `instance\backups`，文件 `git revert`。
+
 ## 2026-11-20 20:40 — 四個沒量過的方法：融券回補、資產成長與毛利÷總資產、依分數配錢、第一次讀現金流量表
 
 - 使用者 11/20 19:3x：「繼續啊，還有什麼？」機器滿載（研究程式 7～8 個、CPU 16 核 100%），所以每個新方法都先排進流程、跑之前寫判定（結果紀錄第 7 節各一段）。

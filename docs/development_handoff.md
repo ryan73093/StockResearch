@@ -17,7 +17,8 @@ P1 第一步的頁面做好了（11/14，D-045）：研究 › 「今天我的�
 
 - 失敗通知的信箱：使用者 11/14 說之後給；`.env` 要 `EMAIL_ENABLED=true`、`SMTP_FROM`、`REPORT_EMAIL_TO`、`SMTP_USERNAME`、`SMTP_PASSWORD`（Gmail 用應用程式密碼）。給之前 16:00「失敗通知有管道可以送出」照實是紅的。
 - FinMind 付費方案 11/21 到期，續訂是使用者自己的動作（成效見續約那份文件的 11/19 更新）。11/21 以後「付費資料每天更新」若變紅，當天查是不是沒續，再照 `docs/finmind_renewal_2026-11-13.md`「決定不續的話」處理並告訴使用者。
-- 事情做完後提醒使用者自己做的三件（D-045 第 11 項）：刪 9/30 的兩份暫存資料庫備份（`instance/backups/` 約 44.6 GB）；刪搬家前的舊資料夾 `C:\Users\皮咪\Project\StockResearch`；開機自動啟動的排程（`docs/project_risks.md` 第 6 節）。
+- 事情做完後提醒使用者自己做的三件（D-045 第 11 項）：刪 9/30 的兩份暫存資料庫備份（11/20 搬到 D 槽 `old-db-backups`，約 44.6 GB）；刪搬家前的舊資料夾 `C:\Users\皮咪\Project\StockResearch`；開機自動啟動的排程（`docs/project_risks.md` 第 6 節）。
+- D 槽 `_誤複製-instance-20261120-1906`（23.5 GB）刪不刪。
 
 其他以前列在這裡的（T0 用哪種錢、可以上線、7 組衝突的規則、櫃買、舊模組、漲停不重試）11/14 都定了：D-044～D-046。
 
