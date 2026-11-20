@@ -98,7 +98,8 @@ SHORT = {
     "low_iskew_250": "特質偏態低", "high_iskew_250": "特質偏態高", "short_cover_ahead": "融券回補前",
     "eps_surprise": "盈餘驚喜", "eps_accel": "盈餘加速", "eps_streak": "盈餘連續成長",
     "low_asset_growth": "資產成長低", "gp_assets": "毛利÷總資產", "low_accruals": "應計項目低", "cash_profit": "現金獲利",
-    "low_net_financing": "外部融資少", "fscore": "F 分數",
+    "low_net_financing": "外部融資少", "fscore": "F 分數", "low_inventory_build": "存貨沒堆高",
+    "low_receivable_build": "應收沒堆高",
 }
 
 

@@ -322,7 +322,15 @@ CASH_FACTORS = {
     # 2026-11-20 (docs/research/results.md「Piotroski F 分數」): nine yes-or-no signals of a company getting stronger
     "fscore": "Piotroski F 分數（9 項：獲利為正、營業現金流為正、ROA 比去年高、現金多於盈餘、負債比下降、流動比率上升、"
               "股本沒增加、毛利率上升、資產週轉上升；至少 7 項算得出來，換算成 9 分；金融保險業不算）",
+    # 2026-11-20 (docs/research/results.md「存貨與應收帳款增加」): Thomas & Zhang 2002 — the accruals' bite is in the
+    # inventory; firms piling up inventory (or receivables) earn less afterwards
+    "low_inventory_build": "存貨沒堆高（近四季存貨增加÷總資產，反向；金融保險業不算）",
+    "low_receivable_build": "應收帳款沒堆高（近四季應收帳款增加÷總資產，反向；金融保險業不算）",
 }
+# 2026-11-20 (docs/research/results.md「存貨與應收帳款增加」): the cash flow statement's working-capital lines,
+# "(increase) decrease" — positive when inventory or receivables fell (year-to-date, split like the others)
+INVENTORY_ITEMS = ("InventoryIncrease",)
+RECEIVABLE_ITEMS = ("ReceivableIncrease",)
 # 2026-11-20: the balance sheet items only the F-score reads (point in time, not year-to-date)
 BALANCE_EXTRA = {"CurrentAssets": "current_assets", "CurrentLiabilities": "current_liabilities",
                  "OrdinaryShare": "ordinary_share"}
@@ -332,7 +340,7 @@ CASH_ITEMS = ("CashFlowsFromOperatingActivities", "NetCashInflowFromOperatingAct
 CASH_FILE = Path("fundamentals") / "cash.parquet"
 CASH_VERSIONS = Path("fundamentals") / "cash_versions.parquet"
 CASH_COLUMNS = ["net_income", "assets", "operating_cash", "financing_cash", "liabilities", "gross_profit", "revenue",
-                *BALANCE_EXTRA.values()]
+                *BALANCE_EXTRA.values(), "inventory_cash", "receivable_cash"]
 FINANCIAL_INDUSTRY = "金融保險"
 QUARTER_BEFORE = {6: (3, 31), 9: (6, 30), 12: (9, 30)}
 
@@ -409,6 +417,9 @@ def build_cash(history: str | Path, today: date | None = None) -> dict[str, int]
     cash, financing = quarter_cash(raw), quarter_cash(raw, FINANCING_ITEMS)
     statements["operating_cash"] = [cash.get(key, np.nan) for key in keys]
     statements["financing_cash"] = [financing.get(key, np.nan) for key in keys]
+    for name, items in (("inventory_cash", INVENTORY_ITEMS), ("receivable_cash", RECEIVABLE_ITEMS)):
+        found = quarter_cash(raw, items)
+        statements[name] = [found.get(key, np.nan) for key in keys]
     table = statements[~statements["code"].isin(financial_codes(raw))]
     table = table[table["operating_cash"].notna()].sort_values(["code", "quarter"]).reset_index(drop=True)
     out = base / CASH_FILE
@@ -436,10 +447,19 @@ def cash_factor_table(frame: pd.DataFrame) -> pd.DataFrame:
             factors = pd.DataFrame({"low_accruals": (-(income - cash) / assets).clip(-5, 5),
                                     "cash_profit": (cash / assets).clip(-5, 5),
                                     "low_net_financing": (-raised / assets).clip(-5, 5),
-                                    "fscore": _fscore(full, assets, income, cash)}, index=full.index)
+                                    "fscore": _fscore(full, assets, income, cash),
+                                    "low_inventory_build": (_four(full, "inventory_cash") / assets).clip(-5, 5),
+                                    "low_receivable_build": (_four(full, "receivable_cash") / assets).clip(-5, 5)},
+                                   index=full.index)
         factors["code"], factors["available"] = full["code"], full["available"]
         output.append(factors[full["code"].notna()])
     return pd.concat(output) if output else pd.DataFrame(columns=["code", "available", *CASH_FACTORS])
+
+
+def _four(full: pd.DataFrame, name: str) -> pd.Series:
+    """The last four quarters' sum of a cash table column (unknown for a table built before the column existed)."""
+    values = full[name] if name in full else pd.Series(np.nan, index=full.index)
+    return values.rolling(4, min_periods=4).sum()
 
 
 def _fscore(full: pd.DataFrame, assets: pd.Series, income: pd.Series, cash: pd.Series) -> pd.Series:

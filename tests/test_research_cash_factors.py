@@ -136,3 +136,23 @@ def test_no_new_buy_in_the_fifth_with_the_least_cash_profit():
     rule = daily.DailyRule(name="t", factors={"momentum_3": 1.0}, exclude="c1")
     assert "cash_profit" in daily.rule_inputs(rule)
     assert "cash" in daily.input_digests(fundamentals.Path("nowhere"), daily.rule_inputs(rule), False)
+
+
+def test_inventory_and_receivables_piled_up(tmp_path):
+    """2026-11-20 (存貨與應收帳款增加): the "(increase) decrease" lines, year-to-date, split and summed over four
+    quarters ÷ assets — a firm whose inventory grew ranks low."""
+    write_statements(tmp_path, ["1101"])
+    folder = tmp_path / "raw" / "finmind" / "TaiwanStockCashFlowsStatement"
+    folder.mkdir(parents=True, exist_ok=True)
+    rows = [{"date": quarter.isoformat(), "type": item, "value": value} for quarter, ytd, stock in
+            zip(QUARTERS, YEAR_TO_DATE, [-10.0, -30.0, -30.0, -20.0, -5.0, -5.0], strict=True)
+            for item, value in (("CashFlowsFromOperatingActivities", ytd), ("InventoryIncrease", stock),
+                                ("ReceivableIncrease", -stock))]
+    (folder / "1101.json.gz").write_bytes(gzip.compress(json.dumps({"data": rows}).encode("utf-8")))
+    build_cash(tmp_path, date(2026, 11, 20))
+    table = pq.read_table(tmp_path / CASH_FILE).to_pandas()
+    assert list(table["inventory_cash"]) == [-10.0, -20.0, 0.0, 10.0, -5.0, 0.0]
+    factors = cash_factor_table(table).reset_index(drop=True)
+    assert factors.loc[3, "low_inventory_build"] == pytest.approx(-20 / 1000)       # 20 more inventory in 2024
+    assert factors.loc[5, "low_inventory_build"] == pytest.approx((0 + 10 - 5 + 0) / 1000)
+    assert factors.loc[5, "low_receivable_build"] == pytest.approx(-(0 + 10 - 5 + 0) / 1000)
