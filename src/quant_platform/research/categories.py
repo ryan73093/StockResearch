@@ -145,6 +145,8 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
                        "revenue": "營收公布後每月決策"}.get(str(check), "每天決策"))
         if spec.get("weighting") == "inverse_vol":
             traits.append("依波動度配置")
+        elif spec.get("weighting") == "inverse_beta":         # 2026-11-20
+            traits.append("依連動配置")
         if spec.get("industry_cap"):
             traits.append("產業上限")
         # 2026-10-20 (使用者：持有 20 天是策略、月線上續抱也是策略): every rule shows its own holding style

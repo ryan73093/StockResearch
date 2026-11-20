@@ -427,7 +427,10 @@ class DailyRule(BaseModel):
     # 2026-10-17 (docs/research_dl_exits_review.md R1): "inverse_risk" — in proportion to 1 / the deep risk model's
     # probability of a 15% fall within 20 sessions (dl_risk, floored at RISK_FLOOR): the riskier, the less money,
     # none left out (the veto, risk_veto, cut the winners).
-    weighting: Literal["equal", "inverse_vol", "inverse_risk"] = "equal"
+    # 2026-11-20 (docs/research/results.md「不買連動最高的、依連動配置」): "inverse_beta" — in proportion to 1 / the
+    # pick's 250-session beta to the market (low_beta_250, at least BETA_FLOOR): the more it moves with the market, the
+    # less money.
+    weighting: Literal["equal", "inverse_vol", "inverse_risk", "inverse_beta"] = "equal"
     account_filter: Literal["none", "own_200"] = "none"
     # 2026-10-07 (the owner: 降換手): rank on each factor's average over the last `smooth` sessions
     # instead of the day's value; 0 = the day's value. Left out of the hash when 0.
@@ -472,7 +475,7 @@ class DailyRule(BaseModel):
     # sessions; holdings are kept by the usual rules. Left out of the hash when "none".
     # 2026-10-22 (集保因子第三版): "h1" = no new buys of the fifth whose small holders' share rose the most in 4 weeks
     # (retail_down_4w lowest), "h2" = of the fifth whose holders grew the most (holders_down_4w lowest)
-    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm", "t1", "e1", "he", "s1", "l1", "x1"] = "none"
+    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm", "t1", "e1", "he", "s1", "l1", "x1", "b1"] = "none"
     # 2026-10-12 (全面研究「之後再試」第 1 項): "cost1" = a holding that leaves the keep zone is replaced only when
     # the replacement's expected next-20-session excess beats the holding's by more than a round trip (about
     # 0.99%: fee both ways, the sell tax, slippage both ways). The expectation is the rule's own score
@@ -2382,6 +2385,8 @@ def daily_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]
         return None
     if rule.weighting == "inverse_risk":
         return _risk_weights(fp, rule, ranks)
+    if rule.weighting == "inverse_beta":
+        return _beta_weights(fp, rule, ranks)
     volatility = -fp.matrix("low_volatility_60")             # stored negated: the daily standard deviation
     lag = lag_of(rule)
     output: dict[date, dict[str, float]] = {}
@@ -2393,6 +2398,27 @@ def daily_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]
         valid = np.isfinite(sigmas) & (sigmas > VOL_FLOOR)    # 1.3.1: a flat price is not a calm stock
         sigmas = np.where(valid, sigmas, np.median(sigmas[valid]) if valid.any() else 1.0)
         inverse = 1 / sigmas
+        output[day] = {symbol: float(share) for symbol, share in zip(names, inverse / inverse.sum(), strict=True)}
+    return output
+
+
+BETA_FLOOR = 0.3             # weighting inverse_beta: a beta below this counts as this (no one pick dominates)
+
+
+def _beta_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]) -> dict[date, dict[str, float]]:
+    """2026-11-20, weighting inverse_beta: each pick in proportion to 1 / its 250-session beta to the market as known on
+    the deciding session (at least BETA_FLOOR; a pick without one takes the median of the others)."""
+    beta = -fp.matrix("low_beta_250")                        # stored negated: low beta ranks high
+    lag = lag_of(rule)
+    output: dict[date, dict[str, float]] = {}
+    for day, names in ranks.items():
+        if not names:
+            continue
+        position = fp.index[day] - lag
+        values = np.array([beta[fp.row[symbol], position] for symbol in names], dtype=float)
+        valid = np.isfinite(values)
+        values = np.where(valid, values, np.median(values[valid]) if valid.any() else 1.0)
+        inverse = 1 / np.maximum(values, BETA_FLOOR)
         output[day] = {symbol: float(share) for symbol, share in zip(names, inverse / inverse.sum(), strict=True)}
     return output
 
@@ -2846,6 +2872,8 @@ def rule_inputs(rule) -> list[str]:
     for veto in VETO_FACTORS.get(getattr(rule, "exclude", "none"), ()):
         if veto not in names:
             names.append(veto)
+    if getattr(rule, "weighting", "equal") == "inverse_beta" and "low_beta_250" not in names:   # 2026-11-20
+        names.append("low_beta_250")
     return names
 
 
@@ -3862,7 +3890,9 @@ VETO_FACTORS = {**{key: (value,) for key, value in HOLDER_EXCLUDES.items()}, "hm
                 # 否決第六版: holders and earnings together; the most borrowed-and-sold; the dearest to borrow
                 "he": ("holders_down_4w", "eps_growth"), "s1": ("low_sbl_short",), "l1": ("low_lending_fee_60",),
                 # 2026-10-29 (技術分析機器人第六版): the fifth the price-and-volume robot (dl-2.5.1) ranks lowest
-                "x1": ("ml_tech_deep_r",)}
+                "x1": ("ml_tech_deep_r",),
+                # 2026-11-20: the fifth that moves most with the market (low_beta_250 is stored negated)
+                "b1": ("low_beta_250",)}
 HOLDER_VETO_SHARE = 0.2
 
 # 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」, written before the
@@ -3990,7 +4020,7 @@ VETO_WORDS = {"h1": "不買散戶大增的五分之一", "h2": "不買股東大�
               "hm": "不買股東大增或融資快斷頭的五分之一", "t1": "不買離年線最遠的五分之一",
               "e1": "不買獲利衰退最多的五分之一", "he": "不買股東大增或獲利衰退最多的五分之一",
               "s1": "不買借券賣出最多的五分之一", "l1": "不買借券費率最高的五分之一",
-              "x1": "不買技術機器人最不看好的五分之一"}
+              "x1": "不買技術機器人最不看好的五分之一", "b1": "不買連動最高的五分之一"}
 # 2026-10-22 (research_method §7「否決第三版」, written before the run; the lists frozen at 14:4x from the passing single
 # rules ranking the top 20 without a veto, by end value): the holders' veto on the 120 richest, both vetoes together on
 # the 20 richest and on the three top-10 rules the margin veto moved onto the frontier
@@ -4028,6 +4058,32 @@ GUARD_H1 = (31735, 33163, 30994, 30812, 31461, 31959, 29892, 33011, 30923, 32673
             35450, 31328, 34949, 35099, 30906, 34835, 31336, 34238, 31147, 34400, 31557, 30909,
             29762, 30197, 29750, 30766, 30700, 29701,
             30714, 30717, 30012, 30941, 29889, 29937)
+
+
+# 2026-11-20 (docs/research/results.md「不買連動最高的、依連動配置」, written before the run): singles passing on both
+# monthly lists, no exclusion of their own, the richest 8 of each kind since 2020-10 (the technical robot has 4;
+# picked 11/20 by build/pick_beta.py)
+BETA_GUARD = {"深度學習": (35450, 31328, 34949, 35099, 34835, 31336, 34238, 31147),
+              "機器學習": (31735, 33163, 30994, 30812, 31461, 31959, 29892, 33011),
+              "多因子": (25391, 30849, 26342, 26164, 30897, 24829, 25631, 23749),
+              "T0 共識清單": (30714, 30717, 30012, 30941, 29889, 29937, 30961, 30984),
+              "RL 機器人": (29762, 30197, 29750, 30766, 30700, 29701, 35498, 29938),
+              "技術分析機器人": (35449, 35454, 35453, 35388)}
+
+
+def beta_guard_batch() -> list[DailyRule]:
+    """Each BETA_GUARD rule with no new buy in the market's highest-beta fifth (exclude "b1"), and each with its picks
+    weighted by 1 / beta (weighting "inverse_beta")."""
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    trials = [trial for group in BETA_GUARD.values() for trial in group]
+    output = _veto_rules([(trial, "b1") for trial in trials])
+    for trial in trials:
+        base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
+        output.append(_variant(base, f"依連動配置（#{trial} 的設定）", weighting="inverse_beta"))
+    return output
 
 
 def guard_h1_batch() -> list[DailyRule]:
@@ -6046,7 +6102,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "betaguard": beta_guard_batch,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],

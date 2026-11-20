@@ -252,3 +252,23 @@ def test_earlier_finalists_written_as_days_without_a_minimum_are_free(tmp_path):
         rows.append({"spec_name": f"掃描：{number}", "report_file": f"r{number}.json", "spec_hash": f"h{number}"})
     (tmp_path / "trials.jsonl").write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
     assert [item["hold"] for item in scan.earlier_finalists(tmp_path)] == ["free", "days", "trend"]
+
+
+def test_weights_by_beta_and_the_highest_beta_fifth_vetoed():
+    """2026-11-20: weighting inverse_beta gives a pick 1 / its beta (floored), a pick without one the median; exclude
+    "b1" vetoes the fifth with the highest beta (low_beta_250 is stored negated)."""
+    from datetime import date as day_type
+
+    from quant_platform.research import daily
+
+    days = [day_type(2026, 11, 2), day_type(2026, 11, 3)]
+    matrix = np.array([[-0.5, -0.5], [-2.0, -2.0], [-0.1, -0.1], [np.nan, np.nan]])     # betas 0.5, 2.0, 0.1, unknown
+    fp = type("FP", (), {"index": {day: number for number, day in enumerate(days)},
+                         "row": {"A": 0, "B": 1, "C": 2, "D": 3}, "matrix": lambda self, name: matrix})()
+    rule = daily.DailyRule(name="t", factors={"trend_200": 1.0}, weighting="inverse_beta")
+    shares = daily.daily_weights(fp, rule, {days[1]: ["A", "B", "C", "D"]})[days[1]]
+    expected = np.array([1 / 0.5, 1 / 2.0, 1 / 0.3, 1 / 0.5])                           # floor 0.3; D takes the median
+    assert np.allclose([shares[name] for name in "ABCD"], expected / expected.sum())
+    assert "low_beta_250" in daily.rule_inputs(rule)
+    assert daily.VETO_FACTORS["b1"] == ("low_beta_250",) and daily.VETO_WORDS["b1"] == "不買連動最高的五分之一"
+    assert daily.DailyRule(name="t", factors={"trend_200": 1.0}).weighting == "equal"
