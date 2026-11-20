@@ -22,7 +22,7 @@ FAMILY_FACTORS = {
              "short_margin_ratio", "dealer_buy_20", "dealer_hedge_20", "trust_quarter_end",
              # 2026-10-17: the lending and short-selling, day-trading and notice families
              "low_sbl_short", "sbl_cover_20", "low_day_trade_20", "low_lending_fee_60", "low_lending_20",
-             "lending_fee_not_rising", "low_attention_20", "low_disposition_60",
+             "lending_fee_not_rising", "low_attention_20", "low_disposition_60", "short_cover_ahead",
              # 2026-10-21: the depository's holder brackets and the paid FinMind tables
              "big_holder_pct", "big_holder_up_4w", "holders_down_4w", "retail_down_4w", "margin_safe", "margin_in_profit",
              "low_pledge_loan_20", "block_premium_20", "block_volume_20", "broker_concentration_5",

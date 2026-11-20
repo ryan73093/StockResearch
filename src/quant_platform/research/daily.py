@@ -371,7 +371,11 @@ BEHAVIOR_FACTORS = {
     "low_iskew_250": "特質偏態低（Boyer-Mitton-Vorkink 2010：250 日扣大盤後日報酬的偏態，反向）",
     # 2026-11-20: the strength analysis found it reversed in Taiwan (the top fifth -5.1% a year): the other way round
     "high_iskew_250": "特質偏態高（250 日扣大盤後日報酬的偏態；台灣 2015 年起偏態高的反而多賺，和美國文獻相反）",
+    # 2026-11-20 (使用者：繼續，還有什麼): Taiwan's forced short covering before an ex-dividend date — the short sellers
+    # must buy back before the book closes; a stock with many shorts and an announced ex-date close ahead
+    "short_cover_ahead": "融券強制回補前（已公告除息、除息日在 7～28 天後：融券餘額÷近 20 日平均成交張數＝幾天的量才補得完，沒有的是 0）",
 }
+SHORT_COVER_FROM, SHORT_COVER_TO = 28, 7       # calendar days before the ex-date: the window before the last covering day
 CGO_WARMUP = 250             # sessions of a stock's own history before its reference price counts
 PAIR_WINDOW, PAIR_LEAST, PAIR_GAP = 250, 200, 20
 
@@ -1084,6 +1088,8 @@ class FactorPanel:
             reference = reference_prices(p.to_numpy(dtype=float), share)
             with np.errstate(divide="ignore", invalid="ignore"):
                 return (p.to_numpy(dtype=float) - reference) / p.to_numpy(dtype=float)
+        if factor == "short_cover_ahead":
+            return self._short_cover_ahead()
         if factor == "illiquidity_60":
             traded = pd.DataFrame(self.panel.turnover.T) / 1e6
             return (returns.abs() / traded.where(traded > 0)).rolling(60, min_periods=40).mean().to_numpy()
@@ -1106,6 +1112,37 @@ class FactorPanel:
         total = residual.rolling(QUALITY_WINDOW, min_periods=QUALITY_WINDOW // 2).sum()
         spread = residual.rolling(QUALITY_WINDOW, min_periods=QUALITY_WINDOW // 2).std()
         return (total / spread.where(spread > 0)).shift(QUALITY_SKIP).to_numpy()
+
+    def _short_cover_ahead(self) -> np.ndarray:
+        """sessions × symbols: from the session after a cash dividend is announced, while its ex-date is SHORT_COVER_TO
+        to SHORT_COVER_FROM calendar days ahead, the short balance (as published the session before) over the last 20
+        sessions' average lots traded (days to cover); 0 for a traded stock outside such a window; NaN without the
+        margin table."""
+        import bisect
+
+        sessions = list(self.sessions)
+        if self.chips is None or not self.chips.available():
+            return np.full((len(sessions), len(self.symbols)), np.nan)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            shares = pd.DataFrame(self.panel.turnover.T / self.panel.close.T / 1000)      # lots, as the balance
+        volume = shares.rolling(20, min_periods=10).mean().to_numpy()
+        short = self.chips._daily("TaiwanStockMarginPurchaseShortSale", "ShortSaleTodayBalance").to_numpy(dtype=float)
+        traded = np.isfinite(self.panel.close.T)
+        values = np.where(traded, 0.0, np.nan)
+        plans = (getattr(self.panel, "notes", None) or {}).get("dividend_plans") or {}
+        for symbol, items in plans.items():
+            row = self.row.get(symbol)
+            if row is None:
+                continue
+            for announced, ex_day, _cash in items:
+                known = bisect.bisect_right(sessions, announced)
+                opens = bisect.bisect_left(sessions, ex_day - timedelta(days=SHORT_COVER_FROM))
+                closes = bisect.bisect_left(sessions, ex_day - timedelta(days=SHORT_COVER_TO))
+                for position in range(max(known, opens), closes):
+                    held, usual = short[position, row], volume[position, row]
+                    if np.isfinite(held) and np.isfinite(usual) and usual > 0:
+                        values[position, row] = held / usual
+        return values
 
     def _trend_quality(self, factor: str) -> np.ndarray:
         """sessions × symbols; every value uses sessions -251..-21 only (TREND_QUALITY)."""
