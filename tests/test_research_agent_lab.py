@@ -244,6 +244,10 @@ def test_the_page_shows_each_designs_decision_the_board_a_replay_and_the_probe(t
     assert [row["code"] for row in info["sold"]] == ["2317"] and info["tools"][0] == {"name": "個股資料", "count": 2}
     assert [replay["name"] for replay in found["replays"]] == ["neutral-20261120"]
     assert [(row["period"], row["asked"]) for row in found["probes"][0]["rows"]] == [("2025 上半年", 40), ("2025 下半年", 40)]
+    declined = view.probe_summary({"months": [{"month": "2026-07", "right": 0, "wrong": 0, "unknown": 40, "declined": True},
+                                              {"month": "2026-08", "right": 24, "wrong": 16}]})
+    # a month it declined counts in its half-year's column, not as answers
+    assert [(row["period"], row["asked"], row["declined"]) for row in declined["rows"]] == [("2026 下半年", 40, 1)]
     body = client.get("/research/agents").get_data(as_text=True)
     for text in ("營收創高", "大盤偏弱", "個股資料 2 次", "20 日跌 54%", "301,000", "+1,000", "-500", "觀察中（3／60 個交易日）",
                  "算不出來：沒有資料", "neutral-20261120", "2025 上半年", "67.5", "滿 60 個交易日判定", "不能當成代理人有本事的證據"):

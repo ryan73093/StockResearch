@@ -59,15 +59,17 @@ def probe_summary(result: dict | None) -> dict | None:
         return None
     groups: dict[str, list[int]] = {}
     for row in result.get("months") or []:
-        if "error" in row or not (row.get("right", 0) + row.get("wrong", 0)):
+        if "error" in row:
             continue
         month = str(row["month"])
         name = (month[:4] + " 上半年" if month[5:] <= "06" else month[:4] + " 下半年")
-        total = groups.setdefault(name, [0, 0])
-        total[0] += int(row["right"])
-        total[1] += int(row["right"]) + int(row["wrong"])
-    rows = [{"period": name, "right": right, "asked": asked, "accuracy": right / asked,
-             "errors": (right - asked / 2) / (0.5 * asked ** 0.5)} for name, (right, asked) in sorted(groups.items())]
+        total = groups.setdefault(name, [0, 0, 0])
+        total[0] += int(row.get("right", 0))
+        total[1] += int(row.get("right", 0)) + int(row.get("wrong", 0))
+        total[2] += 1 if row.get("declined") else 0               # 2026-11-20: months it said it does not know
+    rows = [{"period": name, "right": right, "asked": asked, "accuracy": right / asked if asked else 0.0,
+             "errors": (right - asked / 2) / (0.5 * asked ** 0.5) if asked else 0.0, "declined": declined}
+            for name, (right, asked, declined) in sorted(groups.items()) if asked or declined]
     return {"model": result.get("model"), "made_at": result.get("made_at"), "stocks": result.get("stocks"), "rows": rows}
 
 

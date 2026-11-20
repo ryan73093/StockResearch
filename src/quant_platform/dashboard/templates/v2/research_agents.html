@@ -148,13 +148,15 @@
   <div class="table-wrap table-wrap--stack">
     <table class="table--stack">
       <thead><tr><th>期間</th><th class="num">問了（題）</th><th class="num">答對（題）</th><th class="num">答對（%）<br>亂猜是 50</th>
-        <th class="num" title="比亂猜多幾個標準誤；2 以上不太可能是運氣">比亂猜多<br>（標準誤）</th></tr></thead>
+        <th class="num" title="比亂猜多幾個標準誤；2 以上不太可能是運氣">比亂猜多<br>（標準誤）</th>
+        <th class="num" title="模型說那個月不在它知道的範圍、不肯作答的月數">說不知道<br>（個月）</th></tr></thead>
       <tbody>
       {% for row in probe.rows %}
         <tr><td data-primary>{{ row.period }}</td><td class="num" data-label="問了（題）">{{ row.asked }}</td>
           <td class="num" data-label="答對（題）">{{ row.right }}</td>
-          <td class="num" data-label="答對（%）">{{ '%.1f' % (row.accuracy * 100) }}</td>
-          <td class="num" data-label="比亂猜多（標準誤）">{{ '%+.1f' % row.errors }}</td></tr>
+          <td class="num" data-label="答對（%）">{% if row.asked %}{{ '%.1f' % (row.accuracy * 100) }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="比亂猜多（標準誤）">{% if row.asked %}{{ '%+.1f' % row.errors }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="說不知道（個月）">{{ row.get('declined', 0) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

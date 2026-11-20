@@ -69,6 +69,12 @@ def score(listed: list[tuple[str, float]], answers: dict) -> dict[str, float | i
             "z": round(float(z), 2)}
 
 
+def declined(month: str, stocks: int) -> dict[str, object]:
+    """A month the model would not answer in the format: 2026-11-20, claude-haiku-5-5 wrote for most 2026 months that
+    they were beyond what it knows and any answer would be a guess — a "don't know" for every stock, not a failure."""
+    return {"month": month, "right": 0, "wrong": 0, "unknown": stocks, "accuracy": 0.0, "z": 0.0, "declined": True}
+
+
 def path_for(research: str | Path, model: str) -> Path:
     return Path(research) / "agent_lab" / "probe" / f"{model or 'model'}.json"
 
@@ -98,7 +104,7 @@ def run(fp, base: Path, research: Path, client, count: int = 36, names=None, now
             answer, _usage = client.json_call(INSTRUCTIONS, prompt, OPERATION, context=f"probe-{name}")
             rows.append({"month": name, **score(listed, answer.get("a") if isinstance(answer, dict) else {})})
         except Exception as error:  # noqa: BLE001 - a month that failed is recorded as such
-            rows.append({"month": name, "error": str(error)[:120]})
+            rows.append(declined(name, len(listed)) if "不是 JSON" in str(error) else {"month": name, "error": str(error)[:120]})
     result = {"model": getattr(client, "model", ""), "made_at": (now or datetime.now(TAIPEI)).isoformat(timespec="seconds"),
               "stocks": STOCKS, "months": rows}
     path = path_for(research, str(result["model"]))
@@ -112,6 +118,8 @@ def text(result: dict[str, object]) -> str:
     for row in result["months"]:
         if "error" in row:
             lines.append(f"  {row['month']}：失敗（{row['error']}）")
+        elif row.get("declined"):
+            lines.append(f"  {row['month']}：沒有照格式回答（說不知道），{row['unknown']} 檔都算不知道")
         else:
             lines.append(f"  {row['month']}：答 {row['right'] + row['wrong']} 檔對 {row['right']}（{100 * row['accuracy']:.0f}%，"
                          f"比亂猜多 {row['z']:+.1f} 個標準誤），不知道 {row['unknown']} 檔")
