@@ -153,6 +153,26 @@ def test_a_scripted_agent_runs_the_steps_without_a_model():
     assert client.json_call(runner.instructions(variants.BY_KEY["veto"]), prompt, "agent_lab")[0]["veto"] == []
 
 
+def test_the_scorer_holds_the_best_scores_ties_in_the_agreed_order_within_the_rules():
+    """2026-11-20 (docs/research/results.md「評分者設計」): the program, not the model, makes the list."""
+    pool = [str(3000 + i) for i in range(30)] + ["9999"]                  # 9999: a holding outside the agreed
+    answer = {"scores": {"3005": {"score": 5, "reason": "營收創高"}, "3001": 5, "3002": {"score": "4"}, "3003": 1,
+                         "1234": 5, "3004": {"score": 9}, "3006": "壞"}}
+    scores, reasons = runner.read_scores(answer, pool)
+    assert scores == {"3005": 5, "3001": 5, "3002": 4, "3003": 1, "3004": 5} and reasons["3005"] == "營收創高"
+    industry = lambda code: "半導體" if code in ("3001", "3005", "3010", "3011", "3012", "3013", "3014") else code  # noqa: E731
+    ranked = runner.rank_scored(pool, scores, held=["9999"], blocked={"3004", "9999"}, industry=industry)
+    assert ranked[:3] == ["3001", "3005", "3002"]                         # 5s in the agreed order (3004 blocked), then the 4
+    assert "3003" not in ranked                                           # a 1 is below every unscored candidate (a 3)
+    assert len(ranked) == 20 and len([code for code in ranked if industry(code) == "半導體"]) == 6
+    assert "9999" not in ranked or "9999" in ranked[-3:]                  # unscored and last in the pool: only if room
+    text = runner.instructions(variants.BY_KEY["score"])
+    assert '"scores"' in text and "1～5 分" in text and "處置中的不新買" in text
+    client = environment.ScriptedClient(environment.top_of_consensus())
+    card = "2330 台積電｜半導體｜未持有｜漲跌：5 日 +1.0%\n2317 鴻海｜其他電子｜持有中｜漲跌：5 日 -1.0%"
+    assert set(client.json_call(text, card, "agent_lab")[0]["scores"]) == {"2330", "2317"}
+
+
 def test_a_decision_ranks_its_stocks_from_the_next_session_in_the_panel_layout():
     days = [date(2026, 11, 16) + timedelta(days=i) for i in range(5)]
     fp = SimpleNamespace(sessions=days, symbols=["2330.TW", "2317.TW"], row={"2330.TW": 0, "2317.TW": 1})

@@ -18,6 +18,7 @@ VETO_MOST = 6                    # stocks kept out at once
 VETO_NEW, VETO_SESSIONS = 2, 10  # new vetoes a day; a vetoed stock stays out this many decisions (2026-11-20: the
 #                                  replay vetoed 5.1 stocks a day afresh, 578 orders against the twin's 322)
 VOTES, VOTES_NEEDED = 3, 2
+SCORE_CANDIDATES = 40            # the scorer: the agreed stocks it scores (with the holdings)
 ANALYST_CARDS = 16               # the stocks the analysts read: the holdings and the most agreed
 
 
@@ -51,6 +52,11 @@ COHORT: tuple[Variant, ...] = (
     Variant("team", "分析師團隊：多方、空方各寫意見，經理人決定", "team", ("market", "mood", "headlines", "consensus", "card",
                                                                 "events", "portfolio", "review"),
             "多個角色分工再合議，是不是比一個代理人自己查好", "info", steps=3, calls=3),
+    # 2026-11-20 (docs/research/results.md「評分者設計」, written before it runs): the model scores each candidate, the
+    # program holds the best 20 — the use of a language model with out-of-sample evidence, against the picker
+    Variant("score", "評分者：模型替共識前 40 檔與持股逐一打分，程式持有分數最高的 20 檔", "score",
+            ("market", "mood", "headlines", "card", "events"),
+            "讓模型替每一檔打分、程式照分數持有（文獻上站得住的用法），是不是比讓它自己挑（中性指示）好", "plain", steps=1, calls=1),
 )
 BY_KEY = {variant.key: variant for variant in COHORT}
 FACTORS = {variant.factor: f"AI 代理人實驗室・{variant.label}" for variant in COHORT}

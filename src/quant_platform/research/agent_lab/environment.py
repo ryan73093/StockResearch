@@ -118,6 +118,9 @@ def top_of_consensus(count: int = 10):
     def script(instructions: str, prompt: str, _context: str) -> dict:
         if '"veto"' in instructions:
             return {"veto": [], "view": "腳本", "lesson": ""}
+        if '"scores"' in instructions:             # the scorer: a 3 for every card shown (the agreed order decides)
+            cards = re.findall(r"^(\d{4}) [^\n｜]*｜[^\n｜]*｜(?:持有中|未持有)", prompt, flags=re.M)
+            return {"scores": {code: {"score": 3, "reason": "腳本"} for code in dict.fromkeys(cards)}, "view": "腳本", "lesson": ""}
         codes = list(dict.fromkeys(re.findall(r"^(\d{4}) [^\n]*｜\d+ 個規則", prompt, flags=re.M)))[:count]
         if '"picks"' in instructions:
             return {"picks": [{"code": code, "reason": "腳本"} for code in codes], "case": "腳本"}

@@ -2246,11 +2246,30 @@ switch ($Name) {
         Invoke-Step "6-board" @("-m", "quant_platform.research", "forward-board", "--broker", "cathay")
     }
     "llmagent" {
+        # 2026-11-20 (18:00: three agents of a check failed to import while another session was halfway through an edit
+        # of daily.py; a flow runs the shared working tree): the agents run the last commit — `git archive HEAD src` into
+        # build\llmagent-src, PYTHONPATH pointed there for this flow's steps (the data paths stay the working tree's).
+        # Without git or the archive the steps run the working tree as before, said in the flow's log.
+        $snapshot = Join-Path $root "build\llmagent-src"
+        $git = (Get-Command git -ErrorAction SilentlyContinue).Source
+        if (-not $git) { $git = "C:\Program Files\Git\cmd\git.exe" }
+        Remove-Item -LiteralPath $snapshot -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force $snapshot | Out-Null
+        $archive = Join-Path $snapshot "src.tar"
+        & $git -C $root archive --format=tar -o $archive HEAD src 2>$null
+        if ($LASTEXITCODE -eq 0) { & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $snapshot 2>$null }
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $snapshot "src\quant_platform"))) {
+            $env:PYTHONPATH = Join-Path $snapshot "src"
+            Write-Note "代理人從最新的 commit 跑（$(& $git -C $root rev-parse --short HEAD)），不讀工作目錄裡沒 commit 的程式"
+        } else {
+            Write-Note "取不到最新的 commit，代理人從工作目錄跑"
+        }
         # 2026-11-19 (使用者：做一個選股的 AI agent): the stock-picking agent's decision after the close (research/llm_agent.py)
         Invoke-Step "1-decide" @("-m", "quant_platform.research", "llm-agent")
         # 2026-11-20 (使用者：專門針對 AI 代理人做最強的優化): the agent lab's cohort decides the same day's close, then its
         # board (research/agent_lab; docs/agent_lab.md)
         Invoke-Step "2-lab" @("-m", "quant_platform.research.agent_lab", "decide")
+        $env:PYTHONPATH = "src"
     }
     "agentlab-replay" {
         # 2026-11-20 (docs/research/results.md「AI 代理人實驗室」): the neutral-instruction agents decided afterwards from the
