@@ -558,11 +558,30 @@ def test_accounts_differing_only_before_the_statements_download_are_told_apart()
     """2026-11-20: a rule reading the statements whose recomputation differs only up to 11/13 cannot be checked (the
     numbers then were not kept); differences after it, or in a rule not reading them, still count."""
     rows = [{"differed": 3, "statements": True, "last": "2026-11-13", "first": {"day": "2026-10-01"}},
-            {"differed": 3, "statements": True, "last": "2026-11-17", "first": {"day": "2026-10-01"}},
+            {"differed": 9, "statements": True, "last": "2026-11-17", "first": {"day": "2026-10-01"}},   # the path after
+            {"differed": 2, "statements": True, "last": "2026-11-18", "first": {"day": "2026-11-16"}},   # began after it
             {"differed": 1, "statements": False, "last": "2026-10-02", "first": {"day": "2026-10-02", "table": {"x": 1}}},
             {"differed": 0, "statements": True, "last": None, "first": None},
             {"differed": 2, "first": {"day": "2026-10-01"}}]                       # an audit from before 11/20
     found = {"rows": rows}
     assert invariants.audit_failures(found) == 3
     text = invariants._audit_split(found)
-    assert "無法重算 1 個" in text and "13:50 表和收盤資料不同 1 個" in text and "原因不明 2 個" in text
+    assert "無法重算 2 個" in text and "13:50 表和收盤資料不同 1 個" in text and "原因不明 2 個" in text
+
+
+def test_a_tree_models_features_are_a_rules_input_and_a_deep_models_are_not(tmp_path):
+    """2026-11-20: a tree model scores from today's features, so the tables they read are its rules' input."""
+    import json
+
+    from quant_platform.research import daily, model
+
+    root = tmp_path / "models"
+    tree = root / model.MODELS["ml_gbm_k"]["version"]
+    deep = root / model.MODELS["ml_deep2_top"]["version"]
+    for folder, features in ((tree, ["eps_growth", "trend_200"]), (deep, ["eps_growth"])):
+        folder.mkdir(parents=True)
+        (folder / "meta.json").write_text(json.dumps({"features": features}), encoding="utf-8")
+    (deep / "deep.npz").write_bytes(b"")
+    history = tmp_path / "history"
+    assert daily.model_feature_inputs(history, ["ml_gbm_k", "momentum_6"]) == ["eps_growth", "trend_200"]
+    assert daily.model_feature_inputs(history, ["ml_deep2_top"]) == []

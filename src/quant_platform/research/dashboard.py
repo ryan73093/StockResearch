@@ -30,13 +30,13 @@ def source_groups() -> list[tuple[str, str, bool, frozenset]]:
         BRANCH_FACTORS, CHIP_FACTORS, DEALER_FACTORS, GOVBANK_FACTORS, HOLDER_FACTORS, LENDING_FACTORS, PAID_FACTORS,
         SHORT_FACTORS,
     )
-    from quant_platform.research.fundamentals import STATEMENT_FACTORS
+    from quant_platform.research.fundamentals import EARNINGS_FACTORS, STATEMENT_FACTORS
     from quant_platform.research.model import MONTHLY_REVENUE
 
     paid = frozenset(PAID_FACTORS) - frozenset(GOVBANK_FACTORS) - frozenset(BRANCH_FACTORS)
     return [("chips", "法人、融資券、借券（證交所）", False,
              frozenset(CHIP_FACTORS) | frozenset(DEALER_FACTORS) | frozenset(SHORT_FACTORS) | frozenset(LENDING_FACTORS)),
-            ("statements", "季財報", False, frozenset(STATEMENT_FACTORS)),
+            ("statements", "季財報", False, frozenset(STATEMENT_FACTORS) | frozenset(EARNINGS_FACTORS)),   # 2026-11-20: the earnings family too
             ("revenue", "月營收（落後指標）", False, frozenset(MONTHLY_REVENUE)),
             ("holders", "集保股東人數與大戶（FinMind 付費）", True, frozenset(HOLDER_FACTORS)),
             ("paid", "融資維持率、借貸、鉅額、主力（FinMind 付費）", True, paid),
@@ -72,7 +72,8 @@ def sources(spec: dict, models: Path) -> tuple[set[str], set[str]]:
     names = factor_names(spec)
     versions = {MODELS[name]["version"] for name in names if name in MODELS}
     for version in versions:
-        names |= set(model_meta(models, version).get("features") or [])
+        meta = model_meta(models, version)
+        names |= set(meta.get("features") or meta.get("factors") or [])      # 2026-11-20: the oldest metas say "factors"
     found = {key for key, _label, _paid, group in source_groups() if names & group}
     if "news_veto" in names or spec.get("news_veto"):
         found.add("news")

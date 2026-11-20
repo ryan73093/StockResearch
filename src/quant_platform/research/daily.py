@@ -2902,10 +2902,34 @@ def reads_any(spec: dict, names) -> bool:
     return any(name in names for member in members for name in rule_inputs(member))
 
 
+def model_feature_inputs(history: str | Path, factor_names: list[str]) -> list[str]:
+    """2026-11-20 (docs/research/results.md「選手池的結果重算不出來」): the features of the tree models a rule reads —
+    a tree model scores every session again from the features as they are now (``model.scores``), so the statements
+    downloaded again on 11/15 changed those rules' results while their input (the model files) stayed the same, and
+    22 of 30 sampled results no longer reproduced. A deep model keeps the scores it was trained with: left out."""
+    from quant_platform.research.model import MODELS, model_dir, trained_features
+
+    found: list[str] = []
+    for name in factor_names:
+        if name not in MODELS:
+            continue
+        folder = model_dir(history, MODELS[name]["version"])
+        if (folder / "deep.npz").is_file():
+            continue
+        try:
+            found += [feature for feature in trained_features(folder, folder.name) if feature not in found]
+        except (OSError, ValueError, KeyError):
+            continue
+    return found
+
+
 def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool) -> dict[str, object]:
     """The files besides prices a run reads, as part of its input: statements, the exit models, the
-    trained factor models."""
+    trained factor models — and (2026-11-20) the tables the tree models' features read."""
     payload: dict[str, object] = {}
+    features = model_feature_inputs(history, factor_names)
+    if features:                    # the tables behind a model's features are this run's input too
+        factor_names = list(dict.fromkeys([*factor_names, *features]))
     if "factor_momentum" in factor_names:      # 2026-10-28: it picks among every base factor, which reads their tables
         from quant_platform.research.factor_timing import base_factors
 
@@ -4084,6 +4108,68 @@ def beta_guard_batch() -> list[DailyRule]:
         base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
         output.append(_variant(base, f"依連動配置（#{trial} 的設定）", weighting="inverse_beta"))
     return output
+
+
+# 2026-11-20 (docs/research/results.md「選手池的結果重算不出來」): the pool's latest results registered before the
+# statements were downloaded again (11/15-16) that read them, themselves or through a tree model's features — frozen in
+# a file the first time (the parts' own new results would otherwise move the rest between parts), run again in parts
+POOL_REFRESH_BEFORE = "2026-11-16"
+POOL_REFRESH_FILE = Path("refresh") / "pool-statements-20261120.json"
+POOL_REFRESH_PARTS = 4
+
+
+def pool_refresh_rules(research: Path, history: Path) -> list[dict]:
+    """The frozen list of specs (see POOL_REFRESH_FILE), written the first time."""
+    from quant_platform.research import reproduce_check
+    from quant_platform.research.blend import BlendRule
+    from quant_platform.research.fundamentals import EARNINGS_FACTORS as EARNINGS
+
+    path = research / POOL_REFRESH_FILE
+    if path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
+    statements = set(STATEMENT_FACTORS) | set(EARNINGS)
+    found, models = [], {}
+    for record, rule in reproduce_check.pool(research):
+        if str(record.created_at)[:10] >= POOL_REFRESH_BEFORE:
+            continue
+        members = [sleeve.rule for sleeve in rule.sleeves] if hasattr(rule, "sleeves") else [rule]
+        names = [name for member in members for name in rule_inputs(member)]
+        key = tuple(sorted({name for name in names if name.startswith("ml_")}))
+        if key not in models:
+            models[key] = model_feature_inputs(history, list(key))
+        if set(names) & statements or set(models[key]) & statements:
+            found.append({"trial": record.trial_id, "rule_hash": record.spec_hash, "spec": rule.canonical(),
+                          "blend": isinstance(rule, BlendRule)})
+    found.sort(key=lambda item: item["rule_hash"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_suffix(".partial")
+    partial.write_text(json.dumps(found, ensure_ascii=False), encoding="utf-8")
+    partial.replace(path)
+    return found
+
+
+def _pool_refresh_part(part: int) -> list:
+    from quant_platform.research.blend import parse_spec
+
+    research = Path("instance") / "research"
+    items = pool_refresh_rules(research, research / "history")
+    return [parse_spec(item["spec"]) for number, item in enumerate(items) if number % POOL_REFRESH_PARTS == part]
+
+
+def pool_refresh_a() -> list:
+    return _pool_refresh_part(0)
+
+
+def pool_refresh_b() -> list:
+    return _pool_refresh_part(1)
+
+
+def pool_refresh_c() -> list:
+    return _pool_refresh_part(2)
+
+
+def pool_refresh_d() -> list:
+    return _pool_refresh_part(3)
 
 
 def guard_h1_batch() -> list[DailyRule]:
@@ -6102,7 +6188,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "betaguard": beta_guard_batch,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "betaguard": beta_guard_batch, "poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],

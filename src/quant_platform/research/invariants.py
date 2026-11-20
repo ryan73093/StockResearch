@@ -913,14 +913,18 @@ def long_waits(research: Path, now: datetime | None = None) -> list[str]:
 
 # 2026-11-20 (docs/research/results.md「財報只追加」): the statements were downloaded again from 11/15 22:15 to 11/16
 # 09:27 and earlier numbers changed; the decisions to 11/13 (the last session before) read the old ones, which were not
-# kept — a rule reading the statements that differs from a recomputation only up to that day cannot be checked
+# kept — a rule reading the statements whose recomputation first differs up to that day cannot be checked: from that
+# day on its holdings, and so every later decision, differ with them (the first audit counted the LAST different day
+# and explained 280 of 2,149 such accounts)
 STATEMENTS_REVISED_AFTER = "2026-11-13"
 
 
 def revised_statements(row: dict) -> bool:
-    """A differing account explained by the 11/15 statements download: it reads the statements and its last different
-    day is no later than STATEMENTS_REVISED_AFTER (an audit before 11/20 did not record either: not explained)."""
-    return bool(row.get("statements")) and bool(row.get("last")) and str(row["last"]) <= STATEMENTS_REVISED_AFTER
+    """A differing account explained by the 11/15 statements download: it reads the statements (itself or through a
+    model's features) and its first different day is no later than STATEMENTS_REVISED_AFTER (an audit before 11/20 did
+    not record which rules read them: not explained)."""
+    first = str((row.get("first") or {}).get("day") or "")
+    return bool(row.get("statements")) and bool(first) and first <= STATEMENTS_REVISED_AFTER
 
 
 def audit_failures(found: dict) -> int:
