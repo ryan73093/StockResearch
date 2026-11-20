@@ -200,7 +200,12 @@ def run(base: Path, research: Path, costs, sizes: list[int], holds=HOLDS, count:
         arrays = prepare(data, fp, costs, folder / "arrays")
     started_with = folder / "progress.json"
     if started_with.is_file():
-        names = json.loads(started_with.read_text(encoding="utf-8"))["names"]
+        begun = json.loads(started_with.read_text(encoding="utf-8"))
+        names = begun["names"]
+        # 2026-11-20: a resumed run keeps its own sizes and holding styles too (stage2again's first step was started
+        # without them: the job said 1～3 signals and the summary recorded them though stage 1 had screened 3 and 4)
+        sizes = list(begun.get("sizes") or sizes)
+        holds = tuple(begun.get("holds") or holds)
     else:
         names = [name for name in (only or signals()) if name in arrays.names]
         names += [name for name in required or () if name in arrays.names and name not in names]
