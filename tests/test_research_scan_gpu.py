@@ -25,12 +25,14 @@ def arrays(seed=0, symbols=90, sessions=160, signals=5):
                        industry=rng.integers(0, 6, symbols).astype(np.int32),
                        weekly_days=np.array([day.weekday() == 0 for day in days]),
                        bench=rng.normal(0.0004, 0.01, sessions), days=days,
-                       rising=(rng.random((symbols, sessions)) > 0.5).astype(np.uint8), liquidity=liquidity)
+                       rising=(rng.random((symbols, sessions)) > 0.5).astype(np.uint8), liquidity=liquidity,
+                       beta_calm=(1 / rng.uniform(0.3, 2.0, (symbols, sessions))).astype(np.float32))
 
 
 @pytest.mark.parametrize("universe,check,weighting,hold", [
     ("all", "daily", "equal", "trend"), ("all", "weekly", "inverse_vol", "trend"),
-    ("large", "weekly", "equal", "days"), ("all", "daily", "inverse_vol", "days")])
+    ("large", "weekly", "equal", "days"), ("all", "daily", "inverse_vol", "days"),
+    ("all", "daily", "inverse_beta", "free"), ("large", "weekly", "inverse_beta", "trend")])   # 2026-11-20
 def test_the_gpu_accounts_are_the_cpu_accounts(universe, check, weighting, hold):
     from quant_platform.research.scan_gpu import Device, accounts
 

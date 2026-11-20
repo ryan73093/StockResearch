@@ -54,6 +54,8 @@ class Device:
         self.percentiles = torch.from_numpy(moved).to(self.where).float()
         self.next_returns = torch.from_numpy(np.ascontiguousarray(arrays.next_returns.T)).to(self.where)  # session × symbol
         self.calm = torch.from_numpy(np.ascontiguousarray(arrays.calm.T)).to(self.where)
+        self.beta_calm = (torch.from_numpy(np.ascontiguousarray(arrays.beta_calm.T)).to(self.where)      # 2026-11-20
+                          if getattr(arrays, "beta_calm", None) is not None else None)
         self.rising = (torch.from_numpy(np.ascontiguousarray(arrays.rising.T.astype(bool))).to(self.where)
                        if arrays.rising is not None else None)
         self.industry = torch.from_numpy(arrays.industry.astype(np.int64)).to(self.where)
@@ -76,7 +78,10 @@ def accounts(gpu: Device, items: list[dict], costs) -> tuple[np.ndarray, np.ndar
     first = items[0]
     slot = 0 if first["universe"] == "all" else 1
     checks = gpu.arrays.weekly_days if first["check"] == "weekly" else np.ones(gpu.sessions, dtype=bool)
-    calm = first["weighting"] == "inverse_vol"
+    calm = first["weighting"] in ("inverse_vol", "inverse_beta")
+    by_weight = gpu.beta_calm if first["weighting"] == "inverse_beta" else gpu.calm      # 2026-11-20
+    if calm and by_weight is None:
+        raise ValueError("這次掃描的陣列沒有連動資料（2026-11-20 以前寫的），不能評估依連動配置")
     trend = first.get("hold") == "trend"
     minimum = 0 if first.get("hold") == "free" else MIN_HOLD       # 2026-10-20: "free" sells once out of the zone
     if trend and gpu.rising is None:
@@ -152,7 +157,7 @@ def accounts(gpu: Device, items: list[dict], costs) -> tuple[np.ndarray, np.ndar
             else:
                 held = kept
         if calm:
-            raw = gpu.calm[t].double()[None, :] * held
+            raw = by_weight[t].double()[None, :] * held
             total = raw.sum(1, keepdim=True)
             weight = torch.where(total > 0, raw / torch.where(total > 0, total, 1.0), 0.0)
         else:

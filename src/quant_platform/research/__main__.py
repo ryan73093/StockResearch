@@ -450,6 +450,7 @@ def main() -> int:
     parser.add_argument("--beta-max", type=float, default=0.8, help="scan-large --rerank-low-beta：開發期對 0050 的連動上限")
     parser.add_argument("--distinct-sets", action="store_true", help="scan-large：每組訊號只留最穩的一個設定再排（2026-11-19；2026-11-20 起一般搜尋的第二階段也可用）")
     parser.add_argument("--stage2-pool", type=int, default=600, help="scan-large：第二階段看過快篩的前幾個去挑最後名單（預設 600；2026-11-20）")
+    parser.add_argument("--weightings", help="scan-large：配置方式（逗號分隔：equal、inverse_vol、inverse_beta；預設前兩種；2026-11-20）")
     parser.add_argument("--rerank-pool", type=int, default=3000, help="scan-large --rerank-low-beta：每次搜尋進相關性篩選的候選數")
     parser.add_argument("--holds", help="scan-large：持有方式，逗號分隔（days＝固定持有 20 天、trend＝月線上續抱、free＝不設最短持有；預設三種）")
     parser.add_argument("--signals-min", type=int, default=1, help="scan：一組最少幾個訊號")
@@ -1813,14 +1814,15 @@ def main() -> int:
                 if args.signals_top and args.signals_from else None)
         folder = Path(args.resume) if args.resume else None
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
-        settings = len(scan_large.keys(holds, universes)) // len(holds)
+        settings = len(scan_large.keys(holds, universes, tuple((args.weightings or ",".join(scan_large.WEIGHTINGS)).split(",")))) // len(holds)
         with JobLog(RESEARCH).start(f"大規模搜尋（串流）：{args.signals_min}～{args.signals_max} 個訊號一組"
                                     + (f"（最常過篩的 {len(only)} 個訊號）" if only else "")
                                     + f" × {len(holds)} 種持有方式 × {settings} 種設定", command) as job:
             required = [name.strip() for name in (args.require_any or "").split(",") if name.strip()] or None
             summary = scan_large.run(Path(args.base), RESEARCH, broker_costs(args.broker), sizes, holds,
                                      count=args.finalists, job=job, folder=folder, universes=universes, only=only,
-                                     required=required, pool=args.stage2_pool, distinct=args.distinct_sets)
+                                     required=required, pool=args.stage2_pool, distinct=args.distinct_sets,
+                                     weightings=tuple((args.weightings or ",".join(scan_large.WEIGHTINGS)).split(",")))
             job.payload["summary"] = (f"{summary['candidates']:,} 個策略、{summary['passed_screen']:,} 個過第一階段、"
                                       f"{summary['finalists']} 個進引擎：{summary['tiers']}")
         print(json.dumps({key: value for key, value in summary.items() if key != "results"}, ensure_ascii=False), flush=True)

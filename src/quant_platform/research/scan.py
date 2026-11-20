@@ -193,6 +193,8 @@ def to_rule(candidate: dict):
         parts.append(f"市值前 {LARGE}")
     if candidate["weighting"] == "inverse_vol":
         parts.append("依波動度配置")
+    elif candidate["weighting"] == "inverse_beta":           # 2026-11-20
+        parts.append("依連動配置")
     if candidate["check"] == "weekly":
         parts.append("每週決策")
     hold = candidate.get("hold", "days")
@@ -224,6 +226,9 @@ class Arrays:
     days: list[date]
     rising: np.ndarray | None = None   # symbol × session: above its 20-session average (1.2.0; None in older scans)
     liquidity: np.ndarray | None = None  # symbol × session: 20-session turnover, the tie-break (1.2.1)
+    # 2026-11-20: symbol × session, 1 / the 250-session beta (at least daily.BETA_FLOOR; median where unknown) — the
+    # weighting "inverse_beta"; None in the arrays written before
+    beta_calm: np.ndarray | None = None
 
 
 def prepare(data, fp, costs, folder: Path, names: list[str] | None = None) -> Arrays:
@@ -258,6 +263,12 @@ def prepare(data, fp, costs, folder: Path, names: list[str] | None = None) -> Ar
     known = np.isfinite(volatility) & (volatility > 0)
     fill = np.nanmedian(np.where(known, volatility, np.nan)) if known.any() else 0.02
     calm = (1 / np.where(known, volatility, fill)).astype(np.float32)
+    from quant_platform.research.daily import BETA_FLOOR
+
+    beta = -fp.matrix("low_beta_250")[:, first:last + 1].astype(np.float64)       # 2026-11-20: stored negated
+    has_beta = np.isfinite(beta)
+    middle = np.nanmedian(np.where(has_beta, beta, np.nan)) if has_beta.any() else 1.0
+    beta_calm = (1 / np.maximum(np.where(has_beta, beta, middle), BETA_FLOOR)).astype(np.float32)
     groups = {group: number for number, group in enumerate(sorted({fp.industry(symbol) for symbol in fp.symbols}))}
     industry = np.array([groups[fp.industry(symbol)] for symbol in fp.symbols], dtype=np.int32)
     weekly_set = check_days(days, "weekly")
@@ -268,6 +279,7 @@ def prepare(data, fp, costs, folder: Path, names: list[str] | None = None) -> Ar
     bench[:-1] = units[1:] / units[:-1] - 1
     np.save(folder / "next_returns.npy", next_returns)
     np.save(folder / "calm.npy", calm)
+    np.save(folder / "beta_calm.npy", beta_calm)
     np.save(folder / "industry.npy", industry)
     np.save(folder / "weekly_days.npy", weekly_days)
     np.save(folder / "bench.npy", np.nan_to_num(bench))
@@ -285,7 +297,19 @@ def load_arrays(folder: Path) -> Arrays:
                   industry=np.load(folder / "industry.npy"), weekly_days=np.load(folder / "weekly_days.npy"),
                   bench=np.load(folder / "bench.npy"), days=[date.fromisoformat(day) for day in meta["days"]],
                   rising=np.load(folder / "rising.npy") if (folder / "rising.npy").is_file() else None,
-                  liquidity=np.load(folder / "liquidity.npy") if (folder / "liquidity.npy").is_file() else None)
+                  liquidity=np.load(folder / "liquidity.npy") if (folder / "liquidity.npy").is_file() else None,
+                  beta_calm=np.load(folder / "beta_calm.npy") if (folder / "beta_calm.npy").is_file() else None)
+
+
+def weights_of(arrays: Arrays, weighting: str) -> np.ndarray | None:
+    """The per-stock weights a candidate's weighting reads (None for equal amounts); 2026-11-20 "inverse_beta"."""
+    if weighting == "inverse_vol":
+        return arrays.calm
+    if weighting == "inverse_beta":
+        if arrays.beta_calm is None:
+            raise ValueError("這次掃描的陣列沒有連動資料（2026-11-20 以前寫的），不能評估依連動配置")
+        return arrays.beta_calm
+    return None
 
 
 # --- stage 1 account -----------------------------------------------------------------------------
@@ -412,7 +436,7 @@ def evaluate(arrays: Arrays, candidate: dict, costs, record: bool = False):
     fee = costs.fee_rate * costs.fee_discount
     tax = dict(costs.tax_rates).get("stock", 0.003)
     checks = arrays.weekly_days if candidate["check"] == "weekly" else np.ones(len(arrays.days), dtype=bool)
-    calm = arrays.calm if candidate["weighting"] == "inverse_vol" else None
+    calm = weights_of(arrays, candidate["weighting"])
     trend = candidate.get("hold") == "trend"
     if trend and arrays.rising is None:
         raise ValueError("這次掃描的陣列沒有月線資料（scan 1.2.0 以前），不能評估月線上續抱")
@@ -608,6 +632,8 @@ def finalists(arrays: Arrays, rows: list[dict], costs, count: int, pool: int = 6
     earlier = []
     for seed in seeds or []:
         if not set(seed["factors"]) <= set(arrays.names):   # a signal this scan's arrays do not have (a newer model)
+            continue
+        if seed.get("weighting") == "inverse_beta" and arrays.beta_calm is None:      # 2026-11-20: arrays from before
             continue
         _metrics, (returns, _entries) = evaluate(arrays, seed, costs)
         if np.std(returns) > 0:
