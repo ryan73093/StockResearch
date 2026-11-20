@@ -2,6 +2,21 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-11-20 20:40 — 四個沒量過的方法：融券回補、資產成長與毛利÷總資產、依分數配錢、第一次讀現金流量表
+
+- 使用者 11/20 19:3x：「繼續啊，還有什麼？」機器滿載（研究程式 7～8 個、CPU 16 核 100%），所以每個新方法都先排進流程、跑之前寫判定（結果紀錄第 7 節各一段）。
+- 做了：
+  - 除息前融券強制回補（`short_cover_ahead`，流程 `shortcover`）：事件檢查 9,096 次除息，融券多的沒有比少的多賺；強度 2015～2020 正、2020-10 以後反向（排序相關 −0.013，t＝−3.8），和「即將除息」一樣。
+  - 資產成長低、毛利÷總資產（`fundamentals.BALANCE_FACTORS`，流程 `balance`）：強度都「弱」（資產成長 2020-10 以後排序相關 0.0001；毛利÷總資產 +0.016 但前五分之一沒多賺）。
+  - 依分數高低配錢（weighting "rank"，`daily._rank_weights`，流程 `rankweight`）：betaguard 的 44 個規則，第一名的錢是最後一名的 2 倍；等逐筆模擬的空位（選手池重算兩份佔著，約 11/21 早上）。
+  - 現金流量表第一次讀（`fundamentals.build_cash`、`CashStore`，流程 `cashflow`）：年初累計拆成單季，應計項目、現金獲利兩個因子；自己的表與版本（`fundamentals/cash.parquet`、`cash_versions.parquet`），財報表和讀它的規則不受影響。`history fundamentals` 以後會一起更新它，`history cash` 只建它。
+  - 新因子都只給規則用：不進 `FACTOR_LABELS`（模型、機器人、搜尋清單不變），讀它們的規則把資料算進輸入。
+- 記憶體量測（使用者 11/20：還有 30 GB 記憶體）：
+  - 在 Windows 上，程式放在顯示卡的記憶體會等量算進系統提交額度（2 GB 放顯示卡，提交多 2 GB、實體 0）。研究程式本身沒有佔著顯示卡；它們提交多、實體少，是被換到分頁檔。
+  - 一步因子強度最多 2.4 GB、新穎度 10.9 GB，所以每步預留 16 GB 不改。分頁檔自己長到 82 GB、提交上限 192 GB；現在卡的是 CPU（100%），再多開程式只會變慢。
+- 測試：`scripts\run-tests.ps1` 跑新的 `test_research_short_cover.py`、`test_research_balance_factors.py`、`test_research_rank_weights.py`、`test_research_cash_factors.py`，和財報、因子、流程腳本的測試，都通過（一次流程腳本測試因機器滿載逾時，單獨重跑通過）。
+- commit：236fc32、c4dd2d4、321cdac、3d33c78；回復：各自 revert，`fundamentals/cash*.parquet` 改名留著即可。
+
 ## 2026-11-20 20:20 — 評分者的指示照「同一天問兩次一不一致」選定；16:00 檢查每一天都看、流程還在跑不誤報
 
 - 起因：評分者的 Haiku 試跑（`replay/check-score-20261120`：40 檔都打分、一天 0.0064 美元、沒有退回）分數擠在 2、3 分、剛好 20 檔 3 分以上，我懷疑模型用分數挑 20 檔。
