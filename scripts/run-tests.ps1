@@ -30,7 +30,11 @@ $folder = Join-Path $root "build\test-runs"
 New-Item -ItemType Directory -Force -Path $folder | Out-Null
 $log = Join-Path $folder "$stamp.log"
 $errors = Join-Path $folder "$stamp.err.log"
-$temp = Join-Path $root "build\pytest-$stamp-$PID"
+# 2026-11-20 (使用者：D 槽那麼大容量你不放，一直把資料丟到 C 槽): the tests' temporary folders go to D: (153 of them had
+# filled 18 GB of C:); on a machine without D: they stay under build
+$bulk = if ($env:STOCKRESEARCH_BULK_DIR) { $env:STOCKRESEARCH_BULK_DIR } elseif (Test-Path -LiteralPath "D:\") { "D:\StockResearch-data" } else { Join-Path $root "build" }
+$temp = Join-Path $bulk "pytest\pytest-$stamp-$PID"
+New-Item -ItemType Directory -Force -Path (Join-Path $bulk "pytest") | Out-Null     # pytest makes the folder, not its parent
 
 $arguments = @("-X", "utf8", "-m", "pytest") + $Paths + @("-q", "-p", "no:cacheprovider", "--basetemp", $temp)
 $quoted = ($arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }) -join " "
