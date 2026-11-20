@@ -1,5 +1,6 @@
-"""2026-11-20 (使用者：使用 claude api haiku 並繼續; D-051): the Claude client — the same contract, ledger and caps as the
-OpenAI one, on the Messages API through the official SDK. No test makes a network call."""
+"""2026-11-20 (使用者：使用 claude api haiku 並繼續; D-051; 不是要統一用 ai api 平台的 api 嗎; D-052): the Claude client —
+the same contract, ledger and caps as the OpenAI one, in the Messages format through the official SDK, sent to this
+computer's AI API platform. No test makes a network call."""
 import json
 from datetime import UTC, datetime
 
@@ -9,7 +10,7 @@ import pytest
 
 from quant_platform.config.settings import Settings
 from quant_platform.research.agent.llm import (
-    CLAUDE_BASE_URL,
+    AI_PLATFORM_URL,
     CLAUDE_MAX_TOKENS,
     BudgetExceeded,
     ClaudeClient,
@@ -18,6 +19,7 @@ from quant_platform.research.agent.llm import (
     UsageLedger,
     call_cost,
     claude_error,
+    base_url_for,
     json_object,
     key_configured,
     model_client,
@@ -134,30 +136,46 @@ def test_sdk_errors_become_messages_without_the_key(tmp_path):
         (anthropic.NotFoundError("model: claude-haiku-5-5", response=_response(404, "no"), body=None), "找不到模型"),
         (anthropic.InternalServerError("overloaded", response=_response(529, "overloaded"), body=None), "HTTP 529"),
         (anthropic.APITimeoutError(request=request), "逾時"),
-        (anthropic.APIConnectionError(request=request), "連線失敗"),
+        (anthropic.APIConnectionError(request=request), "連不到AI API 平台"),
     ]
     for error, words in cases:
         assert words in str(claude_error(error, MODEL))
     with pytest.raises(LLMError) as raised:
         claude(tmp_path, FakeCreate(cases[0][0])).json_call("i", "u", "llm_agent")
-    assert "金鑰無效" in str(raised.value) and "sk-ant-secret" not in str(raised.value)
+    assert "AI API 平台的金鑰無效" in str(raised.value) and "sk-ant-secret" not in str(raised.value)
     assert ledger(tmp_path)[-1]["status"] == "failed"
 
 
-def test_the_configured_model_picks_the_provider_and_no_key_means_no_client(tmp_path, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_KEY_ENV_FILE", raising=False)
+def test_every_model_goes_through_the_platform_with_the_projects_key(tmp_path, monkeypatch):
+    """D-052: one key (the platform's, for StockResearch), whatever the model; no OpenAI client is made any more."""
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY_ENV_FILE"):
+        monkeypatch.delenv(name, raising=False)
     book = UsageLedger(tmp_path / "usage.jsonl")
-    assert Settings().research_agent_model == MODEL                    # the platform's default since 2026-11-20
-    without = Settings(anthropic_api_key="")
-    assert model_client(without, book, 1.0) is None and not key_configured(without)
-    made = model_client(Settings(anthropic_api_key="sk-ant-x"), book, 1.0, max_output_tokens=2_000, label="研究知識庫")
+    assert Settings().research_agent_model == MODEL                    # pinned, not one of the platform's aliases
+    without = Settings(anthropic_api_key="", openai_api_key="sk-openai")
+    assert model_client(without, book, 1.0) is None and not key_configured(without)   # an OpenAI key is not used
+    made = model_client(Settings(anthropic_api_key="aiapi-x"), book, 1.0, max_output_tokens=2_000, label="研究知識庫")
     assert type(made) is ClaudeClient and made.model == MODEL and made._effort == "medium"
     assert made._max_output_tokens == CLAUDE_MAX_TOKENS                 # room for the thinking, whatever the caller asked
-    old = model_client(Settings(research_agent_model="gpt-6-luna", openai_api_key="sk-x"), book, 1.0)
-    assert type(old) is ResponsesClient and old.model == "gpt-6-luna"
-    assert model_client(Settings(research_agent_model="gpt-6-luna", anthropic_api_key="sk-ant-x"), book, 1.0) is None
+    assert made._base_url == AI_PLATFORM_URL and made._where == "AI API 平台"
+    gpt = model_client(Settings(research_agent_model="gpt-6-luna", anthropic_api_key="aiapi-x"), book, 1.0)
+    assert type(gpt) is ClaudeClient and gpt.model == "gpt-6-luna"        # the platform translates the format
+    body = gpt.body("回覆 JSON。", ["甲", "乙"])
+    assert "output_config" not in body and not any("cache_control" in block for block in body["messages"][0]["content"])
+
+
+def test_the_address_is_the_settings_then_the_projects_env_file_then_the_platform(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:9/an-ai-tools-proxy")   # inherited: never used
+    env = tmp_path / ".env"
+    env.write_text("ANTHROPIC_API_KEY=aiapi-x\n", encoding="utf-8")
+    assert base_url_for(Settings(env_file=str(env))) == AI_PLATFORM_URL
+    env.write_text("ANTHROPIC_API_KEY=aiapi-x\nANTHROPIC_BASE_URL=http://127.0.0.1:5011\n", encoding="utf-8")
+    assert base_url_for(Settings(env_file=str(env))) == "http://127.0.0.1:5011"           # the platform's own instructions
+    assert base_url_for(Settings(env_file=str(env), claude_api_base_url="https://api.anthropic.com")) == \
+        "https://api.anthropic.com"
+    direct = model_client(Settings(env_file=str(env), claude_api_base_url="https://api.anthropic.com"),
+                          UsageLedger(tmp_path / "u.jsonl"), 1.0)
+    assert direct._where == "Claude API"
 
 
 def test_a_key_added_to_the_env_file_after_start_is_used_without_a_restart(tmp_path, monkeypatch):
@@ -176,7 +194,7 @@ def test_a_key_added_to_the_env_file_after_start_is_used_without_a_restart(tmp_p
 def test_a_base_url_left_in_the_environment_does_not_redirect_the_calls(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:9/elsewhere")
     model = claude(tmp_path, None)
-    assert str(model.sdk().base_url).startswith(CLAUDE_BASE_URL)        # made, not called: no request
+    assert str(model.sdk().base_url).startswith(AI_PLATFORM_URL)        # made, not called: no request
 
 
 def test_the_price_of_a_long_prompt_and_of_the_old_model():

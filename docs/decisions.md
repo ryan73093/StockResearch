@@ -432,3 +432,16 @@ D-001～D-042 是 2026-11-11 從當時的 `AGENTS.md`（commit 97dfb7d）逐字�
   1. 平台所有呼叫語言模型的地方（AI 研究員、新聞事件評分、研究知識庫、假設檢驗、LLM 交易員、AI 選股代理人、AI 代理人實驗室）改用 Claude API 的 `claude-haiku-5-5`，不再加值 OpenAI：設定 `RESEARCH_AGENT_MODEL` 的預設改成它，金鑰放 `.env` 的 `ANTHROPIC_API_KEY`（`research/agent/llm.py` 的 `model_client`，官方 SDK）。
   2. 每月 5 美元的總上限與各自的份額不變；兩家的花費記在同一本用量帳。
   3. 換模型照 D-050 的規則：代理人的每個設計從第一次用 Haiku 做出的決定重新起算 60 個交易日；LLM 交易員與新聞事件評分的紀錄標出換模型的日子（每筆紀錄存模型名稱）。
+
+## D-052 語言模型的呼叫統一經過本機的 AI API 平台
+
+- 日期：2026-11-20
+- 使用者原話（助理把模型改成直接連 Claude API、請使用者把 Anthropic 金鑰加進 `.env` 之後）：
+
+> 不是要統一用ai api平台的api嗎
+
+- 決定內容（助理的整理）：
+  1. 這台電腦上的專案共用一個 AI API 入口（`C:\Dev\AiApiPlatform`，本機 `http://127.0.0.1:5010`）：專案只連它、用它給這個專案的金鑰，背後送到哪個供應商由平台決定，用量與花費在平台的儀表板按專案看。研究平台所有呼叫語言模型的地方都經過它（`research/agent/llm.py` 的 `model_client`、`base_url_for`），不直接連 Anthropic 或 OpenAI。
+  2. 金鑰是平台給 StockResearch 的專案金鑰，放 `.env` 的 `ANTHROPIC_API_KEY`（平台說明裡 Claude SDK 專案的寫法）；`.env` 寫了 `ANTHROPIC_BASE_URL` 就用它，沒寫就是平台的位址；從別的程式環境繼承來的位址不用。
+  3. 模型照 D-051 寫明 `claude-haiku-5-5`，不用平台的別名（`fast` 等）：別名在平台上一改，所有專案就換模型，前向實驗會在不知情下換設計（D-050）。平台的別名要換到研究平台，改 `RESEARCH_AGENT_MODEL`。
+  4. 研究平台自己的每月 5 美元上限與各項份額照舊（平台的儀表板另外記一份）。

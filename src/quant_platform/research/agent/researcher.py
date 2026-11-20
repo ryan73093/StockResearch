@@ -211,7 +211,7 @@ class ResearchAgent:
     def check(self) -> dict[str, object]:
         """A tiny call that proves the key, the model and the JSON format work (not research)."""
         if self._client is None:
-            raise LLMError("AI 研究員未啟用或沒有模型金鑰（Claude：ANTHROPIC_API_KEY）")
+            raise LLMError("AI 研究員未啟用或沒有 AI API 平台的專案金鑰（.env 的 ANTHROPIC_API_KEY）")
         payload, usage = self._client.json_call(
             "只輸出 JSON 物件。", '請回傳 {"ok": true, "model_ready": true}', "connection_check",
         )

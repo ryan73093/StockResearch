@@ -17,6 +17,16 @@
 - 部署 16:09（工作目錄裡另一個對話還沒提交的代理人程式也一起裝上，匯入檢查通過）。
 - 回復方式：`git revert` 這幾個 commit；`betaguard` 等試驗的登錄留著（只增）。
 
+## 2026-11-20 16:25 — 模型呼叫統一經過本機的 AI API 平台（D-052）
+
+- 起因：我把模型改成直接連 Claude API、請使用者加 Anthropic 金鑰；使用者：「不是要統一用ai api平台的api嗎」。這台電腦有共用的 AI API 入口 `C:\Dev\AiApiPlatform`（本機 `127.0.0.1:5010`，每個專案一把自己的金鑰，用量在它的儀表板看）。我開工前沒有查這台電腦的共用服務就接了供應商，是我的疏失；已記進工作記憶。
+- 做法：`research/agent/llm.py`：`model_client` 不論模型都建 `ClaudeClient`，位址由 `base_url_for` 決定——`CLAUDE_API_BASE_URL`，否則專案 `.env` 寫的 `ANTHROPIC_BASE_URL`（平台說明裡專案的寫法），否則平台；從別的程式環境繼承來的位址不用（不讓專案金鑰送到別處）。非 Claude 的模型不送提示快取與思考強度（平台會轉成 OpenAI 格式）。錯誤訊息改說「AI API 平台」。OpenAI Responses API 的用戶端留著、不再建立。模型照 D-051 寫明 `claude-haiku-5-5`，不用平台的別名（別名一改所有專案就換模型，前向實驗會不知情地換設計）。
+- 查過的平台行為（讀它的說明與程式，沒讀它的 `.env`）：Claude 格式原樣轉送到 Anthropic（`output_config`、`cache_control` 都會帶過去），只拿掉 temperature／top_p／top_k；接受 `Authorization: Bearer`（SDK 2.x 的送法）也接受 `x-api-key`；`claude-haiku-5-5` 路由到 Anthropic、單價 0.10／0.50。平台上的專案現在是 VectorDB、videoGeneration、benchmark，還沒有 StockResearch。
+- 實測：用一把不存在的金鑰從研究平台的用戶端連平台，回 401，訊息「AI API 平台的金鑰無效或停用…」，記帳 0 元。
+- 測試：Claude 用戶端、AI 研究員、實驗室、第一版代理人、LLM 交易員、新聞評分、文件守門 77 passed（`build/test-runs/20261120-161802.log`）。
+- 還要：平台給 StockResearch 的專案金鑰（建金鑰要使用者同意），放 `.env` 的 `ANTHROPIC_API_KEY`。
+- 回復：`.env` 設 `CLAUDE_API_BASE_URL=https://api.anthropic.com` 就直接連 Anthropic（要 Anthropic 自己的金鑰）；或 `git revert` 這個 commit。
+
 ## 2026-11-20 16:13 — 金鑰加進 .env 之後不用重啟服務就讀得到
 
 - 服務（worker 的 21:45 新聞評分與 22:00 AI 研究員、網站的「問 AI」）是在啟動時讀 `.env` 的；使用者之後才加的 `ANTHROPIC_API_KEY` 要重啟才讀得到。改成每次建立模型用戶端時，環境裡沒有金鑰就再讀一次 `.env` 的那一行（`Settings.env_file`，`from_env` 給；程式裡直接建的設定，例如測試，不讀檔）。研究流程每次都是新的程序，本來就讀得到。

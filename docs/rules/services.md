@@ -5,6 +5,7 @@
 ## 主機上的其他專案
 
 - 主機同時執行其他專案：VectorDB（5001 與其 Tunnel）、AutoLayout（4173）、YtSummary（8001）及其他 `cloudflared` 程序。只操作核對過的本專案程序；動到共用的服務（DBQdrant、Home、cloudflared）前先看會不會影響其他專案（D-024）。
+- 語言模型的呼叫經過共用的 AI API 平台（`C:\Dev\AiApiPlatform`，本機 `127.0.0.1:5010`，D-052）：本專案只改自己的 `.env`（平台給的專案金鑰），不改平台的設定或別名；平台沒在跑時用模型的功能照「沒有呼叫模型」記錄，不改連供應商。
 - 操作本專案服務前核對：PID、執行檔完整路徑（`.venv\Scripts\quant-web.exe`、`quant-api.exe`、`quant-worker.exe`）、命令列、port（5000、8000）。無法確認身分時先蒐集證據，不要停止程序。
 - 專案在 `C:\Dev\StockResearch`；舊資料夾 `C:\Users\皮咪\Project\StockResearch` 只留給使用者回復或刪除，不在那裡改或跑任何東西；16:00 核對（`invariants.placement`）（D-024）。
 

@@ -675,7 +675,8 @@ def ai_status(settings, research: str | Path):
     if client is None:
         from quant_platform.research.agent.llm import key_name
 
-        return None, {"ready": False, "note": f"沒有設定模型金鑰（.env 的 {key_name(settings.research_agent_model)}）：只能搜尋紀錄。"}
+        return None, {"ready": False,
+                      "note": f"沒有設定 AI API 平台的專案金鑰（.env 的 {key_name(settings.research_agent_model)}）：只能搜尋紀錄。"}
     remaining = float(client.budget_status().get("remaining_usd") or 0.0)
     if remaining <= 0:
         return None, {"ready": False, "note": "本月 AI 預算用完：只能搜尋紀錄。"}

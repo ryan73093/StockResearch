@@ -127,13 +127,17 @@ class Settings:
     # AI researcher (S4-W04, research/agent/): OpenAI Responses API like VectorDB.
     research_agent_enabled: bool = True
     # 2026-11-20 (使用者：使用 claude api haiku 並繼續; D-051): every model call of the research platform (researcher,
-    # news scoring, knowledge base, hypotheses, LLM trader, stock-picking agent, agent lab) on the Claude API; a
-    # "claude-…" model needs ANTHROPIC_API_KEY, any other the OpenAI key (research/agent/llm.py ``model_client``)
+    # news scoring, knowledge base, hypotheses, LLM trader, stock-picking agent, agent lab) on Claude Haiku 5.5, through
+    # this computer's AI API platform (D-052) with the project's key from it in ANTHROPIC_API_KEY
+    # (research/agent/llm.py ``model_client``). A model name pinned, not one of the platform's aliases: a forward
+    # experiment's model changes only when this setting does (D-050).
     research_agent_model: str = "claude-haiku-5-5"
     anthropic_api_key: str = ""
     research_agent_effort: str = "medium"
-    # not ANTHROPIC_BASE_URL: another program's environment (an AI tool's proxy) must not redirect the research calls
-    claude_api_base_url: str = "https://api.anthropic.com"
+    # 2026-11-20 (D-052): empty = the ANTHROPIC_BASE_URL written in this project's .env, else this computer's AI API
+    # platform (127.0.0.1:5010; research/agent/llm.py ``base_url_for``). Not an inherited ANTHROPIC_BASE_URL: another
+    # program's environment (an AI tool's proxy) must not redirect the research calls or receive the project's key.
+    claude_api_base_url: str = ""
     # the .env from_env read (empty for settings made in code, as the tests do): the model key is read from it again at
     # each client, so a key added while the services run is used without a restart
     env_file: str = ""
@@ -246,7 +250,7 @@ class Settings:
             research_agent_model=os.getenv("RESEARCH_AGENT_MODEL", "claude-haiku-5-5").strip(),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             research_agent_effort=os.getenv("RESEARCH_AGENT_EFFORT", "medium").strip(),
-            claude_api_base_url=os.getenv("CLAUDE_API_BASE_URL", "https://api.anthropic.com").strip(),
+            claude_api_base_url=os.getenv("CLAUDE_API_BASE_URL", "").strip(),
             env_file=str(Path.cwd() / ".env"),
             research_agent_monthly_budget_usd=max(0.0, float(os.getenv("RESEARCH_AGENT_MONTHLY_BUDGET_USD", "1"))),
             llm_monthly_budget_usd=max(0.0, float(os.getenv("LLM_MONTHLY_BUDGET_USD", "5"))),

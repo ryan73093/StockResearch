@@ -11,6 +11,10 @@ logged.
 (the default is ``claude-haiku-5-5``) is called on the Claude Messages API through the official SDK (``ClaudeClient``)
 with the same contract — one call answers one JSON object — the same ledger and the same monthly caps. Every caller
 builds its client with ``model_client``, which picks the provider from the configured model's name.
+
+2026-11-20 (使用者：不是要統一用 ai api 平台的 api 嗎; D-052): the calls go to this computer's AI API platform
+(AiApiPlatform, ``AI_PLATFORM_URL``) with the project's key from it, not to a provider: the platform routes every
+model and its dashboard counts each project's use. ``model_client`` makes a ``ClaudeClient`` for every model.
 """
 
 from __future__ import annotations
@@ -36,7 +40,11 @@ PRICES: dict[str, dict[str, float]] = {
     "claude-haiku-5-5": {"input": 0.10, "cached_input": 0.01, "cache_write": 0.125, "output": 0.50,
                          "long_above": 100_000, "long_factor": 5.0},
 }
-CLAUDE_BASE_URL = "https://api.anthropic.com"
+CLAUDE_BASE_URL = "https://api.anthropic.com"     # Anthropic itself: not used unless CLAUDE_API_BASE_URL names it
+# 2026-11-20 (使用者：不是要統一用 ai api 平台的 api 嗎; D-052): every model call goes through this computer's AI API
+# platform (C:\Dev\AiApiPlatform): one address, a key per project, its dashboard counting each project's use; it passes
+# the Claude format through to Anthropic and translates it for OpenAI and Gemini models
+AI_PLATFORM_URL = "http://127.0.0.1:5010"
 CLAUDE_MAX_TOKENS = 16_000        # its thinking counts toward the cap (Claude Haiku 5.5 thinks by default)
 CLAUDE_RETRIES = 2                # the SDK's own retries of 408/409/429/5xx and dropped connections
 CLAUDE_EFFORT = "medium"          # Claude Haiku 5.5's default effort, sent explicitly
@@ -73,34 +81,44 @@ def is_claude(model: str) -> bool:
     return str(model or "").startswith("claude-")
 
 
-def resolve_anthropic_key(direct: str = "", env_file: str = "") -> str:
-    """ANTHROPIC_API_KEY: given, in the environment, or — read again at each call — in ``env_file`` (the project's
-    .env, which Settings.from_env names): a key the owner adds while the services run is used without a restart
-    (the worker's 21:45 news scoring and 22:00 researcher, the web's knowledge questions). Never logged."""
-    if direct or os.getenv("ANTHROPIC_API_KEY"):
-        return direct or os.environ["ANTHROPIC_API_KEY"]
+def env_file_value(env_file: str, name: str) -> str:
+    """``name``'s value in the dotenv file ``env_file`` (read now, not from the environment); "" when absent."""
     path = Path(env_file) if env_file else None
     if path is None or not path.is_file():
         return ""
     for line in path.read_text(encoding="utf-8-sig").splitlines():
-        name, _, value = line.strip().partition("=")
-        if name.strip() == "ANTHROPIC_API_KEY":
+        key, _, value = line.strip().partition("=")
+        if key.strip() == name:
             return value.strip().strip('"').strip("'")
     return ""
 
 
-def key_name(model: str) -> str:
-    return "ANTHROPIC_API_KEY" if is_claude(model) else "OPENAI_API_KEY"
+def resolve_anthropic_key(direct: str = "", env_file: str = "") -> str:
+    """ANTHROPIC_API_KEY — the AI API platform's key for this project (D-052): given, in the environment, or — read
+    again at each call — in ``env_file`` (the project's .env, which Settings.from_env names): a key the owner adds while
+    the services run is used without a restart (the worker's 21:45 news scoring and 22:00 researcher, the web's
+    knowledge questions). Never logged."""
+    if direct or os.getenv("ANTHROPIC_API_KEY"):
+        return direct or os.environ["ANTHROPIC_API_KEY"]
+    return env_file_value(env_file, "ANTHROPIC_API_KEY")
+
+
+def base_url_for(settings) -> str:
+    """Where the model calls go: CLAUDE_API_BASE_URL when set, else the ANTHROPIC_BASE_URL written in the project's
+    .env (the platform's own instructions for a project), else the platform. Never an ANTHROPIC_BASE_URL inherited from
+    another program's environment (an AI tool's proxy): the project key must reach the platform only."""
+    return (getattr(settings, "claude_api_base_url", "")
+            or env_file_value(getattr(settings, "env_file", ""), "ANTHROPIC_BASE_URL") or AI_PLATFORM_URL)
+
+
+def key_name(model: str = "") -> str:
+    """The setting that holds the key (every model goes through the platform's Claude format since D-052)."""
+    return "ANTHROPIC_API_KEY"
 
 
 def key_configured(settings) -> bool:
-    """Whether the configured model's provider has a key (no call is made)."""
-    if is_claude(settings.research_agent_model):
-        return bool(resolve_anthropic_key(getattr(settings, "anthropic_api_key", ""), getattr(settings, "env_file", "")))
-    try:
-        return bool(resolve_openai_key(settings.openai_api_key))
-    except LLMError:
-        return False
+    """Whether the project has its AI API platform key (no call is made)."""
+    return bool(resolve_anthropic_key(getattr(settings, "anthropic_api_key", ""), getattr(settings, "env_file", "")))
 
 
 def token_counts(usage: object) -> tuple[int, int, int]:
@@ -330,8 +348,9 @@ def json_object(text: str) -> dict:
     return payload
 
 
-def claude_error(exc: Exception, model: str) -> LLMError:
-    """An SDK error as an LLMError in the owner's language: the status and the API's own message, never the key."""
+def claude_error(exc: Exception, model: str, where: str = "AI API 平台") -> LLMError:
+    """An SDK error as an LLMError in the owner's language: the status and the API's own message, never the key.
+    ``where``: the service the call went to."""
     if isinstance(exc, LLMError):
         return exc
     try:
@@ -340,49 +359,51 @@ def claude_error(exc: Exception, model: str) -> LLMError:
         return LLMError("沒有安裝 anthropic 套件（pip install anthropic）")
     detail = str(getattr(exc, "message", "") or "")[:200]
     if isinstance(exc, anthropic.AuthenticationError):
-        return LLMError("Claude API 金鑰無效（HTTP 401）：請檢查 .env 的 ANTHROPIC_API_KEY")
+        return LLMError(f"{where}的金鑰無效或停用（HTTP 401）：.env 的 ANTHROPIC_API_KEY 要是平台給 StockResearch 的專案金鑰")
     if isinstance(exc, anthropic.PermissionDeniedError):
-        return LLMError(f"Claude API 沒有權限（HTTP 403）：{detail or '這把金鑰不能用這個模型'}")
+        return LLMError(f"{where}沒有權限（HTTP 403）：{detail or '這把金鑰不能用這個模型'}")
     if isinstance(exc, anthropic.NotFoundError):
-        return LLMError(f"Claude API 找不到模型 {model}（HTTP 404）")
+        return LLMError(f"{where}找不到模型 {model}（HTTP 404）")
     if isinstance(exc, anthropic.RateLimitError):
-        return LLMError(f"Claude API 速率限制（HTTP 429，已自動重試 {CLAUDE_RETRIES} 次）：{detail}")
+        return LLMError(f"{where}速率限制（HTTP 429，已自動重試 {CLAUDE_RETRIES} 次）：{detail}")
     if isinstance(exc, anthropic.BadRequestError):
-        return LLMError(f"Claude API HTTP 400：{detail or '請求格式不對'}")
+        return LLMError(f"{where} HTTP 400：{detail or '請求格式不對'}")
     if isinstance(exc, anthropic.APIStatusError):
-        return LLMError(f"Claude API HTTP {exc.status_code}：{detail or '伺服器錯誤'}")
+        return LLMError(f"{where} HTTP {exc.status_code}：{detail or '伺服器錯誤'}")
     if isinstance(exc, anthropic.APITimeoutError):
-        return LLMError(f"Claude API 逾時（已自動重試 {CLAUDE_RETRIES} 次）")
+        return LLMError(f"{where}逾時（已自動重試 {CLAUDE_RETRIES} 次）")
     if isinstance(exc, anthropic.APIConnectionError):
-        return LLMError(f"Claude API 連線失敗（已自動重試 {CLAUDE_RETRIES} 次）")
-    return LLMError(f"Claude API 呼叫失敗（{exc.__class__.__name__}）")
+        return LLMError(f"連不到{where}（已自動重試 {CLAUDE_RETRIES} 次；平台的服務有沒有在跑？）")
+    return LLMError(f"{where}呼叫失敗（{exc.__class__.__name__}）")
 
 
 class ClaudeClient(ResponsesClient):
-    """2026-11-20 (D-051): ``json_call`` on the Claude Messages API through the official SDK, with the budget checks and
-    the ledger of ``ResponsesClient``. The instructions are the system prompt; the input is one user turn whose parts
-    are text blocks, the one before the last marked for the prompt cache — a caller that sends a growing conversation as
-    parts (a stable beginning, then the step's question) pays a tenth for the part it sent before. The reply's text is
-    parsed as JSON (no prefill, no sampling settings: the model accepts neither). A refusal or a reply cut off at
-    ``max_tokens`` is an LLMError."""
+    """2026-11-20 (D-051, D-052): ``json_call`` in the Claude Messages format through the official SDK, sent to the AI
+    API platform (which passes it to Anthropic, or translates it for another provider's model), with the budget checks
+    and the ledger of ``ResponsesClient``. The instructions are the system prompt; the input is one user turn whose
+    parts are text blocks, the one before the last marked for the prompt cache — a caller that sends a growing
+    conversation as parts (a stable beginning, then the step's question) pays a tenth for the part it sent before. The
+    reply's text is parsed as JSON (no prefill, no sampling settings: the model accepts neither). A refusal or a reply
+    cut off at ``max_tokens`` is an LLMError."""
 
     def __init__(self, api_key: str, model: str, ledger: UsageLedger, monthly_budget_usd: float,
                  timeout: float = 180.0, max_output_tokens: int = CLAUDE_MAX_TOKENS,
                  create: Callable[..., object] | None = None, clock: Callable[[], datetime] | None = None,
                  operations: tuple[str, ...] | None = None, total_budget_usd: float | None = None,
-                 label: str = "AI 研究員", base_url: str = CLAUDE_BASE_URL, effort: str | None = CLAUDE_EFFORT) -> None:
+                 label: str = "AI 研究員", base_url: str = AI_PLATFORM_URL, effort: str | None = CLAUDE_EFFORT) -> None:
         super().__init__(api_key, model, ledger, monthly_budget_usd, timeout=timeout,
                          max_output_tokens=max(int(max_output_tokens), CLAUDE_MAX_TOKENS), clock=clock,
                          operations=operations, total_budget_usd=total_budget_usd, label=label)
-        self._no_key = "尚未設定 ANTHROPIC_API_KEY（.env）"
+        self._no_key = "尚未設定 AI API 平台的專案金鑰（.env 的 ANTHROPIC_API_KEY）"
         self._create = create
-        self._base_url = base_url or CLAUDE_BASE_URL
+        self._base_url = base_url or AI_PLATFORM_URL
+        self._where = "AI API 平台" if self._base_url.rstrip("/") == AI_PLATFORM_URL else "Claude API"
         self._effort = effort
         self._sdk = None
 
     def sdk(self):
         """The SDK client, made once. The base URL is given explicitly: an ANTHROPIC_BASE_URL another program left in
-        the environment must not send the research calls elsewhere."""
+        the environment must not send the research calls (and the project's key) elsewhere."""
         if self._sdk is None:
             import anthropic
 
@@ -395,11 +416,12 @@ class ClaudeClient(ResponsesClient):
         content: list[dict] = [{"type": "text", "text": part} for part in parts if part.strip()]
         if not content or "json" not in (instructions + content[-1]["text"]).lower():
             content.append({"type": "text", "text": "請以 JSON 物件回覆。"})
-        if len(content) >= 2:
+        claude = is_claude(self.model)         # the cache mark and the effort are Claude's; another model gets neither
+        if claude and len(content) >= 2:
             content[-2]["cache_control"] = {"type": "ephemeral"}
         body = {"model": self.model, "max_tokens": self._max_output_tokens, "system": instructions,
                 "messages": [{"role": "user", "content": content}]}
-        if self._effort:
+        if claude and self._effort:
             body["output_config"] = {"effort": self._effort}
         return body
 
@@ -414,7 +436,7 @@ class ClaudeClient(ResponsesClient):
             try:
                 message = (self._create or self.sdk().messages.create)(**body)
             except Exception as exc:  # noqa: BLE001 - every SDK error becomes an LLMError without the key
-                raise claude_error(exc, self.model) from None
+                raise claude_error(exc, self.model, self._where) from None
             usage = claude_usage(_get(message, "usage"))
             stop = _get(message, "stop_reason")
             if stop == "refusal":
@@ -436,25 +458,17 @@ class ClaudeClient(ResponsesClient):
 def model_client(settings, ledger: UsageLedger, monthly_budget_usd: float, *, operations: tuple[str, ...] | None = None,
                  total_budget_usd: float | None = None, label: str = "AI 研究員",
                  max_output_tokens: int = 6000) -> ResponsesClient | None:
-    """The client for ``settings.research_agent_model`` inside the given monthly share: a ``claude-…`` model on the
-    Claude API (ANTHROPIC_API_KEY), any other on OpenAI (OPENAI_API_KEY); None without that provider's key."""
-    model = settings.research_agent_model
-    if is_claude(model):
-        key = resolve_anthropic_key(getattr(settings, "anthropic_api_key", ""), getattr(settings, "env_file", ""))
-        if not key:
-            return None
-        return ClaudeClient(key, model, ledger, monthly_budget_usd, operations=operations,
-                            total_budget_usd=total_budget_usd, label=label, max_output_tokens=max_output_tokens,
-                            base_url=getattr(settings, "claude_api_base_url", "") or CLAUDE_BASE_URL,
-                            effort=getattr(settings, "research_agent_effort", "") or CLAUDE_EFFORT)
-    try:
-        key = resolve_openai_key(settings.openai_api_key)
-    except LLMError:
-        return None
+    """The client for ``settings.research_agent_model`` inside the given monthly share, through the AI API platform
+    (D-052) whatever the model: the platform sends a ``claude-…`` model to Anthropic and translates the Claude format for
+    a ``gpt-…`` or ``gemini-…`` one. None without the project's platform key (ANTHROPIC_API_KEY). ``ResponsesClient``
+    (OpenAI's own API) is no longer made here."""
+    key = resolve_anthropic_key(getattr(settings, "anthropic_api_key", ""), getattr(settings, "env_file", ""))
     if not key:
         return None
-    return ResponsesClient(key, model, ledger, monthly_budget_usd, operations=operations,
-                           total_budget_usd=total_budget_usd, label=label, max_output_tokens=max_output_tokens)
+    return ClaudeClient(key, settings.research_agent_model, ledger, monthly_budget_usd, operations=operations,
+                        total_budget_usd=total_budget_usd, label=label, max_output_tokens=max_output_tokens,
+                        base_url=base_url_for(settings),
+                        effort=getattr(settings, "research_agent_effort", "") or CLAUDE_EFFORT)
 
 
 def _strip_fence(text: str) -> str:
