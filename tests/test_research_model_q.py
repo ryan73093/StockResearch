@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from quant_platform.research import model
 
@@ -153,7 +154,7 @@ def test_model_q_is_model_k_s_features_with_the_other_target_and_its_own_gate(tm
     assert model.version_features("gbm-2.12.0") == model.version_features("gbm-2.7.0")
     assert model.VERSIONS["gbm-2.12.0"]["target"] == "residual" and "target" not in model.VERSIONS["gbm-2.7.0"]
     assert set(model.DOWN_GATES) == {"gbm-2.12.0", "gbm-2.13.0", "gbm-2.13.1", "gbm-2.13.2", "gbm-2.13.3", "gbm-2.14.0",
-                                     "gbm-2.15.0"}
+                                     "gbm-2.15.0", "gbm-2.16.0"}
     assert set(model.version_features("gbm-2.12.0")) - set(model.version_features("gbm-2.13.3")) == {"low_daytrade_5"}
     assert set(model.DOWN_GATES.values()) == {"gbm-2.7.0"}
     whole = model.version_features("gbm-2.12.0")                     # 2026-11-19: the two halves of the paid features
@@ -324,3 +325,31 @@ def test_model_t_is_model_k_with_the_factors_measured_in_november(tmp_path, monk
     (folder / "meta.json").write_text(json.dumps({"down_gate": {"passed": True}}), encoding="utf-8")
     rules = daily.BATCHES["modelt"]()
     assert len(rules) == 3 and all(rule.factors == {"ml_gbm_t": 1.0} for rule in rules)
+
+
+def test_model_u_learns_the_return_net_of_the_beta_on_the_days_taiex_fell():
+    """2026-11-21 (docs/research/results.md「模型 U：扣掉大盤下跌日的連動」, written before the run): a stock that falls
+    twice as much as TAIEX and rises half as much has a downside beta of 2 (Ang, Chen & Xing 2006), whatever its beta
+    over every day; model U's label takes that beta times TAIEX's move off its return."""
+    from quant_platform.research import daily
+
+    rng = np.random.default_rng(5)
+    days = weekdays(date(2020, 1, 1), 400)
+    moves = rng.normal(0.0, 0.01, len(days))
+    moves[0] = 0.0
+    index = 100 * np.cumprod(1 + moves)
+    lopsided = np.where(moves < 0, 2.0 * moves, 0.5 * moves)
+    prices = np.vstack([50 * np.cumprod(1 + lopsided), 30 * np.cumprod(1 + moves)])
+    fp = SimpleNamespace(sessions=days, symbols=["1101.TW", "1102.TW"], market=index,
+                         panel=SimpleNamespace(filled=prices))
+    down = model.market_betas(fp, [300], window=model.DOWN_BETA_WINDOW, down=True)[0]
+    every = model.market_betas(fp, [300])[0]
+    assert down[0] == pytest.approx(2.0, abs=1e-6) and down[1] == pytest.approx(1.0, abs=1e-6)
+    assert 0.9 < every[0] < 1.6                                       # over every day: somewhere between
+    eligible = np.ones((2, len(days)), dtype=bool)
+    ranked = model.label_block(fp, [300], eligible, "down_residual_rank", 20)
+    later = prices[:, 320] / prices[:, 300] - 1 - down * (index[320] / index[300] - 1)
+    assert (ranked[0, 0] > ranked[0, 1]) == (later[0] > later[1])
+    assert model.MODELS["ml_gbm_u"] == {"version": "gbm-2.16.0", "label": "ensemble", "features": "extended_k",
+                                        "target": "down_residual"}
+    assert "ml_gbm_u" in daily.MODEL_FACTORS and daily.BATCHES["modelu"] is daily.model_u_batch

@@ -104,6 +104,9 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # features and target plus the factors measured in November (NOVEMBER_FEATURES) — most tell the bad from the
           # good (high rank correlation) while their top fifth earns no more, which a model of every stock's rank can use
           "ml_gbm_t": {"version": "gbm-2.15.0", "label": "ensemble", "features": "extended_t"},
+          # 2026-11-21 (docs/research/results.md「模型 U：扣掉大盤下跌日的連動」, written before the run): model Q with the
+          # beta measured on the days TAIEX fell (Ang, Chen & Xing 2006) — model Q's registered next version (a)
+          "ml_gbm_u": {"version": "gbm-2.16.0", "label": "ensemble", "features": "extended_k", "target": "down_residual"},
           # 2026-11-19 (docs/research/results.md「模型 Q 靠哪幾份付費表」, written before the run): model R failed and its
           # rules earn half of model Q's — which tables carry it: model Q without the five long-history features
           # (margin maintenance, loans, block trades: PAID_LONG), and without the four that start in 2021-22
@@ -364,10 +367,15 @@ BETA_WINDOW = 120          # sessions a stock's beta to TAIEX is measured over, 
 BETA_LEAST = 108
 
 
-def market_betas(fp, columns: list[int], window: int = BETA_WINDOW, spreads: bool = False):
+DOWN_BETA_WINDOW, DOWN_BETA_LEAST = 250, 60   # 2026-11-21 (model U): the days TAIEX fell in the last 250, 60 traded
+
+
+def market_betas(fp, columns: list[int], window: int = BETA_WINDOW, spreads: bool = False, down: bool = False):
     """len(columns) × symbols: each stock's beta to TAIEX over the ``window`` sessions ending on the column — what was
     known that day. NaN without the index or with fewer than BETA_LEAST of the days traded. ``spreads`` (2026-11-18,
-    dl-2.8.1): also the daily volatility of what the beta leaves over the same sessions — (betas, volatilities)."""
+    dl-2.8.1): also the daily volatility of what the beta leaves over the same sessions — (betas, volatilities).
+    ``down`` (2026-11-21, gbm-2.16.0): over the sessions of the window TAIEX fell only (Ang, Chen & Xing 2006's
+    downside beta), at least DOWN_BETA_LEAST of them traded."""
     prices = np.asarray(fp.panel.filled, dtype=float)
     output = np.full((len(columns), len(fp.symbols)), np.nan, dtype=np.float32)
     left = np.full((len(columns), len(fp.symbols)), np.nan, dtype=np.float32)
@@ -383,12 +391,17 @@ def market_betas(fp, columns: list[int], window: int = BETA_WINDOW, spreads: boo
             returns = prices[:, column - window + 1:column + 1] / prices[:, column - window:column] - 1
         if not np.isfinite(moves).all():
             continue
+        if down:
+            fell = moves < 0
+            moves, returns = moves[fell], returns[:, fell]
+            if moves.size < 2:
+                continue
         centred = moves - moves.mean()
         spread = float(centred @ centred)
         if spread <= 0:
             continue
         known = np.isfinite(returns)
-        enough = known.sum(axis=1) >= BETA_LEAST * window // BETA_WINDOW
+        enough = known.sum(axis=1) >= (DOWN_BETA_LEAST if down else BETA_LEAST * window // BETA_WINDOW)
         filled = np.where(known, returns, 0.0)
         own = filled - filled.mean(axis=1, keepdims=True)
         slopes = own @ centred / spread
@@ -419,6 +432,11 @@ def label_block(fp, columns: list[int], eligible: np.ndarray, kind: str = "rank"
             index = pd.Series(np.asarray(fp.market, dtype=float)).ffill().to_numpy()
             moves = np.array([index[later[slot]] / index[columns[slot]] - 1 for slot in rows])
             returns = returns - market_betas(fp, [columns[slot] for slot in rows]) * moves[:, None]
+        if kind in ("down_residual", "down_residual_rank"):      # 2026-11-21 (gbm-2.16.0): less the downside beta
+            index = pd.Series(np.asarray(fp.market, dtype=float)).ffill().to_numpy()
+            moves = np.array([index[later[slot]] / index[columns[slot]] - 1 for slot in rows])
+            betas = market_betas(fp, [columns[slot] for slot in rows], window=DOWN_BETA_WINDOW, down=True)
+            returns = returns - betas * moves[:, None]
         if kind == "residual_z":
             import warnings
 
@@ -430,7 +448,7 @@ def label_block(fp, columns: list[int], eligible: np.ndarray, kind: str = "rank"
                 floor = np.nanpercentile(np.where(left > 0, left, np.nan), 5, axis=1, keepdims=True)
             with np.errstate(invalid="ignore", divide="ignore"):
                 returns = (returns - slopes * moves[:, None]) / np.maximum(left, floor)
-        if kind in ("rank", "residual_rank"):
+        if kind in ("rank", "residual_rank", "down_residual_rank"):
             output[rows] = _rank(returns)
         else:
             import warnings
@@ -584,10 +602,13 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
     y60 = label_block(fp, samples, eligible, "excess", 60)
     # 2026-11-18 (gbm-2.12.0): what the members learn is the return net of the stock's beta; the diagnostics below stay
     # on the plain labels, so the yearly top-20 gain reads as every other version's
-    residual = VERSIONS.get(version, {}).get("target") == "residual"
-    learn20, learn_rank, learn60 = ((label_block(fp, samples, eligible, "residual", HORIZON),
-                                     label_block(fp, samples, eligible, "residual_rank", HORIZON),
-                                     label_block(fp, samples, eligible, "residual", 60)) if residual else (y20, rank20, y60))
+    # 2026-11-21 (gbm-2.16.0): or net of the beta on the days TAIEX fell ("down_residual")
+    target = VERSIONS.get(version, {}).get("target")
+    residual = target in ("residual", "down_residual")
+    kind = "down_residual" if target == "down_residual" else "residual"
+    learn20, learn_rank, learn60 = ((label_block(fp, samples, eligible, kind, HORIZON),
+                                     label_block(fp, samples, eligible, f"{kind}_rank", HORIZON),
+                                     label_block(fp, samples, eligible, kind, 60)) if residual else (y20, rank20, y60))
     years = years or list(range(FIRST_YEAR, fp.sessions[-1].year + 1))
     diagnostics = {}
     # 2026-10-20 (gbm-2.4.0): refitted every month — each month's ensemble learns the labels ended before the month's
@@ -665,7 +686,8 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
 
 
 DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0", "gbm-2.13.0": "gbm-2.7.0", "gbm-2.13.1": "gbm-2.7.0", "gbm-2.13.2": "gbm-2.7.0",
-              "gbm-2.13.3": "gbm-2.7.0", "gbm-2.14.0": "gbm-2.7.0", "gbm-2.15.0": "gbm-2.7.0"}
+              "gbm-2.13.3": "gbm-2.7.0", "gbm-2.14.0": "gbm-2.7.0", "gbm-2.15.0": "gbm-2.7.0",
+              "gbm-2.16.0": "gbm-2.7.0"}
 # 2026-11-21 (model T): the factors measured in November, outside FACTOR_LABELS — beta, the literature's behavior
 # factors (the skewness one way: a tree reads both ends), the balance sheet and the cash flow statement
 NOVEMBER_FEATURES = ("low_beta_250", "low_down_beta_250", "cgo_250", "beta_resid_mom_12", "illiquidity_60", "pair_gap_20",
@@ -784,7 +806,9 @@ def train_until(fp, out_dir: str | Path, cutoff, label: str, version: str, horiz
         # 2026-11-18: the version's own target — the month's refit of gbm-2.12.0 learned the plain labels here (this
         # function has its own copy of the yearly training's label lines), which made it model K from the cutoff on;
         # found 20 minutes after its first refit, before any forward account read it
-        kinds = (("residual", "residual_rank") if VERSIONS.get(version, {}).get("target") == "residual"
+        goal = VERSIONS.get(version, {}).get("target")          # (``target`` here is the folder)
+        kinds = (("residual", "residual_rank") if goal == "residual"
+                 else ("down_residual", "down_residual_rank") if goal == "down_residual"      # 2026-11-21: model U
                  else ("excess", "rank"))
         y20 = label_block(fp, samples, eligible, kinds[0], HORIZON)
         rank20 = label_block(fp, samples, eligible, kinds[1], HORIZON)

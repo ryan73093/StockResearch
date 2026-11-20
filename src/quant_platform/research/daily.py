@@ -279,6 +279,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_q": "機器學習集成 Q（模型 K 的特徵，學扣掉跟大盤連動之後的報酬：不靠大盤漲）",
                  "ml_gbm_r": "機器學習集成 R（模型 Q 拿掉 FinMind 付費資料的 9 個特徵：不續約也能跑）",
                  "ml_gbm_s": "機器學習集成 S（模型 K 的做法，用上市加上櫃一起訓練、只替上市股打分數）",
+                 "ml_gbm_u": "機器學習集成 U（模型 K 的特徵，學扣掉「大盤下跌日的連動」之後的報酬：跌的時候不跟著跌）",
                  "ml_gbm_t": "機器學習集成 T（模型 K 的特徵，加上 11 月新量的 16 個因子：連動、偏態、處分效果、資產成長、現金流量表、存貨與應收）",
                  "ml_gbm_q_nolong": "模型 Q 拿掉長歷史的 5 個付費特徵（融資維持率、借貸、鉅額；只拿來量，不做規則）",
                  "ml_gbm_q_noshort": "模型 Q 拿掉短歷史的 4 個付費特徵（主力集中度、八大行庫、隔日沖；只拿來量，不做規則）",
@@ -5162,6 +5163,21 @@ def model_s_batch() -> list[DailyRule]:
             for word, change in MODEL_R_FRAMES]
 
 
+def model_u_batch() -> list[DailyRule]:
+    """2026-11-21 (docs/research/results.md「模型 U：扣掉大盤下跌日的連動」, written before the run): gbm-2.16.0 alone
+    in model R's three frames — only past its registered gate (model.down_gate against model K)."""
+    from quant_platform.research.model import stored_down_gate
+
+    check = stored_down_gate(Path("instance") / "research" / "models", "gbm-2.16.0")
+    print(f"gbm-2.16.0 門檻（2021-2025 前 20 名對加權指數，對 gbm-2.7.0）：{check}", flush=True)
+    if not check or not check.get("passed"):
+        return []
+    base = {"factors": {"ml_gbm_u": 1.0}, "check": "weekly", "industry_cap": 0.3, "min_hold": 0}
+    return [DailyRule.model_validate({**base, **change,
+                                      "name": f"模型 U 單獨（扣掉大盤下跌日的連動）、同產業最多 3 成、不設最短持有{word}"})
+            for word, change in MODEL_R_FRAMES]
+
+
 def model_t_batch() -> list[DailyRule]:
     """2026-11-21 (docs/research/results.md「模型 T：模型 K 加上 11 月新量的因子」, written before the run): gbm-2.15.0
     alone in model R's three frames — only past its registered gate (model.down_gate against model K)."""
@@ -6470,7 +6486,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "modelt": model_t_batch,"betaguard": beta_guard_batch, "rankweight": rank_weight_batch, "cashveto": cash_veto_batch, "cashveto2": cash_veto_deep_batch,"poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "modelt": model_t_batch, "modelu": model_u_batch,"betaguard": beta_guard_batch, "rankweight": rank_weight_batch, "cashveto": cash_veto_batch, "cashveto2": cash_veto_deep_batch,"poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
