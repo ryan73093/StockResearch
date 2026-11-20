@@ -34,7 +34,6 @@ from quant_platform.research.forward import FORWARD_START, ForwardTracker
 from quant_platform.research.forward_board import common_start as forward_common_start
 from quant_platform.research.rolling import cutoff_for
 from quant_platform.research.robustness import latest as robustness_latest
-from quant_platform.research.downside import notes as downside_notes
 from quant_platform.research.downside import table as downside_table
 from quant_platform.research.legacy_challenger import challenger_view
 from quant_platform.research.legacy_challenger import latest_report as latest_challenger
@@ -495,7 +494,21 @@ def ready_views(research_dir: Path) -> dict[str, object]:
             "pool:seed": lambda: pool_view(research_dir, basis="seed"), "dashboard": lambda: dashboard_data(research_dir),
             "downside": lambda: downside_table(research_dir), "forward": lambda: StockForwardTracker(research_dir).summary(),
             "status": lambda: research_status(research_dir), "scale": lambda: search_scale(research_dir),
+            "ranking": lambda: trial_ranking(research_dir / "trials.jsonl", "development"),
             "roles": lambda: roles_view(research_dir), "start": lambda: start_view(research_dir)}
+
+
+_NOTES_OF: dict[str, object] = {}
+
+
+def kept_notes(rows: list[dict] | None) -> dict[str, dict]:
+    """rule hash → the falling-market mark (downside.notes' rule) from a downside table, worked out once per table."""
+    from quant_platform.research.downside import RISK_GAP
+
+    if _NOTES_OF.get("rows") is not rows:
+        _NOTES_OF.update(rows=rows, notes={row["rule_hash"]: row["worst_fall"] for row in rows or []
+                                          if row.get("worst_fall") and row["worst_fall"]["gap"] < -RISK_GAP})
+    return _NOTES_OF["notes"]
 
 
 def dashboard_data(research_dir: Path) -> dict[str, object]:
@@ -881,9 +894,12 @@ def create_v2_blueprint(dependencies) -> Blueprint:
     blueprint = Blueprint("v2", __name__)
 
     def risk_note(rule_hash: str) -> dict | None:
-        """2026-10-18: the falling-market mark of a rule (research/downside.py), for every page that lists rules."""
+        """2026-10-18: the falling-market mark of a rule (research/downside.py), for every page that lists rules.
+        2026-11-20 (16:00 檢查：研究總覽 9.0 秒): from the downside table the warm-up keeps ready — read here, the table
+        was built again from every passing rule's report whenever a trial was registered (5 s of the overview's 17)."""
         try:
-            return downside_notes(_instance_dir(dependencies.settings.database_url) / "research").get(rule_hash)
+            research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+            return kept_notes(ready("downside", research_dir, lambda: downside_table(research_dir))).get(rule_hash)
         except (OSError, ValueError, KeyError):
             return None
 
@@ -1527,7 +1543,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             return redirect(url_for("v2.research"))
         tab = tab if tab in RESEARCH_TABS else "overview"
         reports_dir = research_dir / "reports"
-        ranking = trial_ranking(research_dir / "trials.jsonl", "development")
+        # 2026-11-20: kept ready by the warm-up (7 s of a cold overview: the registry read and verified again)
+        ranking = ready("ranking", research_dir, lambda: trial_ranking(research_dir / "trials.jsonl", "development"))
         stats = latest_stats(research_dir / "stats", "development")
         if stats and str(stats.get("basis") or "")[:12] != ranking.get("basis"):
             stats = None  # computed on another data basis than the ranked trials

@@ -490,7 +490,7 @@ def test_a_rule_falling_further_than_0050_is_marked_on_the_pages(tmp_path, monke
            "max_drawdown": -0.34, "benchmark_max_drawdown": -0.34, "down_months": 40, "down_rule": -0.017,
            "down_base": -0.036, "down_worse_share": 0.39, "most_behind": -0.28, "worst_fall": note}
     monkeypatch.setattr(v2, "downside_table", lambda research: [row])
-    monkeypatch.setattr(v2, "downside_notes", lambda research: {"xyz": note})
+    # 2026-11-20: the marks come from the downside table itself (v2.kept_notes), as the warm-up keeps it
     client = create_app(build_container(
         Settings(database_url=f"sqlite:///{tmp_path / 'app.db'}", scheduler_in_web=False))).test_client()
     body = client.get("/research").get_data(as_text=True)
