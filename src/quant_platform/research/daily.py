@@ -377,6 +377,21 @@ BEHAVIOR_FACTORS = {
     # must buy back before the book closes; a stock with many shorts and an announced ex-date close ahead
     "short_cover_ahead": "融券強制回補前（已公告除息、除息日在 7～28 天後：融券餘額÷近 20 日平均成交張數＝幾天的量才補得完，沒有的是 0）",
 }
+# 2026-11-21 (docs/research/results.md「投機的特徵反過來用」, written before the run): in the strength table of 11/20
+# the bottom fifth of these was ahead of the average stock after 2020-10 (by 4.9 to 10.5 points a year), as the
+# skewness was; each is its factor the other way round (the negation), so it ranks the stocks its factor avoids first
+REVERSED_OF = {"high_vol_60": "low_volatility_60", "momentum_1m": "reversal_1", "momentum_1w": "reversal_5d",
+               "industry_leader_5": "industry_laggard_5", "high_max_20": "low_max_return", "high_ivol_60": "low_ivol_60",
+               "high_day_trade_20": "low_day_trade_20"}
+REVERSED_FACTORS = {
+    "high_vol_60": "波動大（60 日日報酬的標準差高；台灣 2015 年起波動最大的五分之一反而多賺）",
+    "momentum_1m": "近 1 個月漲幅大（短線強勢；台灣近 1 個月漲最多的五分之一多賺，和美國的短期反轉相反）",
+    "momentum_1w": "近 1 週漲幅大（短線強勢；漲跌幅限制下價格延遲反應、之後繼續走）",
+    "industry_leader_5": "比同產業強（這檔近 1 週報酬減同產業平均）",
+    "high_max_20": "近 1 個月最大單日漲幅高（飆股）",
+    "high_ivol_60": "特質波動大（60 日扣大盤後的波動高）",
+    "high_day_trade_20": "當沖比例高（20 日）",
+}
 SHORT_COVER_FROM, SHORT_COVER_TO = 28, 7       # calendar days before the ex-date: the window before the last covering day
 CGO_WARMUP = 250             # sessions of a stock's own history before its reference price counts
 PAIR_WINDOW, PAIR_LEAST, PAIR_GAP = 250, 200, 20
@@ -437,6 +452,7 @@ def pair_gaps(log_returns: np.ndarray, groups: dict[str, list[int]], month_start
 
 
 RULE_FACTORS.update(BEHAVIOR_FACTORS)          # 2026-11-20: rule factors too
+RULE_FACTORS.update(REVERSED_FACTORS)          # 2026-11-21
 
 
 def rolling_beta(returns: pd.DataFrame, market: pd.Series, window: int = BETA_WINDOW, least: int = BETA_LEAST,
@@ -795,6 +811,8 @@ class FactorPanel:
         return self._cache[factor]
 
     def _compute(self, factor: str):
+        if factor in REVERSED_OF:                     # 2026-11-21: its factor the other way round
+            return -self.matrix(REVERSED_OF[factor]).T
         if factor in NEUTRAL_FACTORS:                 # 2026-10-20: the score's percentile within the volatility tenth
             return volatility_neutral(self.matrix(NEUTRAL_OF[factor]), -self.matrix("low_volatility_60")).T
         if factor in ("llm_agent", "llm_agent_control"):         # 2026-11-19: the stock-picking agent's stored choices
@@ -3115,6 +3133,9 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
     """The files besides prices a run reads, as part of its input: statements, the exit models, the
     trained factor models — and (2026-11-20) the tables the tree models' features read."""
     payload: dict[str, object] = {}
+    reversed_of = [REVERSED_OF[name] for name in factor_names if name in REVERSED_OF]
+    if reversed_of:                 # 2026-11-21: a reversed factor reads what its factor reads (no other rule changes)
+        factor_names = list(dict.fromkeys([*factor_names, *reversed_of]))
     features = model_feature_inputs(history, factor_names)
     if features:                    # the tables behind a model's features are this run's input too
         factor_names = list(dict.fromkeys([*factor_names, *features]))

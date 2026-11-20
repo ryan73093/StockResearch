@@ -33,8 +33,10 @@ def source_groups() -> list[tuple[str, str, bool, frozenset]]:
     from quant_platform.research.fundamentals import BALANCE_FACTORS, CASH_FACTORS, EARNINGS_FACTORS, STATEMENT_FACTORS
     from quant_platform.research.model import MONTHLY_REVENUE
 
+    from quant_platform.research.daily import REVERSED_OF
+
     paid = frozenset(PAID_FACTORS) - frozenset(GOVBANK_FACTORS) - frozenset(BRANCH_FACTORS)
-    return [("chips", "法人、融資券、借券（證交所）", False,
+    groups = [("chips", "法人、融資券、借券（證交所）", False,
              frozenset(CHIP_FACTORS) | frozenset(DEALER_FACTORS) | frozenset(SHORT_FACTORS) | frozenset(LENDING_FACTORS)),
             ("statements", "季財報", False, frozenset(STATEMENT_FACTORS) | frozenset(EARNINGS_FACTORS) | frozenset(BALANCE_FACTORS)
              | frozenset(CASH_FACTORS)),   # 2026-11-20: the earnings family too
@@ -43,6 +45,9 @@ def source_groups() -> list[tuple[str, str, bool, frozenset]]:
             ("paid", "融資維持率、借貸、鉅額、主力（FinMind 付費）", True, paid),
             ("govbank", "八大行庫（FinMind 付費）", True, frozenset(GOVBANK_FACTORS)),
             ("branches", "分點（FinMind 付費）", True, frozenset(BRANCH_FACTORS))]
+    # 2026-11-21: a reversed factor reads what its factor reads
+    return [(key, text, is_paid, names | frozenset(new for new, base in REVERSED_OF.items() if base in names))
+            for key, text, is_paid, names in groups]
 
 
 def model_meta(models: Path, version: str) -> dict:

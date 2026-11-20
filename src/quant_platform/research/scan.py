@@ -100,6 +100,8 @@ SHORT = {
     "low_asset_growth": "資產成長低", "gp_assets": "毛利÷總資產", "low_accruals": "應計項目低", "cash_profit": "現金獲利",
     "low_net_financing": "外部融資少", "fscore": "F 分數", "low_inventory_build": "存貨沒堆高",
     "low_receivable_build": "應收沒堆高",
+    "high_vol_60": "波動大", "momentum_1m": "近月強勢", "momentum_1w": "近週強勢", "industry_leader_5": "比同業強",
+    "high_max_20": "飆股", "high_ivol_60": "特質波動大", "high_day_trade_20": "當沖多",
 }
 
 
@@ -519,26 +521,39 @@ def novelty(fp, new: list[str], limit: float = 0.7) -> dict[str, dict]:
     base = DailyRule(name="資格", factors={"trend_200": 1.0})
     weeks = [fp.index[day] for day in sorted(check_days([day for day in fp.sessions
                                                          if RECENT_START <= day <= DEV_END], "weekly"))]
+    from quant_platform.research.daily import REVERSED_OF
+
     existing = [name for name in signals() if name not in new]
+
+    def mean_correlation(values, others) -> float | None:
+        correlations = []
+        for position in weeks[::4]:
+            mask = fp.eligible(base, position) & np.isfinite(values[:, position]) & np.isfinite(others[:, position])
+            if mask.sum() < 30:
+                continue
+            found = pd.Series(values[mask, position]).rank().corr(pd.Series(others[mask, position]).rank())
+            # 2026-11-20: a week one of them is the same for every stock has no correlation — left out; the
+            # sparse short_cover_ahead (0 for most stocks most weeks) had its mean turned NaN and passed as 0.0
+            if np.isfinite(found):
+                correlations.append(found)
+        return float(np.mean(correlations)) if correlations else None
+
     output = {}
     for name in new:
         values = fp.matrix(name)
         worst, against = 0.0, None
         for other in existing:
-            others = fp.matrix(other)
-            correlations = []
-            for position in weeks[::4]:
-                mask = fp.eligible(base, position) & np.isfinite(values[:, position]) & np.isfinite(others[:, position])
-                if mask.sum() < 30:
-                    continue
-                found = pd.Series(values[mask, position]).rank().corr(pd.Series(others[mask, position]).rank())
-                # 2026-11-20: a week one of them is the same for every stock has no correlation — left out; the
-                # sparse short_cover_ahead (0 for most stocks most weeks) had its mean turned NaN and passed as 0.0
-                if np.isfinite(found):
-                    correlations.append(found)
-            if correlations and abs(float(np.mean(correlations))) > abs(worst):
-                worst, against = float(np.mean(correlations)), other
+            # 2026-11-21: a reversed factor against its own factor is −1 by construction — it buys the stocks the
+            # other leaves out, which no search has looked at; every other signal still counts
+            if REVERSED_OF.get(name) == other or REVERSED_OF.get(other) == name:
+                continue
+            found = mean_correlation(values, fp.matrix(other))
+            if found is not None and abs(found) > abs(worst):
+                worst, against = found, other
         output[name] = {"max_correlation": round(worst, 3), "with": against, "kept": abs(worst) < limit}
+        # 2026-11-21: the new ones against each other too, for the reader (two alike: the judgment keeps one)
+        among = {other: mean_correlation(values, fp.matrix(other)) for other in new if other != name}
+        output[name]["among"] = {other: round(value, 3) for other, value in among.items() if value is not None}
     return output
 
 
