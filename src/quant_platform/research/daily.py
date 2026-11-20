@@ -508,7 +508,8 @@ class DailyRule(BaseModel):
     # 2026-11-20 (docs/research/results.md「不買連動最高的、依連動配置」): "inverse_beta" — in proportion to 1 / the
     # pick's 250-session beta to the market (low_beta_250, at least BETA_FLOOR): the more it moves with the market, the
     # less money.
-    weighting: Literal["equal", "inverse_vol", "inverse_risk", "inverse_beta"] = "equal"
+    # 2026-11-20 (docs/research/results.md「依分數高低配錢」): "rank" — the best-ranked pick RANK_TILT times the last
+    weighting: Literal["equal", "inverse_vol", "inverse_risk", "inverse_beta", "rank"] = "equal"
     account_filter: Literal["none", "own_200"] = "none"
     # 2026-10-07 (the owner: 降換手): rank on each factor's average over the last `smooth` sessions
     # instead of the day's value; 0 = the day's value. Left out of the hash when 0.
@@ -2537,6 +2538,8 @@ def daily_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]
         return _risk_weights(fp, rule, ranks)
     if rule.weighting == "inverse_beta":
         return _beta_weights(fp, rule, ranks)
+    if rule.weighting == "rank":
+        return _rank_weights(fp, rule, ranks)
     volatility = -fp.matrix("low_volatility_60")             # stored negated: the daily standard deviation
     lag = lag_of(rule)
     output: dict[date, dict[str, float]] = {}
@@ -2553,6 +2556,28 @@ def daily_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]
 
 
 BETA_FLOOR = 0.3             # weighting inverse_beta: a beta below this counts as this (no one pick dominates)
+RANK_TILT = 2.0              # weighting rank: the best-ranked pick's amount over the last one's
+
+
+def _rank_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]) -> dict[date, dict[str, float]]:
+    """2026-11-20 (docs/research/results.md「依分數高低配錢」), weighting "rank": the picks by their order in the
+    deciding session's ranking (the defensive one below TAIEX's 200-session average when the rule has one) — the first
+    RANK_TILT times the last, in a straight line between; a holding outside that day's ranking counts as the last."""
+    lag = lag_of(rule)
+    bear = (rule.model_copy(update={"factors": dict(rule.bear_factors)}) if getattr(rule, "bear_factors", None)
+            else None)
+    output: dict[date, dict[str, float]] = {}
+    for day, names in ranks.items():
+        if not names:
+            continue
+        position = fp.index[day] - lag
+        ranking = bear if bear is not None and not fp.risk_on(position) else rule
+        place = {symbol: order for order, symbol in enumerate(fp.ranked(ranking, position))}
+        ordered = sorted(names, key=lambda symbol: (place.get(symbol, len(place)), names.index(symbol)))
+        count = len(ordered)
+        steps = np.linspace(RANK_TILT, 1.0, count) if count > 1 else np.ones(1)
+        output[day] = {symbol: float(share) for symbol, share in zip(ordered, steps / steps.sum(), strict=True)}
+    return output
 
 
 def _beta_weights(fp: FactorPanel, rule: DailyRule, ranks: dict[date, list[str]]) -> dict[date, dict[str, float]]:
@@ -4244,6 +4269,20 @@ BETA_GUARD = {"深度學習": (35450, 31328, 34949, 35099, 34835, 31336, 34238, 
               "T0 共識清單": (30714, 30717, 30012, 30941, 29889, 29937, 30961, 30984),
               "RL 機器人": (29762, 30197, 29750, 30766, 30700, 29701, 35498, 29938),
               "技術分析機器人": (35449, 35454, 35453, 35388)}
+
+
+def rank_weight_batch() -> list[DailyRule]:
+    """2026-11-20 (docs/research/results.md「依分數高低配錢」, written before the run): the same 44 BETA_GUARD rules with
+    their picks weighted by their place in the day's ranking (weighting "rank")."""
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    output = []
+    for trial in (trial for group in BETA_GUARD.values() for trial in group):
+        base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
+        output.append(_variant(base, f"依分數高低配錢（#{trial} 的設定）", weighting="rank"))
+    return output
 
 
 def beta_guard_batch() -> list[DailyRule]:
@@ -6354,7 +6393,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "betaguard": beta_guard_batch, "poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "betaguard": beta_guard_batch, "rankweight": rank_weight_batch, "poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
