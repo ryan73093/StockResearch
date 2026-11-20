@@ -117,7 +117,9 @@ def signals(models_root: Path | None = None) -> list[str]:
 
 # 2026-11-21 (docs/research/results.md「存貨與應收帳款增加」): rule factors outside FACTOR_LABELS whose strength analysis
 # said 強 and that passed the novelty gate — the searches take them up
-JUDGED_IN = ("low_inventory_build",)
+# 2026-11-21 (「投機的特徵反過來用」第二步): ahead of the industry over the week, the one of its group, 0.67 the same
+# way at most (bollinger_b)
+JUDGED_IN = ("low_inventory_build", "industry_leader_5")
 
 
 def failed_models(models_root: Path) -> set[str]:

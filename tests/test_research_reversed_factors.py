@@ -48,7 +48,8 @@ def test_each_reversed_factor_is_its_factor_the_other_way_round():
         assert np.array_equal(np.isnan(mine), np.isnan(theirs))
         assert np.allclose(mine[np.isfinite(mine)], -theirs[np.isfinite(theirs)])
     # not in the searches until the strength analysis and the novelty gate say so (scan.JUDGED_IN)
-    assert not set(daily.REVERSED_OF) & set(signals())
+    # 11/21 second step: ahead of the industry, the one of its group, passed the gate counting the same way only
+    assert set(daily.REVERSED_OF) & set(signals()) == {"industry_leader_5"}
     # 1-month momentum by hand: the return over the last 21 sessions
     column = 300
     prices = fp._prices.to_numpy(dtype=float)
