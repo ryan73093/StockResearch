@@ -7,7 +7,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 FIRST_TOOLS = ("market", "consensus", "screen", "card", "portfolio", "journal")       # the first agent's (llm_agent.TOOLS)
-LAB_TOOLS = ("headlines", "mood", "lessons", "review", "check")
+# 2026-11-20 (A2, before any design's first real decision): the company events (buyback, insider filings, pledges,
+# the exchange's attention and disposition lists)
+LAB_TOOLS = ("headlines", "mood", "lessons", "review", "check", "events")
 MOST, LEAST = 20, 5              # stocks held: the account is always all in the stocks chosen, each an equal part
 VETO_MOST = 6                    # stocks kept out at once
 VETO_NEW, VETO_SESSIONS = 2, 10  # new vetoes a day; a vetoed stock stays out this many decisions (2026-11-20: the
@@ -38,13 +40,13 @@ COHORT: tuple[Variant, ...] = (
     Variant("plain", "單一代理人・中性指示（第一版的六個工具）", "single", FIRST_TOOLS,
             "第一版的指示裡有事後才知道的提示（跌市少跌、連動高跌更多）；拿掉以後還贏不贏對照組", "twin", calls=8),
     Variant("info", "單一代理人・加市場新聞、情緒、研究知識庫、交易檢討、組合檢查", "single", FIRST_TOOLS + LAB_TOOLS,
-            "多給資訊（新聞、情緒、知識、自己過去交易的對錯）有沒有用", "plain", calls=8),
+            "多給資訊（新聞、情緒、公司事件、研究知識、自己過去交易的對錯）有沒有用", "plain", calls=8),
     Variant("vote", "三次獨立決定投票（同一個設計跑三次，兩票以上才持有）", "vote", FIRST_TOOLS + LAB_TOOLS,
             "同一個代理人每次跑的結果不一樣；投票能不能去掉運氣的成分", "info", calls=24),
-    Variant("veto", "只否決：從對照組的 20 檔裡最多剔掉 6 檔，由後面的遞補", "veto", ("market", "mood", "card", "headlines"),
+    Variant("veto", "只否決：從對照組的 20 檔裡最多剔掉 6 檔，由後面的遞補", "veto", ("market", "mood", "card", "headlines", "events"),
             "語言模型當「否決的人」是不是比當「選股的人」好", "twin", steps=1, calls=1),
     Variant("team", "分析師團隊：多方、空方各寫意見，經理人決定", "team", ("market", "mood", "headlines", "consensus", "card",
-                                                                "portfolio", "review"),
+                                                                "events", "portfolio", "review"),
             "多個角色分工再合議，是不是比一個代理人自己查好", "info", steps=3, calls=3),
 )
 BY_KEY = {variant.key: variant for variant in COHORT}

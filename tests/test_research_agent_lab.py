@@ -274,3 +274,98 @@ def test_the_daily_check_wants_every_designs_decision_and_lists_days_kept_from_b
     runner.append(research, "vote", {"date": "2026-11-23", "llm": {"hold": ["2330"]}})
     weekend = invariants.agent_lab_check(research, date(2026, 11, 22), datetime(2026, 11, 22, 16, 0, tzinfo=taipei))
     assert weekend["ok"] and "六個設計都有" in weekend["detail"]            # Sunday: Friday's decisions are the latest due
+
+
+def _events_desk(tmp_path, day=date(2026, 11, 20)):
+    """A desk on a small panel and the five event tables, each with a row announced on the day itself (not known yet
+    at the decision) next to rows announced before."""
+    import pandas as pd
+
+    sessions = [day - timedelta(days=offset) for offset in range(40, -1, -1)]
+    fp = _Panel(sessions, ["6108.TW", "2330.TW"])
+    fp.tradable = None
+    fp.industry = lambda symbol: "電子零組件"
+    for folder in ("buyback", "insider", "pledge", "chips"):
+        (tmp_path / folder).mkdir()
+    pd.DataFrame([{"code": "6108", "board_date": date(2026, 11, 13), "purpose": "3", "planned_shares": 2_000_000.0,
+                   "price_low": 30.0, "price_high": 60.0, "window_start": date(2026, 11, 14), "window_end": date(2027, 1, 13)},
+                  {"code": "6108", "board_date": day, "purpose": "1", "planned_shares": 9_000_000.0, "price_low": 1.0,
+                   "price_high": 2.0, "window_start": day, "window_end": day}]).to_parquet(tmp_path / "buyback" / "programs.parquet")
+    pd.DataFrame([{"code": "6108", "notice_date": date(2026, 11, 10), "role": "董事本人", "method": "一般交易(每日得轉讓股數限制)",
+                   "total_own": 300_000.0, "total_trust": 0.0, "held_own": 1_000_000.0, "held_trust": 0.0,
+                   "after_own": 700_000.0, "after_trust": 0.0},
+                  {"code": "6108", "notice_date": date(2026, 11, 12), "role": "經理人本人", "method": "贈與",
+                   "total_own": 50_000.0, "total_trust": 0.0, "held_own": 80_000.0, "held_trust": 0.0,
+                   "after_own": 30_000.0, "after_trust": 0.0},
+                  {"code": "6108", "notice_date": day, "role": "大股東本人", "method": "鉅額逐筆交易", "total_own": 5_000_000.0,
+                   "total_trust": 0.0, "held_own": 9_000_000.0, "held_trust": 0.0, "after_own": 4_000_000.0,
+                   "after_trust": 0.0}]).to_parquet(tmp_path / "insider" / "transfers.parquet")
+    pd.DataFrame([{"code": "6108", "year": 2026, "month": 9, "usable_from": date(2026, 10, 16), "percent": 12.5},
+                  {"code": "6108", "year": 2026, "month": 10, "usable_from": date(2026, 11, 16), "percent": 20.0},
+                  {"code": "6108", "year": 2026, "month": 11, "usable_from": date(2026, 12, 16), "percent": 99.0}]).to_parquet(
+        tmp_path / "pledge" / "ratios.parquet")
+    pd.DataFrame([{"date": date(2026, 11, 17), "code": "6108"}, {"date": date(2026, 11, 18), "code": "6108"},
+                  {"date": day, "code": "6108"}]).to_parquet(tmp_path / "chips" / "AlertNotice.parquet")
+    pd.DataFrame([{"date": date(2026, 11, 16), "code": "6108", "start": date(2026, 11, 17), "end": date(2026, 11, 23),
+                   "order": 1}]).to_parquet(tmp_path / "chips" / "AlertDisposition.parquet")
+    desk = LabDesk.__new__(LabDesk)
+    desk.fp, desk.base, desk.research, desk.day = fp, tmp_path, tmp_path, day
+    desk.position = fp.index[day]
+    desk.decided_at = decision_moment(day)
+    desk._events, desk._news, desk._tables = None, None, None
+    desk.held, desk.history, desk.seen = [], [], set()
+    desk.names = {"6108": "競國", "2330": "台積電"}
+    desk.allowed = lambda code: code in ("6108", "2330")
+    return desk
+
+
+def test_company_events_are_read_only_from_the_session_after_their_announcement(tmp_path):
+    """2026-11-20 (A2): buyback, insider filings, pledges, attention and disposition — none announced on the day."""
+    desk = _events_desk(tmp_path)
+    text = desk.tool_events({"codes": ["6108", "2330", "9999"]})
+    assert "庫藏股：2026-11-13 董事會決議買回 2,000 張（維護公司信用與股東權益），價格 30～60 元" in text
+    assert "9,000 張" not in text                                             # resolved on the day: announced tonight
+    assert "在市場賣 300 張、贈與或信託等 50 張" in text and "5,000 張" not in text
+    assert "董事本人以一般交易(每日得轉讓股數限制)申報轉讓 300 張（持股 1,000 → 700 張）" in text
+    assert "董監質押：20.0%（2026-10 的申報，前一個月 12.5%）" in text and "99.0" not in text
+    assert "注意股：最近 20 個交易日被列 2 次（最近一次 11-18）" in text
+    assert "處置中：11-17～11-23（第 1 次" in text
+    assert "2330 台積電｜電子零組件" in text and "最近沒有公告的公司事件" in text
+    assert "9999：不是可交易的上市普通股" in text and desk.seen == {"6108", "2330"}
+
+
+def test_news_lines_mark_a_figure_and_a_follow_up_report(tmp_path):
+    import pandas as pd
+
+    folder = tmp_path / "news_events"
+    folder.mkdir()
+    rows = [{"stock_id": "2330", "news_day": "2026-11-17", "title": "10 月營收年增 30%", "about": True, "direction": 1,
+             "numbers": 1, "type": "營收", "risk": False, "scored_at": "2026-11-17T21:55:00+08:00"},
+            {"stock_id": "2330", "news_day": "2026-11-18", "title": "營收創高續強", "about": True, "direction": 1,
+             "numbers": 0, "type": "營收", "risk": False, "scored_at": "2026-11-18T21:55:00+08:00"},
+            {"stock_id": "2330", "news_day": "2026-11-18", "title": "傳出產能調整", "about": True, "direction": -1,
+             "numbers": 0, "type": "其他", "risk": True, "scored_at": "2026-11-18T21:55:00+08:00"}]
+    pd.DataFrame(rows).to_parquet(folder / "20261118.parquet")
+    lines = _desk(tmp_path).news()["2330"]
+    assert lines[0] == "2026-11-17 利多・有數字：10 月營收年增 30%"
+    assert lines[1] == "2026-11-18 利多・後續報導：營收創高續強"
+    assert lines[2] == "2026-11-18 利空・風險：傳出產能調整"                     # "其他" is never called a follow-up
+
+
+def test_every_lab_design_that_reads_news_can_read_the_company_events():
+    for key in ("info", "vote", "veto", "team"):
+        assert "events" in variants.BY_KEY[key].tools
+    assert "events" not in variants.BY_KEY["plain"].tools                   # the first agent's six tools only
+    assert "- events：" in runner.instructions(variants.BY_KEY["info"])
+
+
+def test_a_new_model_is_probed_once_and_a_probe_cut_short_is_done_again(tmp_path):
+    assert not probe.done(tmp_path, "claude-haiku-5-5")
+    path = probe.path_for(tmp_path, "claude-haiku-5-5")
+    path.parent.mkdir(parents=True)
+    rows = [{"month": f"2024-{month:02d}", "error": "預算用完"} for month in range(1, 13)]
+    path.write_text(json.dumps({"months": rows}), encoding="utf-8")
+    assert not probe.done(tmp_path, "claude-haiku-5-5")                        # every month failed: probe again
+    rows = [{"month": f"{2024 + index // 12}-{index % 12 + 1:02d}", "right": 22, "wrong": 18} for index in range(30)]
+    path.write_text(json.dumps({"months": rows}), encoding="utf-8")
+    assert probe.done(tmp_path, "claude-haiku-5-5") and not probe.done(tmp_path, "gpt-6-luna")

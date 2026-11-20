@@ -77,6 +77,7 @@ def tool_outputs(desk, signals: tuple[str, ...] = ("momentum_6", "low_beta_250",
     output["review"] = desk.tool_review({})
     output["check"] = desk.tool_check({"codes": codes})
     output["headlines"] = desk.tool_headlines({"days": 2})
+    output["events"] = desk.tool_events({"codes": codes})
     return output
 
 

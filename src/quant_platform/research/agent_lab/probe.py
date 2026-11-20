@@ -69,6 +69,22 @@ def score(listed: list[tuple[str, float]], answers: dict) -> dict[str, float | i
             "z": round(float(z), 2)}
 
 
+def path_for(research: str | Path, model: str) -> Path:
+    return Path(research) / "agent_lab" / "probe" / f"{model or 'model'}.json"
+
+
+def done(research: str | Path, model: str, least: int = 24) -> bool:
+    """Whether ``model`` has a probe with at least ``least`` months answered (a run cut short is done again)."""
+    path = path_for(research, model)
+    if not path.is_file():
+        return False
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8")).get("months") or []
+    except ValueError:
+        return False
+    return sum(1 for row in rows if "error" not in row and row.get("right", 0) + row.get("wrong", 0) > 0) >= least
+
+
 def run(fp, base: Path, research: Path, client, count: int = 36, names=None, now: datetime | None = None) -> dict[str, object]:
     rows = []
     for name, before, after in months(list(fp.sessions), count):
@@ -85,7 +101,7 @@ def run(fp, base: Path, research: Path, client, count: int = 36, names=None, now
             rows.append({"month": name, "error": str(error)[:120]})
     result = {"model": getattr(client, "model", ""), "made_at": (now or datetime.now(TAIPEI)).isoformat(timespec="seconds"),
               "stocks": STOCKS, "months": rows}
-    path = Path(research) / "agent_lab" / "probe" / f"{result['model'] or 'model'}.json"
+    path = path_for(research, str(result["model"]))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     return result

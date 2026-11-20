@@ -231,6 +231,7 @@ def packet(desk: LabDesk, agreed: list[str], cards: int = ANALYST_CARDS) -> str:
               desk.tool_portfolio({}), desk.tool_review({})]
     for start in range(0, len(codes), 8):
         blocks.append(desk.tool_card({"codes": codes[start: start + 8]}))
+        blocks.append(desk.tool_events({"codes": codes[start: start + 8]}))       # 2026-11-20 (A2)
     return "\n\n".join(blocks)
 
 
@@ -293,6 +294,7 @@ def decide(fp, base: Path, research: Path, variant: Variant, day: date, client=N
                 blocks = [desk.tool_market({}), desk.tool_mood({}), desk.tool_headlines({"days": 2})]
                 for start in range(0, len(shown), 8):
                     blocks.append(desk.tool_card({"codes": shown[start: start + 8]}))
+                    blocks.append(desk.tool_events({"codes": shown[start: start + 8]}))   # 2026-11-20 (A2)
                 prompt = ("\n\n".join(blocks) + "\n\n候補（依序遞補）：" + "、".join(desk.label(code) for code in reserves[:10])
                           + ("\n\n還在剔除中的（不用再剔）：" + "、".join(f"{desk.label(code)}（{day} 剔）" for code, day in out_already.items())
                              if out_already else "") + "\n\n請回覆 JSON。")

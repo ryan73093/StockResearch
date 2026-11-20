@@ -12,7 +12,7 @@ from quant_platform.research.agent_lab.evaluate import SESSIONS_TO_JUDGE, first_
 
 TOOL_NAMES = {"market": "大盤", "consensus": "規則共識", "screen": "訊號篩選", "card": "個股資料", "portfolio": "持股",
               "journal": "日誌", "headlines": "新聞標題", "mood": "市場情緒", "lessons": "研究知識庫", "review": "交易檢討",
-              "check": "名單檢查"}
+              "check": "名單檢查", "events": "公司事件"}
 
 
 def _load(path: Path) -> dict | None:

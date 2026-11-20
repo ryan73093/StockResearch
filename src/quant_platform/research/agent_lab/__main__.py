@@ -61,17 +61,30 @@ def main() -> int:
                 job.update(current=f"還沒有 {day} 的收盤資料，5 分鐘後再試（第 {attempt + 1} 次）", force=True)
                 time.sleep(300)
             data, fp = loaded
+            model = client()
             if args.run:
                 made = runner.replay(fp, base, RESEARCH, date.fromisoformat(args.first or day.isoformat()), day, args.run,
-                                     client(), keys, job)
+                                     model, keys, job)
             else:
-                made = runner.decide_day(fp, base, RESEARCH, day, client(), None, keys, job) if fp.index.get(day) is not None else []
+                made = runner.decide_day(fp, base, RESEARCH, day, model, None, keys, job) if fp.index.get(day) is not None else []
             job.payload["summary"] = runner.summary(made)
             try:
                 result = evaluate.board(base, RESEARCH, args.run, loaded=(data, fp))
                 evaluate.write(RESEARCH, result)
             except Exception as error:  # noqa: BLE001 - the decisions are stored; the board can be made again
                 job.payload["summary"] += f"；看板沒算出來（{str(error)[:80]}）"
+            # 2026-11-20 (D-051): a model the lab has not probed yet is probed once, on its first live day — what it
+            # remembers of each past month decides which replays mean anything (about US$0.05)
+            if not args.run and not args.scripted and model is not None and not probe.done(RESEARCH, model.model):
+                from quant_platform.research.stock_forward import _names
+
+                job.update(current=f"第一次用 {model.model}：記憶檢測（最近 36 個月）", force=True)
+                try:
+                    probed = probe.run(fp, base, RESEARCH, model, 36, _names(base, fp.sessions[-1].year))
+                    answered = [row for row in probed["months"] if "error" not in row]
+                    job.payload["summary"] += f"；{model.model} 第一次用，做了記憶檢測（{len(answered)} 個月）"
+                except Exception as error:  # noqa: BLE001 - the decisions are stored; the probe runs again tomorrow
+                    job.payload["summary"] += f"；記憶檢測沒做完（{str(error)[:80]}）"
         print(job.payload["summary"], flush=True)
         return 0
     if args.command == "board":

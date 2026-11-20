@@ -3,7 +3,8 @@ consensus, screen, card, portfolio, journal) with the lab's tools, and one gate:
 decision (15:40 of the day unless given). A tool reads prices and factors up to the day's session only, a headline only
 if it had been read from its feed by then, a scored news item only if it had been scored by then (the first agent's
 replay read the files by their news day: scored the evening after, they were not there yet — two days more news than
-its live run sees), a knowledge entry only if it is dated on or before the day.
+its live run sees), a knowledge entry only if it is dated on or before the day, a company event (``tool_events``)
+only from the session after it was announced.
 
 Headlines and knowledge entries are text from outside: they are data for the agent, never instructions to it, and
 whatever it answers is checked against the hard rules (``runner.validate``)."""
@@ -35,7 +36,13 @@ DESCRIPTIONS = {
     "lessons": "查這個平台自己做過的研究結論（哪些做法試過、結果如何）。args: {\"question\": \"要問的事\"}",
     "review": "你過去每一筆已經賣掉的交易的結果（賺賠、同期大盤、勝率、最差的幾筆）與換股次數。args: {}",
     "check": "決定之前檢查一份名單：平均連動、產業集中、要換幾檔與大約的費稅。args: {\"codes\": [\"2330\", \"2317\"]}",
+    "events": "幾檔股票最近的公司事件：庫藏股買回公告、內部人申報轉讓（在市場賣或贈與信託）、董監質押比例、注意股與處置股，"
+              "每一筆都是今天以前公告的。args: {\"codes\": [\"2330\"]}（一次最多 8 檔）",
 }
+EVENT_DAYS = 60                # insider filings and attention listings looked back over
+BUYBACK_DAYS = 120             # buyback programs resolved within
+BUYBACK_PURPOSE = {"1": "轉讓給員工", "2": "給可轉債或認股權轉換", "3": "維護公司信用與股東權益"}
+ON_MARKET = ("一般交易", "盤後", "鉅額")      # an insider's transfer on the market is a sale; a gift or trust is not
 
 
 def decision_moment(day: date) -> datetime:
@@ -56,9 +63,10 @@ class LabDesk(Desk):
         super().__init__(fp, base, research, day, held, history)
         self.decided_at = decided_at or decision_moment(day)
         self._events = None
+        self._tables = None
 
     # --- gated news -----------------------------------------------------------------------------------------------
-    def events(self) -> list[dict]:
+    def scored_news(self) -> list[dict]:
         """The scored news items known at the decision: the last NEWS_DAYS files, only the rows scored by then."""
         if self._events is None:
             import pandas as pd
@@ -78,13 +86,21 @@ class LabDesk(Desk):
 
     def news(self) -> dict[str, list[str]]:
         if self._news is None:
+            # 2026-11-20 (A2; docs/agent_lab.md): news with a figure in it (revenue, EPS, an order) drifts for weeks and
+            # stories without one tend to give their move back (literature in docs/agent_lab.md §2), and a follow-up
+            # report of the same kind of event repeats what the price may already hold — both are marked
             output: dict[str, list[str]] = {}
-            for row in self.events():
+            reported: set[tuple[str, str]] = set()
+            for row in sorted(self.scored_news(), key=lambda item: str(item.get("news_day") or "")):
                 if not bool(row.get("about")):
                     continue
+                code, kind = str(row["stock_id"]), str(row.get("type") or "")
+                follow = (code, kind) in reported and kind not in ("", "其他")
+                reported.add((code, kind))
                 mark = {1: "利多", -1: "利空", 0: "中性"}.get(int(row.get("direction") or 0), "")
-                output.setdefault(str(row["stock_id"]), []).append(
-                    f"{row['news_day']} {mark}{'・風險' if row.get('risk') else ''}：{str(row['title'])[:50]}")
+                marks = (("・有數字" if row.get("numbers") else "") + ("・後續報導" if follow else "")
+                         + ("・風險" if row.get("risk") else ""))
+                output.setdefault(code, []).append(f"{row['news_day']} {mark}{marks}：{str(row['title'])[:50]}")
             self._news = {code: lines[-4:] for code, lines in output.items()}
         return self._news
 
@@ -156,10 +172,10 @@ class LabDesk(Desk):
                 today = float(rolling[-1])
                 place = float((rolling < today).mean())
                 lines.append(f"加權指數近 20 日的年化波動 {100 * today:.0f}%，高過最近一年 {100 * place:.0f}% 的日子。")
-        tone = [int(row.get("direction") or 0) for row in self.events()
+        tone = [int(row.get("direction") or 0) for row in self.scored_news()
                 if bool(row.get("about")) and str(row.get("news_day", "")) >= (self.day - timedelta(days=7)).isoformat()]
         if tone:
-            risk = sum(1 for row in self.events() if bool(row.get("about")) and row.get("risk")
+            risk = sum(1 for row in self.scored_news() if bool(row.get("about")) and row.get("risk")
                        and str(row.get("news_day", "")) >= (self.day - timedelta(days=7)).isoformat())
             lines.append(f"最近一週評分過的個股新聞 {len(tone)} 則：利多 {sum(1 for value in tone if value > 0)}、"
                          f"利空 {sum(1 for value in tone if value < 0)}、帶風險旗標 {risk}。")
@@ -252,6 +268,111 @@ class LabDesk(Desk):
         if early:
             lines.append(f"賣掉之後又漲 5% 以上的有 {len(early)} 筆（可能賣太早）。")
         return "\n".join(lines)
+
+    def company_tables(self) -> dict:
+        """The platform's event tables (research/history: buyback, insider, pledge; chips: the exchange's attention and
+        disposition lists), dates as timestamps; a table that is missing or unreadable is left out."""
+        if self._tables is None:
+            import pandas as pd
+
+            def read(path: Path, dates: tuple[str, ...]):
+                try:
+                    frame = pd.read_parquet(path) if path.is_file() else None
+                except Exception:  # noqa: BLE001
+                    return None
+                if frame is not None:
+                    frame = frame.copy()
+                    frame["code"] = frame["code"].astype(str)
+                    for column in dates:
+                        frame[column] = pd.to_datetime(frame[column], errors="coerce")
+                return frame
+
+            self._tables = {
+                "buyback": read(self.base / "buyback" / "programs.parquet", ("board_date", "window_start", "window_end")),
+                "insider": read(self.base / "insider" / "transfers.parquet", ("notice_date",)),
+                "pledge": read(self.base / "pledge" / "ratios.parquet", ("usable_from",)),
+                "notice": read(self.base / "chips" / "AlertNotice.parquet", ("date",)),
+                "disposition": read(self.base / "chips" / "AlertDisposition.parquet", ("date", "start", "end")),
+            }
+        return self._tables
+
+    def company_events(self, code: str) -> list[str]:
+        """A stock's events known before the day's decision. Point in time as the tables' own modules say: a buyback
+        from the session after its board date (the announcement is that evening; only what it announced, never what
+        was bought), an insider filing from the session after its date, a pledge ratio from its ``usable_from``, the
+        attention and disposition lists from the session after they are announced (after the close)."""
+        import pandas as pd
+
+        tables, day = self.company_tables(), pd.Timestamp(self.day)
+        lines: list[str] = []
+
+        def number(value) -> float:
+            return float(value) if value is not None and np.isfinite(float(value)) else 0.0
+
+        frame = tables.get("buyback")
+        if frame is not None:
+            rows = frame[(frame["code"] == code) & (frame["board_date"] < day)
+                         & (frame["board_date"] >= day - pd.Timedelta(days=BUYBACK_DAYS))]
+            for row in rows.sort_values("board_date").tail(2).to_dict("records"):
+                purpose = BUYBACK_PURPOSE.get(str(row.get("purpose") or "").strip(), str(row.get("purpose") or ""))
+                window = (f"，期間 {row['window_start']:%m-%d}～{row['window_end']:%m-%d}"
+                          if pd.notna(row.get("window_start")) and pd.notna(row.get("window_end")) else "")
+                lines.append(f"庫藏股：{row['board_date']:%Y-%m-%d} 董事會決議買回 {number(row.get('planned_shares')) / 1000:,.0f} 張"
+                             f"（{purpose}），價格 {number(row.get('price_low')):g}～{number(row.get('price_high')):g} 元{window}")
+        frame = tables.get("insider")
+        if frame is not None:
+            rows = frame[(frame["code"] == code) & (frame["notice_date"] < day)
+                         & (frame["notice_date"] >= day - pd.Timedelta(days=EVENT_DAYS))].sort_values("notice_date")
+            if len(rows):
+                records = rows.to_dict("records")
+                planned = [number(row.get("total_own")) + number(row.get("total_trust")) for row in records]
+                market = [any(word in str(row.get("method") or "") for word in ON_MARKET) for row in records]
+                sold = sum(amount for amount, flag in zip(planned, market, strict=True) if flag)
+                other = sum(amount for amount, flag in zip(planned, market, strict=True) if not flag)
+                lines.append(f"內部人申報轉讓（最近 {EVENT_DAYS} 天 {len(records)} 筆）：在市場賣 {sold / 1000:,.0f} 張、"
+                             f"贈與或信託等 {other / 1000:,.0f} 張")
+                for row, amount, flag in list(zip(records, planned, market, strict=True))[-3:]:
+                    before = number(row.get("held_own")) + number(row.get("held_trust"))
+                    after = number(row.get("after_own")) + number(row.get("after_trust"))
+                    lines.append(f"  {row['notice_date']:%m-%d} {row.get('role', '')}以{row.get('method', '')}"
+                                 f"申報轉讓 {amount / 1000:,.0f} 張（持股 {before / 1000:,.0f} → {after / 1000:,.0f} 張）")
+        frame = tables.get("pledge")
+        if frame is not None:
+            rows = frame[(frame["code"] == code) & (frame["usable_from"] <= day)].sort_values("usable_from")
+            if len(rows) and float(rows["percent"].tail(2).abs().sum()) > 0:     # no pledge in either month: nothing to say
+                latest = rows.iloc[-1]
+                text = f"董監質押：{number(latest['percent']):.1f}%（{int(latest['year'])}-{int(latest['month']):02d} 的申報"
+                if len(rows) > 1:
+                    text += f"，前一個月 {number(rows.iloc[-2]['percent']):.1f}%"
+                lines.append(text + "）")
+        frame = tables.get("notice")
+        if frame is not None:
+            first = self.fp.sessions[max(0, self.position - 19)]
+            rows = frame[(frame["code"] == code) & (frame["date"] < day) & (frame["date"] >= pd.Timestamp(first))]
+            if len(rows):
+                lines.append(f"注意股：最近 20 個交易日被列 {len(rows)} 次（最近一次 {rows['date'].max():%m-%d}）")
+        frame = tables.get("disposition")
+        if frame is not None:
+            rows = frame[(frame["code"] == code) & (frame["date"] < day)
+                         & (frame["end"] >= day - pd.Timedelta(days=EVENT_DAYS))].sort_values("date")
+            for row in rows.tail(1).to_dict("records"):
+                state = "處置中" if row["end"] >= day else "處置結束"
+                lines.append(f"{state}：{row['start']:%m-%d}～{row['end']:%m-%d}（第 {int(row.get('order') or 1)} 次，"
+                             f"撮合變慢、大額要預收款）")
+        return lines
+
+    def tool_events(self, args: dict) -> str:
+        codes = [str(code).strip() for code in (args.get("codes") or [])][:8]
+        blocks = []
+        for code in codes:
+            if not self.allowed(code):
+                blocks.append(f"{code}：不是可交易的上市普通股，不能持有。")
+                continue
+            self.seen.add(code)
+            lines = self.company_events(code)
+            blocks.append(f"{self.label(code)}｜{self.fp.industry(code + '.TW')}\n"
+                          + ("\n".join(f"  {line}" for line in lines) if lines else "  最近沒有公告的公司事件"))
+        return "\n".join(blocks) if blocks else "沒有給股票代號。"
 
     def tool_check(self, args: dict) -> str:
         codes = []
