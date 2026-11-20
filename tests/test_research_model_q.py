@@ -229,6 +229,29 @@ def test_the_months_refit_learns_the_versions_own_target(tmp_path, monkeypatch):
     assert asked == [("excess", 20), ("rank", 20), ("excess", 60)]
 
 
+def test_the_months_refit_weighs_by_the_versions_half_life(tmp_path, monkeypatch):
+    """2026-11-21 (交接檔 (d)): model L (gbm-2.8.0) halves a week's weight every 750 sessions in its yearly and monthly
+    training; its refit to the month's cutoff fitted every week equal. A version without a half-life stays unweighted."""
+    from quant_platform.research import model_ensemble
+
+    days = weekdays(date(2018, 1, 1), 2200)
+    fp = SimpleNamespace(sessions=days, symbols=["1101.TW"])
+    weights = []
+    monkeypatch.setattr(model, "trained_features", lambda out, version: ("momentum_3",))
+    monkeypatch.setattr(model, "eligibility", lambda fp: np.ones((1, len(days)), dtype=bool))
+    monkeypatch.setattr(model, "feature_block", lambda fp, samples, eligible, names: np.zeros((len(samples), 1, 1)))
+    monkeypatch.setattr(model, "label_block", lambda fp, samples, eligible, kind, horizon: np.zeros((len(samples), 1)))
+    monkeypatch.setattr(model_ensemble, "fit_year", lambda *args, **kwargs: weights.append(kwargs.get("weights")) or {})
+    model.train_until(fp, tmp_path / "gbm-2.8.0", days[-1], "ensemble", "gbm-2.8.0")
+    found = weights.pop()
+    samples = model.sample_columns(len(days))
+    newest, oldest = max(found), min(found)
+    assert found[newest] > 0.95 and found[oldest] < 0.2                   # 1,948 sessions back: about a sixth
+    assert abs(found[oldest] - 0.5 ** ((len(days) - samples[oldest]) / 750)) < 1e-12
+    model.train_until(fp, tmp_path / "gbm-2.7.0", days[-1], "ensemble", "gbm-2.7.0")
+    assert weights.pop() is None
+
+
 def test_the_small_holders_veto_goes_on_36_fixed_rules_of_four_kinds():
     """2026-11-18 (docs/research/results.md「防護：不買散戶大增的五分之一加到模型類的規則」): in the fall of 9/1-11/18
     every pair with this veto was ahead of the same rule without it; the batch puts it on fixed trials, and the flow

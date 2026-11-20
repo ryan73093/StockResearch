@@ -778,7 +778,13 @@ def train_until(fp, out_dir: str | Path, cutoff, label: str, version: str, horiz
         y20 = label_block(fp, samples, eligible, kinds[0], HORIZON)
         rank20 = label_block(fp, samples, eligible, kinds[1], HORIZON)
         y60 = label_block(fp, samples, eligible, kinds[0], 60)
-        model = fit_year(x, y20, rank20, y60, rows(HORIZON), rows(60), PARAMS)
+        # 2026-11-21 (交接檔 (d)): the version's half-life too — the yearly and monthly training weigh the older weeks
+        # less from the first session the model scores; this copy fitted model L's refits with every week equal
+        half_life = VERSIONS.get(version, {}).get("half_life")
+        weights = None
+        if half_life:
+            weights = {row: 0.5 ** ((last + 1 - samples[row]) / half_life) for row in set(rows(HORIZON)) | set(rows(60))}
+        model = fit_year(x, y20, rank20, y60, rows(HORIZON), rows(60), PARAMS, weights=weights)
         count = len(rows(HORIZON))
     else:
         y = label_block(fp, samples, eligible, label, horizon)
