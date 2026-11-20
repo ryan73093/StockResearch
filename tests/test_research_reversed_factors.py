@@ -81,3 +81,28 @@ def test_a_reversed_factor_reads_what_its_factor_reads(tmp_path):
     if "low_day_trade_20" in CHIP_FACTORS:
         assert "high_day_trade_20" in groups["chips"]
     assert daily.input_digests(tmp_path, ["momentum_1m"], False) == daily.input_digests(tmp_path, ["reversal_1"], False)
+
+
+def test_the_signed_gate_counts_only_the_same_way(monkeypatch):
+    """2026-11-21 (第二步, written before the run): the searches add signals as they are, so a signal ranking the
+    stocks the other way from an existing one is no duplicate there; one ranking them the same way still is."""
+    from quant_platform.research import scan
+
+    fp = panel(date(2020, 9, 30))
+    usual = fp.matrix
+
+    def matrix(name):
+        if name == "flipped":
+            return -usual("momentum_3")
+        if name == "copied":
+            return usual("momentum_3") * 2.0
+        return usual(name)
+
+    monkeypatch.setattr(fp, "matrix", matrix)
+    monkeypatch.setattr(scan, "signals", lambda: ["momentum_3", "trend_200"])
+    plain = scan.novelty(fp, ["flipped"])["flipped"]
+    assert plain["with"] == "momentum_3" and plain["max_correlation"] < -0.99 and plain["kept"] is False
+    signed = scan.novelty(fp, ["flipped", "copied"], signed=True)
+    assert signed["flipped"]["kept"] is True and signed["flipped"]["opposite_with"] == "momentum_3"
+    assert signed["flipped"]["most_opposite"] < -0.99 and signed["flipped"]["max_correlation"] < 0.7
+    assert signed["copied"]["kept"] is False and signed["copied"]["with"] == "momentum_3"

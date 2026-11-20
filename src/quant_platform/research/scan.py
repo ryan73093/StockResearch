@@ -514,9 +514,14 @@ def screen(arrays_folder: Path, items: list[dict], costs, workers: int, out_fold
     return rows
 
 
-def novelty(fp, new: list[str], limit: float = 0.7) -> dict[str, dict]:
+def novelty(fp, new: list[str], limit: float = 0.7, signed: bool = False) -> dict[str, dict]:
     """The registered novelty gate (no returns looked at): each new signal's average weekly rank correlation
-    with every existing signal over the development period; kept only if none reaches ``limit``."""
+    with every existing signal over the development period; kept only if none reaches ``limit``.
+
+    ``signed`` (2026-11-21, docs/research/results.md「投機的特徵反過來用」第二步, written before the run): only a
+    correlation of ``limit`` or more the same way is a duplicate — the searches add their signals as they are (no
+    negative weights), so a signal ranking the stocks the other way from an existing one buys what no search bought;
+    the most opposite one is reported beside it."""
     from quant_platform.research.daily import RECENT_START, DailyRule, check_days
 
     base = DailyRule(name="資格", factors={"trend_200": 1.0})
@@ -543,15 +548,26 @@ def novelty(fp, new: list[str], limit: float = 0.7) -> dict[str, dict]:
     for name in new:
         values = fp.matrix(name)
         worst, against = 0.0, None
+        opposite, opposite_with = 0.0, None
         for other in existing:
             # 2026-11-21: a reversed factor against its own factor is −1 by construction — it buys the stocks the
             # other leaves out, which no search has looked at; every other signal still counts
             if REVERSED_OF.get(name) == other or REVERSED_OF.get(other) == name:
                 continue
             found = mean_correlation(values, fp.matrix(other))
-            if found is not None and abs(found) > abs(worst):
+            if found is None:
+                continue
+            if signed:
+                if found > worst:
+                    worst, against = found, other
+                if found < opposite:
+                    opposite, opposite_with = found, other
+            elif abs(found) > abs(worst):
                 worst, against = found, other
-        output[name] = {"max_correlation": round(worst, 3), "with": against, "kept": abs(worst) < limit}
+        output[name] = {"max_correlation": round(worst, 3), "with": against,
+                        "kept": (worst < limit) if signed else abs(worst) < limit}
+        if signed:
+            output[name].update({"signed": True, "most_opposite": round(opposite, 3), "opposite_with": opposite_with})
         # 2026-11-21: the new ones against each other too, for the reader (two alike: the judgment keeps one)
         among = {other: mean_correlation(values, fp.matrix(other)) for other in new if other != name}
         output[name]["among"] = {other: round(value, 3) for other, value in among.items() if value is not None}

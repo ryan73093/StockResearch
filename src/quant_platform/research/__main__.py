@@ -372,6 +372,8 @@ def main() -> int:
     parser.add_argument("--correlations", action="store_true", help="factors：因子之間的排名相關與高度相關的群")
     parser.add_argument("--events", help="factors：事件因子分析，逗號分隔（例如 low_insider_sell_60,buyback_60）")
     parser.add_argument("--novelty", help="factors：新穎性閘門（和既有訊號每週排序相關 < 0.7，不看報酬），逗號分隔")
+    parser.add_argument("--novelty-signed", action="store_true",
+                        help="factors --novelty：只有同方向的相關到 0.7 才算重複（2026-11-21：搜尋沒有負的權重）")
     parser.add_argument("--swap", help="factors：換因子的版本和原版逐一配對，舊,新（例如 eps_growth,eps_surprise）")
     parser.add_argument("--explain", action="store_true",
                         help="forward：替 2026-10-19 以前的決定補上買賣原因（重算排名，和當時一樣的才補）")
@@ -643,8 +645,9 @@ def main() -> int:
             with JobLog(RESEARCH).start(f"新穎性閘門（{len(names)} 個新因子，和既有訊號的排序相關）",
                                         "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
                 _data, novelty_fp = daily_research.load(Path(args.base))
-                gate = scan.novelty(novelty_fp, names)
-                path = RESEARCH / "scans" / f"novelty-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+                gate = scan.novelty(novelty_fp, names, signed=args.novelty_signed)
+                path = RESEARCH / "scans" / (f"novelty-{'signed-' if args.novelty_signed else ''}"
+                                             f"{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(json.dumps(gate, ensure_ascii=False, indent=1), encoding="utf-8")
                 job.payload["summary"] = f"{sum(item['kept'] for item in gate.values())}／{len(gate)} 個通過"
