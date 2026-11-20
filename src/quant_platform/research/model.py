@@ -100,6 +100,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # features and target, learning from the TPEx stocks too (D-045 第 6 項: TPEx data may train the models);
           # it scores the listed stocks the rules buy
           "ml_gbm_s": {"version": "gbm-2.14.0", "label": "ensemble", "features": "extended_k", "universe": "all"},
+          # 2026-11-21 (docs/research/results.md「模型 T：模型 K 加上 11 月新量的因子」, written before the run): model K's
+          # features and target plus the factors measured in November (NOVEMBER_FEATURES) — most tell the bad from the
+          # good (high rank correlation) while their top fifth earns no more, which a model of every stock's rank can use
+          "ml_gbm_t": {"version": "gbm-2.15.0", "label": "ensemble", "features": "extended_t"},
           # 2026-11-19 (docs/research/results.md「模型 Q 靠哪幾份付費表」, written before the run): model R failed and its
           # rules earn half of model Q's — which tables carry it: model Q without the five long-history features
           # (margin maintenance, loans, block trades: PAID_LONG), and without the four that start in 2021-22
@@ -261,6 +265,8 @@ def version_features(version: str | None) -> tuple[str, ...]:
     if kind in ("extended_k_nolong", "extended_k_noshort", "extended_k_nobranch"):   # 2026-11-19: model K's list less some paid ones
         left = {"extended_k_nolong": PAID_LONG, "extended_k_noshort": PAID_SHORT}.get(kind, ("low_daytrade_5",))
         return tuple(name for name in version_features("gbm-2.7.0") if name not in left)
+    if kind == "extended_t":           # 2026-11-21: K's list and the factors measured in November
+        return version_features("gbm-2.7.0") + NOVEMBER_FEATURES
     if kind == "extended_k":           # 2026-10-26: every factor but the revenue, the industries and the branches
         return tuple(name for name in FACTOR_LABELS if name not in MONTHLY_REVENUE and name not in INDUSTRY_FACTORS
                      and name != "branch_informed_20")
@@ -659,7 +665,12 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
 
 
 DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0", "gbm-2.13.0": "gbm-2.7.0", "gbm-2.13.1": "gbm-2.7.0", "gbm-2.13.2": "gbm-2.7.0",
-              "gbm-2.13.3": "gbm-2.7.0", "gbm-2.14.0": "gbm-2.7.0"}
+              "gbm-2.13.3": "gbm-2.7.0", "gbm-2.14.0": "gbm-2.7.0", "gbm-2.15.0": "gbm-2.7.0"}
+# 2026-11-21 (model T): the factors measured in November, outside FACTOR_LABELS — beta, the literature's behavior
+# factors (the skewness one way: a tree reads both ends), the balance sheet and the cash flow statement
+NOVEMBER_FEATURES = ("low_beta_250", "low_down_beta_250", "cgo_250", "beta_resid_mom_12", "illiquidity_60", "pair_gap_20",
+                     "low_iskew_250", "short_cover_ahead", "low_asset_growth", "gp_assets", "low_accruals", "cash_profit",
+                     "low_net_financing", "fscore", "low_inventory_build", "low_receivable_build")
 PAID_LONG = ("margin_safe", "margin_in_profit", "low_pledge_loan_20", "block_premium_20", "block_volume_20")
 PAID_SHORT = ("broker_concentration_5", "govbank_net_20", "govbank_dip_buy_20", "low_daytrade_5")
 # DOWN_GATES:        # the version judged by ``down_gate`` → the one it is judged against

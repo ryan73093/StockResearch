@@ -152,7 +152,8 @@ def test_a_version_that_gives_too_much_up_over_every_stretch_does_not_pass(monke
 def test_model_q_is_model_k_s_features_with_the_other_target_and_its_own_gate(tmp_path):
     assert model.version_features("gbm-2.12.0") == model.version_features("gbm-2.7.0")
     assert model.VERSIONS["gbm-2.12.0"]["target"] == "residual" and "target" not in model.VERSIONS["gbm-2.7.0"]
-    assert set(model.DOWN_GATES) == {"gbm-2.12.0", "gbm-2.13.0", "gbm-2.13.1", "gbm-2.13.2", "gbm-2.13.3", "gbm-2.14.0"}
+    assert set(model.DOWN_GATES) == {"gbm-2.12.0", "gbm-2.13.0", "gbm-2.13.1", "gbm-2.13.2", "gbm-2.13.3", "gbm-2.14.0",
+                                     "gbm-2.15.0"}
     assert set(model.version_features("gbm-2.12.0")) - set(model.version_features("gbm-2.13.3")) == {"low_daytrade_5"}
     assert set(model.DOWN_GATES.values()) == {"gbm-2.7.0"}
     whole = model.version_features("gbm-2.12.0")                     # 2026-11-19: the two halves of the paid features
@@ -293,3 +294,33 @@ def test_model_q_s_own_rule_is_tried_in_nine_frames_one_change_each():
     for rule, (_word, change) in zip(rules, daily.MODEL_Q_FRAMES, strict=True):
         made = rule.model_dump()
         assert {key for key in made if made[key] != base[key]} == {"name", *change}
+
+
+def test_model_t_is_model_k_with_the_factors_measured_in_november(tmp_path, monkeypatch):
+    """2026-11-21 (docs/research/results.md「模型 T：模型 K 加上 11 月新量的因子」, written before the run): gbm-2.15.0 is
+    model K's list and target plus 16 rule factors outside FACTOR_LABELS, judged by model Q's gate against model K;
+    its three rules only past the gate, and a failed gate keeps it out of the searches."""
+    import json
+
+    from quant_platform.research import daily
+    from quant_platform.research.scan import SHORT, failed_models
+
+    features = model.version_features("gbm-2.15.0")
+    assert features == model.version_features("gbm-2.7.0") + model.NOVEMBER_FEATURES
+    assert len(model.NOVEMBER_FEATURES) == 16 and len(set(features)) == len(features)
+    for name in model.NOVEMBER_FEATURES:
+        assert name in daily.RULE_FACTORS and name not in daily.FACTOR_LABELS
+    assert model.MODELS["ml_gbm_t"]["version"] == "gbm-2.15.0" and "target" not in model.MODELS["ml_gbm_t"]
+    assert model.DOWN_GATES["gbm-2.15.0"] == "gbm-2.7.0"
+    assert "ml_gbm_t" in daily.MODEL_FACTORS and SHORT["ml_gbm_t"] == "模型T"
+    monkeypatch.chdir(tmp_path)
+    assert daily.BATCHES["modelt"]() == []                           # not trained: no rules
+    folder = tmp_path / "instance" / "research" / "models" / "gbm-2.15.0"
+    folder.mkdir(parents=True)
+    (folder / "meta.json").write_text(json.dumps({"down_gate": {"passed": False, "top20_gain": 0.012,
+                                                               "against_top20_gain": 0.013}}), encoding="utf-8")
+    assert daily.BATCHES["modelt"]() == []
+    assert "ml_gbm_t" in failed_models(tmp_path / "instance" / "research" / "models")
+    (folder / "meta.json").write_text(json.dumps({"down_gate": {"passed": True}}), encoding="utf-8")
+    rules = daily.BATCHES["modelt"]()
+    assert len(rules) == 3 and all(rule.factors == {"ml_gbm_t": 1.0} for rule in rules)
