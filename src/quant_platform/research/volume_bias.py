@@ -110,7 +110,15 @@ def run(history: Path, research: Path, costs, count: int = SAMPLE, job=None, mod
     from quant_platform.research.daily import ENGINE_VERSION, SEED_PLAN, evaluate, load, report_metrics, tier
 
     data, fp = load(history)
-    ratios = table_ratios(research, history) if mode == "table" else None
+    # 2026-11-20: "table" draws each stock-day's ratio from what the 13:50 tables held; "scale" multiplies every
+    # stock-day by their median (the bias alone, no noise); "noise" draws them divided by that median (the noise alone)
+    measured = table_ratios(research, history) if mode in ("table", "scale", "noise") else None
+    if mode == "scale":
+        ratios = np.array([float(np.median(measured))])
+    elif mode == "noise":
+        ratios = measured / float(np.median(measured))
+    else:
+        ratios = measured
     lagged = lagged_panel(history, data, ratios)
     rules = sample_rules(research, count)
     rows = []
@@ -122,14 +130,16 @@ def run(history: Path, research: Path, costs, count: int = SAMPLE, job=None, mod
         rows.append({"trial": trial, "name": rule.name, "tier": tier(usual)[0], "tier_lagged": tier(moved)[0],
                      "money": usual.get("since_2020_final_value"), "money_lagged": moved.get("since_2020_final_value"),
                      "drawdown": usual.get("max_drawdown"), "drawdown_lagged": moved.get("max_drawdown")})
-    ratios = [row["money_lagged"] / row["money"] for row in rows if row["money"] and row["money_lagged"]]
+    # 2026-11-20: the money ratios had the name of the drawn ratios — the first "table" run's file shows the money's
+    # median under "table_ratios"
+    money = [row["money_lagged"] / row["money"] for row in rows if row["money"] and row["money_lagged"]]
     summary = {"at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "mode": mode, "rules": len(rows),
-               "table_ratios": {"count": int(len(ratios)), "median": float(np.median(ratios)),
-                                "p5": float(np.quantile(ratios, 0.05)), "p1": float(np.quantile(ratios, 0.01))}
-               if ratios is not None and len(ratios) else None,
+               "table_ratios": {"count": int(len(measured)), "median": float(np.median(measured)),
+                                "p5": float(np.quantile(measured, 0.05)), "p1": float(np.quantile(measured, 0.01))}
+               if measured is not None and len(measured) else None,
                "tier_changed": sum(row["tier"] != row["tier_lagged"] for row in rows),
-               "money_ratio": {"median": float(np.median(ratios)), "min": float(min(ratios)), "max": float(max(ratios))}
-               if ratios else None, "rows": rows}
+               "money_ratio": {"median": float(np.median(money)), "min": float(min(money)), "max": float(max(money))}
+               if money else None, "rows": rows}
     folder = research / "diagnostics"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"volume-bias-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
