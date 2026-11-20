@@ -73,9 +73,20 @@ def is_claude(model: str) -> bool:
     return str(model or "").startswith("claude-")
 
 
-def resolve_anthropic_key(direct: str = "") -> str:
-    """ANTHROPIC_API_KEY — Settings.from_env puts the project's .env into the environment first."""
-    return direct or os.getenv("ANTHROPIC_API_KEY", "")
+def resolve_anthropic_key(direct: str = "", env_file: str = "") -> str:
+    """ANTHROPIC_API_KEY: given, in the environment, or — read again at each call — in ``env_file`` (the project's
+    .env, which Settings.from_env names): a key the owner adds while the services run is used without a restart
+    (the worker's 21:45 news scoring and 22:00 researcher, the web's knowledge questions). Never logged."""
+    if direct or os.getenv("ANTHROPIC_API_KEY"):
+        return direct or os.environ["ANTHROPIC_API_KEY"]
+    path = Path(env_file) if env_file else None
+    if path is None or not path.is_file():
+        return ""
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        name, _, value = line.strip().partition("=")
+        if name.strip() == "ANTHROPIC_API_KEY":
+            return value.strip().strip('"').strip("'")
+    return ""
 
 
 def key_name(model: str) -> str:
@@ -85,7 +96,7 @@ def key_name(model: str) -> str:
 def key_configured(settings) -> bool:
     """Whether the configured model's provider has a key (no call is made)."""
     if is_claude(settings.research_agent_model):
-        return bool(resolve_anthropic_key(getattr(settings, "anthropic_api_key", "")))
+        return bool(resolve_anthropic_key(getattr(settings, "anthropic_api_key", ""), getattr(settings, "env_file", "")))
     try:
         return bool(resolve_openai_key(settings.openai_api_key))
     except LLMError:
@@ -429,7 +440,7 @@ def model_client(settings, ledger: UsageLedger, monthly_budget_usd: float, *, op
     Claude API (ANTHROPIC_API_KEY), any other on OpenAI (OPENAI_API_KEY); None without that provider's key."""
     model = settings.research_agent_model
     if is_claude(model):
-        key = resolve_anthropic_key(getattr(settings, "anthropic_api_key", ""))
+        key = resolve_anthropic_key(getattr(settings, "anthropic_api_key", ""), getattr(settings, "env_file", ""))
         if not key:
             return None
         return ClaudeClient(key, model, ledger, monthly_budget_usd, operations=operations,

@@ -160,6 +160,19 @@ def test_the_configured_model_picks_the_provider_and_no_key_means_no_client(tmp_
     assert model_client(Settings(research_agent_model="gpt-6-luna", anthropic_api_key="sk-ant-x"), book, 1.0) is None
 
 
+def test_a_key_added_to_the_env_file_after_start_is_used_without_a_restart(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("OTHER=1\n", encoding="utf-8")
+    running = Settings(env_file=str(env))                 # what from_env gives the services at start: no key yet
+    book = UsageLedger(tmp_path / "usage.jsonl")
+    assert model_client(running, book, 1.0) is None and not key_configured(running)
+    env.write_text("OTHER=1\nANTHROPIC_API_KEY='sk-ant-added-later'\n", encoding="utf-8")
+    made = model_client(running, book, 1.0)               # the same settings object, the file read again
+    assert type(made) is ClaudeClient and made._key == "sk-ant-added-later" and key_configured(running)
+    assert model_client(Settings(), book, 1.0) is None    # settings made in code read no file (the tests' own)
+
+
 def test_a_base_url_left_in_the_environment_does_not_redirect_the_calls(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:9/elsewhere")
     model = claude(tmp_path, None)

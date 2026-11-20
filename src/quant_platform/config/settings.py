@@ -134,6 +134,9 @@ class Settings:
     research_agent_effort: str = "medium"
     # not ANTHROPIC_BASE_URL: another program's environment (an AI tool's proxy) must not redirect the research calls
     claude_api_base_url: str = "https://api.anthropic.com"
+    # the .env from_env read (empty for settings made in code, as the tests do): the model key is read from it again at
+    # each client, so a key added while the services run is used without a restart
+    env_file: str = ""
     research_agent_monthly_budget_usd: float = 1.0
     research_agent_rounds_per_night: int = 3
     research_agent_specs_per_round: int = 4
@@ -244,6 +247,7 @@ class Settings:
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             research_agent_effort=os.getenv("RESEARCH_AGENT_EFFORT", "medium").strip(),
             claude_api_base_url=os.getenv("CLAUDE_API_BASE_URL", "https://api.anthropic.com").strip(),
+            env_file=str(Path.cwd() / ".env"),
             research_agent_monthly_budget_usd=max(0.0, float(os.getenv("RESEARCH_AGENT_MONTHLY_BUDGET_USD", "1"))),
             llm_monthly_budget_usd=max(0.0, float(os.getenv("LLM_MONTHLY_BUDGET_USD", "5"))),
             news_events_enabled=os.getenv("NEWS_EVENTS_ENABLED", "true").lower() in {"1", "true", "yes"},
