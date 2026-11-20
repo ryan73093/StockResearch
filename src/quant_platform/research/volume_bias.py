@@ -24,18 +24,50 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 SAMPLE = 40
 
 
-def lagged_panel(history: Path, data):
-    """A factor panel whose turnover on each session is the previous session's."""
+def lagged_panel(history: Path, data, ratios: np.ndarray | None = None, seed: int = 0):
+    """A factor panel whose turnover on each session is the previous session's — or, with ``ratios`` (2026-11-20, the
+    realistic version), the session's own times a ratio drawn at random for every stock and session from ``ratios``
+    (what the 13:50 tables held against the day's final data, ``table_ratios``)."""
     from quant_platform.research.daily import ChipStore, FactorPanel, Industries, load_industries, market_closes
     from quant_platform.research.model import models_root
     from quant_platform.research.stock_rules import Panel
 
     panel = Panel(data)
-    shifted = np.full_like(panel.turnover, np.nan)
-    shifted[:, 1:] = panel.turnover[:, :-1]
-    panel.turnover = shifted
+    if ratios is None:
+        shifted = np.full_like(panel.turnover, np.nan)
+        shifted[:, 1:] = panel.turnover[:, :-1]
+        panel.turnover = shifted
+    else:
+        drawn = np.random.default_rng(seed).choice(np.asarray(ratios, dtype=float), size=panel.turnover.shape)
+        panel.turnover = panel.turnover * drawn
     return FactorPanel(panel, Industries(load_industries(history)), ChipStore(history, panel.sessions, panel.symbols, panel.close),
                        market_closes(history, panel.sessions), models_root(history))
+
+
+def table_ratios(research: Path, history: Path) -> np.ndarray:
+    """Every listed stock-day the after-close orders kept a 13:50 table for: its turnover in the table ÷ the day's final
+    turnover (1.0 where they agree; a stock with no final turnover left out)."""
+    from datetime import date
+
+    from quant_platform.research.after_close import FOLDER, today_table
+    from quant_platform.research.history.stocks import read_year
+
+    output: list[float] = []
+    years: dict[int, list[dict]] = {}
+    for path in sorted((Path(research) / FOLDER).glob("*.table.json")):
+        day = date.fromisoformat(path.name[:10])
+        if day.year not in years:
+            source = Path(history) / "stocks" / "twse" / f"{day.year}.parquet"
+            years[day.year] = read_year(source) if source.is_file() else []
+        final = {row["code"]: row for row in years[day.year] if row["date"] == day}
+        if not final:
+            continue
+        kept, _benchmark, _taiex = today_table(json.loads(path.read_text(encoding="utf-8")), day)
+        for row in kept:
+            other = final.get(row["code"])
+            if other and float(other.get("turnover") or 0) > 0 and row.get("turnover") is not None:
+                output.append(float(row["turnover"]) / float(other["turnover"]))
+    return np.array(output, dtype=float)
 
 
 def sample_rules(research: Path, count: int = SAMPLE, seed: int = 0) -> list[tuple[int, object]]:
@@ -72,12 +104,14 @@ def sample_rules(research: Path, count: int = SAMPLE, seed: int = 0) -> list[tup
     return picked
 
 
-def run(history: Path, research: Path, costs, count: int = SAMPLE, job=None) -> dict[str, object]:
-    """The sample run as usual and on the lagged panel; written to research/diagnostics/volume-bias-<time>.json."""
+def run(history: Path, research: Path, costs, count: int = SAMPLE, job=None, mode: str = "lag") -> dict[str, object]:
+    """The sample run as usual and on the lagged panel (``mode`` "table": the realistic one); written to
+    research/diagnostics/volume-bias-<time>.json."""
     from quant_platform.research.daily import ENGINE_VERSION, SEED_PLAN, evaluate, load, report_metrics, tier
 
     data, fp = load(history)
-    lagged = lagged_panel(history, data)
+    ratios = table_ratios(research, history) if mode == "table" else None
+    lagged = lagged_panel(history, data, ratios)
     rules = sample_rules(research, count)
     rows = []
     for number, (trial, rule) in enumerate(rules):
@@ -89,7 +123,10 @@ def run(history: Path, research: Path, costs, count: int = SAMPLE, job=None) -> 
                      "money": usual.get("since_2020_final_value"), "money_lagged": moved.get("since_2020_final_value"),
                      "drawdown": usual.get("max_drawdown"), "drawdown_lagged": moved.get("max_drawdown")})
     ratios = [row["money_lagged"] / row["money"] for row in rows if row["money"] and row["money_lagged"]]
-    summary = {"at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "rules": len(rows),
+    summary = {"at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "mode": mode, "rules": len(rows),
+               "table_ratios": {"count": int(len(ratios)), "median": float(np.median(ratios)),
+                                "p5": float(np.quantile(ratios, 0.05)), "p1": float(np.quantile(ratios, 0.01))}
+               if ratios is not None and len(ratios) else None,
                "tier_changed": sum(row["tier"] != row["tier_lagged"] for row in rows),
                "money_ratio": {"median": float(np.median(ratios)), "min": float(min(ratios)), "max": float(max(ratios))}
                if ratios else None, "rows": rows}

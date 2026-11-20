@@ -450,6 +450,8 @@ def main() -> int:
     parser.add_argument("--beta-max", type=float, default=0.8, help="scan-large --rerank-low-beta：開發期對 0050 的連動上限")
     parser.add_argument("--distinct-sets", action="store_true", help="scan-large：每組訊號只留最穩的一個設定再排（2026-11-19；2026-11-20 起一般搜尋的第二階段也可用）")
     parser.add_argument("--stage2-pool", type=int, default=600, help="scan-large：第二階段看過快篩的前幾個去挑最後名單（預設 600；2026-11-20）")
+    parser.add_argument("--volume-mode", default="lag", choices=("lag", "table"),
+                        help="volume-bias：lag＝每天的量換成前一天的；table＝照 13:50 表對正式資料的實測比例隨機打折（2026-11-20）")
     parser.add_argument("--weightings", help="scan-large：配置方式（逗號分隔：equal、inverse_vol、inverse_beta；預設前兩種；2026-11-20）")
     parser.add_argument("--rerank-pool", type=int, default=3000, help="scan-large --rerank-low-beta：每次搜尋進相關性篩選的候選數")
     parser.add_argument("--holds", help="scan-large：持有方式，逗號分隔（days＝固定持有 20 天、trend＝月線上續抱、free＝不設最短持有；預設三種）")
@@ -1178,7 +1180,7 @@ def main() -> int:
         command = "python -m quant_platform.research " + " ".join(sys.argv[1:])
         with JobLog(RESEARCH).start("回測用整天成交量的偏差：抽樣把每天的成交量換成前一天的重跑", command) as job:
             found = volume_bias.run(Path(args.base), RESEARCH, broker_costs(args.broker), count=args.sample or volume_bias.SAMPLE,
-                                    job=job)
+                                    job=job, mode=args.volume_mode)
             job.payload["summary"] = (f"{found['rules']} 個規則、等級變了 {found['tier_changed']} 個；"
                                       f"錢的比（換成前一天÷照常）{found['money_ratio']}")
         print(json.dumps({key: value for key, value in found.items() if key != "rows"}, ensure_ascii=False), flush=True)
