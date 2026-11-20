@@ -137,6 +137,9 @@ def test_no_new_buy_in_the_fifth_with_the_least_cash_profit():
     rule = daily.DailyRule(name="t", factors={"momentum_3": 1.0}, exclude="c1")
     assert "cash_profit" in daily.rule_inputs(rule)
     assert "cash" in daily.input_digests(fundamentals.Path("nowhere"), daily.rule_inputs(rule), False)
+    # 2026-11-21 (第二步): 24 deep-learning rules cashveto never touched, the same veto
+    assert len(set(daily.CASH_VETO_DEEP)) == 24 and not set(daily.CASH_VETO_DEEP) & set(daily.BETA_GUARD["深度學習"])
+    assert daily.BATCHES["cashveto2"] is daily.cash_veto_deep_batch
 
 
 def test_inventory_and_receivables_piled_up(tmp_path):

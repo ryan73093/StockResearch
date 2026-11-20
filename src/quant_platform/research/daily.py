@@ -4335,6 +4335,18 @@ def cash_veto_batch() -> list[DailyRule]:
     return _veto_rules([(trial, "c1") for group in BETA_GUARD.values() for trial in group])
 
 
+# 2026-11-21 (docs/research/results.md「不買現金獲利最差的五分之一」第二步, written before the run): cashveto failed
+# (13 of 44) but 6 of its 8 deep-learning rules were better — a group seen afterwards, so tried on deep-learning rules
+# it never touched: build/pick_beta.py's criteria, the family's 24 richest since 2020-10 outside BETA_GUARD's 8
+# (build/pick_dlveto.py)
+CASH_VETO_DEEP = (34084, 34400, 31557, 35103, 34747, 35084, 35082, 34409, 29714, 34438, 32864, 37125,
+                  32870, 34435, 30241, 36516, 35263, 31236, 35278, 35147, 35054, 34735, 36860, 36997)
+
+
+def cash_veto_deep_batch() -> list[DailyRule]:
+    return _veto_rules([(trial, "c1") for trial in CASH_VETO_DEEP])
+
+
 def beta_guard_batch() -> list[DailyRule]:
     """Each BETA_GUARD rule with no new buy in the market's highest-beta fifth (exclude "b1"), and each with its picks
     weighted by 1 / beta (weighting "inverse_beta")."""
@@ -6458,7 +6470,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "modelt": model_t_batch,"betaguard": beta_guard_batch, "rankweight": rank_weight_batch, "cashveto": cash_veto_batch, "poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "modelt": model_t_batch,"betaguard": beta_guard_batch, "rankweight": rank_weight_batch, "cashveto": cash_veto_batch, "cashveto2": cash_veto_deep_batch,"poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
