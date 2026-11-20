@@ -224,7 +224,7 @@ def test_the_page_shows_each_designs_decision_the_board_a_replay_and_the_probe(t
     runner.append(research, "info", {"date": "2026-11-19", "llm": {"hold": ["2330", "2317"]}})
     runner.append(research, "info", {"date": "2026-11-20", "llm": {
         "hold": ["2330", "2454"], "reasons": {"2454": "營收創高"}, "view": "大盤偏弱", "lesson": "少換股",
-        "trace": [{"tool": "card"}, {"tool": "card"}, {"tool": "mood"}], "cost_usd": 0.0088}})
+        "trace": [{"tool": "card"}, {"tool": "card"}, {"tool": "mood"}], "cost_usd": 0.0088, "filled": ["2330"]}})
     runner.append(research, "veto", {"date": "2026-11-20", "llm": {"hold": ["1101"], "vetoed": {"3026": "20 日跌 54%"}}})
     row = {"key": "info", "label": variants.BY_KEY["info"].label, "counted": 301000, "sold": 302000, "counted_ahead_of_0050": 1000,
            "sold_ahead_of_0050": -500, "beta": 0.8, "fees_and_tax": 900, "orders": 12, "against": "plain",
@@ -253,6 +253,7 @@ def test_the_page_shows_each_designs_decision_the_board_a_replay_and_the_probe(t
     assert [(row["period"], row["asked"], row["declined"]) for row in declined["rows"]] == [("2026 下半年", 40, 1)]
     body = client.get("/research/agents").get_data(as_text=True)
     for text in ("營收創高", "大盤偏弱", "個股資料 2 次", "20 日跌 54%", "301,000", "+1,000", "-500", "觀察中（3／60 個交易日）",
+                 "模型自己選 1 檔、程式補 1 檔", "程式補</span>",
                  "算不出來：沒有資料", "neutral-20261120", "2025 上半年", "67.5", "滿 60 個交易日判定", "不能當成代理人有本事的證據"):
         assert text in body, text
     assert "dry-20261120" not in body

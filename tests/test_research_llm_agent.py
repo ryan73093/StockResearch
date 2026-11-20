@@ -101,6 +101,25 @@ def test_a_short_list_is_filled_to_twenty_and_a_stock_under_disposition_is_not_b
     assert twin == ["5001", "5000"]                                       # the holding stays; the blocked one not bought
 
 
+def test_the_filled_places_follow_the_twins_rule_and_an_agents_own_sale_is_not_put_back():
+    """2026-11-20: places filled before stay while still among the agreed (the twin's own rule), so an agent differs
+    from its twin only by the stocks it names; a stock the agent named and dropped is not filled back."""
+    agreed = [str(3000 + i) for i in range(30)]
+    same = lambda code: code                                              # noqa: E731
+    yesterday = {"llm": {"hold": ["1111", "2222"] + agreed[25:30] + agreed[:13], "filled": agreed[25:30] + agreed[:13]}}
+    keep, skip = llm_agent.filling(yesterday, ["2222"])
+    assert keep == agreed[25:30] + agreed[:13] and skip == {"1111"}       # 1111 was its own pick, now sold
+    held = yesterday["llm"]["hold"]
+    codes, filled, _dropped = llm_agent.complete(["2222", "3010"], agreed + ["1111"], held, set(), same, keep=keep, skip=skip)
+    assert codes[:2] == ["2222", "3010"] and "1111" not in codes
+    assert filled[:5] == agreed[25:30]                                    # yesterday's fills low in the agreed: kept first
+    # then the rest of yesterday's fills (3010 is its own pick today), then the agreed order: 3013
+    assert len(codes) == 20 and filled[5:] == [code for code in agreed[:14] if code != "3010"]
+    gone = llm_agent.complete([], agreed[:10], held, set(), same, keep=agreed[25:30])[0]
+    assert not set(agreed[25:30]) & set(gone)                             # fills that left the agreed are not kept
+    assert llm_agent.filling(None, ["2330"]) == ([], set())
+
+
 def test_the_disposition_list_is_known_only_after_its_announcement(tmp_path):
     import pandas as pd
 

@@ -43,8 +43,11 @@ def design(variant, made: list[dict], names: dict[str, str]) -> dict[str, object
     return {
         "key": variant.key, "label": variant.label, "question": variant.question, "against": variant.against,
         "mode": variant.mode, "date": (latest or {}).get("date"), "days": len(made),
+        # 2026-11-20: the places the program filled from the agreed stocks (the model named the others)
         "holdings": [{"code": code, "name": names.get(code, ""), "reason": reasons.get(code, ""),
-                      "new": bool(before) and code not in before} for code in hold],
+                      "new": bool(before) and code not in before, "filled": code in set(llm.get("filled") or [])}
+                     for code in hold],
+        "own": len([code for code in hold if code not in set(llm.get("filled") or [])]),
         "sold": [{"code": code, "name": names.get(code, "")} for code in sorted(before - set(hold))],
         "vetoed": [{"code": code, "name": names.get(code, ""), "reason": reason} for code, reason in (llm.get("vetoed") or {}).items()],
         "view": llm.get("view") or "", "lesson": llm.get("lesson") or "", "fallback": llm.get("fallback") or "",

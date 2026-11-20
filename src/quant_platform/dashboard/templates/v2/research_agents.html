@@ -59,7 +59,7 @@
   {% for item in designs %}
   <details class="agent-design"{% if loop.index <= 2 %} open{% endif %} style="margin:0 0 10px">
     <summary><b>{{ item.label }}</b>
-      <span class="muted small">・{{ item.holdings|length }} 檔{% if item.date %}・{{ item.date }}{% endif %}{% if item.fallback %}・<span class="badge badge--warn">沿用前一天</span>{% endif %}</span></summary>
+      <span class="muted small">・{{ item.holdings|length }} 檔{% if item.holdings and item.own is defined and item.own < item.holdings|length and item.mode != 'twin' %}（模型自己選 {{ item.own }} 檔、程式補 {{ item.holdings|length - item.own }} 檔）{% endif %}{% if item.date %}・{{ item.date }}{% endif %}{% if item.fallback %}・<span class="badge badge--warn">沿用前一天</span>{% endif %}</span></summary>
     <p class="small" style="margin:6px 0 4px"><b>它要回答的問題</b>：{{ item.question }}（和「{{ labels.get(item.against, item.against) }}」比）</p>
     {% if item.fallback %}<p class="small" style="margin:0 0 4px"><b>這次沒有新的決定</b>：{{ item.fallback }}。</p>{% endif %}
     {% if item.view %}<p class="small" style="margin:0 0 4px"><b>它對市場的看法</b>：{{ item.view }}</p>{% endif %}
@@ -75,7 +75,7 @@
         {% for row in item.holdings %}
           <tr><td data-primary><a href="/stock?code={{ row.code }}"><strong>{{ row.code }}</strong></a> {{ row.name }}</td>
               <td data-label="它的理由" class="small">{{ row.reason or '—' }}</td>
-              <td data-label="變動">{% if row.new %}<span class="badge">新買</span>{% else %}<span class="muted small">續抱</span>{% endif %}</td></tr>
+              <td data-label="變動">{% if row.new %}<span class="badge">新買</span>{% else %}<span class="muted small">續抱</span>{% endif %}{% if row.get('filled') %}<br><span class="muted small" title="模型沒選滿 20 檔，這一檔是程式照規則共識補的">程式補</span>{% endif %}</td></tr>
         {% endfor %}
         </tbody>
       </table>

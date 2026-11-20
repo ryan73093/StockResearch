@@ -82,7 +82,7 @@ B. 做出決定：{"hold": [{"code": "2330", "reason": "30 字內的理由"}], "
 
 規則：
 1. 只能持有上市普通股（四位數代號、不是 00 開頭的 ETF），而且必須是你今天查到過或已經持有的股票。
-2. 持有 20 檔：請選 20 檔，同一產業最多 6 檔；不夠 20 檔時，程式照規則共識的順序補滿。帳戶的錢平均放在這 20 檔、不會留現金。處置中的股票不能新買（已經持有的可以續抱）。
+2. 持有 20 檔：請選 20 檔，同一產業最多 6 檔；不夠 20 檔時，空位由程式照規則共識補（之前補進來、還在共識名單的會續抱；要換掉它們就自己選滿 20 檔）。帳戶的錢平均放在這 20 檔、不會留現金。處置中的股票不能新買（已經持有的可以續抱）。
 3. 你的價值在於把各種資訊合起來判斷：量化規則的共識、因子、連動（連動高的股票大盤跌時跌更多）、新聞、你自己過去的對錯。
    不要只照某一個名次排，也不要每天大幅換股（每次買賣都有費用）。
 4. 最多查 7 次，第 8 步一定要做出決定。資料夠了就早點決定。
@@ -415,12 +415,16 @@ def control_choice(agreed: list[str], held: list[str], blocked: set[str] | froze
 
 
 def complete(codes: list[str], agreed: list[str], held: list[str], blocked: set[str], industry,
-             most: int = HOLD) -> tuple[list[str], list[str], list[str]]:
+             most: int = HOLD, keep: list[str] | tuple = (), skip: set[str] | frozenset = frozenset()
+             ) -> tuple[list[str], list[str], list[str]]:
     """2026-11-20 (使用者：設規則要有依據; docs/research/results.md「代理人的硬規則依據」): an agent's list as the account
     will hold it — (codes, filled, dropped). A new buy of a ``blocked`` stock is dropped (a holding stays); the list
-    is filled to ``most`` from the agreed stocks in their order, never past a third of the places in one industry.
-    Evidence: every forward rule that held up holds 20; none of the 104 holding 10 did."""
-    held_set = set(held)
+    is filled to ``most``, never past a third of the places in one industry: first the places filled before (``keep``)
+    that are still among the agreed stocks, then the agreed stocks in their order — the twin's own rule, so the
+    filled places trade as the twin does and an agent differs from its twin only by the stocks it names. A stock the
+    agent named before and dropped (``skip``) is not put back. Evidence: every forward rule that held up holds 20, none
+    of the 104 holding 10 did; trading less by itself was no better pair by pair (cost-based switching, 115 pairs)."""
+    held_set, agreed_set = set(held), set(agreed)
     dropped = [code for code in codes if code in blocked and code not in held_set]
     output = [code for code in codes if code not in dropped][:most]
     limit = max(1, int(most * INDUSTRY_SHARE))
@@ -428,15 +432,26 @@ def complete(codes: list[str], agreed: list[str], held: list[str], blocked: set[
     for code in output:
         counts[industry(code)] = counts.get(industry(code), 0) + 1
     filled = []
-    for code in agreed:
+    candidates = [code for code in keep if code in held_set and code in agreed_set] + \
+        [code for code in agreed if code not in blocked]
+    for code in candidates:
         if len(output) >= most:
             break
-        if code in output or code in blocked or counts.get(industry(code), 0) >= limit:
+        if code in output or code in skip or counts.get(industry(code), 0) >= limit:
             continue
         output.append(code)
         filled.append(code)
         counts[industry(code)] = counts.get(industry(code), 0) + 1
     return output, filled, dropped
+
+
+def filling(previous: dict | None, codes: list[str]) -> tuple[list[str], set[str]]:
+    """(keep, skip) for ``complete`` from the record before: the places the program filled then, and the stocks the
+    agent itself named then but not now (it sold them)."""
+    llm = (previous or {}).get("llm") or {}
+    before = list(llm.get("filled") or [])
+    own = [code for code in llm.get("hold") or [] if code not in before]
+    return before, {code for code in own if code not in codes}
 
 
 def validate(answer: dict, allowed, seen: set[str], industry) -> tuple[list[str], list[str], str | None]:
@@ -529,8 +544,9 @@ def decide(fp, base: Path, research: Path, day: date, client=None, now: datetime
                            "cost_usd": cost}
                 else:
                     named = dict(zip(codes, reasons, strict=True))
+                    keep, skip = filling(previous[-1] if previous else None, codes)
                     codes, filled, dropped = complete(codes, agreed, held_llm, blocked,
-                                                      lambda code: fp.industry(f"{code}.TW"))
+                                                      lambda code: fp.industry(f"{code}.TW"), keep=keep, skip=skip)
                     llm = {"hold": codes, "reasons": {code: named.get(code, "程式依規則共識的順序補滿") for code in codes},
                            "view": str(answer.get("view", ""))[:120], "lesson": str(answer.get("lesson", ""))[:120],
                            "trace": trace, "cost_usd": cost}
