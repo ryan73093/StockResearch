@@ -390,7 +390,7 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     when = datetime.fromisoformat(found["at"]).replace(tzinfo=None) if found.get("at") else None
     checks.append(_check("前向帳戶照規則交易（用回測引擎重算決策，8 天內）",
                          "使用者 2026-10-25：前向帳戶 9/7 到 10/5 都沒交易，策略確定合理嗎（看成本才換股從不換股的事件）",
-                         bool(found) and not found.get("differing_accounts") and when is not None
+                         bool(found) and not audit_failures(found) and when is not None
                          and (datetime.now() - when).days <= 8,
                          (f"{when:%m-%d %H:%M}：{found.get('accounts', 0)} 個帳戶、{found.get('checked_days', 0):,} 個決策日，"
                           f"不一樣的帳戶 {found.get('differing_accounts', 0)} 個" + _audit_split(found)) if found else "還沒有核對紀錄"))
@@ -911,6 +911,24 @@ def long_waits(research: Path, now: datetime | None = None) -> list[str]:
     return found
 
 
+# 2026-11-20 (docs/research/results.md「財報只追加」): the statements were downloaded again from 11/15 22:15 to 11/16
+# 09:27 and earlier numbers changed; the decisions to 11/13 (the last session before) read the old ones, which were not
+# kept — a rule reading the statements that differs from a recomputation only up to that day cannot be checked
+STATEMENTS_REVISED_AFTER = "2026-11-13"
+
+
+def revised_statements(row: dict) -> bool:
+    """A differing account explained by the 11/15 statements download: it reads the statements and its last different
+    day is no later than STATEMENTS_REVISED_AFTER (an audit before 11/20 did not record either: not explained)."""
+    return bool(row.get("statements")) and bool(row.get("last")) and str(row["last"]) <= STATEMENTS_REVISED_AFTER
+
+
+def audit_failures(found: dict) -> int:
+    """The differing accounts the check counts: all but those explained by the statements download (revised_statements;
+    the 13:50 table's still count, D-046 第 3 項)."""
+    return sum(1 for row in found.get("rows") or [] if row.get("differed") and not revised_statements(row))
+
+
 def _audit_split(found: dict) -> str:
     """2026-11-03: of the accounts the forward audit found differing, those whose first different day the after-close
     orders decided at 13:50 on numbers the close later changed (the audit's ``table``: 31 of 35 on 11-03) apart from
@@ -918,8 +936,12 @@ def _audit_split(found: dict) -> str:
     rows = [row for row in found.get("rows") or [] if row.get("differed")]
     if not rows:
         return ""
+    revised = [row for row in rows if revised_statements(row)]
+    rows = [row for row in rows if not revised_statements(row)]
     unexplained = [row for row in rows if not (row.get("first") or {}).get("table")]
-    return (f"：13:50 表和收盤資料不同 {len(rows) - len(unexplained)} 個、原因不明 {len(unexplained)} 個"
+    return ((f"：財報 11/15 重新下載前的決定無法重算 {len(revised)} 個（當時的數字沒留，不算錯）" if revised else "：")
+            + ("、" if revised and rows else "")
+            + (f"13:50 表和收盤資料不同 {len(rows) - len(unexplained)} 個、原因不明 {len(unexplained)} 個" if rows else "")
             + (f"（{'、'.join(str((row.get('first') or {}).get('day')) for row in unexplained[:4])}）" if unexplained else ""))
 
 

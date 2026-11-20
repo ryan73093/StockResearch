@@ -1016,6 +1016,7 @@ class StockForwardTracker:
 
         from quant_platform.research.after_close import revisions
         from quant_platform.research.blend import BlendRule
+        from quant_platform.research.dashboard import sources
         from quant_platform.research.daily import DailyRule, daily_rankings, load
         from quant_platform.research.decisions import DecisionStore, key
 
@@ -1033,7 +1034,7 @@ class StockForwardTracker:
             else:
                 parts = [(key(item["rule_hash"], start), DailyRule.model_validate(item["rule"]))]
             days = differed = 0
-            first = None
+            first = last = None
             for name, rule in parts:
                 fixed = store.fixed(name)
                 if not fixed or getattr(rule, "universe", "twse") != "twse":
@@ -1045,6 +1046,7 @@ class StockForwardTracker:
                     found = again.get(day if isinstance(day, date) else date.fromisoformat(str(day)), [])
                     if set(found) != set(symbols):
                         differed += 1
+                        last = str(day)
                         if first is None:
                             first = {"day": str(day), "kept": sorted(symbols), "again": sorted(found)}
                             # 2026-10-27: a day the after-close orders decided at 13:50 — the stocks that moved, as
@@ -1053,8 +1055,14 @@ class StockForwardTracker:
                             changed = revisions(self._base, self._history, date.fromisoformat(str(day)), moved)
                             if changed:
                                 first["table"] = changed
+            # 2026-11-20: the last different day and whether the rule reads the statements (itself or through a
+            # model's features) — the statements downloaded again on 11/15 changed what October's decisions read
+            try:
+                statements = "statements" in sources(item.get("rule") or {}, self._base / "models")[0]
+            except (TypeError, ValueError, KeyError):
+                statements = False
             rows.append({"rule_hash": item["rule_hash"], "name": item["name"], "days": days, "differed": differed,
-                         "first": first})
+                         "first": first, "last": last, "statements": statements})
         moment = datetime.now(TAIPEI)
         report = {"at": moment.isoformat(timespec="seconds"), "accounts": len(rows), "sample": sample,
                   "checked_days": sum(row["days"] for row in rows),

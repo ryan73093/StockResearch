@@ -552,3 +552,17 @@ def test_branch_signals_before_the_year_a_stock_may_be_used_are_red():
     """2026-11-19: a stock covered in 2022 only because it became a top-300 stock in 2024 told the backtest its future."""
     assert invariants.early_branch_rows({"1101": 2022, "1103": 2024}, {"1101": 2022, "1103": 2024}) == []
     assert invariants.early_branch_rows({"1101": 2022, "1103": 2022, "1105": 2023}, {"1101": 2022, "1103": 2024}) == ["1103", "1105"]
+
+
+def test_accounts_differing_only_before_the_statements_download_are_told_apart():
+    """2026-11-20: a rule reading the statements whose recomputation differs only up to 11/13 cannot be checked (the
+    numbers then were not kept); differences after it, or in a rule not reading them, still count."""
+    rows = [{"differed": 3, "statements": True, "last": "2026-11-13", "first": {"day": "2026-10-01"}},
+            {"differed": 3, "statements": True, "last": "2026-11-17", "first": {"day": "2026-10-01"}},
+            {"differed": 1, "statements": False, "last": "2026-10-02", "first": {"day": "2026-10-02", "table": {"x": 1}}},
+            {"differed": 0, "statements": True, "last": None, "first": None},
+            {"differed": 2, "first": {"day": "2026-10-01"}}]                       # an audit from before 11/20
+    found = {"rows": rows}
+    assert invariants.audit_failures(found) == 3
+    text = invariants._audit_split(found)
+    assert "無法重算 1 個" in text and "13:50 表和收盤資料不同 1 個" in text and "原因不明 2 個" in text
