@@ -23,6 +23,7 @@ from quant_platform.research.agent_lab.environment import placebo
 TAIPEI = ZoneInfo("Asia/Taipei")
 SESSIONS_TO_JUDGE = 60
 BLOCK, RESAMPLES = 5, 2000
+SCORE_HORIZON = 20              # the scorer was asked about the next 20 sessions against the market
 
 
 def scores(fp, made: list[dict]) -> np.ndarray:
@@ -74,6 +75,66 @@ def behaviour(made: list[dict]) -> dict[str, object]:
             "bought_per_decision": round(float(np.mean(bought)), 2) if bought else 0.0,
             "average_steps": round(float(np.mean(steps)), 1) if steps else 0.0,
             "cost_usd": round(sum(float((item.get("llm") or {}).get("cost_usd") or 0) for item in made), 4)}
+
+
+def _ranks(values: np.ndarray) -> np.ndarray:
+    """Ranks with ties averaged (0-based)."""
+    order = values.argsort(kind="mergesort")
+    output = np.empty(len(values), dtype=float)
+    ordered = values[order]
+    start = 0
+    while start < len(values):
+        end = start
+        while end + 1 < len(values) and ordered[end + 1] == ordered[start]:
+            end += 1
+        output[order[start:end + 1]] = (start + end) / 2.0
+        start = end + 1
+    return output
+
+
+def score_skill(fp, made: list[dict], horizon: int = SCORE_HORIZON, close: np.ndarray | None = None) -> dict[str, object] | None:
+    """Whether the scorer's scores foretell anything (docs/research/results.md「評分者設計」): for each decision whose
+    ``horizon`` sessions have passed, the rank correlation (ties averaged) of the scores with each candidate's move from
+    the close after the decision (when it would be bought) to ``horizon`` sessions later. The market's move is the same
+    for every candidate of a day, so ranking the moves is ranking them against the market. Days overlap (20-session
+    windows a session apart), so the count of days overstates the evidence; ``positive`` is the share of days above 0."""
+    close = np.asarray(fp.panel.filled, dtype=float) if close is None else close
+    last = close.shape[1] - 1
+    days = []
+    for item in made:
+        llm = item.get("llm") or {}
+        given = llm.get("scores") or {}
+        position = fp.index.get(date.fromisoformat(item["date"]))
+        if not given or position is None or position + 1 + horizon > last:
+            continue
+        start, end = position + 1, position + 1 + horizon
+        pairs = []
+        for code, value in given.items():
+            row = fp.row.get(f"{code}.TW")
+            if row is None:
+                continue
+            with np.errstate(all="ignore"):
+                move = close[row, end] / close[row, start] - 1
+            if np.isfinite(move):
+                pairs.append((code, float(value), float(move)))
+        if len(pairs) < 10:
+            continue
+        given_scores = np.array([value for _code, value, _move in pairs])
+        moves = np.array([move for _code, _value, move in pairs])
+        if given_scores.std() == 0 or moves.std() == 0:
+            continue
+        held = set(llm.get("hold") or [])
+        held_moves = [move for code, _value, move in pairs if code in held]
+        days.append({"date": item["date"], "stocks": len(pairs),
+                     "rho": round(float(np.corrcoef(_ranks(given_scores), _ranks(moves))[0, 1]), 4),
+                     "held_minus_all": round(float(np.mean(held_moves) - moves.mean()), 4) if held_moves else None})
+    if not days:
+        return None
+    rhos = np.array([day["rho"] for day in days])
+    spreads = [day["held_minus_all"] for day in days if day["held_minus_all"] is not None]
+    return {"horizon": horizon, "days": len(days), "mean_rho": round(float(rhos.mean()), 4),
+            "positive": round(float((rhos > 0).mean()), 2),
+            "held_minus_all": round(float(np.mean(spreads)), 4) if spreads else None, "by_day": days}
 
 
 def first_common_day(research: Path, run: str | None) -> str | None:
@@ -179,6 +240,8 @@ def board(base: str | Path, research: str | Path, run: str | None = None, broker
             row["behaviour"] = behaviour(made)
             if key != "twin":
                 row["placebo"] = placebo(fp, made, fp.index[last])
+            if any((item.get("llm") or {}).get("scores") for item in made):
+                row["score_skill"] = score_skill(fp, made)
         rows[key] = row
     for variant in variants.COHORT:
         row, other = rows.get(variant.key), rows.get(variant.against)
@@ -237,5 +300,9 @@ def text(result: dict[str, object]) -> str:
             part += f"；對 {row['against']}：{row['versus']['counted']:+,}／{row['versus']['sold']:+,}"
         if row.get("placebo"):
             part += f"；選股排在隨機代理人的第 {100 * row['placebo']['percentile']:.0f} 百分位"
+        skill = row.get("score_skill")
+        if skill:
+            part += (f"；分數和之後 {skill['horizon']} 個交易日漲跌的名次相關平均 {skill['mean_rho']:+.3f}"
+                     f"（{skill['days']} 天、{100 * skill['positive']:.0f}% 的天數大於 0）")
         lines.append(part + f"｜{row['verdict']}")
     return "\n".join(lines)

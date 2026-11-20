@@ -32,6 +32,7 @@ class Variant:
     against: str                 # the row it is compared with (a variant key, "llm_agent" or "0050")
     steps: int = 8
     calls: int = 0               # model calls a day at most (the budget's arithmetic)
+    since: str = "2026-11-20"    # the first session it decides live (the 16:00 check wants every one from it)
 
     @property
     def factor(self) -> str:
@@ -56,7 +57,8 @@ COHORT: tuple[Variant, ...] = (
     # program holds the best 20 — the use of a language model with out-of-sample evidence, against the picker
     Variant("score", "評分者：模型替共識前 40 檔與持股逐一打分，程式持有分數最高的 20 檔", "score",
             ("market", "mood", "headlines", "card", "events"),
-            "讓模型替每一檔打分、程式照分數持有（文獻上站得住的用法），是不是比讓它自己挑（中性指示）好", "plain", steps=1, calls=1),
+            "讓模型替每一檔打分、程式照分數持有（文獻上站得住的用法），是不是比讓它自己挑（中性指示）好", "plain", steps=1, calls=1,
+            since="2026-11-23"),
 )
 BY_KEY = {variant.key: variant for variant in COHORT}
 FACTORS = {variant.factor: f"AI 代理人實驗室・{variant.label}" for variant in COHORT}

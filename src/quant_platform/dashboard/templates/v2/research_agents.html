@@ -96,7 +96,7 @@
   <p class="muted" style="margin:0">{{ (board.note if board else '') or '第一次決定之後的下一個交易日收盤才成交，再過一個交易日才有可以比的數字。' }}</p>
   {% endif %}
   <details style="margin-top:8px"><summary class="small">怎麼算的</summary>
-    <p class="small" style="margin:6px 0 0">每個設計的名單交給平台同一個回測引擎：隔天收盤成交、扣手續費與交易稅、30 萬元加每月 5 日 1 萬元。「已拿到的錢」賺的只算已經賣掉的、賠的都算；「都賣掉」是今天全部賣掉能拿回多少。兩種都不輸才算不輸。六個設計彼此很像、只有 {{ sessions_to_judge }} 天，小的差距是運氣；判定時差距落在逐日差額重抽的範圍內會寫「分不出來」。</p></details>
+    <p class="small" style="margin:6px 0 0">每個設計的名單交給平台同一個回測引擎：隔天收盤成交、扣手續費與交易稅、30 萬元加每月 5 日 1 萬元。「已拿到的錢」賺的只算已經賣掉的、賠的都算；「都賣掉」是今天全部賣掉能拿回多少。兩種都不輸才算不輸。這些設計彼此很像、只有 {{ sessions_to_judge }} 天，小的差距是運氣；判定時差距落在逐日差額重抽的範圍內會寫「分不出來」。</p></details>
 </section>
 
 <section class="card" data-tab="行為" id="agents-behaviour">
@@ -119,13 +119,13 @@
           <td class="num" data-label="每次新買（檔）">{{ row.behaviour.bought_per_decision }}</td>
           <td class="num" data-label="平均查資料（次）">{{ row.behaviour.average_steps }}</td>
           <td class="num" data-label="模型花費（美元）">{{ '%.3f' % row.behaviour.cost_usd }}</td>
-          <td class="num" data-label="選股贏過隨機的（%）">{% if row.placebo %}{{ '%.0f' % (row.placebo.percentile * 100) }}{% else %}—{% endif %}</td></tr>
+          <td class="num" data-label="選股贏過隨機的（%）">{% if row.placebo %}{{ '%.0f' % (row.placebo.percentile * 100) }}{% else %}—{% endif %}{% if row.score_skill %}<br><span class="muted small" title="評分者的分數和買進後 20 個交易日漲跌的名次相關（-1～1，0 是分數沒有預測力）；滿 20 個交易日的決定才算，天數之間的視窗重疊">分數預測力 {{ '%+.2f' % row.score_skill.mean_rho }}（{{ row.score_skill.days }} 天）</span>{% endif %}</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <p class="muted" style="margin:0">有了第一個可以比的交易日之後才有。到現在六個設計的模型花費一共 {{ '%.3f' % month_cost }} 美元。</p>
+  <p class="muted" style="margin:0">有了第一個可以比的交易日之後才有。到現在各個設計的模型花費一共 {{ '%.3f' % month_cost }} 美元。</p>
   {% endif %}
 </section>
 

@@ -729,37 +729,73 @@ def branch_coverage_check(research: Path) -> dict[str, object]:
                   + ("：" + "、".join(early[:10]) if early else ""))
 
 
+def _flow_running(research: Path, name: str, day: date) -> datetime | None:
+    """When the research flow ``name`` started, if it started on ``day`` and its process still runs; else None."""
+    from zoneinfo import ZoneInfo
+
+    from quant_platform.research import jobs
+
+    try:
+        record = json.loads((research / "pipelines" / f"{name}.json").read_text(encoding="utf-8-sig"))
+        started = datetime.fromisoformat(str(record.get("started_at")))
+    except (OSError, ValueError):
+        return None
+    if started.tzinfo is None:                     # the pipeline writes Taipei time without its offset
+        started = started.replace(tzinfo=ZoneInfo("Asia/Taipei"))
+    if record.get("status") != "running" or started.date() != day or not jobs._alive(int(record.get("pid") or 0), started):
+        return None
+    return started
+
+
 def agent_lab_check(research: Path, today: date, now: datetime | None = None) -> dict[str, object]:
-    """2026-11-20 (D-050): every design of the agent lab has decided the latest session due (the flow llmagent's second
-    step, 15:40 on trading days), with a model call that answered — a day kept from the day before is listed, and more
-    than five in a row is the lab's own reason to drop a design (docs/research/results.md「AI 代理人實驗室」)."""
+    """2026-11-20 (D-050): every design of the agent lab has decided every session due (the flow llmagent's second
+    step, 15:40 on trading days) from its own first one (``Variant.since``), with a model call that answered — a day
+    kept from the day before is listed, and more than five in a row is the lab's own reason to drop a design
+    (docs/research/results.md「AI 代理人實驗室」). 2026-11-20 20:10: every session, not only the latest (a missed day
+    followed by a decided one passed), and the latest while the flow llmagent still runs is said, not failed (at 16:00
+    a busy machine can still be deciding: the flow took 5 minutes on 11/20 with no model call, the calls add about 5;
+    a flow that then dies leaves a missing day the next check finds)."""
+    from zoneinfo import ZoneInfo
+
     from quant_platform.research.agent_lab import runner, variants
 
     name, source = "AI 代理人實驗室每個交易日每個設計都有決定", "D-050；結果紀錄「AI 代理人實驗室」"
-    from zoneinfo import ZoneInfo
-
     now = now or datetime.now(ZoneInfo("Asia/Taipei"))
     after = today < now.date() or (now.hour, now.minute) >= (15, 55)        # the flow starts at 15:40
-    due = _calendar(research).previous_trading_day(today, inclusive=after).isoformat()
-    if due < "2026-11-20":
-        return _check(name, source, True, "第一次決定是 2026-11-20，之前不檢查")
-    missing, kept = [], []
+    calendar = _calendar(research)
+    due = calendar.previous_trading_day(today, inclusive=after)
+    first = min(variant.since for variant in variants.COHORT)
+    if due.isoformat() < first:
+        return _check(name, source, True, f"第一次決定是 {first}，之前不檢查")
+    running = _flow_running(research, "llmagent", due)
+    gaps, kept, waiting = [], [], []
     for variant in variants.COHORT:
         made = runner.records(research, variant.key)
-        if not made or made[-1]["date"] < due:
-            missing.append(variant.key)
-            continue
+        dates = {item["date"] for item in made}
+        day, absent = date.fromisoformat(variant.since), []
+        while day <= due:
+            if calendar.is_trading_day(day) and day.isoformat() not in dates:
+                absent.append(day)
+            day += timedelta(days=1)
+        if absent and absent[-1] == due and running is not None:
+            waiting.append(variant.key)
+            absent.pop()
+        if absent:
+            gaps.append(f"{variant.key} 少 " + "、".join(day.strftime("%m/%d") for day in absent[-3:])
+                        + (f" 等 {len(absent)} 天" if len(absent) > 3 else ""))
         streak = 0
-        for item in reversed(made):
+        for item in sorted(made, key=lambda item: item["date"], reverse=True):
             if not (item.get("llm") or {}).get("fallback"):
                 break
             streak += 1
         if streak:
             kept.append(f"{variant.key} 連續 {streak} 天")
-    detail = f"應有 {due} 的決定" + ("；沒有的：" + "、".join(missing) if missing else "，六個設計都有")
+    detail = f"應有到 {due.isoformat()} 的決定" + ("；沒有的：" + "；".join(gaps) if gaps else "，每個設計都有")
+    if waiting:
+        detail += f"；{due.strftime('%m/%d')} 的流程 {running:%H:%M} 開始、還在跑：" + "、".join(waiting)
     if kept:
         detail += "；沿用前一天的：" + "、".join(kept)
-    return _check(name, source, not missing and not kept, detail)
+    return _check(name, source, not gaps and not kept, detail)
 
 
 def priority_check(processes: list[dict[str, object]] | None, root: Path) -> dict[str, object]:

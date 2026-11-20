@@ -167,10 +167,28 @@ def test_the_scorer_holds_the_best_scores_ties_in_the_agreed_order_within_the_ru
     assert len(ranked) == 20 and len([code for code in ranked if industry(code) == "半導體"]) == 6
     assert "9999" not in ranked or "9999" in ranked[-3:]                  # unscored and last in the pool: only if room
     text = runner.instructions(variants.BY_KEY["score"])
-    assert '"scores"' in text and "1～5 分" in text and "處置中的不新買" in text
+    assert '"scores"' in text and "1～5 分" in text and "每一檔獨立判斷" in text
+    assert "持有分數最高" not in text                                      # the model is not told how its scores are used
     client = environment.ScriptedClient(environment.top_of_consensus())
     card = "2330 台積電｜半導體｜未持有｜漲跌：5 日 +1.0%\n2317 鴻海｜其他電子｜持有中｜漲跌：5 日 -1.0%"
     assert set(client.json_call(text, card, "agent_lab")[0]["scores"]) == {"2330", "2317"}
+
+
+def test_the_scorers_skill_is_the_rank_correlation_of_its_scores_with_the_next_twenty_sessions():
+    """2026-11-20 (「評分者設計」): measured once 20 sessions have passed since the buy; a day's market move is common
+    to its candidates, so ranking their moves is ranking them against the market."""
+    days = [date(2026, 1, 1) + timedelta(days=i) for i in range(40)]
+    fp = _Panel(days, [f"{1000 + i}.TW" for i in range(12)])
+    fp.panel = SimpleNamespace(filled=np.array([np.linspace(1, 1 + 0.05 * row, 40) for row in range(12)]))   # 1011 gains most
+    codes = [str(1000 + i) for i in range(12)]
+    right = {code: 1 + place // 3 for place, code in enumerate(codes)}
+    made = [{"date": days[2].isoformat(), "llm": {"scores": right, "hold": codes[-4:]}},
+            {"date": days[30].isoformat(), "llm": {"scores": right, "hold": codes[-4:]}}]      # 20 sessions not passed yet
+    skill = evaluate.score_skill(fp, made)
+    assert skill["days"] == 1 and skill["mean_rho"] > 0.9 and skill["positive"] == 1.0 and skill["held_minus_all"] > 0
+    wrong = {code: 5 - place // 3 for place, code in enumerate(codes)}
+    assert evaluate.score_skill(fp, [{"date": days[2].isoformat(), "llm": {"scores": wrong}}])["mean_rho"] < -0.9
+    assert evaluate.score_skill(fp, [{"date": days[2].isoformat(), "llm": {"scores": {code: 3 for code in codes}}}]) is None
 
 
 def test_a_decision_ranks_its_stocks_from_the_next_session_in_the_panel_layout():
@@ -250,7 +268,8 @@ def test_the_page_shows_each_designs_decision_the_board_a_replay_and_the_probe(t
            "sold_ahead_of_0050": -500, "beta": 0.8, "fees_and_tax": 900, "orders": 12, "against": "plain",
            "versus": {"counted": 2000, "sold": 1500}, "verdict": "觀察中（3／60 個交易日）",
            "behaviour": {"decisions": 3, "fallbacks": 0, "average_held": 9.0, "bought_per_decision": 1.5, "average_steps": 5.0,
-                         "cost_usd": 0.026}, "placebo": {"percentile": 0.62}}
+                         "cost_usd": 0.026}, "placebo": {"percentile": 0.62},
+           "score_skill": {"horizon": 20, "days": 3, "mean_rho": 0.123, "positive": 0.67}}
     result = {"rows": [row, {"key": "team", "label": "分析師團隊", "error": "沒有資料"}], "start": "2026-11-23", "through": "2026-11-25",
               "sessions": 3, "first_decision": "2026-11-20", "benchmark": {"contributed": 300000, "sold": 300500, "value": 301000}}
     evaluate.write(research, result)
@@ -273,17 +292,17 @@ def test_the_page_shows_each_designs_decision_the_board_a_replay_and_the_probe(t
     assert [(row["period"], row["asked"], row["declined"]) for row in declined["rows"]] == [("2026 下半年", 40, 1)]
     body = client.get("/research/agents").get_data(as_text=True)
     for text in ("營收創高", "大盤偏弱", "個股資料 2 次", "20 日跌 54%", "301,000", "+1,000", "-500", "觀察中（3／60 個交易日）",
-                 "模型自己選 1 檔、程式補 1 檔", "程式補</span>",
+                 "模型自己選 1 檔、程式補 1 檔", "程式補</span>", "分數預測力 +0.12（3 天）",
                  "算不出來：沒有資料", "neutral-20261120", "2025 上半年", "67.5", "滿 60 個交易日判定", "不能當成代理人有本事的證據"):
         assert text in body, text
     assert "dry-20261120" not in body
 
 
-def test_the_daily_check_wants_every_designs_decision_and_lists_days_kept_from_before(tmp_path):
+def test_the_daily_check_wants_every_designs_decision_and_lists_days_kept_from_before(tmp_path, monkeypatch):
     """2026-11-20 (D-050): the 16:00 check of the lab."""
     from zoneinfo import ZoneInfo
 
-    from quant_platform.research import invariants
+    from quant_platform.research import invariants, jobs
 
     research = tmp_path / "research"
     taipei = ZoneInfo("Asia/Taipei")
@@ -301,7 +320,28 @@ def test_the_daily_check_wants_every_designs_decision_and_lists_days_kept_from_b
     assert not kept["ok"] and "vote 連續 1 天" in kept["detail"] and "沒有的" not in kept["detail"]
     runner.append(research, "vote", {"date": "2026-11-23", "llm": {"hold": ["2330"]}})
     weekend = invariants.agent_lab_check(research, date(2026, 11, 22), datetime(2026, 11, 22, 16, 0, tzinfo=taipei))
-    assert weekend["ok"] and "六個設計都有" in weekend["detail"]            # Sunday: Friday's decisions are the latest due
+    assert weekend["ok"] and "每個設計都有" in weekend["detail"]            # Sunday: Friday's decisions are the latest due
+    # 2026-11-20 20:10: every session from a design's own first one, not only the latest — the scorer from 11/23
+    for variant in variants.COHORT:
+        if variant.key != "twin":
+            runner.append(research, variant.key, {"date": "2026-11-23", "llm": {"hold": ["2330"]}})
+        runner.append(research, variant.key, {"date": "2026-11-24", "llm": {"hold": ["2330"]}})
+    tuesday = invariants.agent_lab_check(research, date(2026, 11, 24), datetime(2026, 11, 24, 16, 0, tzinfo=taipei))
+    assert not tuesday["ok"] and "twin 少 11/23" in tuesday["detail"] and "score" not in tuesday["detail"]
+    runner.append(research, "twin", {"date": "2026-11-23", "llm": {"hold": ["2330"]}})
+    # at 16:00 the flow may still be deciding: the latest session is said, not failed, while its process runs
+    (research / "pipelines").mkdir(parents=True)
+    flow = research / "pipelines" / "llmagent.json"
+    flow.write_text(json.dumps({"name": "llmagent", "pid": 4321, "started_at": "2026-11-25T15:40:00", "status": "running"}),
+                    encoding="utf-8")
+    monkeypatch.setattr(jobs, "_alive", lambda pid, started=None: pid == 4321)
+    wednesday = datetime(2026, 11, 25, 16, 0, tzinfo=taipei)
+    deciding = invariants.agent_lab_check(research, date(2026, 11, 25), wednesday)
+    assert deciding["ok"] and "15:40 開始、還在跑" in deciding["detail"] and "score" in deciding["detail"]
+    flow.write_text(json.dumps({"name": "llmagent", "pid": 4321, "started_at": "2026-11-25T15:40:00", "status": "done"}),
+                    encoding="utf-8")
+    ended = invariants.agent_lab_check(research, date(2026, 11, 25), wednesday)
+    assert not ended["ok"] and "score 少 11/25" in ended["detail"]
 
 
 def _events_desk(tmp_path, day=date(2026, 11, 20)):
