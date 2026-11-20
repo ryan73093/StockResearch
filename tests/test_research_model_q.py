@@ -152,7 +152,7 @@ def test_a_version_that_gives_too_much_up_over_every_stretch_does_not_pass(monke
 def test_model_q_is_model_k_s_features_with_the_other_target_and_its_own_gate(tmp_path):
     assert model.version_features("gbm-2.12.0") == model.version_features("gbm-2.7.0")
     assert model.VERSIONS["gbm-2.12.0"]["target"] == "residual" and "target" not in model.VERSIONS["gbm-2.7.0"]
-    assert set(model.DOWN_GATES) == {"gbm-2.12.0", "gbm-2.13.0", "gbm-2.13.1", "gbm-2.13.2", "gbm-2.13.3"}
+    assert set(model.DOWN_GATES) == {"gbm-2.12.0", "gbm-2.13.0", "gbm-2.13.1", "gbm-2.13.2", "gbm-2.13.3", "gbm-2.14.0"}
     assert set(model.version_features("gbm-2.12.0")) - set(model.version_features("gbm-2.13.3")) == {"low_daytrade_5"}
     assert set(model.DOWN_GATES.values()) == {"gbm-2.7.0"}
     whole = model.version_features("gbm-2.12.0")                     # 2026-11-19: the two halves of the paid features

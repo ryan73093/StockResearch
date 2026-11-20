@@ -130,6 +130,7 @@ def failed_models(models_root: Path) -> set[str]:
               "ml_gbm_p": lambda: top_gate(models_root, "gbm-2.11.0", "gbm-2.10.0", (2021, 2022, 2023, 2024, 2025)),
               "ml_gbm_q": lambda: stored_down_gate(models_root, "gbm-2.12.0"),
               "ml_gbm_r": lambda: stored_down_gate(models_root, "gbm-2.13.0"),
+              "ml_gbm_s": lambda: stored_down_gate(models_root, "gbm-2.14.0"),
               "ml_gbm_ext_monthly": lambda: top_gate(models_root, "gbm-2.4.0", "gbm-2.2.0"),
               "ml_deep2_riskadj": lambda: deep2_gate(models_root, "dl-2.4.0"),
               "ml_tech_deep": lambda: deep2_gate(models_root, "dl-2.5.0"),

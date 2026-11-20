@@ -96,6 +96,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # now on) — what the paid tables add to the one model that stands, and the line that goes on if the plan
           # is not renewed; the same gate against gbm-2.7.0 so the two are read side by side
           "ml_gbm_r": {"version": "gbm-2.13.0", "label": "ensemble", "features": "extended_i", "target": "residual"},
+          # 2026-11-20 (docs/research/results.md「模型 S：上市加上櫃一起訓練」, written before the run): model K's
+          # features and target, learning from the TPEx stocks too (D-045 第 6 項: TPEx data may train the models);
+          # it scores the listed stocks the rules buy
+          "ml_gbm_s": {"version": "gbm-2.14.0", "label": "ensemble", "features": "extended_k", "universe": "all"},
           # 2026-11-19 (docs/research/results.md「模型 Q 靠哪幾份付費表」, written before the run): model R failed and its
           # rules earn half of model Q's — which tables carry it: model Q without the five long-history features
           # (margin maintenance, loans, block trades: PAID_LONG), and without the four that start in 2021-22
@@ -655,7 +659,7 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
 
 
 DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0", "gbm-2.13.0": "gbm-2.7.0", "gbm-2.13.1": "gbm-2.7.0", "gbm-2.13.2": "gbm-2.7.0",
-              "gbm-2.13.3": "gbm-2.7.0"}
+              "gbm-2.13.3": "gbm-2.7.0", "gbm-2.14.0": "gbm-2.7.0"}
 PAID_LONG = ("margin_safe", "margin_in_profit", "low_pledge_loan_20", "block_premium_20", "block_volume_20")
 PAID_SHORT = ("broker_concentration_5", "govbank_net_20", "govbank_dip_buy_20", "low_daytrade_5")
 # DOWN_GATES:        # the version judged by ``down_gate`` → the one it is judged against

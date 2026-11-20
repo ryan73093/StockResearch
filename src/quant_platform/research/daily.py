@@ -276,6 +276,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_p": "機器學習集成 P（模型 O 再加上付費分點：跟著「買了會漲」的分點）",
                  "ml_gbm_q": "機器學習集成 Q（模型 K 的特徵，學扣掉跟大盤連動之後的報酬：不靠大盤漲）",
                  "ml_gbm_r": "機器學習集成 R（模型 Q 拿掉 FinMind 付費資料的 9 個特徵：不續約也能跑）",
+                 "ml_gbm_s": "機器學習集成 S（模型 K 的做法，用上市加上櫃一起訓練、只替上市股打分數）",
                  "ml_gbm_q_nolong": "模型 Q 拿掉長歷史的 5 個付費特徵（融資維持率、借貸、鉅額；只拿來量，不做規則）",
                  "ml_gbm_q_noshort": "模型 Q 拿掉短歷史的 4 個付費特徵（主力集中度、八大行庫、隔日沖；只拿來量，不做規則）",
                  "ml_gbm_q_nobranch": "模型 Q 只拿掉「隔日沖少」（分點資料涵蓋範圍偷看未來的那個特徵；只拿來量，不做規則）",
@@ -5007,6 +5008,21 @@ def model_q_frames_batch() -> list[DailyRule]:
 MODEL_R_FRAMES = (("", {}), ("：開盤賣、收盤買", {"execution": "split"}), ("：依波動度配置", {"weighting": "inverse_vol"}))
 
 
+def model_s_batch() -> list[DailyRule]:
+    """2026-11-20 (docs/research/results.md「模型 S：上市加上櫃一起訓練」, written before the run): gbm-2.14.0 alone
+    in model R's three frames — only past its registered gate (model.down_gate against model K)."""
+    from quant_platform.research.model import stored_down_gate
+
+    check = stored_down_gate(Path("instance") / "research" / "models", "gbm-2.14.0")
+    print(f"gbm-2.14.0 門檻（2021-2025 前 20 名對加權指數，對 gbm-2.7.0）：{check}", flush=True)
+    if not check or not check.get("passed"):
+        return []
+    base = {"factors": {"ml_gbm_s": 1.0}, "check": "weekly", "industry_cap": 0.3, "min_hold": 0}
+    return [DailyRule.model_validate({**base, **change,
+                                      "name": f"模型 S 單獨（上市加上櫃一起訓練）、同產業最多 3 成、不設最短持有{word}"})
+            for word, change in MODEL_R_FRAMES]
+
+
 def model_r_batch() -> list[DailyRule]:
     """2026-11-19 (docs/research/results.md「模型 R」, written before the run): gbm-2.13.0 — model Q without the paid
     tables' features — in model Q's three frames that matter (#35585, #35686, #35685), whatever its gate says: the
@@ -6300,7 +6316,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "betaguard": beta_guard_batch, "poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "betaguard": beta_guard_batch, "poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
