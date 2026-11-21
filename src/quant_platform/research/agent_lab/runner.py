@@ -264,12 +264,16 @@ def read_scores(answer: dict, pool: list[str]) -> tuple[dict[str, int], dict[str
 
 
 def rank_scored(pool: list[str], scores: dict[str, int], held: list[str], blocked: set[str], industry,
-                most: int = MOST) -> list[str]:
+                most: int = MOST, keep_at: int | None = None) -> list[str]:
     """The best ``most`` by score — ties in the pool's order (the agreed order, holdings after) — at most a third of
     the places in one industry, no new buy of a blocked stock. A candidate the model left unscored counts as a 3 (no
-    view), so a 1 or a 2 it gave ranks below it."""
+    view), so a 1 or a 2 it gave ranks below it. ``keep_at``: a holding scored that or more is kept before any new
+    buy (2026-11-21: without it a 3 that slipped behind another 3 was sold — 6.5 new buys a decision in the replay)."""
     order = {code: place for place, code in enumerate(pool)}
     ranked = sorted(pool, key=lambda code: (-scores.get(code, 3), order[code]))
+    if keep_at is not None:
+        staying = [code for code in held if code in order and scores.get(code, 3) >= keep_at]
+        ranked = staying + [code for code in ranked if code not in staying]
     limit = max(1, int(most * INDUSTRY_SHARE))
     counts: dict[str, int] = {}
     output = []
