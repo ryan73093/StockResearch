@@ -603,6 +603,8 @@ class StockForwardTracker:
                 found.add("dl_risk")
             if one.get("vol_scale") == "risk_half":              # 2026-10-25: so does the model-timed half
                 found.add("risk_half")
+            if one.get("vol_scale") in ("us_hot_half", "us_hot_quarter"):   # 2026-11-22: the US readings
+                found.add("us_hot")
         return found
 
     def refit(self, factors: set[str], reason: str, now: datetime | None = None) -> list[str]:

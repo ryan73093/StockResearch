@@ -210,6 +210,11 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
         from quant_platform.research.us_factors import refresh as us_refresh
 
         us_refresh(history, day)
+    if any('"vol_scale": "us_hot_' in json.dumps(item.get("rule") or {}) for item in items):
+        # 2026-11-22: an account whose share held reads the US overheating count needs the latest publications
+        from quant_platform.research.us_factors import refresh_hot
+
+        refresh_hot(history)
     data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, day.year, extra=(day, rows, benchmark))
     panel = Panel(data)
     market = market_closes(history, panel.sessions).copy()

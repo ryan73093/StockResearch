@@ -203,6 +203,10 @@ def run_blend_trial(blend: BlendRule, history: str | Path, registry, reports_dir
     names = list(dict.fromkeys(name for sleeve in blend.sleeves for name in rule_inputs(sleeve.rule)))
     payload.update(input_digests(history, names,
                                  any(sleeve.rule.exit_model != "none" for sleeve in blend.sleeves)))
+    from quant_platform.research.daily import US_HOT_SCALES, us_hot_digest
+
+    if any(sleeve.rule.vol_scale in US_HOT_SCALES for sleeve in blend.sleeves):   # 2026-11-22: the US readings it read
+        payload["us_hot"] = us_hot_digest(history, list(fp.sessions), RECENT_END)
     return record_trial(registry, reports_dir, blend.rule_hash, blend.name, payload,
                         lambda: evaluate_blend(data, fp, blend, costs, benchmark_cache), data_fingerprint, "blend",
                         f"{ENGINE_VERSION}+{BLEND_VERSION}")

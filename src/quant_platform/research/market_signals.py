@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import gzip
 import json
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -270,6 +270,29 @@ def us_macro(history: str | Path) -> dict[str, dict[date, float]]:
     if premium:
         keep("台積電 ADR 溢價（水準）", premium)
         keep("台積電 ADR 溢價（5 日變化）", _changes(premium, 5))
+    return output
+
+
+# 2026-11-22 (docs/research/results.md「空頭防護第十四版」, written before the run): the five readings the study found
+# useful at their highest fifth - one story, the US economy overheating
+HOT_READINGS = ("核心資本財訂單（年增率）", "零售銷售（年增率）", "工業生產（年增率）", "職缺數（年增率）", "2 年期殖利率（60 日變化）")
+HOT_SHARE = 0.8                      # a reading is high at or above this share of its own earlier values
+HOT_COUNT = 3                        # overheating: more than half of the five are high
+
+
+def us_hot(history: str | Path, sessions: list[date]) -> dict[date, int]:
+    """Taiwan session → how many of HOT_READINGS are high, as known before it (the latest reading dated before the
+    session, against its own earlier values: ``percentiles``). A session with no reading known yet is left out."""
+    macro = us_macro(history)
+    output: dict[date, int] = {}
+    for name in HOT_READINGS:
+        values = macro.get(f"{MACRO}{name}") or {}
+        ranks = percentiles(values)
+        known = sorted(ranks)
+        for day in sessions:
+            before = bisect_left(known, day) - 1               # dated before the session
+            if before >= 0:
+                output[day] = output.get(day, 0) + int(ranks[known[before]] >= HOT_SHARE)
     return output
 
 

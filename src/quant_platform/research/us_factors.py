@@ -90,6 +90,25 @@ def digest(history: str | Path, end: date) -> str | None:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+HOT_REVISED = ("NEWORDER", "RSAFS", "INDPRO", "JTSJOL")     # market_signals.HOT_READINGS: the statistics behind them
+HOT_DAILY = ("DGS2",)
+
+
+def refresh_hot(history: str | Path, get=None) -> dict[str, object]:
+    """Before a Taiwan session's orders, for an account whose share held reads the US overheating count (vol_scale
+    us_hot_*): the vintages published since the last look and the 2-year yield. A request that fails keeps the files
+    (the count moves on a publication, a few days a month)."""
+    from quant_platform.research.history import us
+
+    extra = {"get": get} if get else {}
+    try:
+        vintages = us.fetch_revised(Path(history), pause=0.0, only=HOT_REVISED, **extra)
+        yields = us.fetch_daily(Path(history), pause=0.0, only=HOT_DAILY, **extra)
+    except Exception as error:  # noqa: BLE001
+        return {"fetched": False, "error": str(error)[:200]}
+    return {"fetched": True, "vintages": vintages, "yields": yields}
+
+
 def refresh(history: str | Path, day: date, get=None) -> dict[str, object]:
     """Before a Taiwan session's orders: the index must hold the last US weekday before ``day`` (a US holiday shows as
     stale and is harmless — nothing traded). One request when it does not; an answer that fails keeps the file, and the

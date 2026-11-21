@@ -178,11 +178,11 @@ def parse_graph(text: str) -> dict[date, float]:
     return output
 
 
-def fetch_daily(history: Path, get=_get, pause: float = 0.6) -> dict[str, int]:
+def fetch_daily(history: Path, get=_get, pause: float = 0.6, only: tuple[str, ...] | None = None) -> dict[str, int]:
     folder = Path(history) / "raw" / "fred"
     folder.mkdir(parents=True, exist_ok=True)
     counts = {}
-    for series in DAILY:
+    for series in (only or tuple(DAILY)):
         path = folder / f"{series}.csv"
         try:
             raw = get(f"{FRED}?{urlencode({'id': series, 'cosd': START.isoformat()})}")

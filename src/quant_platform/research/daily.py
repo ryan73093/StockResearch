@@ -565,8 +565,11 @@ class DailyRule(BaseModel):
     # "own_excess" (2026-10-29, 空頭防護第十一版): the half guard, times OWN_TREND_CUT while that account is further behind
     # (or less ahead of) 0050 with the same money than OWN_TREND sessions before — the rule's excess, the factor's
     # return the literature means (第十版's own year was mostly the market's fall, which the half guard already cuts)
+    # "us_hot_half" / "us_hot_quarter" (2026-11-22, 空頭防護第十四版): the half guard, and the US economy overheating
+    # (market_signals.us_hot: HOT_COUNT of five readings high against their own history, as published before the
+    # session) — "half": half also above the line while it overheats; "quarter": below the line, a quarter while it does
     vol_scale: Literal["none", "v1", "taiex_half", "taiex_staged", "risk_half", "taiex_vol", "taiex_trend",
-                       "own_drawdown", "own_trend", "own_excess"] = "none"
+                       "own_drawdown", "own_trend", "own_excess", "us_hot_half", "us_hot_quarter"] = "none"
     # 2026-10-09 (使用者：只在大型股裡挑，但不要照 0050 的比例買台積電): only the ``large_caps`` largest listed
     # stocks by market value (the previous close times shares issued, chips.py ``market_cap``) can be picked;
     # the picks still get equal amounts, so no stock is held at its market-value share. 0 = no limit, left
@@ -2434,7 +2437,30 @@ RISK_WINDOW = 750                    # "risk_half": the market's predicted drop 
 RISK_TOP = 0.2                       # half while it is in this top share of them (known from 250 sessions)
 
 
-MARKET_SCALES = ("taiex_half", "taiex_staged", "taiex_vol", "taiex_trend", "risk_half")
+MARKET_SCALES = ("taiex_half", "taiex_staged", "taiex_vol", "taiex_trend", "risk_half", "us_hot_half", "us_hot_quarter")
+US_HOT_SCALES = ("us_hot_half", "us_hot_quarter")
+
+
+def us_hot_counts(fp: FactorPanel) -> dict[date, int]:
+    """Each session's count of high US readings as published before it (market_signals.us_hot), once per panel; a
+    panel given ``us_hot_counts`` (a test, a replay with a fixed table) uses that."""
+    given = getattr(fp, "us_hot_counts", None)
+    if given is not None:
+        return given
+    from quant_platform.research.market_signals import us_hot
+
+    if fp.chips is None:
+        raise ValueError("美國景氣過熱的減碼需要研究資料夾（FactorPanel chips）")
+    fp.us_hot_counts = us_hot(Path(fp.chips._folder).parent, list(fp.sessions))
+    return fp.us_hot_counts
+
+
+def us_hot_digest(history: str | Path, sessions: list[date], until: date) -> str:
+    """What a run with a US_HOT_SCALES setting read: every session's count to ``until``."""
+    from quant_platform.research.market_signals import us_hot
+
+    counts = us_hot(history, [day for day in sessions if day <= until])
+    return hashlib.sha256(json.dumps(sorted((day.isoformat(), count) for day, count in counts.items())).encode()).hexdigest()
 
 
 def _market_exposure(fp: FactorPanel, rule: DailyRule) -> dict[date, float]:
@@ -2449,6 +2475,22 @@ def _market_exposure(fp: FactorPanel, rule: DailyRule) -> dict[date, float]:
             return 0.0 if deep else MARKET_HALF
 
         output = {day: level(position) for position, day in enumerate(fp.sessions)}
+        if lag_of(rule):
+            later = dict(zip(fp.sessions, fp.sessions[1:]))
+            output = {later[day]: value for day, value in output.items() if day in later}
+        return output
+    if rule.vol_scale in US_HOT_SCALES:           # 2026-11-22 (空頭防護第十四版): the line and the US overheating
+        from quant_platform.research.market_signals import HOT_COUNT
+
+        counts = us_hot_counts(fp)
+
+        def held(position: int) -> float:
+            hot = counts.get(fp.sessions[position], 0) >= HOT_COUNT
+            if rule.vol_scale == "us_hot_half":
+                return 1.0 if fp.risk_on(position) and not hot else MARKET_HALF
+            return 1.0 if fp.risk_on(position) else MARKET_HALF / 2 if hot else MARKET_HALF
+
+        output = {day: held(position) for position, day in enumerate(fp.sessions)}
         if lag_of(rule):
             later = dict(zip(fp.sessions, fp.sessions[1:]))
             output = {later[day]: value for day, value in output.items() if day in later}
@@ -3069,6 +3111,10 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
 
             payload["meta1"] = meta_digest(models_root(history) / META_VERSION, until=RECENT_END)
             payload["meta1_primary"] = digest(model_dir(history, MODELS["ml_deep2_top"]["version"]), until=RECENT_END)
+    scales = {getattr(rule, "vol_scale", "none")} | {getattr(sleeve.rule, "vol_scale", "none")
+                                                     for sleeve in getattr(rule, "sleeves", None) or ()}
+    if scales & set(US_HOT_SCALES):                              # 2026-11-22: the US readings it read
+        payload["us_hot"] = us_hot_digest(history, list(fp.sessions), RECENT_END)
     delisted = sorted((code, day.isoformat()) for code, days in (data.notes.get("delisted") or {}).items()
                       for day in days if day <= RECENT_END)
     payload["delisted"] = hashlib.sha256(json.dumps(delisted).encode()).hexdigest()   # 1.3.1: the list it read
@@ -6004,6 +6050,17 @@ def bear10_batch() -> list:
     return _guarded(BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE, [BEAR_OWN_TREND])
 
 
+BEAR_US_HOT = [("大盤跌破 200 日均線或美國景氣過熱就減碼一半", {"vol_scale": "us_hot_half"}),
+               ("大盤跌破 200 日均線減碼一半、美國景氣又過熱再減一半", {"vol_scale": "us_hot_quarter"})]
+
+
+def bear14_batch() -> list:
+    """2026-11-22 (docs/research/results.md「空頭防護第十四版」, written before the run; the paper trial passed its 98%):
+    the 55 fixed rules with the half guard and the US overheating condition, two ways (BEAR_US_HOT). Graded the usual
+    way; compared with the half guard of the same rules."""
+    return _guarded(BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE, BEAR_US_HOT)
+
+
 def bear11_batch() -> list:
     """2026-10-29 (空頭防護第十一版, written before the run): the 55 fixed rules with the half guard and half again while
     the rule's own half-guarded account fell behind 0050 (the same money) over the last year (BEAR_OWN_EXCESS). Graded
@@ -6495,7 +6552,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "devconsensus": dev_consensus_batch, "modelf": model_f_batch, "modelg": model_g_batch, "deep": deep_batch, "deep2": deep2_batch, "deep2cost": deep2_cost_batch, "deep2risk": deep2_risk_batch, "deep2cluster": deep2_cluster_batch, "deep2r3": deep2_r3_batch, "deep2large": deep2_large_batch, "coresat": core_satellite_batch, "spread": spread_batch, "deep2timing": deep2_timing_batch, "trim": trim_batch, "blendscan": blend_scan_batch, "blendroll": blend_roll_batch, "blendsteady": blend_consistent_batch, "blendguard": blend_guarded_batch, "blendrecent": blend_recent_batch, "blendfrontier": blend_frontier_batch, "blendfour": blend_four_batch, "blendsize": blend_size_batch, "bear12": bear_blend_batch, "bear13": bear13_blend_batch, "blendreach": blend_reach_batch, "blendreach14": blend_counted_reach_batch, "techsecond": tech_second_batch, "techveto": tech_veto_batch, "modelh": model_h_batch, "deep2neutral": deep2_neutral_batch, "deep24": deep24_batch, "deep2top10": deep2_top10_batch, "costall": cost_all_batch, "threefam": three_families_batch, "techdeep": tech_deep_batch, "techdeep4": tech_deep4_batch, "deepregate": deep_regate_batch, "deep26": deep26_batch, "modelgm": model_g_monthly_batch, "rolesplit": role_split_batch, "holding": holding_batch, "holding2": holding_families_batch, "holding3": holding_all_batch, "exec_a": lambda: execution_all_batch()[0::2], "exec_b": lambda: execution_all_batch()[1::2], "top10blend": top10_blend_batch, "next10blend": next10_blend_batch, "holding4_a": lambda: holding_rest_batch()[0::2], "holding4_b": lambda: holding_rest_batch()[1::2],
            "holding2_a": lambda: holding_families_batch()[0::2], "holding2_b": lambda: holding_families_batch()[1::2], "robot34": robot34_batch, "robot35": robot35_batch, "robot35s": robot35_styles_batch, "deephalf": deep_monthly_half_batch, "paidveto": paid_veto_batch,
            "bearguard_a": lambda: bear_guard_batch()[0::2], "bearguard_b": lambda: bear_guard_batch()[1::2],
-           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear9": bear9_batch, "bear10": bear10_batch, "bear11": bear11_batch, "modelo": model_o_batch, "modelp": model_p_batch, "modelq": model_q_batch, "deepnet": deep_net_batch, "guardh1": guard_h1_batch, "swapq": swap_q_batch, "modelq2": model_q_frames_batch, "modelr": model_r_batch, "deepnetz": deep_netz_batch, "deepdirect": deep_direct_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
+           "bearguard": bear_guard_batch, "bearguard3": bear_guard3_batch, "bear6": bear6_batch, "bear9": bear9_batch, "bear10": bear10_batch, "bear11": bear11_batch, "bear14": bear14_batch, "modelo": model_o_batch, "modelp": model_p_batch, "modelq": model_q_batch, "deepnet": deep_net_batch, "guardh1": guard_h1_batch, "swapq": swap_q_batch, "modelq2": model_q_frames_batch, "modelr": model_r_batch, "deepnetz": deep_netz_batch, "deepdirect": deep_direct_batch, "bear7": bear7_batch, "bear8": bear8_batch, "modelmhalf": model_m_half_batch, "entryonly": entry_only_batch, "band": band_batch, "bearguard4": bear_guard4_batch, "bearguard5": bear_guard5_batch, "meta1": meta1_batch, "winner": winner_batch, "deep3": deep3_batch, "deep2wide": deep2_wide_batch,
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
