@@ -258,6 +258,8 @@ class ResponsesClient:
             "output_tokens": output_tokens,
             "cost_usd": call_cost(self.model, usage),
         }
+        if isinstance(usage, dict) and usage.get("served_model"):
+            entry["served_model"] = usage["served_model"]
         written = usage.get("cache_creation_input_tokens") if isinstance(usage, dict) else None
         if written:
             entry["cache_write_input_tokens"] = written
@@ -400,6 +402,11 @@ class ClaudeClient(ResponsesClient):
         self._where = "AI API 平台" if self._base_url.rstrip("/") == AI_PLATFORM_URL else "Claude API"
         self._effort = effort
         self._sdk = None
+        self.served: list[str] = []      # the model each answer says it came from (2026-11-21: the model lock)
+
+    @property
+    def effort(self) -> str | None:
+        return self._effort
 
     def sdk(self):
         """The SDK client, made once. The base URL is given explicitly: an ANTHROPIC_BASE_URL another program left in
@@ -438,6 +445,14 @@ class ClaudeClient(ResponsesClient):
             except Exception as exc:  # noqa: BLE001 - every SDK error becomes an LLMError without the key
                 raise claude_error(exc, self.model, self._where) from None
             usage = claude_usage(_get(message, "usage"))
+            # 2026-11-21 (使用者：避免串了不同的模型導致的差異): the answer names its model; one that is not the model
+            # asked for (the platform routed or translated it elsewhere) is refused, not used as if it were
+            served = str(_get(message, "model") or "")
+            if served:
+                usage["served_model"] = served
+                self.served.append(served)
+                if not same_model(self.model, served):
+                    raise LLMError(f"{self._where}回應的模型是 {served}，不是設定的 {self.model}；這次的回答不採用")
             stop = _get(message, "stop_reason")
             if stop == "refusal":
                 category = _get(_get(message, "stop_details"), "category")
@@ -455,9 +470,18 @@ class ClaudeClient(ResponsesClient):
             self._record(operation, context, outcome, started, usage)
 
 
+def same_model(asked: str, served: str) -> bool:
+    """Whether an answer's model is the one asked for: the same name, or the name with a snapshot date after it
+    (``claude-haiku-5-5`` → ``claude-haiku-5-5-20261001``)."""
+    asked, served = asked.strip().lower(), served.strip().lower()
+    rest = served[len(asked):] if served.startswith(asked) else None
+    return rest is not None and (rest == "" or (rest[0] in "-@" and rest[1:].replace("-", "").isdigit()))
+
+
 def model_client(settings, ledger: UsageLedger, monthly_budget_usd: float, *, operations: tuple[str, ...] | None = None,
                  total_budget_usd: float | None = None, label: str = "AI 研究員",
-                 max_output_tokens: int = 6000) -> ResponsesClient | None:
+                 max_output_tokens: int = 6000, model: str | None = None,
+                 effort: str | None = None) -> ResponsesClient | None:
     """The client for ``settings.research_agent_model`` inside the given monthly share, through the AI API platform
     (D-052) whatever the model: the platform sends a ``claude-…`` model to Anthropic and translates the Claude format for
     a ``gpt-…`` or ``gemini-…`` one. None without the project's platform key (ANTHROPIC_API_KEY). ``ResponsesClient``
@@ -465,10 +489,12 @@ def model_client(settings, ledger: UsageLedger, monthly_budget_usd: float, *, op
     key = resolve_anthropic_key(getattr(settings, "anthropic_api_key", ""), getattr(settings, "env_file", ""))
     if not key:
         return None
-    return ClaudeClient(key, settings.research_agent_model, ledger, monthly_budget_usd, operations=operations,
+    # ``model`` / ``effort``: a caller whose results are compared over time (the agents) names its own, so a change of
+    # the shared setting for another feature does not change the model under a running comparison
+    return ClaudeClient(key, model or settings.research_agent_model, ledger, monthly_budget_usd, operations=operations,
                         total_budget_usd=total_budget_usd, label=label, max_output_tokens=max_output_tokens,
                         base_url=base_url_for(settings),
-                        effort=getattr(settings, "research_agent_effort", "") or CLAUDE_EFFORT)
+                        effort=effort or getattr(settings, "research_agent_effort", "") or CLAUDE_EFFORT)
 
 
 def _strip_fence(text: str) -> str:

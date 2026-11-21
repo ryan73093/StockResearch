@@ -46,7 +46,7 @@ def main() -> int:
     def client():
         if args.scripted:
             return environment.ScriptedClient(environment.top_of_consensus())
-        return runner.build_client(Settings.from_env(), RESEARCH)
+        return runner.build_client(Settings.from_env(), RESEARCH, replay=bool(args.run))
 
     if args.command == "decide":
         keys = [key.strip() for key in args.only.split(",")] if args.only else None

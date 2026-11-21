@@ -758,9 +758,10 @@ def agent_lab_check(research: Path, today: date, now: datetime | None = None) ->
     a flow that then dies leaves a missing day the next check finds)."""
     from zoneinfo import ZoneInfo
 
+    from quant_platform.research.agent.llm import same_model
     from quant_platform.research.agent_lab import runner, variants
 
-    name, source = "AI 代理人實驗室每個交易日每個設計都有決定", "D-050；結果紀錄「AI 代理人實驗室」"
+    name, source = "AI 代理人實驗室每個交易日每個設計都有決定、模型與指示沒有中途變", "D-050；結果紀錄「AI 代理人實驗室」"
     now = now or datetime.now(ZoneInfo("Asia/Taipei"))
     after = today < now.date() or (now.hour, now.minute) >= (15, 55)        # the flow starts at 15:40
     calendar = _calendar(research)
@@ -769,7 +770,7 @@ def agent_lab_check(research: Path, today: date, now: datetime | None = None) ->
     if due.isoformat() < first:
         return _check(name, source, True, f"第一次決定是 {first}，之前不檢查")
     running = _flow_running(research, "llmagent", due)
-    gaps, kept, waiting = [], [], []
+    gaps, kept, waiting, changed = [], [], [], []
     for variant in variants.COHORT:
         made = runner.records(research, variant.key)
         dates = {item["date"] for item in made}
@@ -791,12 +792,26 @@ def agent_lab_check(research: Path, today: date, now: datetime | None = None) ->
             streak += 1
         if streak:
             kept.append(f"{variant.key} 連續 {streak} 天")
+        # 2026-11-21 (使用者：避免串了不同的模型導致的差異): a design's decisions are one model, one effort, one prompt
+        # — a change is a new design from its own first day, not a continuation of this one
+        if variant.mode != "twin":
+            own = [item for item in made if item["date"] >= variant.since and not (item.get("llm") or {}).get("fallback")]
+            for field, label in (("model", "模型"), ("effort", "思考強度"), ("prompt_version", "指示")):
+                seen = list(dict.fromkeys(str(item.get(field)) for item in own if item.get(field) is not None))
+                if len(seen) > 1:
+                    changed.append(f"{variant.key} 的{label}變過（{'→'.join(seen[:3])}）")
+            other = sorted({name for item in own for name in item.get("served_model") or []
+                            if not same_model(str(item.get("model") or ""), name)})
+            if other or any(item.get("model") not in (None, variant.model_name) for item in own):
+                changed.append(f"{variant.key} 不是用鎖定的 {variant.model_name} 決定的" + (f"（{'、'.join(other)}）" if other else ""))
     detail = f"應有到 {due.isoformat()} 的決定" + ("；沒有的：" + "；".join(gaps) if gaps else "，每個設計都有")
     if waiting:
         detail += f"；{due.strftime('%m/%d')} 的流程 {running:%H:%M} 開始、還在跑：" + "、".join(waiting)
     if kept:
         detail += "；沿用前一天的：" + "、".join(kept)
-    return _check(name, source, not gaps and not kept, detail)
+    if changed:
+        detail += "；" + "；".join(changed)
+    return _check(name, source, not gaps and not kept and not changed, detail)
 
 
 def priority_check(processes: list[dict[str, object]] | None, root: Path) -> dict[str, object]:

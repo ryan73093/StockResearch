@@ -18,6 +18,11 @@ VETO_MOST = 6                    # stocks kept out at once
 VETO_NEW, VETO_SESSIONS = 2, 10  # new vetoes a day; a vetoed stock stays out this many decisions (2026-11-20: the
 #                                  replay vetoed 5.1 stocks a day afresh, 578 orders against the twin's 322)
 VOTES, VOTES_NEEDED = 3, 2
+# 2026-11-21 (使用者：避免串了不同的模型導致的差異): the cohort's model and effort are the lab's own, written here and
+# committed — not the shared setting, which other features may change. A design's 60 sessions are one model, one
+# effort, one prompt; another model is another design (``Variant.model``) running beside it from its own first day.
+LAB_MODEL = "claude-haiku-5-5"
+LAB_EFFORT = "medium"
 SCORE_CANDIDATES = 40            # the scorer: the agreed stocks it scores (with the holdings)
 ANALYST_CARDS = 16               # the stocks the analysts read: the holdings and the most agreed
 
@@ -33,6 +38,11 @@ class Variant:
     steps: int = 8
     calls: int = 0               # model calls a day at most (the budget's arithmetic)
     since: str = "2026-11-20"    # the first session it decides live (the 16:00 check wants every one from it)
+    model: str = ""              # its own model when it is not the lab's (a design that asks the model question)
+
+    @property
+    def model_name(self) -> str:
+        return self.model or LAB_MODEL
 
     @property
     def factor(self) -> str:

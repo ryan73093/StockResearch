@@ -342,6 +342,43 @@ def test_the_daily_check_wants_every_designs_decision_and_lists_days_kept_from_b
                     encoding="utf-8")
     ended = invariants.agent_lab_check(research, date(2026, 11, 25), wednesday)
     assert not ended["ok"] and "score 少 11/25" in ended["detail"]
+    # 2026-11-21: one model, one effort, one prompt per design — a change in the middle is red
+    for variant in variants.COHORT:
+        runner.append(research, variant.key, {"date": "2026-11-25", "model": variants.LAB_MODEL, "effort": "medium",
+                                              "prompt_version": "a", "served_model": [variants.LAB_MODEL], "llm": {"hold": ["2330"]}})
+        runner.append(research, variant.key, {"date": "2026-11-26", "model": "gpt-6-luna" if variant.key == "plain" else variants.LAB_MODEL,
+                                              "effort": "medium", "prompt_version": "b" if variant.key == "info" else "a",
+                                              "served_model": ["gpt-6-luna"] if variant.key == "veto" else [variants.LAB_MODEL],
+                                              "llm": {"hold": ["2330"]}})
+    moved = invariants.agent_lab_check(research, date(2026, 11, 26), datetime(2026, 11, 26, 16, 30, tzinfo=taipei))
+    assert not moved["ok"] and "plain 的模型變過" in moved["detail"] and "info 的指示變過" in moved["detail"]
+    assert "veto 不是用鎖定的" in moved["detail"] and "twin" not in moved["detail"] and "score 的" not in moved["detail"]
+
+
+def test_an_answer_from_another_model_is_refused_and_a_design_only_decides_with_its_own_model(tmp_path):
+    """2026-11-21 (使用者：避免串了不同的模型導致的差異)."""
+    import pytest
+
+    from quant_platform.research.agent import llm
+
+    assert llm.same_model("claude-haiku-5-5", "claude-haiku-5-5") and llm.same_model("claude-haiku-5-5", "claude-haiku-5-5-20261001")
+    assert not llm.same_model("claude-haiku-5-5", "claude-haiku-5-5-pro") and not llm.same_model("claude-haiku-5-5", "gpt-6-luna")
+    reply = lambda model: lambda **_body: {"model": model, "stop_reason": "end_turn", "content": [{"type": "text", "text": '{"ok": 1}'}],  # noqa: E731
+                                           "usage": {"input_tokens": 5, "output_tokens": 2}}
+    ledger = llm.UsageLedger(tmp_path / "usage.jsonl")
+    right = llm.ClaudeClient("k", "claude-haiku-5-5", ledger, 1.0, create=reply("claude-haiku-5-5"))
+    answer, usage = right.json_call("JSON", "x", "agent_lab")
+    assert answer == {"ok": 1} and usage["served_model"] == "claude-haiku-5-5" and right.served == ["claude-haiku-5-5"]
+    wrong = llm.ClaudeClient("k", "claude-haiku-5-5", ledger, 1.0, create=reply("gpt-6-luna"))
+    with pytest.raises(llm.LLMError, match="不是設定的"):
+        wrong.json_call("JSON", "x", "agent_lab")
+    rows = [json.loads(line) for line in (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [row.get("served_model") for row in rows] == ["claude-haiku-5-5", "gpt-6-luna"] and rows[1]["status"] == "failed"
+    assert variants.BY_KEY["plain"].model_name == variants.LAB_MODEL
+    settings = SimpleNamespace(research_agent_model="gpt-6-luna", anthropic_api_key="k", env_file="", llm_monthly_budget_usd=5.0,
+                               research_agent_effort="high", claude_api_base_url="")
+    client = runner.build_client(settings, tmp_path)                      # the shared setting does not move the lab's model
+    assert client.model == variants.LAB_MODEL and client.effort == variants.LAB_EFFORT
 
 
 def _events_desk(tmp_path, day=date(2026, 11, 20)):

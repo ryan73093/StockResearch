@@ -90,6 +90,12 @@ B. 做出決定：{"hold": [{"code": "2330", "reason": "30 字內的理由"}], "
 PROMPT_VERSION = hashlib.sha256(INSTRUCTIONS.encode("utf-8")).hexdigest()[:12]
 
 
+# 2026-11-21 (使用者：避免串了不同的模型導致的差異): the agent's own model and effort, committed here — its 60 sessions
+# are one model; the shared setting (other features) does not move it
+AGENT_MODEL = "claude-haiku-5-5"
+AGENT_EFFORT = "medium"
+
+
 def build_client(settings, research: str | Path):
     """The model client inside the agent's share of the monthly LLM budget; None without a key."""
     from quant_platform.research.agent.llm import UsageLedger, model_client
@@ -97,7 +103,8 @@ def build_client(settings, research: str | Path):
     # 2026-11-20 (D-051): the provider follows the configured model; None without its key
     return model_client(settings, UsageLedger(Path(research) / "agent" / "usage.jsonl"),
                         settings.llm_agent_monthly_budget_usd, operations=(OPERATION,),
-                        total_budget_usd=settings.llm_monthly_budget_usd, label="AI 選股代理人")
+                        total_budget_usd=settings.llm_monthly_budget_usd, label="AI 選股代理人", model=AGENT_MODEL,
+                        effort=AGENT_EFFORT)
 
 
 def folder(research: str | Path) -> Path:
@@ -525,7 +532,7 @@ def decide(fp, base: Path, research: Path, day: date, client=None, now: datetime
     blocked = disposition(base, day)
     record = {"date": day.isoformat(), "version": VERSION, "prompt_version": PROMPT_VERSION,
               # 2026-11-20 (D-051): which model decided — gpt-6-luna until 11/19, Claude Haiku 5.5 from 11/20
-              "model": getattr(client, "model", None),
+              "model": getattr(client, "model", None), "effort": getattr(client, "effort", None),
               "decided_at": (now or datetime.now(TAIPEI)).isoformat(timespec="seconds"),
               "panel": [family for family, _rule in desk.panel()], "agreed": agreed,
               "control": {"hold": control_choice(agreed, held_control, blocked)}}

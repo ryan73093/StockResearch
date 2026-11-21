@@ -19,12 +19,16 @@ from zoneinfo import ZoneInfo
 
 from quant_platform.research.agent_lab import VERSION
 from quant_platform.research.agent_lab.desk import LabDesk, tool_list
-from quant_platform.research.agent_lab.variants import (ANALYST_CARDS, BY_KEY, COHORT, LEAST, MOST, SCORE_CANDIDATES,
+from quant_platform.research.agent_lab.variants import (ANALYST_CARDS, BY_KEY, COHORT, LAB_EFFORT, LAB_MODEL, LEAST, MOST,
+                                                        SCORE_CANDIDATES,
                                                         VETO_MOST, VETO_NEW, VETO_SESSIONS, VOTES, VOTES_NEEDED, Variant)
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 OPERATION = "agent_lab"
-MONTHLY_BUDGET_USD = 1.5        # the cohort's share of the US$5 monthly total (AGENT_LAB_MONTHLY_BUDGET_USD)
+# 2026-11-21: replays are paid from their own share, so a replay cannot use up the money of the day's real decisions
+REPLAY_OPERATION = "agent_lab_replay"
+REPLAY_BUDGET_USD = 1.2         # a month (AGENT_LAB_REPLAY_BUDGET_USD), inside the same US$5 total
+MONTHLY_BUDGET_USD = 2.0        # the cohort's share of the US$5 monthly total (AGENT_LAB_MONTHLY_BUDGET_USD)
 INDUSTRY_SHARE = 0.3
 CONSENSUS_TOP = 30
 # What the agent is for, in the owner's terms (D-002, D-020): no hint about what worked lately.
@@ -101,14 +105,20 @@ def append(research: str | Path, key: str, record: dict, run: str | None = None)
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def build_client(settings, research: str | Path):
-    """The model client inside the lab's share of the monthly total; None without a key."""
+def build_client(settings, research: str | Path, model: str = LAB_MODEL, replay: bool = False):
+    """The model client inside the lab's share of the monthly total; None without a key. The lab's own model and
+    effort (variants.LAB_MODEL, LAB_EFFORT), whatever the shared setting says. ``replay``: the replays' own share."""
     from quant_platform.research.agent.llm import UsageLedger, model_client
 
-    budget = max(0.0, float(os.getenv("AGENT_LAB_MONTHLY_BUDGET_USD", str(MONTHLY_BUDGET_USD))))
-    # 2026-11-20 (D-051): the provider follows the configured model (Claude Haiku 5.5); None without its key
-    return model_client(settings, UsageLedger(Path(research) / "agent" / "usage.jsonl"), budget, operations=(OPERATION,),
-                        total_budget_usd=settings.llm_monthly_budget_usd, label="AI 代理人實驗室")
+    name, default, operation = (("AGENT_LAB_REPLAY_BUDGET_USD", REPLAY_BUDGET_USD, REPLAY_OPERATION) if replay else
+                                ("AGENT_LAB_MONTHLY_BUDGET_USD", MONTHLY_BUDGET_USD, OPERATION))
+    budget = max(0.0, float(os.getenv(name, str(default))))
+    client = model_client(settings, UsageLedger(Path(research) / "agent" / "usage.jsonl"), budget, operations=(operation,),
+                          total_budget_usd=settings.llm_monthly_budget_usd,
+                          label="AI 代理人實驗室的補做" if replay else "AI 代理人實驗室", model=model, effort=LAB_EFFORT)
+    if client is not None:
+        client.lab_operation = operation
+    return client
 
 
 # --- the hard rules -------------------------------------------------------------------------------------------------
@@ -124,7 +134,7 @@ def validate(answer: dict, allowed, seen: set[str], industry) -> tuple[list[str]
 def _call(client, system: str, prompt: str | list[str], context: str) -> tuple[dict, float]:
     from quant_platform.research.agent.llm import call_cost
 
-    answer, usage = client.json_call(system, prompt, OPERATION, context=context)
+    answer, usage = client.json_call(system, prompt, getattr(client, "lab_operation", OPERATION), context=context)
     return answer, float(call_cost(getattr(client, "model", ""), usage) or 0.0)
 
 
@@ -307,10 +317,15 @@ def decide(fp, base: Path, research: Path, variant: Variant, day: date, client=N
     if run:
         record["replayed"] = True
     context = f"{run or 'live'}-{variant.key}-{day.isoformat()}"
+    asked_before = len(getattr(client, "served", None) or [])
     if variant.mode == "twin":
         llm: dict = {"hold": control_choice(agreed, held, blocked)}
+        record["model"] = None
     elif client is None:
         llm = {"hold": held, "fallback": "沒有呼叫模型"}
+    elif hasattr(client, "served") and getattr(client, "model", "") != variant.model_name:
+        # 2026-11-21: a design decides with its own model only — never with whatever client happens to be passed
+        llm = {"hold": held, "fallback": f"沿用前一天：這個設計鎖定 {variant.model_name}，用戶端是 {client.model}"}
     else:
         try:
             if variant.mode == "single":
@@ -399,6 +414,9 @@ def decide(fp, base: Path, research: Path, variant: Variant, day: date, client=N
         llm.update(hold=codes, reasons={code: reasons.get(code, "程式依規則共識的順序補滿") for code in codes})
         if filled or dropped:                    # what the program added or took out, kept apart from the model's
             llm.update(filled=filled, dropped=dropped)
+    if variant.mode != "twin" and client is not None:
+        record["effort"] = getattr(client, "effort", None)
+        record["served_model"] = sorted(set((getattr(client, "served", None) or [])[asked_before:]))
     record["llm"] = llm
     record["seen"] = sorted(desk.seen | set(llm["hold"]))
     record["agreed"] = agreed
@@ -407,15 +425,17 @@ def decide(fp, base: Path, research: Path, variant: Variant, day: date, client=N
 
 
 def decide_day(fp, base: Path, research: Path, day: date, client=None, run: str | None = None, keys: list[str] | None = None,
-               job=None) -> list[dict]:
-    """The cohort's day: the twin first (the veto variant starts from its list), then each variant not decided yet."""
+               job=None, clients: dict | None = None) -> list[dict]:
+    """The cohort's day: the twin first (the veto variant starts from its list), then each variant not decided yet.
+    ``clients``: model name → client, for the designs with a model of their own."""
     made: list[dict] = []
     wanted = [variant for variant in COHORT if not keys or variant.key in keys or variant.key == "twin"]
     twin_hold: list[str] | None = None
     for number, variant in enumerate(wanted):
         if job:
             job.update(done=number, total=len(wanted), current=f"{day.isoformat()}：{variant.label}", force=True)
-        record = decide(fp, base, research, variant, day, client, run, twin_hold=twin_hold)
+        mine = (clients or {}).get(variant.model_name, client) if variant.model else client
+        record = decide(fp, base, research, variant, day, mine, run, twin_hold=twin_hold)
         if variant.key == "twin":
             found = record or next((item for item in records(research, "twin", run) if item["date"] == day.isoformat()), None)
             twin_hold = list((found or {}).get("llm", {}).get("hold") or []) or None
