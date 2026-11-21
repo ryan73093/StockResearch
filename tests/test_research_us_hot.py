@@ -117,3 +117,34 @@ def test_a_trial_with_the_setting_registers_alone_and_in_a_blend(tmp_path, monke
     assert single.spec_hash == guarded[0].rule_hash and len(registry.records()) == 2
     assert daily.us_hot_digest(tmp_path, list(fp.sessions), date(2024, 12, 31)) != daily.us_hot_digest(
         tmp_path, list(fp.sessions), date(2024, 3, 15))                              # the readings to the end are the input
+
+
+def test_a_composite_factor_declares_what_is_under_it(tmp_path):
+    """2026-11-22: the block robots and the consensus lists kept an input naming model files only — the statements
+    downloaded again changed their results under an unchanged hash (6 of 30 sampled results did not reproduce)."""
+    from quant_platform.research import rl_timing
+
+    assert daily.composite_inputs(["momentum_3", "ml_gbm_k"]) == []
+    blocks = daily.composite_inputs(["rl_blocks"])
+    assert set(blocks) == set(rl_timing.BLOCKS) and "eps_growth" in blocks and "ml_gbm_ens" in blocks
+    assert set(daily.composite_inputs(["block_equal"])) == set(blocks)
+    assert set(rl_timing.SLOTS_35["集保籌碼"]) <= set(daily.composite_inputs(["rl_rolling35"]))
+    members = daily.composite_inputs(["t0_consensus"])
+    assert len(members) > 10 and "t0_consensus" not in members
+    plain = daily.input_digests(tmp_path, ["momentum_3"], False)
+    assert "composite" not in plain and "statements" not in plain          # a rule without one keeps its input
+    robot = daily.input_digests(tmp_path, ["rl_blocks"], False)
+    assert robot["composite"] == sorted(blocks) and "statements" in robot   # EPS growth reads the statements
+    assert "statements" in daily.input_digests(tmp_path, ["t0_consensus"], False)
+
+
+def test_the_sweep_asks_for_the_whole_pool_and_a_stale_input_is_run_again(tmp_path):
+    from quant_platform.research.registry import TrialRegistry
+
+    assert daily.BATCHES["rerun_poolsweep"] is daily.pool_sweep_batch
+    assert list(daily.BATCHES)[-2:] == ["rerun_poolsweep", "rerun_guardorigins"]     # last: the sources name a rule by the first batch
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    record = registry.register(kind="candidate", period="recent", spec_hash="s", spec_name="x", input_hash="h1",
+                               data_fingerprint="d", metrics={})
+    assert daily.mark_stale(tmp_path, [record], "the revenue method of 11/19") == 1
+    assert daily.mark_stale(tmp_path, [record], "again") == 0 and daily.stale_inputs(tmp_path) == {"h1"}

@@ -3187,13 +3187,100 @@ def model_feature_inputs(history: str | Path, factor_names: list[str]) -> list[s
     return found
 
 
+# 2026-11-19 (27877a8): monthly revenue growth waits for every month it reads to be filed — the values of about three
+# in a thousand stock-days changed, and so did the scores of the tree models that learned from them; nothing in a run's
+# input said so (the reproduce check of 11/22: #30466, model B's rule registered 11/04, 0.99 of its money). A changed
+# method is not a file: the results registered before it are listed as stale (``revenue_stale``) and run again; making
+# the method an input now would run again the 2,255 results registered since, which already are what the engine gives.
+REVENUE_FIXED = "2026-11-20"         # results registered before this day read the growth as it was computed before
+REVENUE_FACTORS = ("revenue_yoy", "revenue_yoy_3m", "revenue_accel")
+
+
+def revenue_stale(research: str | Path, history: str | Path) -> list:
+    """The pool's results registered before REVENUE_FIXED whose rule reads the monthly revenue growth — itself, through
+    a tree model's features, or under a composite factor."""
+    from quant_platform.research import reproduce_check
+
+    reads: dict[tuple, bool] = {}
+    found = []
+    for record, rule in reproduce_check.pool(Path(research)):
+        if str(record.created_at)[:10] >= REVENUE_FIXED:
+            continue
+        members = [sleeve.rule for sleeve in rule.sleeves] if hasattr(rule, "sleeves") else [rule]
+        names = list(dict.fromkeys(name for member in members for name in rule_inputs(member)))
+        key = tuple(sorted(names))
+        if key not in reads:
+            everything = names + composite_inputs(names)
+            everything += model_feature_inputs(history, everything)
+            reads[key] = any(name in REVENUE_FACTORS for name in everything)
+        if reads[key]:
+            found.append(record)
+    return found
+
+
+def mark_stale(research: str | Path, records: list, reason: str) -> int:
+    """List ``records``' inputs as no longer what the engine gives (windows_since_2020-stale.json, read by
+    ``record_trial``): asked for again they are run, not looked up. Returns how many were added."""
+    path = Path(research) / "windows_since_2020-stale.json"
+    stale = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+    known = {row["input_hash"] for row in stale}
+    added = [{"input_hash": record.input_hash, "trial": record.trial_id, "reason": reason}
+             for record in records if record.input_hash not in known]
+    if added:
+        partial = path.with_suffix(".partial")
+        partial.write_text(json.dumps(stale + added, ensure_ascii=False, indent=1), encoding="utf-8")
+        partial.replace(path)
+    return len(added)
+
+
+def composite_inputs(factor_names: list[str]) -> list[str]:
+    """2026-11-22 (docs/research/results.md「選手池的結果重算不出來」第二次): the factors under the ones made of others
+    — a robot's blocks or slots (rl_timing.factor_names), a consensus list's members' factors — and under those. The
+    11/20 fix added a tree model's features to a rule's inputs but looked only at the rule's own factors: the block
+    robots (EPS growth and model F among their blocks) and the consensus lists (25 members' factors and models) kept an
+    input that named model files only, so the statements downloaded again on 11/15 changed their results under an
+    unchanged hash (#29984, #30926, #32881 of the 11/22 sample)."""
+    from quant_platform.research import rl_timing
+
+    versions = {"rl_all": rl_timing.ALL_VERSION, "all_equal": rl_timing.ALL_VERSION,
+                "rl_blocks": rl_timing.BLOCK_VERSION, "block_equal": rl_timing.BLOCK_VERSION,
+                "rl_worst": rl_timing.WORST_VERSION,
+                "rl_rolling": rl_timing.ROLLING_VERSION, "rolling_equal": rl_timing.ROLLING_VERSION,
+                "rl_rolling32": rl_timing.ROLLING32_VERSION, "rolling32_equal": rl_timing.ROLLING32_VERSION,
+                "rl_rolling33": rl_timing.ROLLING33_VERSION, "rolling33_equal": rl_timing.ROLLING33_VERSION,
+                "rl_rolling34": rl_timing.ROLLING34_VERSION, "rolling34_equal": rl_timing.ROLLING34_VERSION,
+                "rl_rolling35": rl_timing.ROLLING35_VERSION, "rolling35_equal": rl_timing.ROLLING35_VERSION}
+    seen, found, pending = set(factor_names), [], list(factor_names)
+    while pending:
+        name = pending.pop(0)
+        if name in versions:
+            under = rl_timing.factor_names(versions[name])
+        elif name in CONSENSUS_FACTORS:
+            from quant_platform.research.consensus import members
+
+            under = [inner for _trial, _name, rule in members(name) for inner in rule_inputs(rule)]
+        else:
+            continue
+        for inner in under:
+            if inner not in seen:
+                seen.add(inner)
+                found.append(inner)
+                pending.append(inner)
+    return found
+
+
 def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool) -> dict[str, object]:
     """The files besides prices a run reads, as part of its input: statements, the exit models, the
-    trained factor models — and (2026-11-20) the tables the tree models' features read."""
+    trained factor models — and (2026-11-20) the tables the tree models' features read, (2026-11-22) the tables and
+    models under the composite factors (``composite_inputs``)."""
     payload: dict[str, object] = {}
     reversed_of = [REVERSED_OF[name] for name in factor_names if name in REVERSED_OF]
     if reversed_of:                 # 2026-11-21: a reversed factor reads what its factor reads (no other rule changes)
         factor_names = list(dict.fromkeys([*factor_names, *reversed_of]))
+    under = composite_inputs(factor_names)
+    if under:                       # 2026-11-22: what a robot's blocks and a consensus list's members read
+        payload["composite"] = sorted(under)
+        factor_names = list(dict.fromkeys([*factor_names, *under]))
     features = model_feature_inputs(history, factor_names)
     if features:                    # the tables behind a model's features are this run's input too
         factor_names = list(dict.fromkeys([*factor_names, *features]))
@@ -6304,6 +6391,47 @@ def robot41_batch() -> list:
                       factors={"rl_free41": 1.0}, free=True)]
 
 
+def pool_sweep_batch() -> list:
+    """2026-11-22 (docs/research/results.md「選手池的結果重算不出來」第二次): every rule of the pool (reproduce_check.pool:
+    the latest result of each 100%-stock rule on this engine) asked for again. A rule whose inputs are what they were
+    when it was registered is found, not run (``record_trial``); one whose input changed since — a model retrained,
+    a table revised, an input declared only now — is run and its new result becomes the pool's. Run every Sunday
+    before the reproduce check, which then finds only what no input declares."""
+    from quant_platform.research import reproduce_check
+
+    return [rule for _record, rule in reproduce_check.pool(Path("instance") / "research")]
+
+
+def guard_origins_batch() -> list:
+    """2026-11-22: the 55 fixed rules of the bear-guard trials and their half-guard versions, as registered — asked for
+    again before bear14's pairs are read (a version run today against a half guard registered before an input changed
+    compares two different inputs)."""
+    from quant_platform.research.blend import parse_spec
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = Path("instance") / "research"
+    records = TrialRegistry(research / "trials.jsonl").records()
+    by_trial = {record.trial_id: record for record in records}
+    latest = {record.spec_hash: record for record in newest(
+        records, lambda record: record.kind == "candidate" and record.period == "recent").values()}
+    fields = BEAR_GUARDS["taiex_half"][1]
+    output, seen = [], set()
+    for trial in BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE:
+        spec = _json_load(research / "reports" / by_trial[trial].report_file)["spec"]
+        if spec.get("kind") == "blend":
+            half = parse_spec({**spec, "sleeves": [{**sleeve, "rule": {**sleeve["rule"], **fields}}
+                                                   for sleeve in spec["sleeves"]]})
+        else:
+            half = DailyRule.model_validate({**spec, **fields})
+        for rule in (parse_spec(spec), half):
+            record = latest.get(rule.rule_hash)
+            if record is None or rule.rule_hash in seen:
+                continue
+            seen.add(rule.rule_hash)
+            output.append(parse_spec(_json_load(research / "reports" / record.report_file)["spec"]))   # its registered name
+    return output
+
+
 def rerun_all_batch() -> list:
     """2026-10-14 夜: every 100%-stock daily rule and blend whose latest result is in the registry, run again on engine
     1.4.1 (the retrained models) — none left on an older engine. Rules holding 0050 (NO_0050) and the 17-way blend
@@ -6630,3 +6758,5 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "splitblends": split_blends_all_batch, "splitblends_a": lambda: split_blends_all_batch()[0::2],
            "splitblends_b": lambda: split_blends_all_batch()[1::2],
            "vetoblends_a": lambda: veto_blends_batch()[0::2], "vetoblends_b": lambda: veto_blends_batch()[1::2]}
+# 2026-11-22: the asked-again batches last - the pool's sources snapshot names a rule by the first batch holding it
+BATCHES.update({"rerun_poolsweep": pool_sweep_batch, "rerun_guardorigins": guard_origins_batch})
