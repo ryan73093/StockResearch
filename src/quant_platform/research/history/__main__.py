@@ -54,7 +54,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="長歷史研究資料集")
     parser.add_argument("command", choices=("fetch", "build", "actions", "oddlot", "status", "crosscheck", "stocks", "finmind",
                                             "chips", "tpex", "fundamentals", "cash", "alerts", "reductions", "insider", "buyback", "pledge", "tdcc",
-                                            "holders", "paid", "finmind-daily", "paid-daily"))
+                                            "holders", "paid", "finmind-daily", "paid-daily", "us"))
     parser.add_argument("--kind", choices=("govbank", "branches"), default="govbank", help="finmind-daily：八大行庫或分點")
     parser.add_argument("--part", help="finmind-daily --kind branches：第幾份／共幾份（例如 0/2），兩個下載分工")
     parser.add_argument("--datasets", help="finmind：逗號分隔的資料集，預設全部；statements＝三種財報；paid＝付費方案的資料集")
@@ -72,6 +72,22 @@ def main() -> int:
     base = Path(args.base)
     keys = _keys(args.series)
 
+    if args.command == "us":          # 2026-11-21: US stocks, market series and every vintage of the revised statistics
+        from quant_platform.research.history import us
+        counts = us.fetch(base)
+        report = us.status(base)
+        print(f"美股個股與指數：這次抓到 {len(counts['prices'])}／{report['prices']['wanted']} 檔，存著 {report['prices']['kept']} 檔；"
+              f"不修正的市場序列：這次抓到 {len(counts['daily'])}／{report['daily']['wanted']} 個；"
+              f"會修正的統計（歷次公布版本）：存著 {report['revised']['kept']}／{report['revised']['wanted']} 個", flush=True)
+        for series, entry in report["revised"]["series"].items():
+            print(f"  {series} {us.REVISED[series][0]}：{entry['vintages']} 個版本，最新 {entry['last_vintage']} 公布、"
+                  f"資料到 {entry['last_observation']}")
+        missing = ([key for key in us.US_STOCKS if key not in report["prices"]["last"]]
+                   + [key for key in us.DAILY if key not in report["daily"]["last_published"]]
+                   + [key for key in us.REVISED if key not in report["revised"]["series"]])
+        if missing:
+            print("沒有抓到：" + "、".join(missing))
+        return 0 if not missing else 1
     if args.command == "status":
         manifest_path = base / "manifest.json"
         if not manifest_path.is_file():
