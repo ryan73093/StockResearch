@@ -372,6 +372,7 @@ def test_background_scheduler_registers_market_specific_jobs(tmp_path):
             "llm_agent",                      # 2026-11-19: the stock-picking agent, 15:40
             "finmind_paid",
             "paid_daily",
+            "us_daily",                       # 2026-11-22: the US stocks, market series and statistics, 07:10
             "close_catch_up",
             "knowledge_index",
             "live_flow",

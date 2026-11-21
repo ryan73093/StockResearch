@@ -135,3 +135,20 @@ def test_a_us_statistic_is_useful_only_with_the_same_end_in_both_periods():
     assert found[f"{market_signals.MACRO}同一頭"]["same_end"] and found[f"{market_signals.MACRO}同一頭"]["useful"]
     assert not found[f"{market_signals.MACRO}換邊"]["same_end"] and not found[f"{market_signals.MACRO}換邊"]["useful"]
     assert found[f"{market_signals.MACRO}同一頭"]["halves_below"] >= 3
+
+
+def test_the_us_data_is_brought_up_to_date_every_morning_unless_one_runs(tmp_path):
+    """2026-11-22: only the index one factor reads was refreshed before the orders; the whole US side every day."""
+    from quant_platform.config.settings import Settings
+    from quant_platform.container import build_container
+    from quant_platform.scheduler.runner import start_us_daily
+
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'us.db'}"))
+    started = []
+    assert start_us_daily(container, launch=started.append) == "usdaily"
+    record = tmp_path / "research" / "pipelines" / "usdaily.json"
+    record.parent.mkdir(parents=True)
+    record.write_text(json.dumps({"status": "running"}), encoding="utf-8")
+    assert start_us_daily(container, launch=started.append) is None
+    record.write_text(json.dumps({"status": "done"}), encoding="utf-8")
+    assert start_us_daily(container, launch=started.append) == "usdaily" and started == ["usdaily", "usdaily"]

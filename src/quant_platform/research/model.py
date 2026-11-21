@@ -104,6 +104,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # features and target plus the factors measured in November (NOVEMBER_FEATURES) — most tell the bad from the
           # good (high rank correlation) while their top fifth earns no more, which a model of every stock's rank can use
           "ml_gbm_t": {"version": "gbm-2.15.0", "label": "ensemble", "features": "extended_t"},
+          # 2026-11-22 (docs/research/results.md「模型 V：模型 K 加上美國那一邊的特徵」, written before the run): model K's
+          # features and target plus the US side (US_FEATURES_V): how a stock follows the US semiconductor index and its
+          # US peers, its rate and dollar sensitivities, and six US market states
+          "ml_gbm_v": {"version": "gbm-2.17.0", "label": "ensemble", "features": "extended_v"},
           # 2026-11-21 (docs/research/results.md「模型 U：扣掉大盤下跌日的連動」, written before the run): model Q with the
           # beta measured on the days TAIEX fell (Ang, Chen & Xing 2006) — model Q's registered next version (a)
           "ml_gbm_u": {"version": "gbm-2.16.0", "label": "ensemble", "features": "extended_k", "target": "down_residual"},
@@ -268,6 +272,8 @@ def version_features(version: str | None) -> tuple[str, ...]:
     if kind in ("extended_k_nolong", "extended_k_noshort", "extended_k_nobranch"):   # 2026-11-19: model K's list less some paid ones
         left = {"extended_k_nolong": PAID_LONG, "extended_k_noshort": PAID_SHORT}.get(kind, ("low_daytrade_5",))
         return tuple(name for name in version_features("gbm-2.7.0") if name not in left)
+    if kind == "extended_v":           # 2026-11-22: K's list and the US side
+        return version_features("gbm-2.7.0") + US_FEATURES_V
     if kind == "extended_t":           # 2026-11-21: K's list and the factors measured in November
         return version_features("gbm-2.7.0") + NOVEMBER_FEATURES
     if kind == "extended_k":           # 2026-10-26: every factor but the revenue, the industries and the branches
@@ -326,7 +332,13 @@ def market_state(fp, name: str) -> np.ndarray:
     with np.errstate(all="ignore"):
         moved = prices / np.roll(prices, 20, axis=1) - 1
     moved[:, :20] = np.nan
-    if name == "market:trend":
+    if name.startswith("market:us_"):   # 2026-11-22 (gbm-2.17.0): a US reading, dated before the session
+        from quant_platform.research.us_factors import market_reading
+
+        chips = getattr(fp, "chips", None)
+        raw = (pd.Series(market_reading(Path(chips._folder).parent, name, list(fp.sessions))) if chips is not None
+               else pd.Series(np.nan, index=range(len(fp.sessions))))
+    elif name == "market:trend":
         raw = market / market.rolling(200, min_periods=200).mean() - 1
     elif name == "market:volatility":
         raw = market.pct_change(fill_method=None).rolling(20).std()
@@ -687,7 +699,12 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
 
 DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0", "gbm-2.13.0": "gbm-2.7.0", "gbm-2.13.1": "gbm-2.7.0", "gbm-2.13.2": "gbm-2.7.0",
               "gbm-2.13.3": "gbm-2.7.0", "gbm-2.14.0": "gbm-2.7.0", "gbm-2.15.0": "gbm-2.7.0",
-              "gbm-2.16.0": "gbm-2.7.0"}
+              "gbm-2.16.0": "gbm-2.7.0", "gbm-2.17.0": "gbm-2.7.0"}
+# 2026-11-22 (model V): the US side — one rule factor, five per-stock readings (us_factors.US_FEATURES) and six market
+# states (us_factors.US_MARKET, each against its own last MARKET_WINDOW sessions like the other market readings)
+US_FEATURES_V = ("us_sox_beta", "us_peer_mom_20", "us_peer_mom_60", "us_peer_gap_5", "us_rate_move_60", "us_dollar_move_60",
+                 "market:us_sox_20", "market:us_vix", "market:us_yield2_60", "market:us_curve", "market:us_dollar_60",
+                 "market:us_hot")
 # 2026-11-21 (model T): the factors measured in November, outside FACTOR_LABELS — beta, the literature's behavior
 # factors (the skewness one way: a tree reads both ends), the balance sheet and the cash flow statement
 NOVEMBER_FEATURES = ("low_beta_250", "low_down_beta_250", "cgo_250", "beta_resid_mom_12", "illiquidity_60", "pair_gap_20",

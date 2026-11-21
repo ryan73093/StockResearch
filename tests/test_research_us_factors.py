@@ -86,3 +86,76 @@ def test_the_index_is_refreshed_before_the_orders_only_when_it_lacks_last_night(
         raise OSError("no answer")
     report = us_factors.refresh(tmp_path, date(2026, 11, 25), get=broken)
     assert report["stale"] and report["last"] == "2026-11-20"             # the file is kept and the report says so
+
+
+def test_the_rolling_correlation_is_the_one_of_the_same_window():
+    generator = np.random.default_rng(11)
+    x = generator.normal(0, 0.02, 400)
+    y = np.column_stack([0.8 * x + generator.normal(0, 0.01, 400), generator.normal(0, 0.02, 400)])
+    slope, related = us_factors.rolling_slope(x, y, window=250, least=200, correlation=True)
+    assert abs(related[399, 0] - np.corrcoef(x[150:400], y[150:400, 0])[0, 1]) < 1e-9
+    assert abs(slope[399, 0] - np.polyfit(x[150:400], y[150:400, 0], 1)[0]) < 1e-9
+    assert np.isnan(related[198, 0]) and abs(related[399, 1]) < 0.2
+
+
+def test_the_changes_read_only_us_sessions_dated_before_the_taiwan_session():
+    days = [date(2026, 11, 16), date(2026, 11, 17), date(2026, 11, 18), date(2026, 11, 19)]
+    values = np.array([100.0, 110.0, 121.0, 133.1])
+    sessions = [date(2026, 11, 17), date(2026, 11, 18), date(2026, 11, 19), date(2026, 11, 20)]
+    last = us_factors._known(days, sessions)
+    assert last.tolist() == [0, 1, 2, 3]
+    assert np.allclose(us_factors._between(values, last, False)[1:], [0.10, 0.10, 0.10])
+    assert np.allclose(us_factors._back(values, last, 2, False)[2:], [0.21, 0.21]) and np.isnan(us_factors._back(values, last, 2, False)[1])
+    assert np.allclose(us_factors._between(values, last, True)[1:], [10.0, 11.0, 12.1])
+
+
+def test_model_v_is_model_k_with_the_us_side(tmp_path, monkeypatch):
+    """2026-11-22 (docs/research/results.md「模型 V：模型 K 加上美國那一邊的特徵」, written before the run): gbm-2.17.0 is
+    model K's list and target plus 12 US features, judged by model Q's gate against model K; its three rules only past
+    the gate, and a failed gate keeps it out of the searches."""
+    import json
+
+    from quant_platform.research import model
+    from quant_platform.research.scan import SHORT, failed_models
+
+    features = model.version_features("gbm-2.17.0")
+    assert features == model.version_features("gbm-2.7.0") + model.US_FEATURES_V
+    assert len(model.US_FEATURES_V) == 12 and len(set(features)) == len(features)
+    per_stock = [name for name in model.US_FEATURES_V if not name.startswith("market:")]
+    assert set(per_stock) == set(us_factors.US_FACTORS) | set(us_factors.US_FEATURES)
+    assert tuple(name for name in model.US_FEATURES_V if name.startswith("market:")) == us_factors.US_MARKET
+    assert not set(us_factors.US_FEATURES) & set(daily.RULE_FACTORS)              # a model's inputs, not rule factors
+    assert model.MODELS["ml_gbm_v"]["version"] == "gbm-2.17.0" and "target" not in model.MODELS["ml_gbm_v"]
+    assert model.DOWN_GATES["gbm-2.17.0"] == "gbm-2.7.0"
+    assert "ml_gbm_v" in daily.MODEL_FACTORS and SHORT["ml_gbm_v"] == "模型V"
+    monkeypatch.chdir(tmp_path)
+    assert daily.BATCHES["modelv"]() == []                           # not trained: no rules
+    folder = tmp_path / "instance" / "research" / "models" / "gbm-2.17.0"
+    folder.mkdir(parents=True)
+    (folder / "meta.json").write_text(json.dumps({"down_gate": {"passed": False, "top20_gain": 0.012,
+                                                               "against_top20_gain": 0.013}}), encoding="utf-8")
+    assert daily.BATCHES["modelv"]() == []
+    assert "ml_gbm_v" in failed_models(tmp_path / "instance" / "research" / "models")
+    (folder / "meta.json").write_text(json.dumps({"down_gate": {"passed": True}}), encoding="utf-8")
+    rules = daily.BATCHES["modelv"]()
+    assert len(rules) == 3 and all(rule.factors == {"ml_gbm_v": 1.0} for rule in rules)
+
+
+def test_a_us_market_reading_is_dated_before_the_session(tmp_path):
+    import gzip
+    import json
+    from datetime import datetime
+
+    from quant_platform.research.history import us
+
+    days = [date(2026, 9, 1) + timedelta(days=number) for number in range(60)]
+    days = [day for day in days if day.weekday() < 5]
+    stamps = [int(datetime(day.year, day.month, day.day, 16, 0, tzinfo=us.NEW_YORK).timestamp()) for day in days]
+    payload = {"chart": {"result": [{"timestamp": stamps, "indicators": {
+        "quote": [{"close": [20.0 + number for number in range(len(days))], "volume": [1.0] * len(days)}]}}]}}
+    folder = tmp_path / "raw" / "yahoo_us"
+    folder.mkdir(parents=True)
+    (folder / (us._file("^VIX") + ".json.gz")).write_bytes(gzip.compress(json.dumps(payload).encode("utf-8")))
+    found = us_factors.market_reading(tmp_path, "market:us_vix", [days[0], days[1], days[10]])
+    assert np.isnan(found[0]) and found[1] == 20.0 and found[2] == 29.0   # the session reads the US day before it
+    assert np.isnan(us_factors.market_reading(tmp_path, "market:us_curve", [days[5]])).all()   # no file: nothing

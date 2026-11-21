@@ -796,6 +796,33 @@ def start_paid_daily(container: "Container", now: datetime | None = None, launch
     return "paiddaily"
 
 
+def start_us_daily(container: "Container", now: datetime | None = None, launch=None) -> str | None:
+    """2026-11-22 (使用者 11/21：美股個股、就業、通膨、利率數據都沒有；補了以後只有費半在排單前自動補): every day at 07:10
+    the US stocks and indices, the market series and the statistics' new vintages (scripts/start-research.ps1 -Name
+    usdaily; research/history/us.py, incremental, no key) - after the US close at 05:00 and before the 13:50 orders;
+    nothing while one runs."""
+    import json
+    import subprocess
+    from pathlib import Path as FilePath
+
+    from quant_platform.container import _instance_dir
+
+    research = _instance_dir(container.settings.database_url) / "research"
+    try:
+        if json.loads((research / "pipelines" / "usdaily.json").read_text(encoding="utf-8")).get("status") == "running":
+            return None
+    except (OSError, ValueError):
+        pass
+    script = FilePath(_instance_dir(container.settings.database_url)).parent / "scripts" / "start-research.ps1"
+    if launch is not None:
+        launch("usdaily")
+    elif script.is_file():
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Name",
+                        "usdaily"], check=False, timeout=120)
+    logger.info("US data's daily download started")
+    return "usdaily"
+
+
 def start_trade_audit(container: "Container", now: datetime | None = None, launch=None) -> str | None:
     """2026-10-21 (使用者 2026-10-14：確實檢查每個時期都照當時的台股規則；稽核：10/17 之後沒再稽核、排程裡沒有): every
     Sunday 06:00, every rule the forward accounts and the month's list track, order by order (scripts/start-research.ps1
@@ -1525,6 +1552,17 @@ def _add_maintenance_jobs(scheduler: "BaseScheduler", container: "Container") ->
         coalesce=True,
         max_instances=1,
         misfire_grace_time=3 * 3600,
+    )
+    scheduler.add_job(
+        start_us_daily,
+        args=[container],
+        trigger=CronTrigger(hour=7, minute=10, timezone=timezone),
+        id="us_daily",
+        name="美國資料每天補到最新（07:10：美股個股與指數 65 檔、殖利率與利差等市場序列、就業／通膨／景氣統計的新公布版本）",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=5 * 3600,
     )
     scheduler.add_job(
         start_knowledge_index,
