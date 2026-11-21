@@ -23,6 +23,7 @@ VOTES, VOTES_NEEDED = 3, 2
 # effort, one prompt; another model is another design (``Variant.model``) running beside it from its own first day.
 LAB_MODEL = "claude-haiku-5-5"
 LAB_EFFORT = "medium"
+TRADE_CANDIDATES = 16            # the trader: the agreed stocks not held that it may buy
 SCORE_CANDIDATES = 40            # the scorer: the agreed stocks it scores (with the holdings)
 ANALYST_CARDS = 16               # the stocks the analysts read: the holdings and the most agreed
 
@@ -69,6 +70,11 @@ COHORT: tuple[Variant, ...] = (
             ("market", "mood", "headlines", "card", "events"),
             "讓模型替每一檔打分、程式照分數持有（文獻上站得住的用法），是不是比讓它自己挑（中性指示）好", "plain", steps=1, calls=1,
             since="2026-11-23"),
+    # 2026-11-21 (使用者：依據現有持股去做對應的交易，由 AI agent 決定怎麼買賣; docs/research/results.md「持股經理」): it
+    # starts from what the account holds and answers with orders — what it does not mention stays
+    Variant("trade", "持股經理：從帳戶現有的持股出發，模型只決定今天賣哪幾檔、買哪幾檔，其餘續抱", "trade",
+            ("market", "mood", "headlines", "portfolio", "card", "events"),
+            "從現有持股出發只下買賣單（不提的續抱），是不是比每天重新排一份名單好", "twin", steps=1, calls=1, since="2026-11-23"),
 )
 BY_KEY = {variant.key: variant for variant in COHORT}
 FACTORS = {variant.factor: f"AI 代理人實驗室・{variant.label}" for variant in COHORT}

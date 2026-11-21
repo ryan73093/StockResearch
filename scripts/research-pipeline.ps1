@@ -2470,7 +2470,7 @@ switch ($Name) {
         # 2026-11-21 (使用者：直接去跑回測跟前向觀察): the same days again with the lab's locked model (Claude Haiku 5.5) and
         # the rules of 11/20 — the picker, the veto and the scorer beside the twin; paid from the replays' own share.
         # (The run of 11/20 with gpt-6-luna, neutral-20261120, stays as it is.)
-        Invoke-Step "1-replay" @("-m", "quant_platform.research.agent_lab", "decide", "--run", "haiku-20261121", "--from", "2026-09-01", "--day", "2026-11-20", "--only", "plain,veto,score")
+        Invoke-Step "1-replay" @("-m", "quant_platform.research.agent_lab", "decide", "--run", "haiku-20261121", "--from", "2026-09-01", "--day", "2026-11-20", "--only", "plain,veto,score,trade")
         Invoke-Step "2-board" @("-m", "quant_platform.research.agent_lab", "board", "--run", "haiku-20261121")
     }
     "llmagent-replay" {

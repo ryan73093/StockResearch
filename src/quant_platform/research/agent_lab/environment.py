@@ -116,6 +116,8 @@ def top_of_consensus(count: int = 10):
     import re
 
     def script(instructions: str, prompt: str, _context: str) -> dict:
+        if '"sell"' in instructions:                # the trader: no order (everything stays)
+            return {"sell": [], "buy": [], "view": "腳本", "lesson": ""}
         if '"veto"' in instructions:
             return {"veto": [], "view": "腳本", "lesson": ""}
         if '"scores"' in instructions:             # the scorer: a 3 for every card shown (the agreed order decides)

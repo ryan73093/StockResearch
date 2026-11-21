@@ -24,13 +24,15 @@ def main() -> int:
     from quant_platform.research.market import DEFAULT_BASE
 
     parser = argparse.ArgumentParser(description="AI 代理人實驗室")
-    parser.add_argument("command", choices=("decide", "board", "leakcheck", "probe"))
+    parser.add_argument("command", choices=("decide", "board", "leakcheck", "probe", "advise"))
     parser.add_argument("--day", help="哪一天收盤後（YYYY-MM-DD，預設今天）")
     parser.add_argument("--from", dest="first", help="decide --run：從這一天起補做到 --day")
     parser.add_argument("--run", help="補做的名稱（存在 agent_lab/replay/<名稱>/，不是證據）")
     parser.add_argument("--only", help="只做這些設計（逗號分隔的代號）")
     parser.add_argument("--scripted", action="store_true", help="用腳本代理人，不呼叫模型")
     parser.add_argument("--months", type=int, default=36, help="probe：問最近幾個月")
+    parser.add_argument("--holdings", default="", help="advise：現在的持股，代號:股數[:每股成本]，逗號分隔（例 2330:1000:950,2317:2000）")
+    parser.add_argument("--cash", type=float, default=0.0, help="advise：現金（元）")
     parser.add_argument("--base", default=str(DEFAULT_BASE))
     args = parser.parse_args()
 
@@ -86,6 +88,33 @@ def main() -> int:
                 except Exception as error:  # noqa: BLE001 - the decisions are stored; the probe runs again tomorrow
                     job.payload["summary"] += f"；記憶檢測沒做完（{str(error)[:80]}）"
         print(job.payload["summary"], flush=True)
+        return 0
+    if args.command == "advise":
+        # 2026-11-21 (使用者：我會跟 AI 講我現在持股狀況，它要協助我買賣): advice only — nothing is ordered (D-001)
+        holdings: dict[str, dict] = {}
+        for part in [part.strip() for part in args.holdings.split(",") if part.strip()]:
+            fields = part.split(":")
+            holdings[fields[0].strip()] = {"shares": int(float(fields[1])) if len(fields) > 1 else 0,
+                                           "cost": float(fields[2]) if len(fields) > 2 else None}
+        _data, fp = daily.load(base)
+        day = date.fromisoformat(args.day) if args.day else fp.sessions[-1]
+        model = runner.build_client(Settings.from_env(), RESEARCH)
+        if model is None:
+            print("沒有 AI API 平台的專案金鑰，無法給建議", flush=True)
+            return 1
+        result = runner.advise(fp, base, RESEARCH, day, holdings, args.cash, model)
+        print(f"{result['date']} 收盤後的建議（{result['model']}；只是建議，平台不下單）", flush=True)
+        print(f"市場看法：{result['view']}", flush=True)
+        for order in result["orders"]:
+            price = f"{order['close']:,.2f}" if order["close"] else "—"
+            print(f"  {order['side']} {order['name']} {order['shares']:,} 股（收盤 {price} 元）：{order['reason']}", flush=True)
+        if not result["orders"]:
+            print("  今天不用買賣。", flush=True)
+        print("續抱：" + ("、".join(result["keep"]) or "（沒有）"), flush=True)
+        if result["unknown"]:
+            print("平台沒有資料、沒辦法判斷的：" + "、".join(result["unknown"]), flush=True)
+        print(f"做完後的現金約 {result['cash_after']:,} 元（每檔買進最多放帳戶的二十分之一）", flush=True)
+        print(f"模型花費 US${result['cost_usd']:.4f}", flush=True)
         return 0
     if args.command == "board":
         result = evaluate.board(base, RESEARCH, args.run)

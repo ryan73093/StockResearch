@@ -477,3 +477,20 @@ def test_a_new_model_is_probed_once_and_a_probe_cut_short_is_done_again(tmp_path
     rows = [{"month": f"{2024 + index // 12}-{index % 12 + 1:02d}", "right": 22, "wrong": 18} for index in range(30)]
     path.write_text(json.dumps({"months": rows}), encoding="utf-8")
     assert probe.done(tmp_path, "claude-haiku-5-5") and not probe.done(tmp_path, "gpt-6-luna")
+
+
+def test_the_trader_starts_from_the_holdings_and_only_its_valid_orders_count():
+    """2026-11-21 (使用者：依據現有持股去做對應的交易，由 AI agent 決定怎麼買賣)."""
+    held, candidates = ["2330", "2317", "2412"], ["1101", "1216", "6108"]
+    answer = {"sell": [{"code": "2317", "reason": "跌破年線"}, {"code": "9999", "reason": "不是持股"}, "2412"],
+              "buy": [{"code": "1101", "reason": "低連動"}, {"code": "2330", "reason": "已持有"}, {"code": "6108", "reason": "處置中"},
+                      {"code": "5555", "reason": "不在候選"}]}
+    sells, buys = runner.read_trades(answer, held, candidates, blocked={"6108"})
+    assert sells == {"2317": "跌破年線", "2412": ""} and buys == {"1101": "低連動"}
+    assert runner.read_trades({"sell": "x"}, held, candidates) == ({}, {})
+    text = runner.instructions(variants.BY_KEY["trade"])
+    assert '"sell"' in text and "沒提到的持股就續抱" in text and "1%" in text
+    assert "沒有具體的理由就不要換" in runner.ADVISE_INSTRUCTIONS and "平台不會下單" in runner.ADVISE_INSTRUCTIONS
+    client = environment.ScriptedClient(environment.top_of_consensus())
+    assert client.json_call(text, "x", "agent_lab")[0] == {"sell": [], "buy": [], "view": "腳本", "lesson": ""}
+    assert variants.BY_KEY["trade"].against == "twin" and variants.BY_KEY["trade"].since == "2026-11-23"
