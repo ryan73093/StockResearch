@@ -160,3 +160,36 @@ def test_inventory_and_receivables_piled_up(tmp_path):
     assert factors.loc[3, "low_inventory_build"] == pytest.approx(-20 / 1000)       # 20 more inventory in 2024
     assert factors.loc[5, "low_inventory_build"] == pytest.approx((0 + 10 - 5 + 0) / 1000)
     assert factors.loc[5, "low_receivable_build"] == pytest.approx(-(0 + 10 - 5 + 0) / 1000)
+
+def test_the_veto_reaches_the_rest_of_the_deep_learning_rules_on_both_lists(tmp_path):
+    """2026-11-22 (第三步, written before the run): single deep-learning rules passing both lists, with cashveto2's
+    criteria, less the 32 already done; nothing without the lists."""
+    import json
+
+    from quant_platform.research import daily
+    from quant_platform.research.registry import TrialRegistry
+
+    assert daily.BATCHES["cashveto3"] is daily.cash_veto_rest_batch
+    assert daily.cash_veto_rest_trials(tmp_path) == []
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "rolling").mkdir()
+    specs = {"plain": {"factors": {"ml_deep2_top": 1.0}},
+             "vetoed": {"factors": {"ml_deep2_top": 1.0}, "exclude": "h2"},
+             "beta": {"factors": {"ml_deep2_top": 1.0, "low_beta_250": 1.0}},
+             "filtered": {"factors": {"ml_deep2_top": 1.0}, "market_filter": "taiex_200"},
+             "other": {"factors": {"momentum_3": 1.0}},
+             "september": {"factors": {"ml_deep2_top": 1.0}, "top": 10}}
+    rows, trials = {}, {}
+    for name, spec in specs.items():
+        rule = daily.DailyRule.model_validate({"name": name, **spec})
+        record = registry.register(kind="candidate", period="recent", spec_hash=rule.rule_hash, spec_name=name,
+                                   input_hash=rule.rule_hash, data_fingerprint="d", metrics={},
+                                   report_file=f"{name}.json")
+        (tmp_path / "reports" / f"{name}.json").write_text(json.dumps({"spec": rule.canonical()}), encoding="utf-8")
+        rows[name] = {"rule_hash": rule.rule_hash, "passed": True, "spec": rule.canonical()}
+        trials[name] = record.trial_id
+    (tmp_path / "rolling" / "2026-09-30.json").write_text(json.dumps({"graded": list(rows.values())}), encoding="utf-8")
+    (tmp_path / "rolling" / "2026-08-31.json").write_text(
+        json.dumps({"graded": [row for name, row in rows.items() if name != "september"]}), encoding="utf-8")
+    assert daily.cash_veto_rest_trials(tmp_path) == [trials["plain"]]

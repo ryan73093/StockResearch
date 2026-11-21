@@ -4408,6 +4408,50 @@ def cash_veto_deep_batch() -> list[DailyRule]:
     return _veto_rules([(trial, "c1") for trial in CASH_VETO_DEEP])
 
 
+CASH_VETO_LISTS = ("2026-08-31", "2026-09-30")       # the two months' lists cashveto2's rules were picked from
+
+
+def cash_veto_rest_trials(research: str | Path | None = None) -> list[int]:
+    """2026-11-22 (docs/research/results.md「不買現金獲利最差的五分之一」第三步, written before the run): the deep-learning
+    single rules passing both of CASH_VETO_LISTS that the veto was never put on — cashveto2's criteria (no exclusion
+    of their own, no beta factor, no market filter, not free), less BETA_GUARD's 8 and CASH_VETO_DEEP's 24. The two
+    lists are closed months: the same rules whenever it is asked."""
+    from quant_platform.research.categories import classify
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path(research) if research else Path("instance") / "research"
+    lists = []
+    for name in CASH_VETO_LISTS:
+        path = research / "rolling" / f"{name}.json"
+        if not path.is_file():
+            return []
+        lists.append({row["rule_hash"]: row for row in _json_load(path)["graded"]})
+    records = {}
+    for record in TrialRegistry(research / "trials.jsonl").records():
+        if record.kind == "candidate" and record.period == "recent":
+            records[record.spec_hash] = record
+    done = set(BETA_GUARD["深度學習"]) | set(CASH_VETO_DEEP)
+    found = []
+    for key, row in lists[1].items():
+        spec = row.get("spec") or {}
+        if not row.get("passed") or not lists[0].get(key, {}).get("passed") or spec.get("kind") == "blend" or key not in records:
+            continue
+        if spec.get("exclude", "none") != "none" or spec.get("market_filter", "none") != "none" or spec.get("free"):
+            continue
+        if any(name in ("low_beta_250", "low_down_beta_250") for name in spec.get("factors") or {}):
+            continue
+        record = records[key]
+        if record.trial_id in done or classify(spec)["family"] != "深度學習":
+            continue
+        if (research / "reports" / record.report_file).is_file():
+            found.append(record.trial_id)
+    return sorted(found)
+
+
+def cash_veto_rest_batch() -> list[DailyRule]:
+    return _veto_rules([(trial, "c1") for trial in cash_veto_rest_trials()])
+
+
 def beta_guard_batch() -> list[DailyRule]:
     """Each BETA_GUARD rule with no new buy in the market's highest-beta fifth (exclude "b1"), and each with its picks
     weighted by 1 / beta (weighting "inverse_beta")."""
@@ -6572,7 +6616,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "costswitch": cost_switch_batch, "techmodel": tech_model_batch,
            "minhold": min_hold_batch, "rerun13": rerun_batch, "rerun131": rerun131_batch,
            "rerun140": rerun140_batch, "rerun_models": rerun_models_batch, "factormom": factor_momentum_batch,
-           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "modelt": model_t_batch, "modelv": model_v_batch, "modelu": model_u_batch,"betaguard": beta_guard_batch, "rankweight": rank_weight_batch, "cashveto": cash_veto_batch, "cashveto2": cash_veto_deep_batch,"poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
+           "robot2": robot2_batch, "robot21": robot21_batch, "rerun_all": rerun_all_batch, "rerun_all_a": lambda: rerun_half(0), "rerun_all_b": lambda: rerun_half(1), "leakfix": leakfix_batch, "branchfix": branchfix_batch, "betablend": beta_blend_batch, "models": model_s_batch, "modelt": model_t_batch, "cashveto3": cash_veto_rest_batch, "modelv": model_v_batch, "modelu": model_u_batch,"betaguard": beta_guard_batch, "rankweight": rank_weight_batch, "cashveto": cash_veto_batch, "cashveto2": cash_veto_deep_batch,"poolrefresh_a": pool_refresh_a, "poolrefresh_b": pool_refresh_b, "poolrefresh_c": pool_refresh_c, "poolrefresh_d": pool_refresh_d,
            # split by the twin's own hash, not its place: the other half registering first must not move a rule across
            "surpriseswap": surprise_swaps,
            "t2half_a": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0], "t2half_b": lambda: [rule for rule in t2_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 1], "halftwins_a": lambda: [rule for rule in all_half_twins() if int(rule.rule_hash[-1], 16) % 2 == 0],
