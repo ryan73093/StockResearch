@@ -2145,7 +2145,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         snapshot, verdicts = _stock_context(research_dir)
         holders = []
-        for row in StockForwardTracker(research_dir).summary():
+        # 2026-11-21 (使用者：整個 UI 非常慢): the first stock page after each restart took 16 s — it worked out the forward
+        # accounts' whole summary itself (213,000 record lines); the view the warm-up keeps is read like every other page does
+        for row in ready("forward", research_dir, lambda: StockForwardTracker(research_dir).summary()):
             if row.get("stopped"):                  # 2026-10-15: a stopped account's last holdings are not holdings
                 continue
             for item in row["holdings"]:

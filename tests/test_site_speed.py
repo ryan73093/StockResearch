@@ -110,6 +110,26 @@ def test_another_basis_of_the_pool_is_the_seed_view_with_the_old_designs_rows(tm
     assert seed["basis"] == "seed" and seed["total"] == 1                                       # the seed view is not changed
 
 
+def test_a_stock_page_reads_the_kept_forward_view_not_the_whole_summary(tmp_path, monkeypatch):
+    """The first stock page after each restart took 16 s: it worked out the forward accounts' whole summary (213,000
+    record lines) in the page, while every other page reads the view the warm-up keeps."""
+    from quant_platform.config import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard import app as app_module
+    from quant_platform.dashboard import warm
+    from quant_platform.research import stock_forward
+
+    def forbidden(self):
+        raise AssertionError("the whole summary was worked out in the page")
+
+    monkeypatch.setattr(stock_forward.StockForwardTracker, "summary", forbidden)
+    warm.write(tmp_path / "research", "forward", [])                      # what the warm-up keeps
+    client = app_module.create_app(build_container(
+        Settings(database_url=f"sqlite:///{tmp_path / 'stock.db'}", scheduler_in_web=False))).test_client()
+    response = client.get("/stock/2330")
+    assert response.status_code in (200, 404)                             # no data in this folder; not a 500 from the summary
+
+
 def test_a_slow_click_is_written_to_the_web_log(tmp_path, caplog, monkeypatch):
     """A click the owner found slow left no trace and could not be found afterwards (11/20's 12.5 s overview was only
     seen by the 16:00 check): over ``SLOW_REQUEST_SECONDS`` it is logged with its path."""
