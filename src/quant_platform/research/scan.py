@@ -102,6 +102,7 @@ SHORT = {
     "low_receivable_build": "應收沒堆高",
     "high_vol_60": "波動大", "momentum_1m": "近月強勢", "momentum_1w": "近週強勢", "industry_leader_5": "比同業強",
     "high_max_20": "飆股", "high_ivol_60": "特質波動大", "high_day_trade_20": "當沖多",
+    "us_sox_beta": "費半連動高",
 }
 
 
@@ -119,7 +120,7 @@ def signals(models_root: Path | None = None) -> list[str]:
 # said 強 and that passed the novelty gate — the searches take them up
 # 2026-11-21 (「投機的特徵反過來用」第二步): ahead of the industry over the week, the one of its group, 0.67 the same
 # way at most (bollinger_b)
-JUDGED_IN = ("low_inventory_build", "industry_leader_5")
+JUDGED_IN = ("low_inventory_build", "industry_leader_5", "us_sox_beta")
 
 
 def failed_models(models_root: Path) -> set[str]:

@@ -455,6 +455,9 @@ def pair_gaps(log_returns: np.ndarray, groups: dict[str, list[int]], month_start
 
 RULE_FACTORS.update(BEHAVIOR_FACTORS)          # 2026-11-20: rule factors too
 RULE_FACTORS.update(REVERSED_FACTORS)          # 2026-11-21
+from quant_platform.research.us_factors import US_FACTORS  # noqa: E402 - 2026-11-21: read from the US side
+
+RULE_FACTORS.update(US_FACTORS)
 
 
 def rolling_beta(returns: pd.DataFrame, market: pd.Series, window: int = BETA_WINDOW, least: int = BETA_LEAST,
@@ -884,6 +887,12 @@ class FactorPanel:
             from quant_platform.research.model import MODELS, scores
 
             return scores(self, Path(self.models) / MODELS[factor]["version"])      # sessions × symbols
+        if factor in US_FACTORS:                                   # 2026-11-21: the US files beside the chip files
+            if self.chips is None:
+                return np.full((len(self.sessions), len(self.symbols)), np.nan)
+            from quant_platform.research.us_factors import matrix as us_matrix
+
+            return us_matrix(self, Path(self.chips._folder).parent, factor)        # sessions × symbols
         if factor in CASH_FACTORS:                                 # 2026-11-20: the cash flows' own table
             if self.chips is None:
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
@@ -3148,6 +3157,10 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         factor_names = list(dict.fromkeys([*factor_names, *payload["factor_momentum"]]))
     if any(name in ZERO_FILLED for name in factor_names):
         payload["paid_fill"] = ZERO_FILL_VERSION
+    if any(name in US_FACTORS for name in factor_names):       # 2026-11-21: the US index's closes
+        from quant_platform.research.us_factors import digest as us_digest
+
+        payload["us"] = us_digest(history, RECENT_END)
     if any(name in CASH_FACTORS for name in factor_names):     # 2026-11-20: the cash table (with its statement items)
         from quant_platform.research.fundamentals import CASH_FILE
         from quant_platform.research.fundamentals import digest as statements_digest

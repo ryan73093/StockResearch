@@ -97,7 +97,10 @@ REVISED: dict[str, tuple[str, str]] = {
 
 
 def _get(url: str, timeout: int = 60) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"})
+    # 2026-11-21: the St. Louis Fed's file servers leave a request with a client name of our own unanswered (60 s each)
+    # and answer the library's own name at once; Yahoo wants a name
+    headers = {"Accept-Encoding": "identity"} if "stlouisfed.org" in url else {"User-Agent": USER_AGENT, "Accept-Encoding": "identity"}
+    request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=timeout) as response:   # noqa: S310 - fixed public addresses
         return response.read()
 
@@ -129,8 +132,10 @@ def bars(payload: dict) -> dict[date, dict[str, float]]:
     return output
 
 
-def fetch_prices(history: Path, get=_get, pause: float = 0.6, today: date | None = None) -> dict[str, int]:
-    """Every symbol's whole history; one that does not answer (or answers fewer days than kept) keeps its last file."""
+def fetch_prices(history: Path, get=_get, pause: float = 0.6, today: date | None = None,
+                 only: tuple[str, ...] | None = None) -> dict[str, int]:
+    """Every symbol's (or ``only``'s) whole history; one that does not answer (or answers fewer days than kept) keeps
+    its last file."""
     folder = Path(history) / "raw" / "yahoo_us"
     folder.mkdir(parents=True, exist_ok=True)
     end = (today or date.today()) + timedelta(days=2)
@@ -138,7 +143,7 @@ def fetch_prices(history: Path, get=_get, pause: float = 0.6, today: date | None
                        "period2": int(datetime(end.year, end.month, end.day, tzinfo=NEW_YORK).timestamp()),
                        "interval": "1d", "events": "div,splits", "includeAdjustedClose": "true"})
     counts = {}
-    for symbol in US_STOCKS:
+    for symbol in (only or tuple(US_STOCKS)):
         path = folder / f"{_file(symbol)}.json.gz"
         try:
             raw = get(f"{YAHOO}{quote(symbol)}?{query}")

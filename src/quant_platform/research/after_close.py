@@ -205,6 +205,11 @@ def prepare(history: Path, research: Path, day: date, payload: object, costs=Non
 
     ranks_now = {row["rule_hash"]: row.get("rank", 10**6) for row in (board_load(research) or {}).get("rows", [])}
     items.sort(key=lambda item: ranks_now.get(item["rule_hash"], 10**6))     # the board's best first
+    if any("us_sox_beta" in json.dumps(item.get("rule") or {}) for item in items):
+        # 2026-11-21: an account reading the US factor needs last night's index before its orders
+        from quant_platform.research.us_factors import refresh as us_refresh
+
+        us_refresh(history, day)
     data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, day.year, extra=(day, rows, benchmark))
     panel = Panel(data)
     market = market_closes(history, panel.sessions).copy()

@@ -69,13 +69,13 @@ def used(research: str | Path) -> dict[str, int]:
 
 def label(name: str) -> str:
     from quant_platform.research.daily import (
-        BALANCE_FACTORS, CASH_FACTORS, EARNINGS_FACTORS, FACTOR_LABELS, MODEL_FACTORS, REVERSED_FACTORS,
+        BALANCE_FACTORS, CASH_FACTORS, EARNINGS_FACTORS, FACTOR_LABELS, MODEL_FACTORS, REVERSED_FACTORS, US_FACTORS,
     )
     from quant_platform.research.scan import SHORT
 
     if name in MODEL_FACTORS:
         return f"{SHORT.get(name, name)}：{MODEL_FACTORS[name].replace('同上，', '')}"
-    return str({**FACTOR_LABELS, **EARNINGS_FACTORS, **BALANCE_FACTORS, **CASH_FACTORS, **REVERSED_FACTORS}.get(
+    return str({**FACTOR_LABELS, **EARNINGS_FACTORS, **BALANCE_FACTORS, **CASH_FACTORS, **REVERSED_FACTORS, **US_FACTORS}.get(
         name, SHORT.get(name, name)))
 
 

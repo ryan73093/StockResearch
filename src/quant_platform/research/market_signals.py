@@ -20,14 +20,21 @@ criterion — written before the run (research_method §7「八大行庫」).
 database has held since 2020-01 and no research had read (Yahoo: ^VIX, ^SOX, ^IXIC, ^GSPC, TLT, TWD=X). A US session
 dated D closes at 05:00 Taipei on D+1, so it is used from the Taiwan session after its date, as every signal here.
 Percentiles from 2021-01; judged on US_PERIODS by the same criterion — written before the run (docs/research/results.md
-「美股與國際指標能不能提早看出 0050 大跌」)."""
+「美股與國際指標能不能提早看出 0050 大跌」).
+
+2026-11-21 (使用者：還有各種就業數據、通膨數據、利率數據，各種的指標——這些都沒有): the US statistics and market
+series of ``history/us.py`` — employment, prices, rates, credit, liquidity, activity, and the TSMC ADR's premium. A
+revised statistic's reading is computed from each vintage as published and dated by the vintage; every reading is
+carried to each weekday (so that percentiles count days, not releases) and used from the Taiwan session after its
+date. Judged on PERIODS, and the worst fifth must sit at the same end in both — written before the run
+(docs/research/results.md「美股個股、美國就業／通膨／利率／景氣數據」)."""
 
 from __future__ import annotations
 
 import gzip
 import json
 from bisect import bisect_right
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -39,6 +46,7 @@ SHORT_PERIODS = {"2022-07～2023-12": (date(2022, 7, 1), date(2023, 12, 31)), "2
 GOVBANK = "八大行庫淨買超"
 US = "美股："
 US_PERIODS = {"2021-01～2023-12": (date(2021, 1, 1), date(2023, 12, 31)), "2024-01～2026-08": (date(2024, 1, 1), date(2026, 8, 31))}
+MACRO = "美國數據："
 HORIZONS = (20, 60)
 FALL = 0.10
 GAP, RATE = 0.03, 1.5
@@ -126,6 +134,145 @@ def us_series(database: str | Path) -> dict[str, dict[date, float]]:
     return {name: values for name, values in output.items() if values}
 
 
+def _month(observation: str, back: int) -> str:
+    year, month = int(observation[:4]), int(observation[5:7]) - back
+    while month < 1:
+        year, month = year - 1, month + 12
+    return f"{year:04d}-{month:02d}-01"
+
+
+def _yearly(known: dict[str, float], at: str | None = None) -> float | None:
+    """The latest month (or ``at``) against the same month a year before, as published in one vintage."""
+    at = at or (max(known) if known else None)
+    if at is None or at not in known or _month(at, 12) not in known or not known[_month(at, 12)]:
+        return None
+    return known[at] / known[_month(at, 12)] - 1
+
+
+def _steps(points: dict[date, float], until: date) -> dict[date, float]:
+    """A value dated on some days, carried to every weekday up to ``until`` (the next value replaces it)."""
+    output: dict[date, float] = {}
+    days = sorted(points)
+    for index, day in enumerate(days):
+        end = days[index + 1] if index + 1 < len(days) else until + timedelta(days=1)
+        cursor = day
+        while cursor < end:
+            if cursor.weekday() < 5:
+                output[cursor] = points[day]
+            cursor += timedelta(days=1)
+    return output
+
+
+def _vintage_reading(vintages: dict[str, dict[str, float]], reading) -> dict[date, float]:
+    output = {}
+    for vintage in sorted(vintages):
+        value = reading(vintages[vintage])
+        if value is not None and np.isfinite(value):
+            output[date.fromisoformat(vintage)] = float(value)
+    return output
+
+
+def _sahm(known: dict[str, float]) -> float | None:
+    """The 3-month average unemployment rate above its lowest of the 12 months before (Sahm's reading)."""
+    months = sorted(known)
+    if len(months) < 15:
+        return None
+    averages = [float(np.mean([known[month] for month in months[index - 2:index + 1]])) for index in range(2, len(months))]
+    return averages[-1] - min(averages[-13:-1])
+
+
+def _last_change(known: dict[str, float], back: int, average: bool = False) -> float | None:
+    months = sorted(known)
+    if len(months) <= back:
+        return None
+    change = known[months[-1]] - known[months[-1 - back]]
+    return change / back if average else change
+
+
+def _claims(known: dict[str, float]) -> float | None:
+    weeks = sorted(known)
+    if len(weeks) < 26:
+        return None
+    return float(np.mean([known[week] for week in weeks[-4:]]) / np.mean([known[week] for week in weeks[-26:]]) - 1)
+
+
+def _yearly_change(known: dict[str, float], back: int = 3) -> float | None:
+    now, then = _yearly(known), _yearly(known, _month(max(known), back)) if known else None
+    return None if now is None or then is None else now - then
+
+
+def us_macro(history: str | Path) -> dict[str, dict[date, float]]:
+    """name → {date the reading is published: value}, each carried to every weekday. {} without the files."""
+    import pandas as pd
+
+    from quant_platform.research.history import us
+
+    history = Path(history)
+    revised, market, stocks = us.revised(history), us.daily(history), us.prices(history)
+    until = datetime.now(TAIPEI).date()
+    output: dict[str, dict[date, float]] = {}
+
+    def keep(name: str, points: dict[date, float]) -> None:
+        if points:
+            output[f"{MACRO}{name}"] = _steps(points, until)
+
+    yearly = {"JTSJOL": "職缺數（年增率）", "CES0500000003": "平均時薪（年增率）", "CPIAUCSL": "消費者物價（年增率）",
+              "PCEPILFE": "核心 PCE 物價（年增率）", "PPIFIS": "生產者物價（年增率）", "INDPRO": "工業生產（年增率）",
+              "IPG3344S": "半導體與電子零組件生產（年增率）", "RSAFS": "零售銷售（年增率）", "NEWORDER": "核心資本財訂單（年增率）",
+              "A34SNO": "電腦與電子產品新訂單（年增率）", "PERMIT": "營建許可（年增率）"}
+    for series, name in yearly.items():
+        if series in revised:
+            keep(name, _vintage_reading(revised[series], _yearly))
+    special = {"UNRATE": ("失業率（3 個月平均比前 12 個月低點高多少）", _sahm),
+               "PAYEMS": ("非農就業（3 個月平均增加）", lambda known: _last_change(known, 3, average=True)),
+               "ICSA": ("初領失業金（4 週對 26 週）", _claims),
+               "CPIAUCSL": ("消費者物價年增率（3 個月變化）", _yearly_change),
+               "MICH": ("密大一年通膨預期（水準）", lambda known: known[max(known)] if known else None),
+               "UMCSENT": ("密大消費者信心（3 個月變化）", lambda known: _last_change(known, 3))}
+    for series, (name, reading) in special.items():
+        if series in revised:
+            keep(name, _vintage_reading(revised[series], reading))
+
+    def moved(values: dict[date, float], sessions: int) -> dict[date, float]:
+        days = sorted(values)
+        return {day: values[day] / values[days[index - sessions]] - 1 for index, day in enumerate(days)
+                if index >= sessions and values[days[index - sessions]]}
+
+    def spread(left: str, right: str) -> dict[date, float]:
+        return {day: market[left][day] - market[right][day] for day in market.get(left, {}) if day in market.get(right, {})}
+
+    for series, sessions, name in (("DGS10", 60, "10 年期殖利率（60 日變化）"), ("DGS2", 60, "2 年期殖利率（60 日變化）"),
+                                   ("DFII10", 60, "10 年期實質殖利率（60 日變化）"), ("DFF", 126, "聯邦基金利率（126 日變化）"),
+                                   ("T5YIE", 60, "5 年期損益兩平通膨率（60 日變化）"), ("BAMLH0A0HYM2", 20, "高收益債利差（20 日變化）")):
+        if series in market:
+            keep(name, _changes(market[series], sessions))
+    keep("10 年減 3 個月殖利率（水準）", spread("DGS10", "DGS3MO"))
+    keep("10 年減 2 年殖利率（水準）", spread("DGS10", "DGS2"))
+    for series, name in (("BAMLH0A0HYM2", "高收益債利差（水準）"), ("NFCI", "金融狀況指數（水準）")):
+        if series in market:
+            keep(name, market[series])
+    for series, sessions, name in (("DTWEXBGS", 60, "美元廣義指數（60 日變化）"), ("DCOILWTICO", 60, "西德州原油（60 日變化）"),
+                                   ("WALCL", 13, "聯準會資產負債表（13 週變化）")):
+        if series in market:
+            keep(name, moved(market[series], sessions))
+    # the TSMC ADR's premium: one ADR is five shares; US session D against the Taiwan close of the same date
+    adr, dollar = stocks.get("TSM") or {}, stocks.get("TWD=X") or {}
+    local: dict[date, float] = {}
+    if adr and dollar:
+        for file in sorted((history / "stocks" / "twse").glob("*.parquet")):
+            if int(file.stem) >= min(adr).year:
+                frame = pd.read_parquet(file, columns=["date", "code", "close"])
+                frame = frame[frame["code"] == "2330"]
+                local.update({value.date(): float(close) for value, close in zip(pd.to_datetime(frame["date"]), frame["close"])
+                              if close and close > 0})
+    premium = {day: adr[day]["close"] * dollar[day]["close"] / 5 / local[day] - 1
+               for day in adr if day in dollar and day in local}
+    if premium:
+        keep("台積電 ADR 溢價（水準）", premium)
+        keep("台積電 ADR 溢價（5 日變化）", _changes(premium, 5))
+    return output
+
+
 def _changes(values: dict[date, float], sessions: int = 20) -> dict[date, float]:
     days = sorted(values)
     return {day: values[day] - values[days[index - sessions]] for index, day in enumerate(days) if index >= sessions}
@@ -169,7 +316,7 @@ def study(index: dict[date, float], signals: dict[str, dict[date, float]]) -> di
                 fifth = min(int(ranks[known[before]] * 5), 4)
                 ahead = level[at + 1:at + 61]
                 buckets[fifth].append((level[at + 20] / level[at] - 1, level[at + 60] / level[at] - 1,
-                                       bool(ahead.min() / level[at] - 1 <= -FALL)))
+                                       bool(ahead.min() / level[at] - 1 <= -FALL), day))
             everything = [item for items in buckets.values() for item in items]
             if not everything:
                 continue
@@ -181,13 +328,29 @@ def study(index: dict[date, float], signals: dict[str, dict[date, float]]) -> di
                                           "mean_60": round(float(np.mean([item[1] for item in items])), 4) if items else None,
                                           "fall_rate": round(float(np.mean([item[2] for item in items])), 4) if items else None}
                                          for fifth, items in buckets.items()]}
+            # 2026-11-21: the period cut in two at its middle day — is the period's worst fifth below each half's average
+            worst_fifth = min((fifth for fifth, items in buckets.items() if items),
+                              key=lambda fifth: float(np.mean([item[1] for item in buckets[fifth]])))
+            middle = sorted(item[3] for item in everything)[len(everything) // 2]
+            halves = []
+            for early in (True, False):
+                part = [item for item in everything if (item[3] < middle) == early]
+                mine = [item for item in buckets[worst_fifth] if (item[3] < middle) == early]
+                halves.append(bool(part) and len(mine) >= 20
+                              and float(np.mean([item[1] for item in mine])) < float(np.mean([item[1] for item in part])))
+            report[period]["halves_below"] = halves
         verdicts = []
         for period, item in report.items():
             worst = min((fifth for fifth in item["fifths"] if fifth["mean_60"] is not None), key=lambda fifth: fifth["mean_60"])
             verdicts.append(worst["mean_60"] <= item["mean_60"] - GAP and item["fall_rate"] > 0
                             and (worst["fall_rate"] or 0) >= RATE * item["fall_rate"])
             item["worst"] = worst["fifth"]
-        found[name] = {"periods": report, "useful": bool(verdicts) and len(verdicts) == len(periods) and all(verdicts)}
+        ends = {"low" if item["worst"] <= 2 else "high" if item["worst"] >= 4 else "middle" for item in report.values()}
+        same_end = len(report) == len(periods) and len(ends) == 1 and "middle" not in ends
+        useful = bool(verdicts) and len(verdicts) == len(periods) and all(verdicts)
+        found[name] = {"periods": report, "same_end": same_end,
+                       "halves_below": sum(sum(item["halves_below"]) for item in report.values()),
+                       "useful": useful and same_end if name.startswith(MACRO) else useful}
     return found
 
 
@@ -211,6 +374,9 @@ def run(history: str | Path, research: str | Path) -> Path:
     american = us_series(Path(research).parent / "quant_platform.db")
     signals.update(american)
     raw.update(american)
+    macro = us_macro(history)                   # 2026-11-21: the US statistics and market series (history/us.py)
+    signals.update(macro)
+    raw.update(macro)
     found = study(index, signals)
     report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "fall": FALL, "gap": GAP, "rate": RATE,
               "signals": found, "ranges": {name: [str(min(values)), str(max(values))] for name, values in raw.items() if values}}

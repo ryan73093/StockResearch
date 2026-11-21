@@ -284,7 +284,7 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None, names: list[s
     eligibility = daily.DailyRule(name="資格", factors={"momentum_3": 1.0})
     labels = {**daily.FACTOR_LABELS, **daily.EARNINGS_FACTORS,       # 2026-10-28: the earnings family by name
               **daily.BETA_FACTORS, **daily.BEHAVIOR_FACTORS,          # 2026-11-20: the beta and literature ones
-              **daily.BALANCE_FACTORS, **daily.CASH_FACTORS, **daily.REVERSED_FACTORS}
+              **daily.BALANCE_FACTORS, **daily.CASH_FACTORS, **daily.REVERSED_FACTORS, **daily.US_FACTORS}
     factors = [name for name in (names or daily.FACTOR_LABELS) if name in labels]
     sessions = fp.sessions
     positions = [index for index, day in enumerate(sessions)
