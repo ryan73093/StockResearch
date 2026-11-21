@@ -197,18 +197,24 @@ class Desk:
             self._news = {code: lines[-4:] for code, lines in output.items()}
         return self._news
 
+    def list_path(self) -> Path:
+        """The month's list for the day; 9/30's month (cutoff 7/31) has none — then the latest list cut off by the day."""
+        from quant_platform.research.rolling import cutoff_for
+
+        path = self.research / "rolling" / f"{cutoff_for(self.day).isoformat()}.json"
+        if not path.is_file():
+            earlier = sorted(item for item in (self.research / "rolling").glob("20??-??-??.json")
+                             if item.stem <= self.day.isoformat())
+            path = earlier[-1] if earlier else path
+        return path
+
     def panel(self) -> list[tuple[str, object]]:
         """(family, rule): the best single rule of each family on the month's list (by money since 2020-10)."""
         if self._panel is None:
             from quant_platform.research.blend import parse_spec
             from quant_platform.research.categories import classify
-            from quant_platform.research.rolling import cutoff_for
 
-            path = self.research / "rolling" / f"{cutoff_for(self.day).isoformat()}.json"
-            if not path.is_file():      # 2026-11-19: 9/30's month (cutoff 7/31) has no list — the latest list cut off by the day
-                earlier = sorted(item for item in (self.research / "rolling").glob("20??-??-??.json")
-                                 if item.stem <= self.day.isoformat())
-                path = earlier[-1] if earlier else path
+            path = self.list_path()
             best: dict[str, tuple[float, dict]] = {}
             if path.is_file():
                 for row in json.loads(path.read_text(encoding="utf-8")).get("graded") or []:
@@ -229,11 +235,12 @@ class Desk:
                     continue
         return self._panel
 
-    def agreed(self, top: int = CONSENSUS_TOP) -> list[tuple[str, int, list[str]]]:
-        """(code, how many panel rules rank it in their top 20, which families), most agreed first."""
+    def agreed(self, top: int = CONSENSUS_TOP, panel: list | None = None) -> list[tuple[str, int, list[str]]]:
+        """(code, how many panel rules rank it in their top 20, which families), most agreed first. ``panel``: another
+        set of rules than the desk's own (the lab's steady panel)."""
         votes: dict[str, list[str]] = {}
         best: dict[str, int] = {}
-        for family, rule in self.panel():
+        for family, rule in (self.panel() if panel is None else panel):
             try:
                 picks = self.fp.ranked(rule, self.position)[:20]
             except Exception:  # noqa: BLE001

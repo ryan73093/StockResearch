@@ -494,3 +494,62 @@ def test_the_trader_starts_from_the_holdings_and_only_its_valid_orders_count():
     client = environment.ScriptedClient(environment.top_of_consensus())
     assert client.json_call(text, "x", "agent_lab")[0] == {"sell": [], "buy": [], "view": "腳本", "lesson": ""}
     assert variants.BY_KEY["trade"].against == "twin" and variants.BY_KEY["trade"].since == "2026-11-23"
+
+
+def test_the_steady_panel_takes_each_familys_best_rule_among_the_fifth_moving_least_with_0050(tmp_path, monkeypatch):
+    """2026-11-22 (使用者：先調贏 0050; docs/research/results.md「穩健候選」)."""
+    from quant_platform.research import progress, registry
+    from quant_platform.research.agent_lab import desk as desk_module
+
+    research = tmp_path / "research"
+    (research / "rolling").mkdir(parents=True)
+    betas = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4]
+    graded = [{"trial": number, "passed": number != 0, "rule_hash": f"h{number}",
+               "spec": {"name": f"規則 {number}", "factors": {"trend_200": 1.0}, "top": 20},
+               "metrics": {"since_2020_final_value": 1000.0 * (number + 1)}} for number in range(len(betas))]
+    graded.append({"trial": 99, "passed": True, "rule_hash": "blend", "spec": {"sleeves": [1], "factors": {"trend_200": 1.0}}, "metrics": {}})
+    path = research / "rolling" / "2026-09-30.json"
+    path.write_text(json.dumps({"graded": graded}), encoding="utf-8")
+    asked = []
+
+    class Registry:
+        def __init__(self, _path):
+            pass
+
+        def records(self):
+            return [SimpleNamespace(trial_id=number, report_file=f"r{number}.json") for number in range(len(betas))]
+
+    def months(_research, report_file, until):
+        asked.append(until)
+        return {"beta": betas[int(report_file[1:-5])]} if report_file else None
+
+    monkeypatch.setattr(registry, "TrialRegistry", Registry)
+    monkeypatch.setattr(progress, "market_months", months)
+    rows = desk_module.steady_rows(research, path)
+    # nine passing single rules have a beta (0.6～1.4): the lowest fifth is 0.6 and 0.7, one family — the one with more money
+    assert [(row["beta"], row["money"]) for row in rows] == [(0.7, 3000.0)]
+    assert set(asked) == {"2026-10"}                      # the beta of the months before the month after the cutoff
+    kept = json.loads((research / "agent_lab" / "panels" / "steady-2026-09-30-2026-10.json").read_text(encoding="utf-8"))
+    assert kept["rules_with_beta"] == 9 and 0.7 <= kept["beta_limit"] < 0.8
+    monkeypatch.setattr(progress, "market_months", lambda *_args: 1 / 0)
+    assert desk_module.steady_rows(research, path) == rows   # kept: the reports are read once for a list
+
+
+def test_the_trader_that_may_keep_cash_leaves_places_open_and_never_holds_under_ten():
+    """2026-11-22 (使用者：先調贏 0050; docs/research/results.md「持股經理可以留現金」)."""
+    cash, trade = variants.BY_KEY["cash"], variants.BY_KEY["trade"]
+    assert cash.cash and cash.mode == "trade" and cash.against == "trade" and cash.tools == trade.tools and cash.panel == trade.panel
+    text = runner.instructions(cash)
+    assert "沒補的空位就是現金" in text and f"最少持有 {variants.CASH_LEAST} 檔" in text
+    assert "大盤漲你會落後、大盤跌你會少跌" in text                      # said both ways, nothing about the weeks just past
+    assert "空位由程式" not in text and runner.instructions(trade) == runner.TRADE_INSTRUCTIONS
+    for variant in variants.COHORT:                                     # a design is compared with a twin of its own candidates
+        other = variants.BY_KEY.get(variant.against)
+        if other is not None:
+            assert other.panel == variant.panel, variant.key
+    # the account's share in stocks follows the decision before each session
+    sessions = [date(2026, 9, 1) + timedelta(days=number) for number in range(5)]
+    fp = SimpleNamespace(sessions=sessions)
+    made = [{"date": sessions[0].isoformat(), "llm": {"hold": [str(n) for n in range(20)]}},
+            {"date": sessions[2].isoformat(), "llm": {"hold": [str(n) for n in range(12)]}}]
+    assert evaluate.invested(fp, made, 20) == {sessions[1]: 1.0, sessions[2]: 1.0, sessions[3]: 0.6, sessions[4]: 0.6}

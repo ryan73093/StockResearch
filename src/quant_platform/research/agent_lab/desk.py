@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
-from quant_platform.research.llm_agent import NEWS_DAYS, Desk
+from quant_platform.research.llm_agent import NEWS_DAYS, PANEL_FAMILIES, Desk
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 DECISION_TIME = time(15, 40)
@@ -54,6 +54,67 @@ EVIDENCE = {
 }
 
 
+# 2026-11-22 (使用者：先調贏 0050; docs/research/results.md「穩健候選」): the lab's consensus takes the rule with the most
+# backtest money of each family — the rules that move most with 0050 (the twin's beta 1.32 from 9/1). The steady
+# panel takes it among the fifth of the list's passing rules that moved least with 0050 in the backtest before the
+# cutoff (of 3,275 rules, 22.7% of that fifth held up from 9/1 against 8.7%, 1.1%, 0.2%, 0% of the others).
+STEADY_SHARE = 0.2
+LIST_OVERRIDE: Path | None = None   # a replay of a stretch before the first monthly list (``decide --run … --list``): the
+                                    # list every day reads — chosen on data that covers the stretch, so the candidates are
+                                    # flattered and only what does not depend on them is read from such a run
+STEADY_UNTIL: str | None = None     # a check's override: the month the beta is known before (default: the month after the cutoff)
+
+
+def steady_rows(research: Path, path: Path, until: str | None = None) -> list[dict]:
+    """The steady panel of a monthly list — [{family, spec, beta, money}], the best-money rule of each family among the
+    passing single rules whose backtest beta (``progress.market_months``: the 60 months before ``until``, by default the
+    month after the list's cutoff) is in the lowest STEADY_SHARE. Kept beside the lab's records by list and month."""
+    from quant_platform.research.categories import classify
+    from quant_platform.research.progress import market_months
+    from quant_platform.research.registry import TrialRegistry
+
+    if not path.is_file():
+        return []
+    if until is None:
+        following = date.fromisoformat(path.stem[:10]) + timedelta(days=1)
+        until = f"{following.year}-{following.month:02d}"
+    kept = Path(research) / "agent_lab" / "panels" / f"steady-{path.stem}-{until}.json"
+    stamp = path.stat().st_mtime
+    if kept.is_file():
+        try:
+            saved = json.loads(kept.read_text(encoding="utf-8"))
+            if saved.get("list_mtime") == stamp and saved.get("share") == STEADY_SHARE:
+                return saved["rows"]
+        except ValueError:
+            pass
+    files = {record.trial_id: record.report_file for record in TrialRegistry(Path(research) / "trials.jsonl").records()}
+    found = []
+    for row in json.loads(path.read_text(encoding="utf-8")).get("graded") or []:
+        spec = row.get("spec") or {}
+        factors = spec.get("factors") or {}
+        if not row.get("passed") or spec.get("sleeves") or not factors or any(name.startswith("llm_") for name in factors):
+            continue
+        months = market_months(research, files.get(row.get("trial")), until)
+        if not months or months.get("beta") is None:
+            continue
+        found.append({"family": str(classify(spec).get("family")), "spec": spec, "beta": float(months["beta"]),
+                      "money": float((row.get("metrics") or {}).get("since_2020_final_value") or 0.0)})
+    rows: list[dict] = []
+    limit = None
+    if found:
+        limit = float(np.quantile([item["beta"] for item in found], STEADY_SHARE))
+        best: dict[str, dict] = {}
+        for item in found:
+            if item["beta"] <= limit and (item["family"] not in best or item["money"] > best[item["family"]]["money"]):
+                best[item["family"]] = item
+        rows = sorted(best.values(), key=lambda item: -item["money"])[:PANEL_FAMILIES]
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    kept.write_text(json.dumps({"list": path.name, "list_mtime": stamp, "until": until, "share": STEADY_SHARE,
+                                "rules_with_beta": len(found), "beta_limit": limit, "rows": rows}, ensure_ascii=False, indent=1),
+                    encoding="utf-8")
+    return rows
+
+
 def decision_moment(day: date) -> datetime:
     return datetime.combine(day, DECISION_TIME, TAIPEI)
 
@@ -73,6 +134,27 @@ class LabDesk(Desk):
         self.decided_at = decided_at or decision_moment(day)
         self._events = None
         self._tables = None
+        self._steady = None
+
+    def list_path(self) -> Path:
+        return LIST_OVERRIDE or super().list_path()
+
+    def steady_panel(self) -> list[tuple[str, object]]:
+        """(family, rule) of the steady panel (``steady_rows``) for the day's list."""
+        if self._steady is None:
+            from quant_platform.research.blend import parse_spec
+
+            self._steady = []
+            for row in steady_rows(self.research, self.list_path(), STEADY_UNTIL):
+                try:
+                    self._steady.append((row["family"], parse_spec(row["spec"])))
+                except Exception:  # noqa: BLE001 - a rule this code no longer reads is left out
+                    continue
+        return self._steady
+
+    def agreed_of(self, kind: str, top: int) -> list[tuple[str, int, list[str]]]:
+        """The agreed stocks of a design's panel: "money" (the lab's own) or "steady"."""
+        return self.agreed(top, self.steady_panel()) if kind == "steady" else self.agreed(top)
 
     # --- gated news -----------------------------------------------------------------------------------------------
     def scored_news(self) -> list[dict]:

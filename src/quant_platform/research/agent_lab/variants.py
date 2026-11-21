@@ -24,6 +24,7 @@ VOTES, VOTES_NEEDED = 3, 2
 LAB_MODEL = "claude-haiku-5-5"
 LAB_EFFORT = "medium"
 TRADE_CANDIDATES = 16            # the trader: the agreed stocks not held that it may buy
+CASH_LEAST = 10                  # the trader that may keep cash: the fewest stocks held (half — the platform's guard that held up halves)
 SCORE_CANDIDATES = 40            # the scorer: the agreed stocks it scores (with the holdings)
 ANALYST_CARDS = 16               # the stocks the analysts read: the holdings and the most agreed
 
@@ -40,6 +41,9 @@ class Variant:
     calls: int = 0               # model calls a day at most (the budget's arithmetic)
     since: str = "2026-11-20"    # the first session it decides live (the 16:00 check wants every one from it)
     model: str = ""              # its own model when it is not the lab's (a design that asks the model question)
+    panel: str = "money"         # where its candidates come from: "money" (the lab's consensus) | "steady" (desk.steady_rows;
+                                 # 2026-11-22: tried as twin2/trade2 and not adopted — docs/research/results.md「穩健候選」)
+    cash: bool = False           # a trader whose places left open stay cash (CASH_LEAST stocks at least)
 
     @property
     def model_name(self) -> str:
@@ -75,6 +79,11 @@ COHORT: tuple[Variant, ...] = (
     Variant("trade", "持股經理：從帳戶現有的持股出發，模型只決定今天賣哪幾檔、買哪幾檔，其餘續抱", "trade",
             ("market", "mood", "headlines", "portfolio", "card", "events"),
             "從現有持股出發只下買賣單（不提的續抱），是不是比每天重新排一份名單好", "twin", steps=1, calls=1, since="2026-11-23"),
+    # 2026-11-22 (使用者：先調贏 0050; docs/research/results.md「持股經理可以留現金」, written before it runs): the trader's
+    # path was the market's and the low-beta rules fall less by holding cash — the one thing not tried is how much it holds
+    Variant("cash", f"持股經理・可以留現金：賣掉的可以不補，空位留現金（最少持有 {CASH_LEAST} 檔）", "trade",
+            ("market", "mood", "headlines", "portfolio", "card", "events"),
+            "讓持股經理自己決定留多少現金，是不是比永遠滿檔好", "trade", steps=1, calls=1, since="2026-11-23", cash=True),
 )
 BY_KEY = {variant.key: variant for variant in COHORT}
 FACTORS = {variant.factor: f"AI 代理人實驗室・{variant.label}" for variant in COHORT}

@@ -171,8 +171,22 @@ def judge_day(research: Path, first_decision: str, sessions: int = SESSIONS_TO_J
         return None
 
 
+def invested(fp, made: list[dict], most: int) -> dict[date, float]:
+    """The share of the account in stocks on each session for a design that may keep cash: the stocks of the decision
+    before it out of ``most`` (a decision is filled at the next close, as ``scores``)."""
+    by_day = {item["date"]: len((item.get("llm") or {}).get("hold") or []) / most for item in made}
+    output: dict[date, float] = {}
+    level: float | None = None
+    for position in range(1, len(fp.sessions)):
+        level = by_day.get(fp.sessions[position - 1].isoformat(), level)
+        if level is not None:
+            output[fp.sessions[position]] = level
+    return output
+
+
 def board(base: str | Path, research: str | Path, run: str | None = None, broker: str = "cathay", loaded=None,
-          now: datetime | None = None) -> dict[str, object]:
+          now: datetime | None = None, through: date | None = None) -> dict[str, object]:
+    """``through``: the last session counted (a replay of a stretch in the past; the default is the newest session)."""
     from quant_platform.research import daily
     from quant_platform.research.costs import broker_costs
     from quant_platform.research.metrics import max_drawdown, unit_values
@@ -188,7 +202,7 @@ def board(base: str | Path, research: str | Path, run: str | None = None, broker
         return output
     variants.register()
     data, fp = loaded or daily.load(base)
-    later = [day for day in fp.sessions if day > date.fromisoformat(first_day)]
+    later = [day for day in fp.sessions if day > date.fromisoformat(first_day) and (through is None or day <= through)]
     output["first_decision"] = first_day
     if len(later) < 2:
         output["note"] = f"第一次決定是 {first_day}，隔天收盤才成交；至少要再一個交易日才有可以比的數字。"
@@ -218,7 +232,8 @@ def board(base: str | Path, research: str | Path, run: str | None = None, broker
                                    industry_cap=0.3)
             ledger: list = []
             ranks = daily.daily_rankings(fp, rule, start, last)
-            result = daily.simulate_daily(data, rule, costs, start, last, ranks, plan, ledger=ledger)
+            levels = invested(fp, made, variants.MOST) if made is not None and variants.BY_KEY[key].cash else None
+            result = daily.simulate_daily(data, rule, costs, start, last, ranks, plan, ledger=ledger, exposure=levels)
         except Exception as error:  # noqa: BLE001 - one row that cannot be computed is shown as such
             row["error"] = str(error)[:160]
             rows[key] = row
@@ -238,7 +253,11 @@ def board(base: str | Path, research: str | Path, run: str | None = None, broker
                    sold_ahead_of_0050=round((result.sold_value or 0) - (bench.sold_value or 0)))
         if made is not None:
             row["behaviour"] = behaviour(made)
-            if key != "twin":
+            if variants.BY_KEY[key].cash:
+                shares = [len((item.get("llm") or {}).get("hold") or []) / variants.MOST for item in made]
+                row["invested"] = {"average": round(float(np.mean(shares)), 3), "least": round(float(min(shares)), 2),
+                                   "latest": round(float(shares[-1]), 2)}
+            if variants.BY_KEY[key].mode != "twin":
                 row["placebo"] = placebo(fp, made, fp.index[last])
             if any((item.get("llm") or {}).get("scores") for item in made):
                 row["score_skill"] = score_skill(fp, made)
@@ -298,6 +317,9 @@ def text(result: dict[str, object]) -> str:
             part += f"，連動 {row['beta']}"
         if row.get("versus"):
             part += f"；對 {row['against']}：{row['versus']['counted']:+,}／{row['versus']['sold']:+,}"
+        if row.get("invested"):
+            part += (f"；持股比例平均 {100 * row['invested']['average']:.0f}%、最低 {100 * row['invested']['least']:.0f}%、"
+                     f"最近 {100 * row['invested']['latest']:.0f}%")
         if row.get("placebo"):
             part += f"；選股排在隨機代理人的第 {100 * row['placebo']['percentile']:.0f} 百分位"
         skill = row.get("score_skill")

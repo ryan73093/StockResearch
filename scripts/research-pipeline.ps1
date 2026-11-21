@@ -2520,8 +2520,12 @@ switch ($Name) {
         # 2026-11-21 (使用者：直接去跑回測跟前向觀察): the same days again with the lab's locked model (Claude Haiku 5.5) and
         # the rules of 11/20 — the picker, the veto and the scorer beside the twin; paid from the replays' own share.
         # (The run of 11/20 with gpt-6-luna, neutral-20261120, stays as it is.)
-        Invoke-Step "1-replay" @("-m", "quant_platform.research.agent_lab", "decide", "--run", "haiku-20261121", "--from", "2026-09-01", "--day", "2026-11-20", "--only", "plain,veto,score,trade")
+        # 2026-11-22 (使用者：先調贏 0050; docs/research/results.md「持股經理可以留現金」): the trader that may keep cash, from
+        # the same day as the trader of 11/21 (the designs decided then are kept as they are), then the rise of April
+        # with the 8/31 list (chosen after those days: only how much it holds is read from that run)
+        Invoke-Step "1-replay" @("-m", "quant_platform.research.agent_lab", "decide", "--run", "haiku-20261121", "--from", "2026-09-01", "--day", "2026-11-20", "--only", "plain,veto,score,trade,cash")
         Invoke-Step "2-board" @("-m", "quant_platform.research.agent_lab", "board", "--run", "haiku-20261121")
+        Invoke-Step "3-rise" @("-m", "quant_platform.research.agent_lab", "decide", "--run", "cashrise-20261122", "--from", "2026-04-01", "--day", "2026-05-08", "--only", "cash", "--list", "2026-08-31")
     }
     "llmagent-replay" {
         # 2026-11-19: the agent's days from the month's cutoff decided afterwards with each day's information (marked

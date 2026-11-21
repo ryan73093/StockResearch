@@ -29,6 +29,8 @@ def main() -> int:
     parser.add_argument("--from", dest="first", help="decide --run：從這一天起補做到 --day")
     parser.add_argument("--run", help="補做的名稱（存在 agent_lab/replay/<名稱>/，不是證據）")
     parser.add_argument("--only", help="只做這些設計（逗號分隔的代號）")
+    parser.add_argument("--list", dest="list_day", help="decide --run：每天都讀這一份名單（YYYY-MM-DD；補做第一份名單以前的期間用，"
+                        "名單是事後挑的，候選偏樂觀）")
     parser.add_argument("--scripted", action="store_true", help="用腳本代理人，不呼叫模型")
     parser.add_argument("--months", type=int, default=36, help="probe：問最近幾個月")
     parser.add_argument("--holdings", default="", help="advise：現在的持股，代號:股數[:每股成本]，逗號分隔（例 2330:1000:950,2317:2000）")
@@ -43,6 +45,14 @@ def main() -> int:
 
     base = Path(args.base)
     day = date.fromisoformat(args.day) if args.day else datetime.now(TAIPEI).date()
+    if args.list_day:
+        if not args.run:
+            parser.error("--list 只能和 --run 一起用（真的決定只讀當月的名單）")
+        from quant_platform.research.agent_lab import desk as desk_module
+
+        desk_module.LIST_OVERRIDE = RESEARCH / "rolling" / f"{args.list_day}.json"
+        if not desk_module.LIST_OVERRIDE.is_file():
+            parser.error(f"沒有這一份名單：{desk_module.LIST_OVERRIDE}")
     command = "python -m quant_platform.research.agent_lab " + " ".join(sys.argv[1:])
 
     def client():
@@ -71,7 +81,7 @@ def main() -> int:
                 made = runner.decide_day(fp, base, RESEARCH, day, model, None, keys, job) if fp.index.get(day) is not None else []
             job.payload["summary"] = runner.summary(made)
             try:
-                result = evaluate.board(base, RESEARCH, args.run, loaded=(data, fp))
+                result = evaluate.board(base, RESEARCH, args.run, loaded=(data, fp), through=day if args.run else None)
                 evaluate.write(RESEARCH, result)
             except Exception as error:  # noqa: BLE001 - the decisions are stored; the board can be made again
                 job.payload["summary"] += f"；看板沒算出來（{str(error)[:80]}）"
@@ -117,7 +127,7 @@ def main() -> int:
         print(f"模型花費 US${result['cost_usd']:.4f}", flush=True)
         return 0
     if args.command == "board":
-        result = evaluate.board(base, RESEARCH, args.run)
+        result = evaluate.board(base, RESEARCH, args.run, through=day if args.run and args.day else None)
         print(evaluate.text(result), flush=True)
         print(f"寫到 {evaluate.write(RESEARCH, result)}", flush=True)
         return 0
