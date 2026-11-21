@@ -8,7 +8,7 @@
 - 研究知識庫的向量用這台電腦共用的 `C:\Dev\DBQdrant`（`.env` 的 `KNOWLEDGE_QDRANT_URL`、collection `stockresearch_knowledge_bge_m3_v1`），不放在專案裡（D-024）。
 - 備份放專案自己的位置（`instance/backups`）；`D:\StockResearch-data`（大的研究資料、測試暫存、舊的資料庫備份 `old-db-backups`）和每晚第二份研究資料 `D:\StockResearch-backup` 在 D 槽，不用問（D-053、D-054、D-045）；其他磁碟、外部空間或雲端仍要先問使用者（D-026）。
 - 下載的原始檔（FinMind、證交所、櫃買、集保等）是 `instance/research/history/raw` 底下的 JSON.gz 一般檔案，不在資料庫裡。本機的 PostgreSQL（`C:\Dev\DBPostgreSQL`）本專案不用：`DATABASE_URL` 是 sqlite，程式有支援 PostgreSQL 的寫法但沒遷移過。
-- C 槽是 NVMe SSD（快、快滿了），D 槽是硬碟 HDD（3.7 TB、較慢）；資料庫、服務、程式碼的位置不變（D-053）。
+- C 槽是 NVMe SSD（快、快滿了），D 槽是硬碟 HDD（3.7 TB、較慢：11/21 量，一次資料庫提交 280 毫秒、C 槽 2.6 毫秒，常寫的 SQLite 留 C 槽）；資料庫、服務、程式碼的位置不變（D-053）。
 - 暫停模組見 `REQUIREMENTS.md` §13；不在暫停模組上開發新功能（D-029）。
 
 ## 資料庫安全

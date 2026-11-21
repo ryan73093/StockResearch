@@ -1135,7 +1135,7 @@ class StockForwardTracker:
         # 2026-10-19 (使用者：每一筆買賣賺多少賠多少、要有原因): average-cost results and the decisions' reasons
         from quant_platform.research.decisions import DecisionStore, key as decision_key
 
-        store, start = DecisionStore(self._base), date.fromisoformat(item["since"])
+        store, start = DecisionStore(self._base, shared=True), date.fromisoformat(item["since"])   # read only: 2026-11-21
         sleeves = len((item.get("rule") or {}).get("sleeves") or []) if item.get("kind") == "blend" else 0
         why: dict[str, dict[str, str]] = {}
         for name in ([decision_key(rule_hash, start, number) for number in range(sleeves)] if sleeves

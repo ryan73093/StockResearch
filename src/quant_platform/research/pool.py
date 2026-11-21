@@ -96,7 +96,9 @@ SEARCH_BATCHES = ("blendscan", "blendroll", "blendsteady", "blendguard", "blendr
                   "top10blend",
                   # 2026-11-12: the four searches added since 10/29 were not here; a pool without its snapshot ran them
                   # on the real pool (tests/test_research_pool.py now finds every batch that runs a search)
-                  "bear12", "bear13", "blendreach", "blendreach14")
+                  "bear12", "bear13", "blendreach", "blendreach14",
+                  # 2026-11-21: round fifteen (betablend, 11/20) was not here; the guard test above found it
+                  "betablend")
 SOURCES_LOG = "sources.jsonl"           # the rules each daily batch run went through, appended by the CLI
 
 
@@ -822,16 +824,32 @@ def pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> d
     return found
 
 
-def _pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> dict[str, object]:
-    from quant_platform.research.daily import TIERS
-
-    rows = rule_rows(research_dir, basis)
-    daily_rules = daily_rows(research_dir)
+def _basis_part(rows: list[dict], top: int) -> dict[str, object]:
+    """What the pool view takes from the old design's rows on one basis (the rules and what is counted from them)."""
     counts = {status: sum(1 for row in rows if row["status"] == status) for status in STATUS_ORDER}
     families = {family: sum(1 for row in rows if row["family"] == family) for family in ("ETF 規則", "個股規則")}
     ranked = [row for row in rows if row["development"]["win_3y"] is not None]
     high_win = sorted(ranked, key=lambda row: (-row["development"]["win_3y"], -(row["development"]["median_3y"] or 0)))[:top]
     both = [row for row in rows if row["validation"] and not row["development"]["reasons"] and not row["validation"]["reasons"]]
+    return {"rules": rows, "counts": counts, "families": families, "total": len(rows), "high_win": high_win,
+            "both_periods": both}
+
+
+def pool_view_on(research_dir: str | Path, basis: str, seed_view: dict[str, object], top: int = 20) -> dict[str, object]:
+    """2026-11-21 (使用者：整個 UI 非常慢; the pool's other bases took 40 s a click): the pool view on another basis from the
+    seed view. Only the old design's rows depend on the basis; the new design's rows, the forward accounts' summary and
+    the AI researcher are the same on every basis, and computing them again (the chained forward record over 190 MB)
+    was the 40 s."""
+    return {**seed_view, **_basis_part(rule_rows(research_dir, basis), top), "basis": basis,
+            "basis_label": BASIS_LABELS[basis], "bases": BASIS_LABELS}
+
+
+def _pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> dict[str, object]:
+    from quant_platform.research.daily import TIERS
+
+    rows = rule_rows(research_dir, basis)
+    daily_rules = daily_rows(research_dir)
+    part = _basis_part(rows, top)
     from quant_platform.research.stock_forward import StockForwardTracker
 
     stats = latest_stats(Path(research_dir) / "stats", "development") or {}
@@ -842,10 +860,10 @@ def _pool_view(research_dir: str | Path, top: int = 20, basis: str = "seed") -> 
                    for item in (stats.get("candidates") or []) + (stock_stats.get("candidates") or [])
                    or [{"dsr": {"deflated_sharpe": 0}, "name": ""}])
     return {
-        "rules": rows, "counts": counts, "families": families, "total": len(rows),
+        **part,
         "attempts": attempts, "best_dsr": best_dsr, "pbo": (stats.get("pbo") or {}).get("pbo"),
         "stock_pbo": (stock_stats.get("pbo") or {}).get("pbo"),
-        "high_win": high_win, "both_periods": both, "ai_rounds": ai_rounds(research_dir),
+        "ai_rounds": ai_rounds(research_dir),
         "forward_stocks": StockForwardTracker(research_dir).summary(),
         "daily": daily_rules, "daily_passed": sum(1 for row in daily_rules if row["passed"] and not row["uses_0050"]),
         "categories": category_summary([row for row in daily_rules if not row["uses_0050"]]),

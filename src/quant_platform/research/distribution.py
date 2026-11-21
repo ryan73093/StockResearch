@@ -146,11 +146,13 @@ def view(research: str | Path, rows: list[dict]) -> dict[str, object]:
         bench = Counter(round(row[track["bench"]]) for row in members if row.get(track["bench"])).most_common(1)
         if not invested or not bench:
             continue
-        from quant_platform.research.numbers import label as number_label
+        # 2026-11-21: the rules' fixed numbers read ONCE for the view (it asked per rule: 17,000 times, 5 s)
+        from quant_platform.research.numbers import numbers as fixed_numbers
 
+        fixed = fixed_numbers(research)
         items = [{"trial": row.get("trial_id"), "name": row.get("name"), "tier": row.get("tier"),
                   "family": (row.get("category") or {}).get("family") or "其他", "spec_hash": row.get("spec_hash"),
-                  "no": number_label(research, row.get("spec_hash")),
+                  "no": f"#{fixed[row['spec_hash']]}" if row.get("spec_hash") in fixed else "",
                   "value": float(row[track["value"]])} for row in members]
         output[key] = _track(track["label"], invested, float(bench[0][0]), items)
     return output

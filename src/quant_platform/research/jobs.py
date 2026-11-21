@@ -142,7 +142,10 @@ class JobLog:
         if not self.folder.is_dir():
             return []
         rows = []
-        for path in sorted(self.folder.glob("*.json"), reverse=True)[:limit]:
+        # 2026-11-21 (使用者：整個 UI 非常慢): every research page asks for this list (the running programs' badge). Path.glob
+        # made a Path object for each of the 2,362 job files, 0.3 s a page; the names sort the same (job ids are stamps)
+        names = sorted((name for name in os.listdir(self.folder) if name.endswith(".json")), reverse=True)[:limit]
+        for path in (self.folder / name for name in names):
             try:
                 item = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):

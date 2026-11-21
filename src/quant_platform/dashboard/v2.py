@@ -241,6 +241,7 @@ POOL_FILTERS = ("q", "family", "tier", "trait")
 # only when the warm-up has none younger than READY_FOR.
 _READY: dict[str, tuple[float, object]] = {}
 READY_FOR = 15 * 60
+INLINE_VIEW_LOG_SECONDS = 1.0          # a view the page had to make itself, slower than this, is written to the web log
 # 2026-11-12: a view written before this process started was written by the version before it (the deploy of 15:01:
 # /research answered 500 for a minute — the overview kept by the old warm-up had no ``ahead_sold``); not used
 _STARTED = __import__("time").time()
@@ -274,8 +275,14 @@ def ready(name: str, research_dir: Path, compute):
             pass
     if found is not None and monotonic() - found[0] < READY_FOR:
         return found[1]
+    started = monotonic()
     value = compute()
     _READY[key] = (monotonic(), value)
+    # 2026-11-21 (使用者：整個 UI 非常慢): a view made inside the click (the warm-up had none written since this process
+    # started, or none younger than READY_FOR) was the 12–53 s page and left no trace
+    if monotonic() - started > INLINE_VIEW_LOG_SECONDS:
+        logger.warning("view %s made inside the page: %.1f s (no warm-up file written since this process started "
+                       "and younger than %d min)", name, monotonic() - started, READY_FOR // 60)
     return value
 
 
@@ -303,6 +310,24 @@ def month_view(research_dir: Path) -> dict[str, object] | None:
     except Exception:  # noqa: BLE001 — the list still shows without the moneys
         logger.exception("Month list: the forward accounts' moneys failed")
     return rolling_test.summary(payload)
+
+
+def pool_for(research_dir: Path, basis: str) -> dict[str, object]:
+    """The pool view the pages show: the seed's as the warm-up keeps it; another basis from it (research/pool.py
+    ``pool_view_on``, 2026-11-21 — it was computed whole in the page, 40 s)."""
+    seed = ready("pool:seed", research_dir, lambda: pool_view(research_dir, basis="seed"))
+    if basis == "seed":
+        return seed
+    from quant_platform.research.pool import pool_view_on
+
+    return ready(f"pool:{basis}", research_dir, lambda: pool_view_on(research_dir, basis, seed))
+
+
+def _distribution_view(research_dir: Path) -> dict[str, object]:
+    """2026-11-21: where every rule's end money falls (research/distribution.py), for the dashboard's big windows."""
+    from quant_platform.research import distribution
+
+    return distribution.view(research_dir, pool_view(research_dir, basis="seed")["daily"])
 
 
 def start_view(research_dir: Path) -> dict[str, object]:
@@ -492,6 +517,7 @@ def ready_views(research_dir: Path) -> dict[str, object]:
 
     return {"chained": lambda: StockForwardTracker(research_dir).chained(datetime.now(TAIPEI).date()),
             "pool:seed": lambda: pool_view(research_dir, basis="seed"), "dashboard": lambda: dashboard_data(research_dir),
+            "distribution": lambda: _distribution_view(research_dir),
             "downside": lambda: downside_table(research_dir), "forward": lambda: StockForwardTracker(research_dir).summary(),
             "status": lambda: research_status(research_dir), "scale": lambda: search_scale(research_dir),
             "ranking": lambda: trial_ranking(research_dir / "trials.jsonl", "development"),
@@ -1349,9 +1375,11 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         )
 
     def render_holdings(error: str | None = None, form: dict | None = None, status: int = 200, on: str = ""):
-        overview = dependencies.paper_trading_service.overview()
+        # 2026-11-21 (使用者：整個 UI 非常慢): the old AI's paper account is shown only on /holdings?paper=1 (介面檢查 H-1); it was
+        # worked out for every visit (0.3 s, 20 price lookups) and thrown away
+        overview = dependencies.paper_trading_service.overview() if request.args.get("paper") else None
         actual = dependencies.actual_account_service.overview()
-        symbols = [item.position.symbol for item in overview.positions]
+        symbols = [item.position.symbol for item in overview.positions] if overview is not None else []
         symbols += [f"{item.symbol}.{suffix}" for item in actual.holdings for suffix in ("TW", "TWO")]
         names = names_for(symbols)
         investment_plan = dependencies.investment_plan_service.current()
@@ -1642,7 +1670,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         basis = request.args.get("basis") or _default_basis(research_dir)
         basis = basis if basis in ("seed", "lump_sum", "dca") else "seed"
-        view = ready(f"pool:{basis}", research_dir, lambda: pool_view(research_dir, basis=basis))
+        view = pool_for(research_dir, basis)
         picked = {key: (request.args.get(key) or "").strip() for key in POOL_FILTERS}
         # 2026-10-31 (使用者：你到底有沒有親自使用過系統): variants with the same results to the yuan are one row here
         # too (merge_same), as on the overview — 421 rules in 192 groups were listed one by one
@@ -1655,14 +1683,17 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                                # 2026-11-15 (介面檢查 PL-1：8,233、8,161、8,159 三個「規則數」沒寫各算什麼)
                                rule_counts={"all": len(view["daily"]), "with_0050": sum(1 for row in view["daily"] if row.get("uses_0050")),
                                             "full_track": (ready("dashboard", research_dir, lambda: dashboard_data(research_dir)) or {}).get("rules"),
-                                            "graded": (month_view(research_dir) or {}).get("graded")},
+                                            # 2026-11-21: the month's list is parsed (0.25 s) for one number — read it from the
+                                            # roles view the warm-up keeps
+                                            "graded": ((ready("roles", research_dir, lambda: roles_view(research_dir)) or {})
+                                                       .get("rolling") or {}).get("graded")},
                                generated=datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M"))
 
     @blueprint.get("/research/pool.json")
     def research_pool_json():
         research_dir = _instance_dir(dependencies.settings.database_url) / "research"
         basis = request.args.get("basis") or _default_basis(research_dir)
-        view = pool_view(research_dir, basis=basis if basis in ("seed", "lump_sum", "dca") else "seed")
+        view = dict(pool_for(research_dir, basis if basis in ("seed", "lump_sum", "dca") else "seed"))
         view["generated_at"] = datetime.now(TAIPEI).isoformat(timespec="seconds")
         return jsonify(view)
 
@@ -1784,7 +1815,9 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             start = forward_common_start(datetime.now(TAIPEI).date()).isoformat()
             found = distribution.forward_view(rows, ready("forward", research_dir, lambda: StockForwardTracker(research_dir).summary()), start)
         else:
-            found = distribution.view(research_dir, rows)
+            # 2026-11-21 (使用者：整個 UI 非常慢；每個類別點開要 4～6 秒、點第二次還是): the view of every rule's end money is
+            # kept ready by the warm-up like the pool it reads; computed here each click it took 4–6 s
+            found = ready("distribution", research_dir, lambda: distribution.view(research_dir, rows))
         whole = found.get(key)
         # 2026-10-27 (使用者：深度學習、RL、多因子、趨勢動能這些類別的分佈在哪一個位置): one category on the same axis
         family = request.args.get("family") or ""

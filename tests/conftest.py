@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import sqlite3
 from pathlib import Path
+
+import pytest
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 from quant_platform.database import engine
 
@@ -40,3 +45,26 @@ def _refuse_production_database(self, url: str) -> None:
 
 
 engine.Database.__init__ = _refuse_production_database
+
+
+@event.listens_for(Engine, "connect")
+def _tests_do_not_wait_for_the_disk(dbapi_connection, _record) -> None:
+    """2026-11-21 (使用者：整個 UI 非常慢; checking that fix, 49 page tests ran for 14 minutes and more): the tests' temp folder
+    is on D: (D-053, a hard disk) where one durable commit takes 280 ms - C: takes 2.6 ms (100 commits: 28 s against 0.26 s,
+    measured) - and building the app in a test is about 100 commits: 30 s. A test's database is thrown away; it does not wait
+    for the disk (D: with this: 8 ms a commit). Tests only: the site's database keeps its own settings."""
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        dbapi_connection.execute("PRAGMA synchronous=OFF")
+
+
+@pytest.fixture(autouse=True)
+def _pool_sources_without_the_live_batches(monkeypatch):
+    """2026-11-21 (使用者：整個 UI 非常慢; the check of that fix ran 14 minutes, one test stuck for ten): a pool built in a
+    test's fresh folder has no sources snapshot, so it asked for the rules of EVERY batch (research/pool.py
+    ``_every_batch_once``) - and dozens of the daily batches read the LIVE ``instance/research`` (the registry, 41,000
+    report files, the models): minutes in every test process, and a test reading the real data. No test names a rule by
+    the batch it came from; the one that checks the rebuild (tests/test_research_pool_sources.py) replaces
+    ``_every_batch`` itself."""
+    from quant_platform.research import pool
+
+    monkeypatch.setattr(pool, "_every_batch_once", lambda: {})

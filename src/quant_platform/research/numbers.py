@@ -9,6 +9,7 @@ front of the name everywhere, and /research/no/<number> opens it.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -16,17 +17,27 @@ _HEAD = re.compile(r'"trial_id":\s*(\d+).*?"spec_hash":\s*"([0-9a-f]{16,64})"')
 _CACHE: dict[str, object] = {}
 
 
-def numbers(research: str | Path) -> dict[str, int]:
-    """spec hash -> its first trial id, from trials.jsonl (kept until the file changes; only each line's head is read)."""
-    path = Path(research) / "trials.jsonl"
-    if not path.is_file():
-        return {}
-    stat = path.stat()
-    key = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+def _stamp(research: str | Path) -> tuple[str, int, int] | None:
+    """(path, modified, size) of the trial registry: ONE stat, None when there is no registry. 2026-11-21 (使用者：整個 UI
+    非常慢): every call used to resolve() the path (three more stats) and copy the whole 35,000-entry dict — a window that
+    names 17,000 rules asked 17,000 times and spent 5 s of its 7 on it."""
+    path = os.path.join(os.fspath(research), "trials.jsonl")
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (path, stat.st_mtime_ns, stat.st_size)
+
+
+def _load(research: str | Path) -> bool:
+    """Make the cache current (read again only when the registry changed); False when there is no registry."""
+    key = _stamp(research)
+    if key is None:
+        return False
     if _CACHE.get("key") != key:
         found: dict[str, int] = {}
         runs: dict[int, str] = {}
-        with open(path, encoding="utf-8") as handle:
+        with open(key[0], encoding="utf-8") as handle:
             for line in handle:
                 match = _HEAD.search(line[:400])
                 if match:
@@ -35,6 +46,14 @@ def numbers(research: str | Path) -> dict[str, int]:
                     if spec not in found or trial < found[spec]:
                         found[spec] = trial
         _CACHE.update(key=key, found=found, by_number={trial: spec for spec, trial in found.items()}, runs=runs)
+    return True
+
+
+def numbers(research: str | Path) -> dict[str, int]:
+    """spec hash -> its first trial id, from trials.jsonl (kept until the file changes; only each line's head is read).
+    A copy: for one number use ``number_of``."""
+    if not _load(research):
+        return {}
     return dict(_CACHE["found"])  # type: ignore[arg-type]
 
 
@@ -45,14 +64,12 @@ _DATES: dict[str, object] = {}
 def first_dates(research: str | Path) -> dict[str, str]:
     """2026-11-19 (the T0 list: a rule registered after its forward record began had those days recorded afterwards):
     spec hash -> the day its first trial was registered (kept until the file changes)."""
-    path = Path(research) / "trials.jsonl"
-    if not path.is_file():
+    key = _stamp(research)
+    if key is None:
         return {}
-    stat = path.stat()
-    key = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
     if _DATES.get("key") != key:
         found: dict[str, str] = {}
-        with open(path, encoding="utf-8") as handle:
+        with open(key[0], encoding="utf-8") as handle:
             for line in handle:
                 head, made = _HEAD.search(line[:400]), _CREATED.search(line)
                 if head and made and (head.group(2) not in found or made.group(1) < found[head.group(2)]):
@@ -62,23 +79,24 @@ def first_dates(research: str | Path) -> dict[str, str]:
 
 
 def number_of(research: str | Path, spec_hash: str | None) -> int | None:
-    if not spec_hash:
+    if not spec_hash or not _load(research):
         return None
-    numbers(research)
-    return (_CACHE.get("found") or {}).get(spec_hash)  # type: ignore[union-attr]
+    return _CACHE["found"].get(spec_hash)  # type: ignore[union-attr]
 
 
 def spec_of(research: str | Path, number: int) -> str | None:
     """The spec hash a strategy number stands for (None when no rule was registered as that trial first)."""
-    numbers(research)
-    return (_CACHE.get("by_number") or {}).get(number)  # type: ignore[union-attr]
+    if not _load(research):
+        return None
+    return _CACHE["by_number"].get(number)  # type: ignore[union-attr]
 
 
 def spec_of_run(research: str | Path, trial: int) -> str | None:
     """2026-11-15 (介面檢查 E-1): the rule ANY trial belongs to — a later run of a rule has a newer trial id, and pages
     printed that one ("#34653"); typed in the number box it opens the rule (whose fixed number is its first trial)."""
-    numbers(research)
-    return (_CACHE.get("runs") or {}).get(trial)  # type: ignore[union-attr]
+    if not _load(research):
+        return None
+    return _CACHE["runs"].get(trial)  # type: ignore[union-attr]
 
 
 def label_of_run(research: str | Path, trial: int | None) -> str:

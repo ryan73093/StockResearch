@@ -7,6 +7,7 @@ import json
 import logging
 import secrets
 import statistics
+import time
 from zoneinfo import ZoneInfo
 
 from flask import Flask, flash, g, jsonify, redirect, render_template, request, url_for
@@ -41,6 +42,11 @@ DATABASE_TABLE_DESCRIPTIONS = {
 }
 
 
+# 2026-11-21 (使用者：整個 UI 非常慢、點什麼都很慢): a click the owner found slow left no trace and could not be found
+# afterwards; a request over this many seconds is written to the web log ("SLOW GET /path -> 200 in 12.5 s")
+SLOW_REQUEST_SECONDS = 1.5
+
+
 def create_app(container: Container | None = None) -> Flask:
     dependencies = container or build_container()
     app_started_at = datetime.now(UTC)
@@ -60,6 +66,10 @@ def create_app(container: Container | None = None) -> Flask:
     app.register_blueprint(create_v2_blueprint(dependencies))
     request_log = logging.getLogger("quant_platform.web.requests")
 
+    @app.before_request
+    def start_request_timer() -> None:
+        g.request_started = time.perf_counter()
+
     @app.after_request
     def log_failed_requests(response):
         # Without a trace of 4xx/5xx answers a user's "it showed an error" cannot be diagnosed.
@@ -68,6 +78,15 @@ def create_app(container: Container | None = None) -> Flask:
                 "%s %s -> %s (%s)", request.method, request.path, response.status_code,
                 request.headers.get("User-Agent", "")[:80],
             )
+        started = g.get("request_started")
+        if started is not None and not request.path.startswith("/static/"):
+            seconds = time.perf_counter() - started
+            if seconds > SLOW_REQUEST_SECONDS:
+                request_log.warning(
+                    "SLOW %s %s%s -> %s in %.1f s", request.method, request.path,
+                    ("?" + request.query_string.decode("utf-8", "replace")[:120]) if request.query_string else "",
+                    response.status_code, seconds,
+                )
         return response
 
     @app.before_request

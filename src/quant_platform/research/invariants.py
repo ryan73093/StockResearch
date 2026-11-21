@@ -570,9 +570,10 @@ def run(research: str | Path, today: date, backups: Path | None = None,
     if site:
         live_hashes = [item["rule_hash"] for item in live if item.get("kind") == "daily" and item["rule_hash"] in numbered]
         slow = research_pages(site, live_hashes[0] if live_hashes else None)
-        checks.append(_check("研究頁 5 秒內打開、規則有編號、每一筆交易有買進價與賣出價",
-                             "使用者 2026-10-28：研究的載入也太慢了吧；每個策略給個編號；每一筆交易都要顯示買入的價格跟賣出的價格",
-                             not slow, "；".join(slow) if slow else "研究總覽、規則頁、前向頁都在 5 秒內"))
+        checks.append(_check("研究頁與彈窗 3 秒內打開、規則有編號、每一筆交易有買進價與賣出價",
+                             "使用者 2026-10-28：研究的載入也太慢了吧；每個策略給個編號；每一筆交易都要顯示買入的價格跟賣出的價格；"
+                             "2026-11-21：整個 UI 非常慢，點什麼都很慢",
+                             not slow, "；".join(slow) if slow else "研究總覽、分布與類別視窗、選手池、規則頁、前向頁都在 3 秒內"))
         # 2026-11-15 (介面檢查 U3，D-046 第 9 項：同一件事兩個數字是錯的)
         differing = same_figures(site)
         checks.append(_check("同一個問題，各頁的數字一樣（首頁、研究總覽、策略角色）",
@@ -809,21 +810,30 @@ def priority_check(processes: list[dict[str, object]] | None, root: Path) -> dic
         return _check(name, source, False, f"沒辦法檢查：{str(exc)[:120]}")
 
 
-PAGE_LIMIT = 5.0           # seconds a research page may take (使用者 2026-10-28：研究的載入也太慢了吧)
+PAGE_LIMIT = 3.0           # seconds a research page may take (使用者 2026-10-28：研究的載入也太慢了吧; 11/21: was 5 s)
 
 
 def research_pages(site: str, rule_hash: str | None, limit: float = PAGE_LIMIT) -> list[str]:
     """What is wrong with the research pages as the owner opens them: slower than ``limit``, not opening, a strategy's
-    page without its number, a forward page without the buy and sell prices."""
+    page without its number, a forward page without the buy and sell prices.
+
+    2026-11-21 (使用者：整個 UI 非常慢，點什麼都很慢，你自己點過嗎): this timed three pages while the windows the overview
+    opens (where every rule's end money falls, one category's) took 4–6 s a click and the pool in its other bases 40 s - for
+    weeks, and the limit of 5 s let the 4.6 s ones through. They are opened too, and the limit is 3 s."""
+    import re
     import time
+    import urllib.parse
     import urllib.request
 
-    pages = [("研究總覽", "/research", ())]
+    pages = [("研究總覽", "/research", ()), ("分布視窗", "/research/distribution?track=recent", ()),
+             ("選手池", "/research/pool", ()), ("選手池（定期定額）", "/research/pool?basis=dca", ())]
     if rule_hash:
         pages += [("規則頁", f"/research/rules/{rule_hash}", ('class="rule-no"',)),
                   ("前向頁", f"/research/forward/{rule_hash}", ('class="rule-no"', "買進價", "賣出價"))]
     wrong = []
-    for name, path, needed in pages:
+    queue = list(pages)
+    while queue:
+        name, path, needed = queue.pop(0)
         started = time.monotonic()
         try:
             with urllib.request.urlopen(site.rstrip("/") + path, timeout=60) as response:
@@ -835,6 +845,10 @@ def research_pages(site: str, rule_hash: str | None, limit: float = PAGE_LIMIT) 
         if spent > limit:
             wrong.append(f"{name} {spent:.1f} 秒")
         wrong += [f"{name}沒有「{text}」" for text in needed if text not in body]
+        if path == "/research":                         # the window of one category: its name is on the overview
+            families = re.findall(r'data-family="([^"]+)"', body)
+            if families:
+                queue.insert(0, ("類別視窗", "/research/distribution?track=recent&family=" + urllib.parse.quote(families[0]), ()))
     return wrong
 
 

@@ -147,6 +147,10 @@ def test_research_page_ranks_candidate_trials(tmp_path):
         run_trial(kind="candidate", spec=spec, period="development", market=MARKET, plan=PLAN,
                   registry=registry, reports_dir=tmp_path / "research" / "reports", window_months=(3,))
 
+    from quant_platform.dashboard import v2
+
+    v2._READY.clear()       # 2026-11-21: since 11/20 (e219cfa) the ranking is a view the page keeps for 15 minutes; the first
+    #                         request above kept the empty one - the test failed in the full run, which had not been run since
     body = client.get("/research?tab=legacy").get_data(as_text=True)
     assert "目前資料版本 2 個候選試驗" in body and "回撤 5%" in body and "開發期" in body
 

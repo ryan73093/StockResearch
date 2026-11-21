@@ -42,12 +42,32 @@ class DecisionsUnreadable(RuntimeError):
     """The decisions file is there and could not be read (held by another process past the wait, or not JSON)."""
 
 
+_SHARED: dict[str, tuple] = {}
+
+
 class DecisionStore:
-    def __init__(self, research: str | Path) -> None:
+    def __init__(self, research: str | Path, shared: bool = False) -> None:
+        """``shared``: for a page that only reads (a rule's forward page). The file is 66 MB; parsing it for every click
+        took 0.6 s of a 0.9 s page (2026-11-21, 使用者：整個 UI 非常慢). The parse is kept while the file's stamp stays;
+        this class never changes ``_data`` in place (kept entries are new dicts, ``_drop`` and ``_save`` read the file
+        again themselves), so a store that writes does not use it."""
         self.path = Path(research) / "forward" / "stocks" / "decisions.json"
         self._kept: dict[str, dict] = {}
         self._loaded_at = time.time()            # 2026-10-22: what was dropped after this is not written back
-        self._data = self._read()
+        self._data = self._shared() if shared else self._read()
+
+    def _shared(self) -> dict:
+        try:
+            stat = self.path.stat()
+        except OSError:
+            return self._read()
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        held = _SHARED.get(str(self.path))
+        if held is not None and held[0] == stamp:
+            return held[1]
+        data = self._read()
+        _SHARED[str(self.path)] = (stamp, data)
+        return data
 
     def _read(self, wait: float = 60.0) -> dict:
         """The file's accounts; none only when there is no file. 2026-11-12 (system review of 11-10, root cause 5): a

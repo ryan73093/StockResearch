@@ -248,23 +248,34 @@ def test_the_trading_page_names_the_engine_and_is_on_the_project_list(tmp_path):
 
 
 def test_the_research_pages_are_opened_and_timed(monkeypatch):
-    """2026-10-28 (使用者：研究的載入也太慢了吧；每一筆交易都要顯示買入的價格跟賣出的價格)."""
+    """2026-10-28 (使用者：研究的載入也太慢了吧；每一筆交易都要顯示買入的價格跟賣出的價格); 2026-11-21 (使用者：整個 UI 非常
+    慢，點什麼都很慢): the windows the overview opens and the pool are opened and timed too - the check had timed three pages
+    while those took 4-6 s and 40 s a click."""
     import io
+    import urllib.parse
     import urllib.request
 
-    bodies = {"/research": "ok", "/research/rules/h": '<span class="rule-no">#1</span>',
-              "/research/forward/h": '<span class="rule-no">#1</span> 買進價'}
+    family = urllib.parse.quote("多因子")
+    bodies = {"/research": '<button data-family="多因子">', "/research/rules/h": '<span class="rule-no">#1</span>',
+              "/research/forward/h": '<span class="rule-no">#1</span> 買進價',
+              "/research/distribution?track=recent": "ok", f"/research/distribution?track=recent&family={family}": "ok",
+              "/research/pool": "ok", "/research/pool?basis=dca": "ok"}
+    opened_paths = []
 
     def opened(url, timeout=0):
         path = url.split("5000", 1)[1]
+        opened_paths.append(path)
         return io.BytesIO(bodies[path].encode("utf-8"))
 
     monkeypatch.setattr(urllib.request, "urlopen", opened)
     found = invariants.research_pages("http://127.0.0.1:5000", "h")
     assert found == ["前向頁沒有「賣出價」"]
+    assert sorted(opened_paths) == sorted(bodies)                    # the windows and the pool, not only the three pages
     bodies["/research/forward/h"] += " 賣出價"
     assert invariants.research_pages("http://127.0.0.1:5000", "h") == []
-    assert invariants.research_pages("http://127.0.0.1:5000", "h", limit=-1.0)[0].startswith("研究總覽 ")
+    slow = invariants.research_pages("http://127.0.0.1:5000", "h", limit=-1.0)
+    assert slow[0].startswith("研究總覽 ")
+    assert [item.rsplit(" ", 2)[0] for item in slow] == ["研究總覽", "類別視窗", "分布視窗", "選手池", "選手池（定期定額）", "規則頁", "前向頁"]
 
 
 
