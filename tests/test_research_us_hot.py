@@ -86,3 +86,34 @@ def test_the_readings_are_refreshed_for_an_account_that_reads_them(tmp_path, mon
         raise OSError("no answer")
     monkeypatch.setattr(us, "fetch_revised", broken)
     assert us_factors.refresh_hot(tmp_path)["fetched"] is False                   # the files are kept, the orders go on
+
+
+def test_a_trial_with_the_setting_registers_alone_and_in_a_blend(tmp_path, monkeypatch):
+    """2026-11-22: bear14's 20 blends stopped on a name the blend's trial never imported — no test ran a trial with the
+    setting. Both kinds of trial run and keep the readings among their inputs."""
+    import numpy as np
+
+    from quant_platform.research import blend
+    from quant_platform.research.registry import TrialRegistry
+    from tests.test_research_blend import CALM, UP
+    from tests.test_research_blend import market as small_market
+
+    monkeypatch.setattr(daily, "RECENT_START", date(2024, 1, 1))
+    monkeypatch.setattr(daily, "REGIME_START", date(2024, 7, 1))
+    monkeypatch.setattr(daily, "RECENT_END", date(2024, 12, 31))
+    monkeypatch.setattr(daily, "WINDOWS", {"1y": 6})
+    data, plain = small_market()
+    fp = FactorPanel(plain.panel, market=np.linspace(100, 300, len(plain.sessions)))
+    hot = {day: (3 if day.month in (3, 4) else 0) for day in fp.sessions}
+    fp.us_hot_counts = hot
+    monkeypatch.setattr(market_signals, "us_hot", lambda history, sessions: {day: hot[day] for day in sessions})
+    registry = TrialRegistry(tmp_path / "trials.jsonl")
+    guarded = [rule.model_copy(update={"vol_scale": "us_hot_half"}) for rule in (UP, CALM)]
+    mix = blend.BlendRule(name="過熱減碼的組合", sleeves=(blend.Sleeve(rule=guarded[0], share=0.5),
+                                                    blend.Sleeve(rule=guarded[1], share=0.5)))
+    record, report = blend.run_blend_trial(mix, tmp_path, registry, tmp_path / "reports", FREE, data, fp, "daily:test")
+    assert record.spec_hash == mix.rule_hash and report["curve"]
+    single, _report = daily.run_trial(guarded[0], tmp_path, registry, tmp_path / "reports", FREE, data, fp, "daily:test")
+    assert single.spec_hash == guarded[0].rule_hash and len(registry.records()) == 2
+    assert daily.us_hot_digest(tmp_path, list(fp.sessions), date(2024, 12, 31)) != daily.us_hot_digest(
+        tmp_path, list(fp.sessions), date(2024, 3, 15))                              # the readings to the end are the input
