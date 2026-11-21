@@ -14,7 +14,13 @@ return is at least ``GAP`` below the period's average and its 10%-fall rate at l
 2026-10-22 (八大行庫): the eight government banks' net buying over the whole listed market, as a share of the market's
 turnover over 5 and 20 sessions (FinMind TaiwanStockGovernmentBankBuySell from 2021-06-30, history/paid). Known from
 2021-07, its percentiles from 2022-07: judged on SHORT_PERIODS (2022-07..2023-12 and 2024-01..2026-08) by the same
-criterion — written before the run (research_method §7「八大行庫」)."""
+criterion — written before the run (research_method §7「八大行庫」).
+
+2026-11-21 (使用者：有把美股的資料也放進來一起跑嗎？美股有很多指標): the US and international daily series the main
+database has held since 2020-01 and no research had read (Yahoo: ^VIX, ^SOX, ^IXIC, ^GSPC, TLT, TWD=X). A US session
+dated D closes at 05:00 Taipei on D+1, so it is used from the Taiwan session after its date, as every signal here.
+Percentiles from 2021-01; judged on US_PERIODS by the same criterion — written before the run (docs/research/results.md
+「美股與國際指標能不能提早看出 0050 大跌」)."""
 
 from __future__ import annotations
 
@@ -31,6 +37,8 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 PERIODS = {"2015-06～2020-09": (date(2015, 6, 1), date(2020, 9, 30)), "2020-10～2026-08": (date(2020, 10, 1), date(2026, 8, 31))}
 SHORT_PERIODS = {"2022-07～2023-12": (date(2022, 7, 1), date(2023, 12, 31)), "2024-01～2026-08": (date(2024, 1, 1), date(2026, 8, 31))}
 GOVBANK = "八大行庫淨買超"
+US = "美股："
+US_PERIODS = {"2021-01～2023-12": (date(2021, 1, 1), date(2023, 12, 31)), "2024-01～2026-08": (date(2024, 1, 1), date(2026, 8, 31))}
 HORIZONS = (20, 60)
 FALL = 0.10
 GAP, RATE = 0.03, 1.5
@@ -81,6 +89,43 @@ def govbank(history: str | Path, sessions: int) -> dict[date, float]:
     return {day.date(): float(value) for day, value in share.dropna().items()}
 
 
+def us_series(database: str | Path) -> dict[str, dict[date, float]]:
+    """US session date → value, from the main database's daily bars (read-only): the VIX and its 5-session change, the
+    semiconductor index's 20-session return and its distance from its 200-session average, the Nasdaq's 20-session
+    return, the S&P 500 against its 200-session average, the long Treasury ETF's 20-session return, and the 20-session
+    change of the US dollar in Taiwan dollars. {} without the database."""
+    import sqlite3
+
+    path = Path(database)
+    if not path.is_file():
+        return {}
+    wanted = ("^VIX", "^SOX", "^IXIC", "^GSPC", "TLT", "TWD=X")
+    closes: dict[str, dict[date, float]] = {symbol: {} for symbol in wanted}
+    with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
+        rows = connection.execute(
+            "select symbol, event_time, coalesce(adjusted_close, close) from market_bars where market = 'US' and "
+            f"interval = '1d' and symbol in ({','.join('?' * len(wanted))})", wanted).fetchall()
+    for symbol, when, close in rows:
+        if close is not None and float(close) > 0:
+            closes[symbol][date.fromisoformat(str(when)[:10])] = float(close)
+
+    def moved(values: dict[date, float], sessions: int) -> dict[date, float]:
+        days = sorted(values)
+        return {day: values[day] / values[days[index - sessions]] - 1 for index, day in enumerate(days) if index >= sessions}
+
+    def above(values: dict[date, float], sessions: int = 200) -> dict[date, float]:
+        days = sorted(values)
+        levels = np.array([values[day] for day in days])
+        return {day: float(levels[index] / levels[index - sessions + 1:index + 1].mean() - 1)
+                for index, day in enumerate(days) if index >= sessions - 1}
+
+    output = {f"{US}VIX（水準）": closes["^VIX"], f"{US}VIX（5 日變化）": _changes(closes["^VIX"], 5),
+              f"{US}費城半導體（20 日報酬）": moved(closes["^SOX"], 20), f"{US}費城半導體（對 200 日均線）": above(closes["^SOX"]),
+              f"{US}那斯達克（20 日報酬）": moved(closes["^IXIC"], 20), f"{US}S&P 500（對 200 日均線）": above(closes["^GSPC"]),
+              f"{US}美國長債 TLT（20 日報酬）": moved(closes["TLT"], 20), f"{US}美元兌台幣（20 日變化）": moved(closes["TWD=X"], 20)}
+    return {name: values for name, values in output.items() if values}
+
+
 def _changes(values: dict[date, float], sessions: int = 20) -> dict[date, float]:
     days = sorted(values)
     return {day: values[day] - values[days[index - sessions]] for index, day in enumerate(days) if index >= sessions}
@@ -107,7 +152,7 @@ def study(index: dict[date, float], signals: dict[str, dict[date, float]]) -> di
         known = sorted(values)
         ranks = percentiles(values)
         report = {}
-        periods = SHORT_PERIODS if name.startswith(GOVBANK) else PERIODS
+        periods = SHORT_PERIODS if name.startswith(GOVBANK) else US_PERIODS if name.startswith(US) else PERIODS
         for period, (start, end) in periods.items():
             buckets: dict[int, list[tuple[float, float, bool]]] = {fifth: [] for fifth in range(5)}
             for day in days:
@@ -162,6 +207,10 @@ def run(history: str | Path, research: str | Path) -> Path:
         if values:
             signals[f"{GOVBANK}（{sessions} 日，佔全市場成交值）"] = values
             raw[f"{GOVBANK}（{sessions} 日）"] = values
+    # 2026-11-21: the US and international series (research is instance/research, the database beside it)
+    american = us_series(Path(research).parent / "quant_platform.db")
+    signals.update(american)
+    raw.update(american)
     found = study(index, signals)
     report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "fall": FALL, "gap": GAP, "rate": RATE,
               "signals": found, "ranges": {name: [str(min(values)), str(max(values))] for name, values in raw.items() if values}}
