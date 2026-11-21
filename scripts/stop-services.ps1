@@ -113,6 +113,16 @@ Start-Sleep -Seconds 1
 $remaining = @(Get-ProjectServiceProcesses) + @(Get-ProjectPythonChildren) + @(Get-ProjectSupervisors) + @(Get-ProjectTunnels)
 $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
     Where-Object { $_.LocalPort -in 5000, 8000 })
+# 2026-11-22 (a deploy at 02:08 stopped every service, then failed here on "8000/PID 0" and installed nothing - the
+# services stayed down until the deploy was run again): a listening socket whose owner has already ended closes by
+# itself within seconds; it is given 20 seconds. A listener with a live owner fails at once, as before.
+$portDeadline = (Get-Date).AddSeconds(20)
+while ($listeners.Count -gt 0 -and (Get-Date) -lt $portDeadline -and -not ($listeners | Where-Object {
+            $_.OwningProcess -and (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue) })) {
+    Start-Sleep -Seconds 2
+    $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalPort -in 5000, 8000 })
+}
 Remove-Item -LiteralPath $stopFlagPath, $supervisorPidPath -Force -ErrorAction SilentlyContinue
 Get-ChildItem -LiteralPath $runtimeRoot -Filter '*.pid' -ErrorAction SilentlyContinue | Remove-Item -Force
 if ($remaining.Count -gt 0) {
