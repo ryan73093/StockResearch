@@ -49,7 +49,7 @@ def test_the_overview_and_the_home_page_say_how_long_until_the_first_t0(tmp_path
     from quant_platform.research.countdown import countdown
 
     wait = countdown(date(2026, 11, 22), date(2026, 11, 30), date(2026, 11, 20), 54, 60, lambda day: day.weekday() < 5,
-                     not_behind_both=347)
+                     not_behind_both=347, judged=324)
     app = _app(tmp_path)
     client = app.test_client()
     assert 'id="t0-countdown"' not in client.get("/research").get_data(as_text=True)        # nothing kept yet: the block is left out
@@ -60,3 +60,4 @@ def test_the_overview_and_the_home_page_say_how_long_until_the_first_t0(tmp_path
         assert 'id="t0-countdown"' in body, path
         assert "還有 6 個交易日（8 天）" in body and "11/30（一）" in body and "11/23（一）" in body, path
         assert "54<small>／60 個交易日" in body and "347" in body and "以前不會有 T0" in body, path
+        assert "會被判的有 <b>324</b> 個" in body and 'href="/research/t0-list"' in body, path       # both counts, related, not two answers

@@ -30,6 +30,26 @@ def test_the_day_has_come_or_gone():
     assert after["days"] < 0 and after["sessions_left"] == 0 and after["reached"] is True
 
 
+def test_the_judged_count_is_the_t0_lists_count():
+    """The countdown's "會被判的有 N 個" must be the number the 判定清單 lists (progress.t0_list), not the home page's wider count."""
+    from quant_platform.research.countdown import judged_count
+    from quant_platform.research.progress import PASSING, t0_list
+
+    def run(sessions, excess, sold, parts=True):
+        return {"sessions": sessions, "excess": excess, "sold_excess": sold, "parts": [{"from": "2026-09-01", "to": "2026-11-20"}] if parts else [],
+                "return": 0.1, "benchmark_return": 0.05, "beta": 0.9}
+
+    chained = {"a": run(54, 0.02, 0.01), "b": run(54, 0.02, -0.01), "c": run(54, -0.01, 0.02), "d": run(54, 0.03, 0.03),
+               "e": run(54, 0.03, 0.03), "f": run(40, 0.05, 0.05), "g": run(54, 0.02, 0.02, parts=False)}
+    tier = PASSING[0] if isinstance(PASSING, (tuple, list)) else sorted(PASSING)[0]
+    pool = [{"spec_hash": key, "name": key, "tier": tier, "category": {"family": "多因子"}, "uses_0050": key == "d"} for key in chained]
+    pool[4]["tier"] = "T3"                                                    # e: fails the backtest gates
+    # a: ahead on both; b, c: behind on one money; d: has 0050; e: not passing; f: a shorter run; g: no record parts
+    assert judged_count(chained, pool, PASSING) == 1
+    assert len(t0_list(chained, pool, {}, {})["rows"]) == judged_count(chained, pool, PASSING)      # the same filter as the list
+    assert judged_count(None, pool, PASSING) == 0
+
+
 def test_no_forward_record_counts_from_today():
     found = countdown(date(2026, 11, 22), date(2026, 11, 24), None, 0, 60, _weekdays)
     assert found["dates"] == ["11/23（一）", "11/24（二）"] and found["through_label"] == ""

@@ -380,12 +380,13 @@ def start_view(research_dir: Path) -> dict[str, object]:
     t0_rules = sum(1 for row in pool if str(row.get("tier") or "").startswith("T0") and "候選" not in str(row.get("tier")))
     first = date.fromisoformat(chain["first_t0"])
     # 2026-11-22 (使用者 D-059：距三十號，我又不知道要多久，只剩八天，沒有一個可以上線的): the wait for the first T0 in sessions and days
-    from quant_platform.research.countdown import countdown
+    from quant_platform.research.countdown import countdown, judged_count
     from quant_platform.research.invariants import _calendar
+    from quant_platform.research.progress import PASSING
 
     wait = countdown(now.date(), first, date.fromisoformat(state["forward"]) if state.get("forward") else None, chain["sessions"],
                      chain["needed"], _calendar(research_dir).is_trading_day, not_behind_both=t0.get("not_behind_both"),
-                     t0_rules=t0_rules)
+                     t0_rules=t0_rules, judged=judged_count(chained, pool, PASSING))
 
     def big(count: float) -> str:
         return f"{count / 1e8:,.2f} 億" if count >= 1e8 else (f"{count / 1e4:,.0f} 萬" if count >= 1e5 else f"{count:,.0f}")
