@@ -1,0 +1,28 @@
+{# 2026-11-22 (D-058; 使用者：AI 的部分用個對話小視窗…右下角一個按鍵，然後彈出來就一個對話視窗。不然我完全不知道後端到底有沒有在回):
+   the button and the window of every page; static/js/chat.js fills the thread and talks to dashboard/chat.py (POST /research/chat,
+   a text/event-stream of steps, a heartbeat and the answer). The look is static/css/chat.css. #}
+<button type="button" class="chat-launcher" id="chat-launcher" aria-label="開啟 AI 對話" aria-expanded="false" aria-controls="chat-window" title="問 AI（研究知識庫）">
+  <svg class="chat-launcher__icon" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
+    <path class="chat-launcher__bubble" d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-6.3L8.5 21v-3.5H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z"/>
+    <circle class="chat-launcher__d1" cx="8.5" cy="11" r="1.15"/><circle class="chat-launcher__d2" cx="12" cy="11" r="1.15"/><circle class="chat-launcher__d3" cx="15.5" cy="11" r="1.15"/>
+  </svg>
+  <span class="chat-launcher__dot" hidden></span>
+</button>
+<section class="chat-window" id="chat-window" role="dialog" aria-modal="false" aria-labelledby="chat-title" hidden data-examples="{{ (chat_examples or [])|tojson|forceescape }}">
+  <header class="chat-window__head">
+    <div class="chat-window__name"><strong id="chat-title">問 AI</strong><small>只根據研究知識庫的紀錄回答，每句附出處</small></div>
+    <div class="chat-window__tools">
+      <button type="button" class="chat-tool" data-chat-new title="新對話（清掉這一段）" aria-label="新對話">＋</button>
+      <button type="button" class="chat-tool" data-chat-size title="放大" aria-label="放大">⤢</button>
+      <button type="button" class="chat-tool" data-chat-close title="收合（Esc）" aria-label="收合">✕</button>
+    </div>
+  </header>
+  <div class="chat-thread" role="log" aria-live="polite" aria-relevant="additions" aria-label="對話"></div>
+  <form class="chat-form" autocomplete="off">
+    <label class="visually-hidden" for="chat-input">問題</label>
+    <textarea id="chat-input" rows="2" maxlength="500" placeholder="問研究知識庫，例如：停損有沒有效？"></textarea>
+    <button type="submit" class="btn btn--primary chat-send" data-chat-send>送出</button>
+  </form>
+  <p class="chat-foot">Enter 送出，Shift+Enter 換行。每題獨立回答；問 AI 約 30～50 秒、約 US$0.002，同一題在知識庫沒變以前不重複計費。</p>
+</section>
+<script src="{{ url_for('static', filename='js/chat.js', v=asset_version) }}" defer></script>

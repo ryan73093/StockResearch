@@ -15,6 +15,7 @@ from sqlalchemy import inspect, text
 
 from quant_platform.container import Container, build_container
 from quant_platform.dashboard.cloudflare_access import register_cloudflare_access
+from quant_platform.dashboard.chat import create_chat_blueprint
 from quant_platform.dashboard.v2 import create_v2_blueprint
 from quant_platform.application.analytics import DEFAULT_UNIVERSE
 from quant_platform.application.odd_lot_research import OddLotAssumptions
@@ -64,6 +65,7 @@ def create_app(container: Container | None = None) -> Flask:
     # Registered first so it runs before any other request hook.
     register_cloudflare_access(app, dependencies.settings)
     app.register_blueprint(create_v2_blueprint(dependencies))
+    app.register_blueprint(create_chat_blueprint(dependencies))      # 2026-11-22 (D-058): the AI chat window, every page
     request_log = logging.getLogger("quant_platform.web.requests")
 
     @app.before_request

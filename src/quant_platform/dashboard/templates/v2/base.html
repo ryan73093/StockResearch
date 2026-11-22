@@ -10,6 +10,7 @@
   <title>{% block title %}交易研究分析平台{% endblock %}</title>
   <link rel="icon" href="{{ url_for('static', filename='mark.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css', v=asset_version) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css', v=asset_version) }}">
 </head>
 <body>
   {# 2026-11-17 (D-047): what this page is known by in the navigation (v2/_nav.html nav_sections) #}
@@ -222,6 +223,7 @@
     });
   })();
   </script>
+  {% include "v2/_chat.html" %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

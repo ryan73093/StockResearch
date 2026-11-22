@@ -39,12 +39,14 @@
     <input id="kb-q" name="q" type="search" value="{{ question }}" placeholder="例如：停損有沒有效？月營收的策略可不可行？#6490 的回測？" autocomplete="off" maxlength="500">
     <div class="kb-form__buttons">
       <button type="submit" class="btn">搜尋紀錄</button>
-      <button type="submit" class="btn btn--primary" name="ai" value="1"{% if not ai.ready %} disabled title="{{ ai.note }}"{% endif %}>問 AI</button>
+      {# 2026-11-22 (D-058): 「問 AI」 opens the chat window at the bottom right (static/js/chat.js, data-chat-ask), which writes what the
+         backend is doing as it does it; without the script the button still submits ai=1 as before #}
+      <button type="submit" class="btn btn--primary" name="ai" value="1" data-chat-ask data-chat-source="#kb-q"{% if not ai.ready %} title="{{ ai.note }}"{% endif %}>問 AI</button>
     </div>
   </form>
   {# 2026-11-15 (介面檢查 K-1：搜尋一題 23 秒、問 AI 25～50 秒，畫面沒有任何反應): say it is running, and how long #}
   <p class="kb-wait small" id="kb-wait" hidden role="status"><span class="kb-wait__dot"></span><span id="kb-wait-text"></span></p>
-  <p class="muted small" style="margin:6px 0 0">「搜尋紀錄」不花錢，第一次要載入語意模型約 20 秒、之後幾秒；「問 AI」會把找到的紀錄交給模型整理，約 30～50 秒、會計費（同一題在紀錄沒變以前不重複計費）。</p>
+  <p class="muted small" style="margin:6px 0 0">「搜尋紀錄」不花錢，第一次要載入語意模型約 20 秒、之後幾秒；「問 AI」開右下角的對話視窗，後端做到哪一步、已經等了幾秒都寫在視窗裡；它把找到的紀錄交給模型整理，約 30～50 秒、會計費（同一題在紀錄沒變以前不重複計費）。</p>
   <p class="muted small" style="margin:6px 0 0">{{ ai.note }}　試試：{% for example in examples %}<a href="/research/knowledge?q={{ example|urlencode }}">{{ example }}</a>{% if not loop.last %}、{% endif %}{% endfor %}</p>
 
   {% if answer and (answer.conclusion or answer.note) %}
@@ -110,7 +112,7 @@
       <tbody>
       {% for item in recent %}
         <tr>
-          <td data-primary><a href="/research/knowledge?q={{ item.question|urlencode }}&ai=1">{{ item.question }}</a></td>
+          <td data-primary><a href="/research/knowledge?q={{ item.question|urlencode }}&ai=1" data-chat-ask data-chat-question="{{ item.question }}">{{ item.question }}</a></td>
           <td data-label="結論" class="small">{{ item.conclusion }}</td>
           <td data-label="時間">{{ (item.at or '')[:16].replace('T', ' ') }}</td>
         </tr>
@@ -133,7 +135,7 @@
     wait.hidden = false; say(); setInterval(say, 1000);
   };
   form.addEventListener('submit', (event) => begin(Boolean(event.submitter && event.submitter.name === 'ai')));
-  document.querySelectorAll('a[href^="/research/knowledge?q="]').forEach((link) => link.addEventListener('click', () => begin(link.href.includes('ai=1'))));
+  document.querySelectorAll('a[href^="/research/knowledge?q="]:not([data-chat-ask])').forEach((link) => link.addEventListener('click', () => begin(link.href.includes('ai=1'))));
 })();
 </script>
 {% endblock %}
