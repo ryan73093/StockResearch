@@ -142,7 +142,13 @@ def test_the_sweep_asks_for_the_whole_pool_and_a_stale_input_is_run_again(tmp_pa
     from quant_platform.research.registry import TrialRegistry
 
     assert daily.BATCHES["rerun_poolsweep"] is daily.pool_sweep_batch
-    assert list(daily.BATCHES)[-2:] == ["rerun_poolsweep", "rerun_guardorigins"]     # last: the sources name a rule by the first batch
+    # asked-again batches are no rule's source: the sources rebuild leaves every rerun* batch out by its name
+    import inspect
+
+    from quant_platform.research import pool
+
+    assert 'name.startswith("rerun")' in inspect.getsource(pool)
+    assert daily.BATCHES["rerun_guardorigins"] is daily.guard_origins_batch
     registry = TrialRegistry(tmp_path / "trials.jsonl")
     record = registry.register(kind="candidate", period="recent", spec_hash="s", spec_name="x", input_hash="h1",
                                data_fingerprint="d", metrics={})

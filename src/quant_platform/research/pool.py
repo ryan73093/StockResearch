@@ -159,7 +159,10 @@ def _every_batch_once() -> dict[str, str]:
 
     origin: dict[str, str] = {}
     for name, batch in DAILY_BATCHES.items():
-        if name in SEARCH_BATCHES:
+        # 2026-11-22: a batch that asks again for registered rules (rerun_*: the pool's sweep is the whole pool) is no
+        # rule's source — by name, not by its place in the table (a batch added after the sweep on 11/22 would have
+        # had its rules named after the sweep)
+        if name in SEARCH_BATCHES or name.startswith("rerun"):
             continue
         try:                                   # a batch built from the registry (t0equal) may not rebuild today
             rules = batch()
