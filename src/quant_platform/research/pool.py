@@ -583,6 +583,126 @@ def describe_rule(spec: dict) -> list[str]:
     return lines
 
 
+def _settings_rows(spec: dict) -> list[dict[str, str]]:
+    """One every-day-decision rule's settings, every question answered — a setting the rule does not use says so
+    (2026-11-22, 使用者：停損設多少？買的時候到底是用什麼樣的策略？具體上的參數是什麼？完全沒有)."""
+    from quant_platform.research.costs import broker_costs
+    from quant_platform.research.daily import FACTOR_LABELS, MODEL_FACTORS, RULE_FACTORS, VETO_WORDS
+    from quant_platform.research.scan import SHORT
+
+    def label(name: str) -> str:
+        if name in MODEL_FACTORS:
+            return f"{SHORT.get(name, name)}（{MODEL_FACTORS[name].replace('同上，', '')}）"
+        return str(FACTOR_LABELS.get(name) or RULE_FACTORS.get(name) or SHORT.get(name, name))
+
+    factors = spec.get("factors") or {}
+    total = sum(abs(weight) for weight in factors.values()) or 1.0
+    ranked = "；".join(f"{label(name)}{'（反向：越低越好）' if weight < 0 else ''} 佔 {abs(weight) / total:.0%}"
+                      for name, weight in factors.items())
+    top, keep = int(spec.get("top", 20)), int(spec.get("keep", 3))
+    rows = [("買什麼（排名依據）", ranked or "—",
+             "每個交易日把合格的股票各自排出百分位，照比重加起來，分數最高的排前面" if len(factors) > 1 else "合格的股票照這個分數由高到低排"),
+            ("買幾檔", f"分數前 {top} 名", "還沒持有、排進前幾名的才買"),
+            ("什麼時候決定", str(CHECK_WORDS.get(spec.get("check", "daily"), spec.get("check"))), "只在這些日子換股，其他日子不動"),
+            ("怎麼成交", str(EXECUTION_WORDS.get(spec.get("execution", "same"), spec.get("execution"))), "")]
+    weighting = spec.get("weighting", "equal")
+    rows.append(("每檔買多少", {**WEIGHT_WORDS, "inverse_beta": "跟大盤連動低的多買（依連動的倒數分配）",
+                             "rank": "排名越前面買越多"}.get(weighting, str(weighting)), f"{top} 檔合起來是帳戶的股票部位"))
+    leave = f"跌出前 {top * keep} 名" if keep > 1 else f"跌出前 {top} 名"
+    if spec.get("hold") == "trend":
+        sell = f"{leave}，而且股價跌破月線（20 日均線）才賣；還在月線上就續抱"
+    elif spec.get("min_hold", 20):
+        sell = f"{leave}，而且買進滿 {spec.get('min_hold', 20)} 個交易日才賣（沒滿不賣）"
+    else:
+        sell = f"{leave}就賣（不設最短持有）"
+    if spec.get("exit_model", "none") != "none":
+        sell += f"；另外由出場模型決定提早賣（{spec['exit_model']}）"
+    rows.append(("什麼時候賣", sell, "賣出看的是排名，不是賺賠幾成"))
+    rows.append(("停損", (f"從買進後的最高價跌超過 {spec['stop_loss']:.0%} 就賣，賣出後 {spec.get('cooldown', 20)} 個交易日內不買回"
+                        if spec.get("stop_loss") else "沒有設停損"),
+                 "" if spec.get("stop_loss") else "單一持股跌多少都不會因此賣出，只照上一列的條件賣"))
+    profit = []
+    if spec.get("winner_hold"):
+        profit.append(f"漲超過 {spec['winner_hold']:.0%} 而且在月線上的持股，跌出名次也續抱")
+    if spec.get("trim_above"):
+        profit.append(f"單一持股漲到目標金額的 {spec['trim_above']:g} 倍以上，賣掉多出來的部分")
+    rows.append(("停利", "；".join(profit) or "沒有設停利", "" if profit else "賺多少都不會因此賣出"))
+    market = []
+    if spec.get("market_filter", "none") != "none":
+        market.append(str(FILTER_WORDS.get(spec["market_filter"], spec["market_filter"])))
+    if spec.get("vol_scale", "none") != "none":
+        market.append(str(SCALE_WORDS.get(spec["vol_scale"], spec["vol_scale"])))
+    if spec.get("account_filter", "none") == "own_200":
+        market.append("自己的帳戶跌破 200 日均線就先不持股")
+    if spec.get("bear_factors"):
+        market.append("加權指數在 200 日均線下時改用「" + "＋".join(label(name) for name in spec["bear_factors"]) + "」排名")
+    rows.append(("大盤不好時", "；".join(market) or "沒有設：大盤下跌時照常滿倉", "減碼空出來的錢放現金，不買別的"))
+    vetoes = []
+    if spec.get("exclude", "none") != "none":
+        vetoes.append(str(VETO_WORDS.get(spec["exclude"], "不買新聞事件排除的股票" if spec["exclude"] == "v1" else spec["exclude"])))
+    if spec.get("risk_veto", "none") != "none":
+        vetoes.append(str(RISK_VETO_WORDS.get(spec["risk_veto"], spec["risk_veto"])))
+    if spec.get("news_veto", "none") == "v1":
+        vetoes.append("當天有重大負面新聞的股票不買")
+    rows.append(("不買的股票（否決）", "；".join(vetoes) or "沒有", "只擋新買進，已經持有的照賣出條件"))
+    spread = []
+    if spec.get("industry_cap"):
+        spread.append(f"同一產業最多佔 {spec['industry_cap']:.0%} 的檔數")
+    if spec.get("cluster_cap"):
+        spread.append(f"走勢相近的一群最多佔 {spec['cluster_cap']:.0%} 的檔數")
+    rows.append(("分散", "；".join(spread) or "沒有上限", ""))
+    universe = "上市＋上櫃股票" if spec.get("universe") == "all" else "上市股票"
+    if spec.get("large_caps"):
+        universe += f"裡市值前 {spec['large_caps']} 大"
+    rows.append(("可以買的股票", f"{universe}；收盤 ≥ {spec.get('min_price', 10):g} 元；近 20 日平均成交值 ≥ "
+                 f"{spec.get('min_turnover', 2e7) / 1e4:,.0f} 萬元；上市滿 {spec.get('min_history', 252)} 個交易日",
+                 {"entry": "這些條件只管買進，持有後不符合也不因此賣", "band": "持有的股票低於門檻的七成才因此賣"}.get(
+                     spec.get("eligibility", "both"), "持有的股票不再符合也會賣")))
+    if spec.get("switching") == "cost1":
+        rows.append(("換股", "要賣的持股，只有換成排名更前的股票扣掉一來一回的成本仍划算才換", ""))
+    if spec.get("smooth"):
+        rows.append(("分數平滑", f"分數用近 {spec['smooth']} 個交易日的平均", "減少每天跳動"))
+    costs = broker_costs("cathay")
+    rows.append(("交易成本（回測與前向都扣）", f"手續費 {costs.fee_rate * costs.fee_discount:.4%}（每筆最低 {costs.minimum_fee} 元）、"
+                 f"賣出證交稅 {dict(costs.tax_rates)['stock']:.1%}、滑價 {costs.slippage_bps / 100:.2f}%", "國泰的費率"))
+    rows.append(("資金", "啟動 30 萬元、每月 5 日再投入 1 萬元；" + ("錢進來先放著，決策日才買" if spec.get("reinvest", "decision") == "decision"
+                                                     else "錢一進來就照目前比重買"), "零股下單；比較基準是同樣的錢全部買 0050"))
+    return [{"item": item, "value": value, "note": note} for item, value, note in rows]
+
+
+def settings_sections(spec: dict) -> list[dict[str, object]]:
+    """The settings tables of a rule's page: one table for a rule, one for each part of a blend. [] for the old
+    designs (the page keeps their sentences)."""
+    if spec.get("kind") == "blend":
+        sections = [{"title": f"第 {number} 份：帳戶的 {sleeve['share']:.0%}", "rows": _settings_rows(sleeve["rule"])}
+                    for number, sleeve in enumerate(spec.get("sleeves") or [], start=1)]
+        if spec.get("core"):
+            sections.append({"title": f"另外 {spec['core']:.0%} 買 0050", "rows": [
+                {"item": "怎麼做", "value": "錢進來就買 0050，不賣", "note": ""}]})
+        return sections
+    return [{"title": "", "rows": _settings_rows(spec)}] if "factors" in spec else []
+
+
+def settings_line(spec: dict) -> str:
+    """A rule's settings in one line for the lists: what it buys, when it sells, its stop, what it does in a falling
+    market. A blend: its parts' shares and what each buys."""
+    from quant_platform.research.scan import SHORT
+
+    def short(rule: dict) -> str:
+        return "＋".join(str(SHORT.get(name, name)) for name in rule.get("factors") or {})
+
+    if spec.get("kind") == "blend":
+        return "組合：" + "；".join(f"{sleeve['share']:.0%} 買 {short(sleeve['rule'])}" for sleeve in spec.get("sleeves") or []) + (
+            f"；{spec['core']:.0%} 買 0050" if spec.get("core") else "") + "（各份的參數見規則頁）"
+    if "factors" not in spec:
+        return ""
+    rows = {row["item"]: row["value"] for row in _settings_rows(spec)}
+    checks = {"daily": "每天", "weekly": "每週", "monthly": "每月", "revenue": "每月營收後"}
+    return (f"買：{short(spec)} 分數前 {int(spec.get('top', 20))} 名（{checks.get(spec.get('check', 'daily'), spec.get('check'))}決定）"
+            f"｜賣：{rows['什麼時候賣']}｜停損：{rows['停損']}｜大盤不好時：{rows['大盤不好時']}"
+            + ("" if rows["不買的股票（否決）"] == "沒有" else f"｜否決：{rows['不買的股票（否決）']}"))
+
+
 def _svg(curve: dict[str, list[float]], width: int = 640, height: int = 220,
          counted: dict[str, float] | None = None, zoom: bool = False) -> dict[str, object] | None:
     """The money chart: the rule (its value, gains on paper in), 0050 with the same money and the money put in;
@@ -781,6 +901,7 @@ def rule_detail(research_dir: str | Path, spec_hash: str) -> dict[str, object] |
         seen_periods.setdefault(run["period"], str(run.get("engine")))
     forward = StockForwardTracker(base).summary_for(spec_hash)       # 2026-10-28: its own records only (it took ~14 s)
     return {"spec_hash": spec_hash, "name": records[-1].spec_name, "spec": spec, "description": describe_rule(spec),
+            "settings": settings_sections(spec),              # 2026-11-22: every setting, the unused ones said so
             # 2026-10-14: the daily-decision rules ("daily:" data) are stock rules too (the page said ETF 規則)
             "family": "個股規則" if records[-1].data_fingerprint.startswith(("stocks:", "daily:")) else "ETF 規則",
             "source": _sources(base).get(spec_hash, "其他"), "runs": runs, "forward": forward,

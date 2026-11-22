@@ -292,6 +292,25 @@ BETA_MONTHS = 60            # 2026-11-20: the months of the backtest beta shown 
                             # forward beta +0.78, docs/research/results.md「回測的連動能事前預測前向誰撐得住」)
 
 
+_SETTINGS: dict[str, str] = {}
+
+
+def settings_of(research: str | Path, report_file: str | None) -> str:
+    """2026-11-22 (使用者：所有的策略我都不知道你的參數到底是什麼): a rule's settings in one line (pool.settings_line),
+    from its registered report; kept by report file (a report is written once). "" without the report."""
+    if not report_file:
+        return ""
+    path = str(Path(research) / "reports" / report_file)
+    if path not in _SETTINGS:
+        from quant_platform.research.pool import settings_line
+
+        try:
+            _SETTINGS[path] = settings_line(json.loads(Path(path).read_text(encoding="utf-8")).get("spec") or {})
+        except (OSError, ValueError, KeyError, TypeError):
+            _SETTINGS[path] = ""
+    return _SETTINGS[path]
+
+
 def market_months(research: str | Path, report_file: str | None, until: str | None = None) -> dict[str, float] | None:
     """2026-11-19 (the T0 list: the rules ahead in a fall are mostly the ones moving less with 0050 — do they keep up
     when it rises?): from a rule's registered report, its average month return in the months 0050 rose and in the
@@ -351,6 +370,7 @@ def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, 
         problems = (summary.get(key) or {}).get("problems") or []
         output.append({"spec_hash": key, "name": row["name"], "tier": row["tier"],
                        "months": market_months(research, row.get("report_file"), start[:7] if start else None) if research else None,
+                       "settings": settings_of(research, row.get("report_file")) if research else "",
                        "family": (row.get("category") or {}).get("family") or "其他",
                        "excess": value["excess"], "sold_excess": sold, "beta": value.get("beta"),
                        "return": value["return"], "reconciled": not problems, "problems": len(problems),

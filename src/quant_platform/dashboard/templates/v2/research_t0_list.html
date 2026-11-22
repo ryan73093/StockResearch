@@ -18,6 +18,8 @@
         <td class="num" data-label="回測：0050 漲的月">{% if row.months %}{{ '{:+.1f}'.format(row.months.up * 100) }}%<span class="muted">（{{ '{:+.1f}'.format(row.months.up_bench * 100) }}%）</span>{% else %}—{% endif %}</td>
         <td class="num" data-label="回測：0050 跌的月">{% if row.months %}{{ '{:+.1f}'.format(row.months.down * 100) }}%<span class="muted">（{{ '{:+.1f}'.format(row.months.down_bench * 100) }}%）</span>{% else %}—{% endif %}</td>
         <td data-label="第一次登錄">{{ (row.first[5:7]|int ~ '/' ~ row.first[8:10]|int) if row.first else '—' }}</td></tr>
+      {% if row.settings %}<tr class="row-note row-note--keep"><td colspan="9">{{ row.settings }}</td></tr>
+{% endif %}
 {% endmacro %}
 {% set first_rows = 30 %}
 <div class="table-wrap table-wrap--stack">

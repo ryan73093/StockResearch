@@ -17,7 +17,23 @@
     {% if rule.final %}<span class="badge {{ 'badge--ok' if rule.final.passed else 'badge--bad' }}">最終驗證{{ '通過' if rule.final.passed else '未通過' }} {{ '{:+.0%}'.format(rule.final.excess) if rule.final.excess is not none else '' }}</span>{% endif %}
   </div>
   <p class="small" style="margin:0 0 8px"><b>完整名稱</b>：{{ rule.name }}</p>
+  {# 2026-11-22 (使用者：停損設多少？買的時候用什麼策略？具體上的參數是什麼？完全沒有): every setting in a table, the
+     unused ones said so (pool.settings_sections); the sentences stay for the designs without a table #}
+  {% if rule.settings %}
+  {% for section in rule.settings %}
+  {% if section.title %}<p class="small" style="margin:10px 0 4px"><b>{{ section.title }}</b></p>{% endif %}
+  <div class="table-wrap">
+    <table data-settings style="width:100%;table-layout:fixed">
+      <thead><tr><th style="width:6.5em">項目</th><th>這個規則的設定</th></tr></thead>
+      <tbody>{% for row in section.rows %}
+        <tr><td style="vertical-align:top;white-space:normal"><b>{{ row.item }}</b></td><td style="white-space:normal;overflow-wrap:anywhere">{{ row.value }}{% if row.note %}<br><span class="small muted">{{ row.note }}</span>{% endif %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+  {% else %}
   <ul class="reasons">{% for line in rule.description %}<li>{{ line }}</li>{% endfor %}</ul>
+  {% endif %}
   <p class="small muted" style="margin:8px 0 0">來源：{{ rule.family }}，研究批次「{{ rule.source }}」（程式裡的批次代號，查研究結果紀錄時用）。</p>
   {% if rule.significance %}{% set sig = rule.significance %}
   {# 2026-11-15 (介面檢查 S-3：可信度埋在第 3 個分頁): how much to trust the backtest, said on the first tab #}
