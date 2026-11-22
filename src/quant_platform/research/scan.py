@@ -103,6 +103,9 @@ SHORT = {
     "high_vol_60": "波動大", "momentum_1m": "近月強勢", "momentum_1w": "近週強勢", "industry_leader_5": "比同業強",
     "high_max_20": "飆股", "high_ivol_60": "特質波動大", "high_day_trade_20": "當沖多",
     "us_sox_beta": "費半連動高",
+    "smc_break_up_20": "SMC 結構突破", "smc_choch_up_20": "SMC 空翻多", "smc_ob_retest_10": "SMC 回測訂單塊",
+    "smc_fvg_retest_10": "SMC 回測缺口", "smc_sweep_low_10": "SMC 掃低回收", "smc_discount": "SMC 折價區",
+    "smc_setup_10": "SMC 完整進場",
 }
 
 
@@ -550,8 +553,10 @@ def novelty(fp, new: list[str], limit: float = 0.7, signed: bool = False) -> dic
         return float(np.mean(correlations)) if correlations else None
 
     output = {}
+    from quant_platform.research.smc import measured
+
     for name in new:
-        values = fp.matrix(name)
+        values = measured(name, fp.matrix(name))      # 2026-11-22: an SMC event without a signal counts as 0
         worst, against = 0.0, None
         opposite, opposite_with = 0.0, None
         for other in existing:

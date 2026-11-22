@@ -1962,7 +1962,7 @@ def main() -> int:
         factors = [*daily_research.FACTOR_LABELS, *daily_research.MODEL_FACTORS, *daily_research.CONSENSUS_FACTORS,
                    *daily_research.EARNINGS_FACTORS, *daily_research.BETA_FACTORS, *daily_research.BEHAVIOR_FACTORS,
                    *daily_research.BALANCE_FACTORS, *daily_research.CASH_FACTORS, *daily_research.REVERSED_FACTORS,
-                   *daily_research.US_FACTORS, *daily_research.US_FEATURES]
+                   *daily_research.US_FACTORS, *daily_research.US_FEATURES, *daily_research.SMC_FACTORS]
         if args.only:                       # 2026-11-22: a new factor's check before its first use
             wanted = set(args.only.split(","))
             factors = [name for name in factors if name in wanted]

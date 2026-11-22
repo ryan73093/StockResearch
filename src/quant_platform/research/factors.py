@@ -284,7 +284,8 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None, names: list[s
     eligibility = daily.DailyRule(name="資格", factors={"momentum_3": 1.0})
     labels = {**daily.FACTOR_LABELS, **daily.EARNINGS_FACTORS,       # 2026-10-28: the earnings family by name
               **daily.BETA_FACTORS, **daily.BEHAVIOR_FACTORS,          # 2026-11-20: the beta and literature ones
-              **daily.BALANCE_FACTORS, **daily.CASH_FACTORS, **daily.REVERSED_FACTORS, **daily.US_FACTORS}
+              **daily.BALANCE_FACTORS, **daily.CASH_FACTORS, **daily.REVERSED_FACTORS, **daily.US_FACTORS,
+              **daily.SMC_FACTORS}                                      # 2026-11-22
     factors = [name for name in (names or daily.FACTOR_LABELS) if name in labels]
     sessions = fp.sessions
     positions = [index for index, day in enumerate(sessions)
@@ -391,11 +392,14 @@ def event_study(history: str | Path, out_dir: str | Path, factors: list[str], jo
     sessions = fp.sessions
     positions = [index for index, day in enumerate(sessions)
                  if daily.RECENT_START <= day <= daily.RECENT_END and index + HORIZON < len(sessions)][::STEP]
+    from quant_platform.research import smc
+
+    labels = daily.RULE_FACTORS             # 2026-11-22: the rule factors outside FACTOR_LABELS by name too
     summary: dict[str, object] = {}
     for count, factor in enumerate(factors):
         if job:
-            job.update(done=count, total=len(factors), current=daily.FACTOR_LABELS[factor], force=True)
-        matrix = fp.matrix(factor)
+            job.update(done=count, total=len(factors), current=labels[factor], force=True)
+        matrix = smc.measured(factor, fp.matrix(factor))        # 2026-11-22: an SMC event without a signal counts as 0
         weeks = []
         for position in positions:
             with warnings.catch_warnings():
@@ -416,7 +420,7 @@ def event_study(history: str | Path, out_dir: str | Path, factors: list[str], jo
         by_year: dict[str, list[float]] = {}
         for row in weeks:
             by_year.setdefault(row["date"][:4], []).append(row["excess"])
-        summary[factor] = {"label": daily.FACTOR_LABELS[factor], "periods": periods,
+        summary[factor] = {"label": labels[factor], "periods": periods,
                            "stocks_per_week": round(statistics.fmean(row["stocks"] for row in weeks), 1) if weeks else 0,
                            "by_year": {year: round(statistics.fmean(values), 5) for year, values in sorted(by_year.items())}}
     report = {"generated_at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "design": "events",

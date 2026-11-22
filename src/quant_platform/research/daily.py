@@ -459,6 +459,9 @@ RULE_FACTORS.update(REVERSED_FACTORS)          # 2026-11-21
 from quant_platform.research.us_factors import US_FACTORS, US_FEATURES  # noqa: E402 - 2026-11-21: read from the US side
 
 RULE_FACTORS.update(US_FACTORS)
+from quant_platform.research.smc import SMC_FACTORS  # noqa: E402 - 2026-11-22: the candles' highs and lows
+
+RULE_FACTORS.update(SMC_FACTORS)
 
 
 def rolling_beta(returns: pd.DataFrame, market: pd.Series, window: int = BETA_WINDOW, least: int = BETA_LEAST,
@@ -897,6 +900,12 @@ class FactorPanel:
             from quant_platform.research.us_factors import matrix as us_matrix
 
             return us_matrix(self, Path(self.chips._folder).parent, factor)        # sessions × symbols
+        if factor in SMC_FACTORS:                                  # 2026-11-22: swing points, order blocks, gaps
+            if self.chips is None:
+                return np.full((len(self.sessions), len(self.symbols)), np.nan)
+            from quant_platform.research.smc import matrix as smc_matrix
+
+            return smc_matrix(self, Path(self.chips._folder).parent, factor)       # sessions × symbols
         if factor in CASH_FACTORS:                                 # 2026-11-20: the cash flows' own table
             if self.chips is None:
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
@@ -4341,6 +4350,27 @@ def new_data_signs(report: dict) -> tuple[dict[str, float], list[str]]:
     return signs, partners
 
 
+# 2026-11-22 (使用者：SMC加到策略研究裡; docs/research/results.md「SMC（Smart Money Concepts）」, written before the run):
+# every SMC factor alone and with the higher-timeframe trend SMC trades along (above the 200-session average), decided
+# every day (the method is a daily one), the top 20, a 30% industry cap, in the three holding styles. A stock without
+# a signal in force has no value and is not ranked, so eligibility is "entry": the signal decides the buys only, and
+# the holding style decides the exit (20 sessions, above the 20-session average, or as soon as the signal lapses) —
+# with the default a holding would be sold the day its signal lapsed in all three styles
+SMC_WORDS = {"smc_break_up_20": "結構向上突破", "smc_choch_up_20": "結構由空翻多", "smc_ob_retest_10": "回測訂單塊",
+             "smc_fvg_retest_10": "回測缺口 FVG", "smc_sweep_low_10": "掃低回收", "smc_discount": "多方結構折價區",
+             "smc_setup_10": "完整進場"}
+
+
+def smc_batch() -> list[DailyRule]:
+    output = []
+    for factor, words in SMC_WORDS.items():
+        for told, factors in ((words, {factor: 1.0}), (f"{words}＋站上 200 日線", {factor: 1.0, "trend_200": 1.0})):
+            for label, style in HOLDING_STYLES:
+                output.append(DailyRule(name=f"SMC：{told}：前 20 名、同產業最多 3 成、每天決策｜持有：{label}",
+                                        factors=factors, industry_cap=0.3, eligibility="entry", **style))
+    return output
+
+
 def new_data_batch() -> list[DailyRule]:
     from quant_platform.research.scan import SHORT
 
@@ -6760,3 +6790,4 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
            "vetoblends_a": lambda: veto_blends_batch()[0::2], "vetoblends_b": lambda: veto_blends_batch()[1::2]}
 # 2026-11-22: the asked-again batches last - the pool's sources snapshot names a rule by the first batch holding it
 BATCHES.update({"rerun_poolsweep": pool_sweep_batch, "rerun_guardorigins": guard_origins_batch})
+BATCHES["smc"] = smc_batch                     # 2026-11-22

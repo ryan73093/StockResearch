@@ -176,6 +176,7 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
                 traded.setdefault(symbol, {})[day] = float(row["turnover"] or 0)
                 if row.get("open"):
                     opens.setdefault(symbol, {})[day] = float(row["open"])
+    extra_bars: dict[date, dict[str, tuple[float, float]]] = {}
     if extra is not None:
         # 2026-10-14 (research/after_close.py): today's TWSE table, out 20–30 minutes after the close, as one more
         # session before the stock files and the index series are written (after 15:14)
@@ -188,6 +189,8 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
             traded.setdefault(symbol, {})[extra_day] = float(row["turnover"] or 0)
             if row.get("open"):
                 opens.setdefault(symbol, {})[extra_day] = float(row["open"])
+            if row.get("high") and row.get("low"):       # 2026-11-22: the day's candle (research/smc.py)
+                extra_bars.setdefault(extra_day, {})[symbol] = (float(row["high"]), float(row["low"]))
     benchmark = {row["date"]: float(row["close"]) for row in read_series(base / "daily" / "0050.parquet")
                  if row["close"] and first_year <= row["date"].year <= last_year}
     if extra is not None and extra[2]:
@@ -240,6 +243,7 @@ def load_stock_data(base: str | Path, first_year: int, last_year: int, universe:
     return LegacyData(sessions=sessions, closes=closes, traded_value=traded, factors=factors, predictions={},
                       notes={"symbols": len(closes) - 1, "years": [first_year, last_year], "universe": universe,
                              "limits": limits, "moved_events": moved_actions,
+                             "extra_bars": extra_bars,
                              "reductions": reductions,        # 2026-10-16 (engine 1.5.0): shares exchanged, money back
                              "delisted": delisting_dates(base),       # 1.3.1: an unsold delisted holding is worthless
                              # 2026-10-14: announced cash dividends, by symbol (time factor dividend_ahead)

@@ -35,11 +35,14 @@ FAMILY_FACTORS = {
                  "low_net_financing", "fscore", "low_inventory_build", "low_receivable_build"),
     "成交量規模": ("liquidity", "volume_surge", "market_cap", "low_pv_corr_20", "illiquidity_60"),
     "美股連動": ("us_sox_beta",),          # 2026-11-21
+    # 2026-11-22 (使用者：SMC加到策略研究裡): Smart Money Concepts, read from the candles' highs and lows
+    "價格行為 SMC": ("smc_break_up_20", "smc_choch_up_20", "smc_ob_retest_10", "smc_fvg_retest_10", "smc_sweep_low_10",
+                    "smc_discount", "smc_setup_10"),
 }
 FACTOR_FAMILY = {factor: family for family, factors in FAMILY_FACTORS.items() for factor in factors}
 OPPOSITE = {"趨勢動能": "反轉", "反轉": "趨勢動能"}
 FAMILY_ORDER = ("T0 共識清單", "機器學習", "深度學習", "RL 機器人", "技術分析機器人", "組合帳戶", "趨勢動能", "反轉", "低波動",
-                "價值殖利率", "籌碼", "公司事件", "營收財報", "成交量規模", "美股連動", "多因子", "反向（學著賠）", "其他")
+                "價值殖利率", "籌碼", "公司事件", "營收財報", "成交量規模", "美股連動", "價格行為 SMC", "多因子", "反向（學著賠）", "其他")
 FAMILY_NOTES = {
     "機器學習": "把 35 個因子交給逐年滾動訓練的模型打分數",
     "技術分析機器人": "只看價格與成交量的機器人：強化學習版自己決定買進和賣出；第三版是深度學習替股票排名",
@@ -47,6 +50,7 @@ FAMILY_NOTES = {
     "RL 機器人": "強化學習決定各訊號的權重，或每天自己決定每檔比重與現金（含它的對照組：同樣訊號平均）",
     "公司事件": "看股利調升、現金增資、股本膨脹、即將除息等公司事件",
     "美股連動": "看這檔股票跟美股（費城半導體）連動的程度",
+    "價格行為 SMC": "Smart Money Concepts：從 K 棒的高低點看波段結構、訂單塊、缺口（FVG）與掃低回收",
     "反向（學著賠）": "把訊號反過來用、或學著賠最多（趣味與檢查，不是策略）",
     "T0 共識清單": "所有 T0 候選各自替股票排名，取平均成一張清單，帳戶只交易這一張",
     "組合帳戶": "帳戶分成幾份，各自照不同規則操作",
@@ -85,6 +89,8 @@ FAMILY_HOW = {
     "營收財報": "單一類因子：看月營收成長與季財報。",
     "成交量規模": "單一類因子：看成交值、量能放大或市值。",
     "美股連動": "單一類因子：看這檔股票跟前一晚美股（費城半導體）連動的程度，買連動最高的 20 檔。",
+    "價格行為 SMC": "交易圈的 Smart Money Concepts 寫成每天收盤後可以算的規則：收盤站上前一個波段高點算結構向上，"
+                    "突破前最後一根黑 K 是訂單塊、三根 K 棒之間的空檔是缺口（FVG），回到這些位置、或盤中跌破波段低點又收回來時買。",
 }
 
 
