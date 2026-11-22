@@ -9,6 +9,9 @@
     {# 2026-11-15 (D-046 第 9 項；介面檢查 S-1：標題截在詞中間): the number and the short name; the full name in 規則內容 #}
     <h1 title="{{ name }}">{% if number %}<span class="rule-no">{{ number }}</span> {% endif %}{{ name|short }}</h1>{{ risk_badge(spec_hash) }}
     {% if sub %}<p class="page-head__sub">{{ sub }}</p>{% endif %}
+    {# 2026-11-22 (使用者 D-059：所有的策略，我都不知道你的參數到底是什麼): the account's rule in one line (the rule's page has the
+       whole table: 規則內容) #}
+    {% if view == 'forward' %}{% set line = rule_settings(spec_hash) %}{% if line %}<p class="small muted rule-settings" style="margin:6px 0 0;max-width:70em"><b>這個規則的設定</b>　{{ line }}{% if has_backtest %}（<a href="/research/rules/{{ spec_hash }}">全部設定與回測</a>）{% endif %}</p>{% endif %}{% endif %}
   </div>
   <form class="rule-jump" action="/research/no" method="get" role="search">
     <label class="sr-only" for="rule-jump">策略編號</label>

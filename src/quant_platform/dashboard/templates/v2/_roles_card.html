@@ -1,5 +1,6 @@
 {# 2026-10-16 (使用者：每次優化之後我都要在首頁看到每種角色成長了多少、跟之前訓練相比強化了多少): the strategy roles. #}
 {% from "v2/_risk.html" import risk_badge %}
+{% from "v2/_settings.html" import settings_note %}
 {% macro roles_card(growth, limit=8, tab=none) %}
 {% if growth and growth.roles %}
 <section class="card" id="roles"{% if tab %} data-tab="{{ tab }}"{% endif %}>
@@ -23,6 +24,7 @@
           <td class="num" data-label="年化（0050）">{{ '{:.1%}'.format(now.xirr) if now.xirr is not none else '—' }}<span class="muted small">（{{ '{:.1%}'.format(now.bench_xirr) if now.bench_xirr is not none else '—' }}）</span></td>
           <td class="num" data-label="最大回撤（0050）">{{ '{:.0%}'.format(now.drawdown) if now.drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(now.bench_drawdown) if now.bench_drawdown is not none else '—' }}）</span></td>
         </tr>
+        {{ settings_note(now.spec, 7) }}
       {% endfor %}
       </tbody>
     </table>
@@ -73,6 +75,7 @@
           <td class="num" data-label="最大回撤">{{ '{:.1%}'.format(row.drawdown) }}</td>
           <td data-label="當月可用">{% if row.ahead_kept is not defined or row.ahead_kept is none %}<span class="badge">{{ '帳面贏' if row.usable else '帳面輸' }}・等前向紀錄</span>{% elif row.usable %}<span class="badge badge--ok">可用</span>{% elif row.ahead_kept is defined and row.ahead_kept is not none and (row.ahead_kept >= 0 or row.ahead_sold >= 0) %}<span class="badge badge--warn">只有一種不輸</span>{% else %}<span class="badge">輸 0050</span>{% endif %}</td>
         </tr>
+        {{ settings_note(row.rule_hash, 6) }}
       {% endfor %}
       </tbody>
     </table>

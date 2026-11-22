@@ -330,6 +330,28 @@ def _distribution_view(research_dir: Path) -> dict[str, object]:
     return distribution.view(research_dir, pool_view(research_dir, basis="seed")["daily"])
 
 
+def _settings_view(research_dir: Path) -> dict[str, str]:
+    """2026-11-22 (使用者 D-059：所有的策略，我都不知道你的參數到底是什麼): every daily rule's settings in one line (research/
+    pool.py ``settings_line``: what it buys, when it sells, its stop, what it does in a falling market) for the lists. Made by
+    the warm-up right after the pool view, which has read every rule's report (the specs are kept in that process): the
+    lines of all 9,568 rules take 0.1 s, the pickle 1 MB."""
+    from quant_platform.research import pool
+
+    found: dict[str, str] = {}
+    for row in pool_view(research_dir, basis="seed")["daily"]:
+        spec = pool._spec_of(research_dir, row.get("report_file"))
+        line = pool.settings_line(spec) if spec else ""
+        if line:
+            found[row["spec_hash"]] = line
+    return found
+
+
+def kept_countdown(research_dir: Path) -> dict[str, object] | None:
+    """2026-11-22 (使用者 D-059): the wait for the first T0 that the home page's view (start_view) holds, for the other pages. None
+    until the warm-up has made it — the first minute after a restart; the page leaves the block out rather than make it."""
+    return (ready("start", research_dir, dict) or {}).get("countdown")
+
+
 def start_view(research_dir: Path) -> dict[str, object]:
     """2026-11-15 (D-046 第 9 項；介面檢查 U1：打開首頁不知道這個平台在做什麼、走到哪一步): the home page's "從這裡開始" —
     the research's six steps, each with ONE number and the page it opens, and what changed today (data, forward records,
@@ -357,6 +379,13 @@ def start_view(research_dir: Path) -> dict[str, object]:
     chain, money = state["chain"], month.get("money") or {}
     t0_rules = sum(1 for row in pool if str(row.get("tier") or "").startswith("T0") and "候選" not in str(row.get("tier")))
     first = date.fromisoformat(chain["first_t0"])
+    # 2026-11-22 (使用者 D-059：距三十號，我又不知道要多久，只剩八天，沒有一個可以上線的): the wait for the first T0 in sessions and days
+    from quant_platform.research.countdown import countdown
+    from quant_platform.research.invariants import _calendar
+
+    wait = countdown(now.date(), first, date.fromisoformat(state["forward"]) if state.get("forward") else None, chain["sessions"],
+                     chain["needed"], _calendar(research_dir).is_trading_day, not_behind_both=t0.get("not_behind_both"),
+                     t0_rules=t0_rules)
 
     def big(count: float) -> str:
         return f"{count / 1e8:,.2f} 億" if count >= 1e8 else (f"{count / 1e4:,.0f} 萬" if count >= 1e5 else f"{count:,.0f}")
@@ -404,7 +433,7 @@ def start_view(research_dir: Path) -> dict[str, object]:
     ]
     return {"steps": steps, "today": today, "red": [{"name": item.get("name"), "detail": str(item.get("detail") or "")[:160],
                                                      "days": item.get("red_days")} for item in red],
-            "due": state["due"], "at": now.isoformat(timespec="minutes"), "first_t0": chain["first_t0"]}
+            "due": state["due"], "at": now.isoformat(timespec="minutes"), "first_t0": chain["first_t0"], "countdown": wait}
 
 
 ORDER_ROWS = 60
@@ -518,6 +547,7 @@ def ready_views(research_dir: Path) -> dict[str, object]:
     return {"chained": lambda: StockForwardTracker(research_dir).chained(datetime.now(TAIPEI).date()),
             "pool:seed": lambda: pool_view(research_dir, basis="seed"), "dashboard": lambda: dashboard_data(research_dir),
             "distribution": lambda: _distribution_view(research_dir),
+            "settings": lambda: _settings_view(research_dir),       # after the pool view: its specs are still read
             "downside": lambda: downside_table(research_dir), "forward": lambda: StockForwardTracker(research_dir).summary(),
             "status": lambda: research_status(research_dir), "scale": lambda: search_scale(research_dir),
             "ranking": lambda: trial_ranking(research_dir / "trials.jsonl", "development"),
@@ -942,6 +972,19 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             return ""
 
     blueprint.add_app_template_global(rule_no, "rule_no")
+
+    def rule_settings(rule_hash: str | None) -> str:
+        """2026-11-22 (使用者 D-059：所有的策略，我都不知道你的參數到底是什麼): a rule's settings in one line, under its row on
+        every list (templates/v2/_settings.html). "" for what has none — the old designs, an account that is no rule, the first
+        minute after a restart before the warm-up has made them."""
+        if not rule_hash:
+            return ""
+        try:
+            return (ready("settings", _instance_dir(dependencies.settings.database_url) / "research", dict) or {}).get(rule_hash, "")
+        except (OSError, ValueError):
+            return ""
+
+    blueprint.add_app_template_global(rule_settings, "rule_settings")
 
     def run_no(trial) -> dict[str, str]:
         """2026-11-15 (介面檢查 E-1): the rule a trial belongs to, for data that only carries a run's trial id (the
@@ -1613,6 +1656,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         return render_template(
             "v2/research.html",
             active_nav="research",
+            countdown=kept_countdown(research_dir),          # 2026-11-22 (D-059): how long until the first T0
             agent=agent_status(dependencies.settings, research_dir),
             promotion=PromotionPipeline(
                 research_dir, FORWARD_PLAN, **promotion_limits(dependencies.investment_plan_service.current()),

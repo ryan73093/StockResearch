@@ -1,5 +1,6 @@
 {# 2026-10-23: one strategy family in the dashboard's window (research/dashboard.py); a fragment, not a page. #}
 {% from "v2/_dashboard.html" import wan, pts, legend %}
+{% from "v2/_settings.html" import settings_note %}
 {% set f = family %}{% set e = f.eras %}
 {% if f.note %}<p class="small" style="margin:0 0 10px">{{ f.note }}</p>{% endif %}
 <div class="dash-kpis">
@@ -55,6 +56,7 @@
         <td class="num" data-label="回測期末">{{ wan(row.final_value) }}</td>
         <td class="num" data-label="2020-10 起">{{ wan(row.since_2020_final_value) }}</td>
         <td class="num {{ 'up' if row.forward and row.forward.ahead > 0 else ('down' if row.forward else '') }}" data-label="前向比 0050">{% if row.forward %}<a href="/research/forward/{{ row.spec_hash }}">{{ '{:+,.0f}'.format(row.forward.ahead) }}</a>{% else %}<span class="muted small">不在名單</span>{% endif %}</td></tr>
+        {{ settings_note(row.spec_hash, 4) }}
     {% endfor %}
     </tbody>
   </table>

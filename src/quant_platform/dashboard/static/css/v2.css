@@ -423,7 +423,7 @@ details.card[open] > summary { margin-bottom: 12px; }
 /* 2026-11-22 (使用者：所有的策略我都不知道你的參數到底是什麼): a note that is the rule's settings stays on a phone too,
    and wraps at every width */
 .table-wrap tr.row-note--keep > td { white-space: normal; padding-top: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.55; }
-@media (max-width: 767px) { tr.row-note.row-note--keep { display: block !important; margin: -6px 0 10px; } tr.row-note.row-note--keep > td { display: block; } }
+@media (max-width: 767px) { tr.row-note.row-note--keep { display: block !important; margin: -6px 0 10px; } tr.row-note.row-note--keep > td { display: block; text-align: left; } }
 /* at every width: a long verdict wraps inside its cell, a code word breaks instead of widening the card */
 .table-wrap td:not(.num) .badge { white-space: normal; text-align: left; line-height: 1.35; border-radius: 10px; }
 .table-wrap td code { white-space: normal; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; background: var(--surface-3); padding: 0 4px; border-radius: 4px; }

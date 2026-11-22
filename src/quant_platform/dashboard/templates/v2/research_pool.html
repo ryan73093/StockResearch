@@ -1,5 +1,6 @@
 {% extends "v2/base.html" %}
 {% from "v2/_risk.html" import risk_badge %}
+{% from "v2/_settings.html" import settings_note %}
 {% block title %}研究選手池 · 交易研究分析平台{% endblock %}
 {% block heading %}
 <header class="page-head">
@@ -34,6 +35,7 @@
           <td class="num" data-label="T3">{{ item.tiers['T3'] }}</td>
           <td data-label="最好的規則" data-wide><a href="/research/rules/{{ item.best.spec_hash }}" title="{{ item.best.name }}">{{ rule_no(item.best.spec_hash) }} {{ item.best.name|short }}</a> <span class="badge {{ 'badge--ok' if item.best.tier in ('T0', 'T0 候選') else ('badge--warn' if item.best.tier == 'T1' else ('badge--bad' if item.best.tier == 'T3' or '高風險' in item.best.tier else '')) }}">{{ item.best.tier }}</span>{% if item.best.excess is not none %} {% if item.best.final_value and item.best.benchmark_final_value %}<span class="small {{ 'up' if item.best.excess > 0 else 'down' }}">是 0050 的 {{ '{:.1f}'.format(item.best.final_value / item.best.benchmark_final_value) }} 倍</span>{% else %}<span class="small {{ 'up' if item.best.excess > 0 else 'down' }}">比 0050 {{ '{:+.0%}'.format(item.best.excess) }}</span>{% endif %}{% endif %}</td>
         </tr>
+        {{ settings_note(item.best.spec_hash, 8) }}
       {% endfor %}
       </tbody>
     </table>
@@ -87,6 +89,7 @@
           <td class="num" data-label="最大跌幅">{{ '{:.0%}'.format(-row.max_drawdown) if row.max_drawdown is not none else '—' }}<br><span class="muted small">（0050 {{ '{:.0%}'.format(-row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
           <td data-label="交易" data-wide>{% if row.orders_per_month %}每月 {{ '%.0f' % row.orders_per_month }} 筆<br>{% endif %}{% if row.costs is not none and row.contributed %}<span class="small">費稅 {{ wan(row.costs) }}（投入的 {{ '%.1f' % (row.costs / row.contributed) }} 倍）</span>{% elif row.cost_share is not none %}<span class="small">費稅是投入的 {{ '%.1f' % row.cost_share }} 倍</span>{% endif %}</td>
         </tr>
+        {{ settings_note(row.spec_hash, 7) }}
       {% endfor %}
       </tbody>
     </table>

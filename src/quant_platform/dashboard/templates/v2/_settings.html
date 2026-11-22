@@ -1,0 +1,9 @@
+{# 2026-11-22 (使用者 D-059：所有的策略，我都不知道你的參數到底是什麼。這個停損設多少？買的時候用什麼策略？具體上的參數是什麼？):
+   a rule's settings in one line under its row — what it buys, when it sells, the stop, what it does in a falling market
+   (pool.settings_line, kept ready by the warm-up as the view "settings"). Nothing for a rule that has none (the old designs).
+   ``cols`` is the number of columns of the table; the row stays on a phone too (row-note--keep). The full table is on the
+   rule's page. #}
+{% macro settings_note(spec_hash, cols) -%}
+{%- set line = rule_settings(spec_hash) -%}
+{%- if line %}<tr class="row-note row-note--keep"><td colspan="{{ cols }}">{{ line }}</td></tr>{% endif -%}
+{%- endmacro %}

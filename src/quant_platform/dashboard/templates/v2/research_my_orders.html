@@ -42,6 +42,8 @@
     <button class="button" type="submit">重算</button>
   </form>
   <p class="small" style="margin:0 0 4px"><b>規則</b>：<a href="/research/forward/{{ chosen.rule_hash }}">{{ rule_no(chosen.rule_hash) }} {{ chosen.name }}</a></p>
+  {# 2026-11-22 (使用者 D-059：所有的策略，我都不知道你的參數到底是什麼): what the rule buys, when it sells, its stop #}
+  {% set line = rule_settings(chosen.rule_hash) %}{% if line %}<p class="small muted" style="margin:0 0 6px;max-width:70em"><b>設定</b>　{{ line }}（<a href="/research/rules/{{ chosen.rule_hash }}">全部設定與回測</a>）</p>{% endif %}
   {% if recorded %}
   <p class="small" style="margin:0"><b>你的帳戶</b>：讀<a href="/holdings">持倉頁</a>記錄的現金與持股。</p>
   {% else %}

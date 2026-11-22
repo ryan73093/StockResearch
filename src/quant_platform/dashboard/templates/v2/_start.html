@@ -1,10 +1,13 @@
 {# 2026-11-15 (D-046 第 9 項；使用者 11/13：我點開給 user 看，完全不知道從何介紹): the home page's first tab — one sentence,
    the research's six steps each with one number (click to open that step's page), what changed today, the issues'
    lights in one line. The data: dashboard/v2.py start_view (the same functions the other pages read). #}
+{% from "v2/_countdown.html" import countdown_card %}
 {% macro start_card(start, issues_head=none) %}
 <section class="card start" id="start" data-tab="從這裡開始" data-tab-default>
   <p class="start__lead">這是我自己的<b>台股研究平台</b>：讓程式和 AI 找「只買個股」的選股規則，看能不能用同樣的錢贏過<b>全部買 0050</b>（先放 30 萬，每月 5 日再放 1 萬）。它只做研究和模擬記帳，<b>不會下單</b>。</p>
   {% if start %}
+  {# 2026-11-22 (使用者 D-059): how long until the first T0 — first, before the six steps #}
+  {{ countdown_card(start.countdown) }}
   <h3 class="start__h">研究怎麼走：六步，現在走到第 5 步</h3>
   <ol class="start__steps">
     {% for step in start.steps %}

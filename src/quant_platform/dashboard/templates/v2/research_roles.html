@@ -1,4 +1,5 @@
 {% extends "v2/base.html" %}
+{% from "v2/_settings.html" import settings_note %}
 {% from "v2/_roles_card.html" import roles_card, rolling_card %}
 {% block title %}策略角色 · 交易研究分析平台{% endblock %}
 {% block heading %}
@@ -40,6 +41,7 @@
           <td class="num">{{ '{:+.0%}'.format(now.worst_1y) if now.worst_1y is not none else '—' }}</td>
           <td class="num">{{ now.orders if now.orders is not none else '—' }} 筆<br><span class="muted small">{{ '{:.0%}'.format(now.cost_share) if now.cost_share is not none else '—' }}</span></td>
         </tr>
+        {{ settings_note(now.spec, 9) }}
       {% endfor %}
       </tbody>
     </table>

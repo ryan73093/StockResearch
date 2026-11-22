@@ -1,4 +1,6 @@
 {% extends "v2/base.html" %}
+{% from "v2/_settings.html" import settings_note %}
+{% from "v2/_countdown.html" import countdown_card %}
 {% from "v2/_risk.html" import risk_badge %}
 {% from "v2/_icons.html" import icon %}
 {% from "v2/_research_status.html" import research_status %}
@@ -22,6 +24,8 @@
 {% set running_count = (jobs or [])|selectattr('status', 'equalto', 'running')|list|length %}
 
 {% if research_tab == 'overview' %}
+{# 2026-11-22 (使用者 D-059：距三十號，我又不知道要多久，沒有一個可以上線的): above the tabs, always shown #}
+{% if countdown %}<section class="card" data-notab>{{ countdown_card(countdown) }}</section>{% endif %}
 {{ dashboard_section(dashboard) }}
 {{ research_status(status) }}
 <section class="card" id="conclusions">
@@ -77,6 +81,7 @@
           <td class="num" data-label="是 0050 的幾倍">{% if row.final_value and row.benchmark_final_value %}{{ '{:.1f}'.format(row.final_value / row.benchmark_final_value) }}{% else %}—{% endif %}／{% if row.since_2020_final_value and row.since_2020_benchmark_final_value %}{{ '{:.1f}'.format(row.since_2020_final_value / row.since_2020_benchmark_final_value) }}{% else %}—{% endif %} 倍</td>
           <td class="num" data-label="最大回撤（0050）">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<br><span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
         </tr>
+        {{ settings_note(row.spec_hash, 7) }}
       {% endfor %}
       </tbody>
     </table>
@@ -103,6 +108,7 @@
           {% endfor %}
           <td class="num">{{ wins.count }}／{{ wins.total }}</td>
         </tr>
+        {{ settings_note(row.spec_hash, yearly.years|length + 2) }}
         {% endfor %}
       </tbody>
     </table>
@@ -133,6 +139,7 @@
           <td class="num {{ 'down' if worst and worst.gap < -0.05 else '' }}" data-label="大跌時最糟">{% if worst %}{{ '{:+.1%}'.format(worst.rule) }} ／ {{ '{:+.1%}'.format(worst.base) }}<br><span class="muted small">{{ worst.months }}・{{ '多跌' if worst.gap < 0 else '少跌' }} {{ '{:.1f}'.format((worst.gap * 100)|abs) }} 點</span>{% else %}—{% endif %}</td>
           <td class="num" data-label="相對最大落後">{{ '{:.0%}'.format(row.most_behind) }}</td>
         </tr>
+        {{ settings_note(row.rule_hash, 6) }}
       {% endfor %}
       </tbody>
     </table>
@@ -162,6 +169,7 @@
           <td class="num" data-label="{{ {'base': '原本', 'costs_doubled': '成本加倍', 'next_session': '晚一天成交', 'open_tight': '開盤上限收緊'}[key] }}">{% if item %}{{ '{:,.0f}'.format(item.final_value / 10000) }} 萬<span class="muted small">（{{ '{:.0%}'.format(item.max_drawdown) }}）</span><br><span class="badge {{ 'badge--ok' if item.tier == 'T0 候選' else 'badge--warn' }}">{{ item.tier }}</span>{% elif key == 'open_tight' %}<span class="muted small">沒有開盤成交</span>{% else %}<span class="muted small">本來就晚一天成交</span>{% endif %}</td>
           {% endfor %}
         </tr>
+        {{ settings_note(row.rule_hash, 6) }}
       {% endfor %}
       </tbody>
     </table>
@@ -705,6 +713,8 @@
   <details{% if loop.index <= 3 or ov.show == 'one' %} open{% endif %}>
     <summary>{% if rule.rank and ov.show == 'all' %}<span class="badge" title="共同起跑線排行榜（實際結果）的名次">第 {{ rule.rank }} 名</span> {% endif %}<strong>{{ rule_no(rule.rule_hash) }} {{ rule.name|short }}</strong> <span class="muted small">{% if rule.error %}無法計算：{{ rule.error }}{% else %}{{ rule.orders|length }} 筆{% if not rule.orders %}（今天不用下單）{% endif %}{% endif %}{% if rule.chain and rule.chain.excess is not none %}・串接前向比 0050 {{ '{:+.1f}'.format(rule.chain.excess * 100) }}／{{ '{:+.1f}'.format((rule.chain.sold_excess or 0) * 100) }} 點{% endif %}</span></summary>
     <p class="small" style="margin:6px 0"><a href="/research/forward/{{ rule.rule_hash }}">這個規則的前向帳戶與每一筆交易</a>{% if not rule_no(rule.rule_hash).startswith('#E') %}・<a href="/research/rules/{{ rule.rule_hash }}">回測與完整設定</a>{% endif %}<span class="muted">・{{ rule.name }}</span></p>
+    {# 2026-11-22 (使用者 D-059): the rule these orders come from — what it buys, when it sells, its stop #}
+    {% set line = rule_settings(rule.rule_hash) %}{% if line %}<p class="small muted" style="margin:0 0 6px;max-width:70em"><b>設定</b>　{{ line }}</p>{% endif %}
     {% if rule.orders %}
     <div class="table-wrap table-wrap--stack">
       <table class="table--stack">
@@ -771,6 +781,7 @@
           <td class="num" data-label="回撤">{{ '{:.1%}'.format(row.max_drawdown) }}</td>
           <td class="num" data-label="買／賣">{{ row.buys }}／{{ row.sells }}{% if row.recent %}<br><a class="small" href="/research/recent/{{ row.rule_hash }}">近 3 個月 {{ '{:+.0%}'.format(row.recent.excess) }}</a>{% endif %}</td>
         </tr>
+        {{ settings_note(row.rule_hash, 10) }}
       {% endfor %}
       </tbody>
     </table>
@@ -810,6 +821,7 @@
           <td class="num" data-label="持股／費稅">{{ row.holdings|length }} 檔／{{ '{:,}'.format(row.costs) }} 元</td>
           <td data-label="對帳">{% if row.problems or row.replay_mismatches %}<span class="badge badge--bad">{{ row.problems|length + row.replay_mismatches }} 項不符</span>{% elif row.sessions %}<span class="badge badge--ok">正常</span>{% else %}<span class="muted small">等第一個交易日</span>{% endif %}{% if row.rebased %} <span class="badge" title="這幾天是重新計算的結果，原因見明細頁">重算 {{ row.rebased|length }} 天</span>{% endif %}</td>
         </tr>
+        {{ settings_note(row.rule_hash, 10) }}
       {% endfor %}
       </tbody>
     </table>

@@ -1,0 +1,19 @@
+{# 2026-11-22 (使用者 D-059：十一月二十二，距三十號，我又不知道要多久，只剩八天，沒有一個可以上線的): how long until the first T0
+   judgment — the date, the sessions left and which days they are, where the chained forward record stands, what "can go live"
+   waits for. The numbers: research/countdown.py (the roadmap's date, the exchange's calendar, the chained record's counts). #}
+{% macro countdown_card(c) %}
+{% if c %}
+<div class="countdown" id="t0-countdown" role="region" aria-label="距離第一次判 T0">
+  <h3 class="start__h" style="margin-top:0">距離第一次判 T0：{% if c.reached %}{{ c.first_label }} 收盤後的判定日已經到了{% else %}還有 {{ c.sessions_left }} 個交易日（{{ c.days }} 天）{% endif %}</h3>
+  <div class="kpis kpis--page">
+    <div class="kpi"><div class="kpi__label">第一次判 T0</div><div class="kpi__value">{{ c.first_label }}</div><div class="kpi__note">收盤後判定・今天 {{ c.today_label }}{% if c.days > 0 %}，還有 {{ c.days }} 天{% elif c.days == 0 %}就是這一天{% else %}，已過 {{ -c.days }} 天{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">還要幾個交易日</div><div class="kpi__value">{{ c.sessions_left }}<small> 個</small></div><div class="kpi__note">{% if c.dates %}{{ c.dates|join('、') }}{% else %}沒有了：串接前向已滿 {{ c.needed }} 個交易日{% endif %}</div></div>
+    <div class="kpi"><div class="kpi__label">串接前向</div><div class="kpi__value">{{ c.sessions }}<small>／{{ c.needed }} 個交易日</small></div><div class="kpi__note">{% if c.through_label %}算到 {{ c.through_label }}；{% endif %}每個交易日加 1，滿 {{ c.needed }} 才能判</div></div>
+    <div class="kpi"><div class="kpi__label">現在可以上線的</div><div class="kpi__value">{{ c.t0 }}<small> 個</small></div><div class="kpi__note">可以上線＝T0＋你核准</div></div>
+  </div>
+  <p class="small" style="margin:8px 0 0;max-width:72em">{% if c.not_behind_both is not none %}現在兩種錢（已拿到的、兩邊當天都賣掉）都不輸 0050 的有 <b>{{ '{:,}'.format(c.not_behind_both) }}</b> 個規則（<a href="/research/t0-list">看判定清單</a>）。{% endif %}{% if c.reached %}判定日到了：串接滿 {{ c.needed }} 個交易日、那天還不輸 0050、帳戶對帳正常的規則就是 T0，T0 要你核准才會進「今天我的帳戶要買賣什麼」；平台不會自己下單。{% else %}{{ c.first_label }} 收盤後第一次判：當天串接滿 {{ c.needed }} 個交易日、還不輸 0050、帳戶對帳正常的規則才是 T0，T0 還要你核准才會進「今天我的帳戶要買賣什麼」；平台不會自己下單。<b>{{ c.first_label }} 以前不會有 T0</b>。{% endif %}</p>
+  {# what comes after T0 is the roadmap's (S10), not written out here: it would go stale #}
+  <p class="small muted" style="margin:4px 0 0;max-width:72em">T0 以後還有核准、每日決策引擎、今日頁的多檔委託、開始使用這幾步，狀態與初估工時看<a href="/project/roadmap">路線圖</a>的 S10；現在就能用的是<a href="/research/my-orders">今天我的帳戶要買賣什麼</a>（只能看，不下單）。</p>
+</div>
+{% endif %}
+{% endmacro %}

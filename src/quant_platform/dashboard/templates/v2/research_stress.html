@@ -1,6 +1,7 @@
 {# 2026-10-24 (使用者：測這些策略在每一次的大空頭有沒有辦法撐過去；我不要只有 2008 的，應該要很多空頭情境，你都要分析給我):
    research/stress.py, the dashboard's window. #}
 {% from "v2/_dashboard.html" import wan %}
+{% from "v2/_settings.html" import settings_note %}
 {% macro pct(value) %}{% if value is none %}—{% else %}{{ '{:+.0%}'.format(value) }}{% endif %}{% endmacro %}
 {% macro span(days) %}{% if days is none %}還沒{% elif days < 60 %}{{ days }} 天{% elif days < 730 %}{{ '%.0f'|format(days / 30.4) }} 個月{% else %}{{ '%.1f'|format(days / 365.25) }} 年{% endif %}{% endmacro %}
 {% if not report or not report.scenarios %}<p class="muted">壓力測試還沒跑完。</p>{% else %}
@@ -39,6 +40,7 @@
         <td class="num {{ 'up' if row.final > row.base_final else 'down' }}" data-label="期末">{{ wan(row.final) }}<span class="muted small">（{{ wan(row.base_final) }}）</span></td>
         <td class="num" data-label="最大回撤">{{ pct(row.max_drawdown) }}<span class="muted small">（{{ pct(row.base_max_drawdown) }}）</span></td>
       </tr>
+      {{ settings_note(row.spec_hash, 6) }}
     {% endfor %}
     {% for row in report.rows if row.error %}<tr><td data-primary>{{ rule_link(row.spec_hash, row.trial, row.name) }}</td><td colspan="4" class="small down">沒跑成：{{ row.error }}</td></tr>{% endfor %}
     </tbody>

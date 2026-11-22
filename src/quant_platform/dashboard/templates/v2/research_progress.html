@@ -1,4 +1,5 @@
 {% extends "v2/base.html" %}
+{% from "v2/_settings.html" import settings_note %}
 {% block title %}研究進展 · 交易研究分析平台{% endblock %}
 {% block heading %}
 <header class="page-head">
@@ -60,6 +61,7 @@
           <td class="num" data-label="2015-06 起期末">{{ wan(row.final_value) }}</td>
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_max_drawdown) if row.benchmark_max_drawdown is not none else '—' }}）</span></td>
         </tr>
+        {{ settings_note(row.spec_hash, 8) }}
       {% endfor %}
       </tbody>
     </table>
@@ -79,6 +81,7 @@
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}<span class="muted small">（{{ '{:.0%}'.format(row.benchmark_drawdown) if row.benchmark_drawdown is not none else '—' }}）</span></td>
           <td class="num" data-label="1 年勝率">{{ '{:.0%}'.format(row.win_1y) if row.win_1y is not none else '—' }}</td>
         </tr>
+        {{ settings_note(row.spec_hash, 8) }}
       {% endfor %}
       </tbody>
     </table>
@@ -103,6 +106,7 @@
           <td class="num" data-label="0050 的幾倍">{{ '{:.1f}'.format(row.value / line.benchmark) if line.benchmark else '—' }}</td>
           <td class="small" data-label="引擎">{{ row.engine }}</td>
         </tr>
+        {{ settings_note(row.spec_hash, 8) }}
       {% endfor %}
       </tbody>
     </table>
@@ -163,6 +167,7 @@
           <td class="num {{ 'up' if row.sold_excess > 0 else 'down' }}" data-label="比 0050（都賣掉）">{{ '{:+.1%}'.format(row.sold_excess) }}</td>
           <td class="num" data-label="回測期末">{{ wan(row.final_value) if row.final_value else '—' }}</td>
         </tr>
+        {{ settings_note(row.spec_hash, 8) }}
       {% endfor %}
       </tbody>
     </table>
@@ -184,6 +189,7 @@
           <td class="num {{ 'up' if (row.forward_ahead or 0) > 0 else 'down' }}" data-label="比 0050">{{ '{:+,.0f}'.format(row.forward_ahead) if row.forward_ahead is not none else '—' }}</td>
           <td class="num" data-label="已賣出的損益">{{ '{:+,.0f}'.format(row.realized) if row.realized is not none else '—' }}</td>
         </tr>
+        {{ settings_note(row.rule_hash, 8) }}
       {% endfor %}
       </tbody>
     </table>
@@ -229,6 +235,7 @@
           <td class="num" data-label="最大回撤">{{ '{:.0%}'.format(row.max_drawdown) if row.max_drawdown is not none else '—' }}</td>
           <td class="num" data-label="前向">{% if row.forward_gain is not none %}<span class="{{ 'up' if row.forward_gain > 0 else 'down' }}">{{ '{:+,.0f}'.format(row.forward_gain) }}</span>／<span class="{{ 'up' if (row.forward_ahead or 0) > 0 else 'down' }}">{{ '{:+,.0f}'.format(row.forward_ahead) }}</span>{% else %}<span class="muted small">沒有前向帳戶</span>{% endif %}</td>
         </tr>
+        {{ settings_note(row.spec_hash, 8) }}
       {% endfor %}
       </tbody>
     </table>
