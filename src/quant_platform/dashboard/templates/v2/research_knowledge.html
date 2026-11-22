@@ -46,7 +46,7 @@
   </form>
   {# 2026-11-15 (介面檢查 K-1：搜尋一題 23 秒、問 AI 25～50 秒，畫面沒有任何反應): say it is running, and how long #}
   <p class="kb-wait small" id="kb-wait" hidden role="status"><span class="kb-wait__dot"></span><span id="kb-wait-text"></span></p>
-  <p class="muted small" style="margin:6px 0 0">「搜尋紀錄」不花錢，第一次要載入語意模型約 20 秒、之後幾秒；「問 AI」開右下角的對話視窗，後端做到哪一步、已經等了幾秒都寫在視窗裡；它把找到的紀錄交給模型整理，約 30～50 秒、會計費（同一題在紀錄沒變以前不重複計費）。</p>
+  <p class="muted small" style="margin:6px 0 0">「搜尋紀錄」不花錢，第一次要載入語意模型約 20 秒、之後幾秒；「問 AI」開右下角的對話視窗，後端做到哪一步、已經等了幾秒都寫在視窗裡；它把找到的紀錄交給模型整理，通常 15～50 秒、會計費（同一題在紀錄沒變以前不重複計費）。</p>
   <p class="muted small" style="margin:6px 0 0">{{ ai.note }}　試試：{% for example in examples %}<a href="/research/knowledge?q={{ example|urlencode }}">{{ example }}</a>{% if not loop.last %}、{% endif %}{% endfor %}</p>
 
   {% if answer and (answer.conclusion or answer.note) %}
@@ -131,7 +131,7 @@
   if (!form || !wait) return;
   const begin = (asking) => {
     const started = Date.now();
-    const say = () => { text.textContent = (asking ? 'AI 整理中（約 30～50 秒）' : '搜尋中（第一次約 20 秒）') + '…已經 ' + Math.round((Date.now() - started) / 1000) + ' 秒'; };
+    const say = () => { text.textContent = (asking ? 'AI 整理中（通常 15～50 秒）' : '搜尋中（第一次約 20 秒）') + '…已經 ' + Math.round((Date.now() - started) / 1000) + ' 秒'; };
     wait.hidden = false; say(); setInterval(say, 1000);
   };
   form.addEventListener('submit', (event) => begin(Boolean(event.submitter && event.submitter.name === 'ai')));

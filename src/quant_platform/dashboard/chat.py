@@ -40,6 +40,8 @@ KEEP_LIVE = 8                          # finished turns whose events a page can 
 HEARTBEAT_SECONDS = 2.0                # a slow step says how long it has been going on this often
 KEEPALIVE_SECONDS = 15.0               # a comment line keeps a quiet connection open
 FOLDER = "chat"
+# 2026-11-22: the model answered in 15 s on the first real question (claude-haiku-5-5); the K-1 measurement of 10/22 (gpt) was 25-50 s
+ASK_HINT = "通常 15～50 秒，會計費約 US$0.002"
 INTERRUPTED = "網站重新啟動，這一題沒有回完。AI 如果已經答完會存著，再問一次同一題不會重複計費。"
 
 
@@ -185,7 +187,7 @@ def answer(turn: Turn, context: Context) -> dict:
     step.done(f"挑 {len(found)} 筆給 AI 讀" if found else "沒有找到相關的紀錄")
 
     cached = knowledge.cached(research, question)
-    step = turn.step("ask", "請 AI 整理成答案", "約 30～50 秒，會計費約 US$0.002")
+    step = turn.step("ask", "請 AI 整理成答案", ASK_HINT)
     client, ai = None, {"ready": bool(cached), "note": ""}
     if cached is None:
         client, ai = knowledge.ai_status(context.settings, research)
@@ -197,7 +199,7 @@ def answer(turn: Turn, context: Context) -> dict:
         step.fail(str(ai.get("note") or "AI 沒有開，只能列出最相關的紀錄"))
     else:
         result = with_heartbeat(turn, step, lambda: knowledge.ask(research, question, client, semantic_ids=meaning),
-                                "約 30～50 秒，會計費約 US$0.002")
+                                ASK_HINT)
         if result.get("answer") or result.get("conclusion"):
             step.done(f"模型 {result.get('model') or ''}")
         else:

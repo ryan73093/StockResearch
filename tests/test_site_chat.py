@@ -158,7 +158,7 @@ def test_a_slow_step_says_how_long_it_has_been_going_on(site, monkeypatch):
     monkeypatch.setattr(knowledge, "ai_status", ready(FakeClient(delay=0.4)))
     _, events = ask(site, "停損有沒有效？")
     waits = [data for name, data in events if name == "wait"]
-    assert waits and all(data["key"] == "ask" for data in waits) and "30～50 秒" in waits[0]["hint"]
+    assert waits and all(data["key"] == "ask" for data in waits) and "15～50 秒" in waits[0]["hint"]
     assert events[-1][0] == "done"
 
 
