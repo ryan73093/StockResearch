@@ -39,3 +39,14 @@ def test_a_blend_has_a_table_for_each_part():
     sections = pool.settings_sections(blend)
     assert [section["title"] for section in sections] == ["第 1 份：帳戶的 40%", "第 2 份：帳戶的 60%"]
     assert pool.settings_line(blend).startswith("組合：40% 買") and pool.settings_sections({"description": "old"}) == []
+
+
+def test_a_factor_without_a_short_name_is_named_by_its_label_not_its_code():
+    from quant_platform.research.daily import RULE_FACTORS
+    from quant_platform.research.scan import SHORT
+
+    for name in ("t0_consensus", "block_equal", "rl_blocks", "rl_rolling35", "rolling_equal", "revenue_yoy_3m"):
+        if name in SHORT or name not in RULE_FACTORS:
+            continue
+        line = pool.settings_line({"factors": {name: 1.0}, "top": 20})
+        assert name not in line and line.startswith("買："), (name, line)

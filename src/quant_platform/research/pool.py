@@ -689,7 +689,12 @@ def settings_line(spec: dict) -> str:
     from quant_platform.research.scan import SHORT
 
     def short(rule: dict) -> str:
-        return "＋".join(str(SHORT.get(name, name)) for name in rule.get("factors") or {})
+        # 2026-11-22: a factor without a short name (the robots, the consensus lists) by its label before the bracket,
+        # never by its code
+        from quant_platform.research.daily import RULE_FACTORS
+
+        return "＋".join(str(SHORT.get(name) or str(RULE_FACTORS.get(name, name)).split("（")[0].split("：")[0].strip() or name)
+                        for name in rule.get("factors") or {})
 
     if spec.get("kind") == "blend":
         return "組合：" + "；".join(f"{sleeve['share']:.0%} 買 {short(sleeve['rule'])}" for sleeve in spec.get("sleeves") or []) + (
