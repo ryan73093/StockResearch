@@ -57,7 +57,8 @@ def test_fetch_asks_both_exchanges_every_year_and_each_twse_detail_once(tmp_path
     client = OfficialHistoryClient(tmp_path / "raw", fetch_json=fake, min_interval=0, today=lambda: date(2025, 6, 1))
     assert reductions.fetch(client, date(2025, 6, 1), 2024) == 4
     assert "startDate=20240101&endDate=20241231" in asked[0] and "startDate=2024/01/01&endDate=2024/12/31" in asked[1]
-    assert "STK_NO=3308&FILE_DATE=20240320" in asked[2] and "endDate=20250601" in asked[3]
+    # 2026-11-25: the open year to its end — a reduction is listed before its resume day, and the day's records need it
+    assert "STK_NO=3308&FILE_DATE=20240320" in asked[2] and "endDate=20251231" in asked[3] and "endDate=2025/12/31" in asked[4]
     reductions.fetch(client, date(2025, 6, 1), 2024)
     assert not any("2024" in url and "TWTAVUDetail" not in url for url in asked[5:])   # 2024 closed: from the cache
     assert sum("TWTAVUDetail" in url for url in asked) == 1                              # a detail is kept for good

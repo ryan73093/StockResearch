@@ -55,7 +55,10 @@ def fetch(client, today: date, first_year: int = FIRST_YEAR) -> int:
     (kept for good once fetched); returns the reductions listed."""
     count = 0
     for year in range(first_year, today.year + 1):
-        end = min(today, date(year, 12, 31))
+        # 2026-11-25: the open year is asked to its end, not to today — both exchanges list a reduction before its
+        # resume day (8291's of 11-30 was listed on 11-25), and a table asked to "today" at 21:30 had 1808's row of
+        # 11-23 only that night: the 15:30 records of 11-23 kept the old shares, and three accounts did not reconcile
+        end = date(year, 12, 31)
         twse = client._cached(f"twse_reductions/{year}", TWSE_URL.format(start=f"{year}0101", end=f"{end:%Y%m%d}"),
                               final=end < today, period_end=end)
         tpex = client._cached(f"tpex_reductions/{year}",

@@ -348,6 +348,12 @@ def refresh_research_history(container: "Container", now: datetime | None = None
     manifest = HistoryDataset(base, client=OfficialHistoryClient(base / "raw")).build()
     build_actions(base, OfficialHistoryClient(base / "raw"))
     logger.info("Research history refreshed: %s", manifest.get("requests"))
+    try:        # 2026-11-25: the reductions table again before the 15:30 records (it was asked at 21:30 only, so a
+        from quant_platform.research.history import reductions   # stock resuming today was recorded with its old shares)
+
+        reductions.fetch(OfficialHistoryClient(base / "raw"), local_now.date(), local_now.year - 1)
+    except Exception:  # the quotes below must still arrive
+        logger.exception("Capital reductions table failed")
     if (base / "stocks" / "twse").is_dir():
         # R2: today's all-market quotes for the stock-rule forward simulation (15:30).
         try:
