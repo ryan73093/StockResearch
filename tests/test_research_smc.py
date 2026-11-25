@@ -301,6 +301,11 @@ def test_the_weekly_batch_is_the_first_versions_frames_once_a_week_and_the_stron
     daily.BATCHES["smcveto"]()
     assert {code for _trial, code in asked} == {"k1"}
     assert len(asked) == sum(len(group) for group in daily.BETA_GUARD.values()) == 44
+    # the second step: the structure veto alone on the 24 deep-learning rules the first step never touched
+    asked.clear()
+    daily.BATCHES["smcveto2"]()
+    assert asked == [(trial, "k2") for trial in daily.CASH_VETO_DEEP] and len(asked) == 24
+    assert not set(daily.CASH_VETO_DEEP) & {trial for group in daily.BETA_GUARD.values() for trial in group}
 
 
 def test_model_w_is_model_k_with_the_smc_readings(tmp_path, monkeypatch):

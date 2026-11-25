@@ -4447,6 +4447,13 @@ def smc_veto_batch() -> list[DailyRule]:
     return _veto_rules([(trial, code) for code in wanted for group in BETA_GUARD.values() for trial in group])
 
 
+def smc_veto_deep_batch() -> list[DailyRule]:
+    """2026-11-25 (docs/research/results.md「SMC 第二版」第二步, written before the run): "k2" failed on the 44 (14 good)
+    but 5 of its 8 deep-learning rules were better — a group seen afterwards, so tried on the 24 deep-learning rules
+    it never touched (CASH_VETO_DEEP: the family's 24 richest outside BETA_GUARD's 8)."""
+    return _veto_rules([(trial, "k2") for trial in CASH_VETO_DEEP])
+
+
 def new_data_batch() -> list[DailyRule]:
     from quant_platform.research.scan import SHORT
 
@@ -6885,4 +6892,5 @@ BATCHES.update({"rerun_poolsweep": pool_sweep_batch, "rerun_guardorigins": guard
 BATCHES["smc"] = smc_batch                     # 2026-11-22
 BATCHES["smc2"] = smc2_batch                   # 2026-11-25
 BATCHES["smcveto"] = smc_veto_batch
+BATCHES["smcveto2"] = smc_veto_deep_batch
 BATCHES["modelw"] = model_w_batch
