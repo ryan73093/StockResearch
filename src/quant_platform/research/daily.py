@@ -282,6 +282,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_u": "機器學習集成 U（模型 K 的特徵，學扣掉「大盤下跌日的連動」之後的報酬：跌的時候不跟著跌）",
                  "ml_gbm_v": "機器學習集成 V（模型 K 的特徵，加上美國那一邊的 12 個：費半連動、美股同業動能與差距、利率與美元敏感度，以及費半、VIX、殖利率、美元、景氣過熱六個大盤狀態）",
                  "ml_gbm_t": "機器學習集成 T（模型 K 的特徵，加上 11 月新量的 16 個因子：連動、偏態、處分效果、資產成長、現金流量表、存貨與應收）",
+                 "ml_gbm_w": "機器學習集成 W（模型 K 的特徵，加上 SMC 的 9 個讀數：結構突破、空翻多、訂單塊與缺口回測、掃低回收、折價區、完整進場、日線與週線的結構）",
                  "ml_gbm_q_nolong": "模型 Q 拿掉長歷史的 5 個付費特徵（融資維持率、借貸、鉅額；只拿來量，不做規則）",
                  "ml_gbm_q_noshort": "模型 Q 拿掉短歷史的 4 個付費特徵（主力集中度、八大行庫、隔日沖；只拿來量，不做規則）",
                  "ml_gbm_q_nobranch": "模型 Q 只拿掉「隔日沖少」（分點資料涵蓋範圍偷看未來的那個特徵；只拿來量，不做規則）",
@@ -459,9 +460,10 @@ RULE_FACTORS.update(REVERSED_FACTORS)          # 2026-11-21
 from quant_platform.research.us_factors import US_FACTORS, US_FEATURES  # noqa: E402 - 2026-11-21: read from the US side
 
 RULE_FACTORS.update(US_FACTORS)
-from quant_platform.research.smc import SMC_FACTORS  # noqa: E402 - 2026-11-22: the candles' highs and lows
+from quant_platform.research.smc import SMC_FACTORS, SMC_V2  # noqa: E402 - 2026-11-22: the candles' highs and lows
 
 RULE_FACTORS.update(SMC_FACTORS)
+RULE_FACTORS.update(SMC_V2)                    # 2026-11-25: the structure as a state, the weekly structure
 
 
 def rolling_beta(returns: pd.DataFrame, market: pd.Series, window: int = BETA_WINDOW, least: int = BETA_LEAST,
@@ -585,7 +587,8 @@ class DailyRule(BaseModel):
     # 2026-10-22 (集保因子第三版): "h1" = no new buys of the fifth whose small holders' share rose the most in 4 weeks
     # (retail_down_4w lowest), "h2" = of the fifth whose holders grew the most (holders_down_4w lowest)
     # 2026-11-20 (docs/research/results.md「不買現金獲利最差的五分之一」): "c1"
-    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm", "t1", "e1", "he", "s1", "l1", "x1", "b1", "c1"] = "none"
+    exclude: Literal["none", "v1", "h1", "h2", "m1", "hm", "t1", "e1", "he", "s1", "l1", "x1", "b1", "c1",
+                     "k1", "k2"] = "none"
     # 2026-10-12 (全面研究「之後再試」第 1 項): "cost1" = a holding that leaves the keep zone is replaced only when
     # the replacement's expected next-20-session excess beats the holding's by more than a round trip (about
     # 0.99%: fee both ways, the sell tax, slippage both ways). The expectation is the rule's own score
@@ -900,7 +903,7 @@ class FactorPanel:
             from quant_platform.research.us_factors import matrix as us_matrix
 
             return us_matrix(self, Path(self.chips._folder).parent, factor)        # sessions × symbols
-        if factor in SMC_FACTORS:                                  # 2026-11-22: swing points, order blocks, gaps
+        if factor in SMC_FACTORS or factor in SMC_V2:              # 2026-11-22: swing points, order blocks, gaps
             if self.chips is None:
                 return np.full((len(self.sessions), len(self.symbols)), np.nan)
             from quant_platform.research.smc import matrix as smc_matrix
@@ -1252,6 +1255,12 @@ class FactorPanel:
             return set()
         cut = np.quantile(values[known], HOLDER_VETO_SHARE)
         return {self.symbols[row] for row in known if values[row] <= cut}
+
+    def signal_vetoed(self, position: int, factor: str) -> set[str]:
+        """exclude "k1"/"k2" (2026-11-25): the stocks with ``factor``'s signal in force at ``position`` — an event
+        factor that has a value only for them (a sweep of a swing low in the last 10 sessions, a bearish structure)."""
+        values = self.matrix(factor)[:, position]
+        return {self.symbols[row] for row in np.flatnonzero(np.isfinite(values) & (values > 0))}
 
     def excluded(self, position: int) -> set[str]:
         """exclude "v1": the traded stocks in the top fifth by 60-session idiosyncratic volatility or the
@@ -1726,6 +1735,8 @@ def _rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: d
         elif getattr(rule, "exclude", "none") in VETO_FACTORS:      # 2026-10-22: chips dispersing, no new buys
             for factor in VETO_FACTORS[rule.exclude]:
                 vetoed = vetoed | fp.holder_vetoed(position, factor)
+        elif getattr(rule, "exclude", "none") in SIGNAL_VETOES:     # 2026-11-25: an SMC signal in force, no new buys
+            vetoed = vetoed | fp.signal_vetoed(position, SIGNAL_VETOES[rule.exclude])
         if exit_agent is not None and hasattr(exit_agent, "refuses"):
             vetoed = vetoed | exit_agent.refuses(position)  # tech1: the robot buys only what it wants
         if risk_veto == "meta1":              # 2026-10-20: the meta-label model expects it to lose to 0050
@@ -3145,6 +3156,9 @@ def rule_inputs(rule) -> list[str]:
     for veto in VETO_FACTORS.get(getattr(rule, "exclude", "none"), ()):
         if veto not in names:
             names.append(veto)
+    signal = SIGNAL_VETOES.get(getattr(rule, "exclude", "none"))     # 2026-11-25
+    if signal and signal not in names:
+        names.append(signal)
     if getattr(rule, "weighting", "equal") == "inverse_beta" and "low_beta_250" not in names:   # 2026-11-20
         names.append("low_beta_250")
     return names
@@ -4294,6 +4308,10 @@ VETO_FACTORS = {**{key: (value,) for key, value in HOLDER_EXCLUDES.items()}, "hm
                 # in its bottom fifth: 5.5% a year between the fifths since 2020-10, the top fifth +0.6%)
                 "c1": ("cash_profit",)}
 HOLDER_VETO_SHARE = 0.2
+# 2026-11-25 (docs/research/results.md「SMC 第二版」, written before the run): vetoes by a signal in force, not by a
+# fifth — "k1" no new buy within 10 sessions of a sweep of a swing low (the first version measured it reversed in both
+# periods), "k2" none while the daily structure is bearish (SMC trades along the structure)
+SIGNAL_VETOES = {"k1": "smc_sweep_low_10", "k2": "smc_bearish"}
 
 # 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」, written before the
 # strength results): the new data's factors that the strength analysis calls strong (or reversed: bet the other way),
@@ -4371,6 +4389,64 @@ def smc_batch() -> list[DailyRule]:
     return output
 
 
+# 2026-11-25 (使用者：做第二版; docs/research/results.md「SMC 第二版」, written before the run). The first version's 42
+# rules were all T3: an edge of 3 points a year over the average stock, 45 to 300 orders a month.
+SMC2_STYLES = HOLDING_STYLES[:2]               # not "sold the day the signal lapses": worst in 13 of 14 frames
+SMC2_WEEKLY = ("smc_w_break_up_8", "smc_break_up_w", "smc_fvg_retest_w")
+SMC2_VETO_EVENTS = {"k1": "smc_sweep_low_10", "k2": "smc_bearish"}
+SMC2_WORDS = {"smc_w_break_up_8": "週線結構向上突破", "smc_break_up_w": "結構向上突破且週線多方",
+              "smc_fvg_retest_w": "回測缺口 FVG 且週線多方"}
+
+
+def smc_event_verdicts(folder: str | Path | None = None) -> dict[str, str]:
+    """Each event factor's verdict from the newest event study that has it (``factors --events``): 強 = the stocks
+    with the event beat every eligible stock by ``factors.EDGE`` a year or more over the next 20 sessions in both
+    2015-06～2020-10 and 2020-10 on; 反向 = behind by as much in both; 弱 otherwise."""
+    from quant_platform.research.factors import EDGE, HORIZON
+
+    folder = Path(folder) if folder else Path("instance") / "research" / "factors"
+    verdicts: dict[str, str] = {}
+    for path in sorted(folder.glob("events-*.json")):          # the newest last: it overrides
+        try:
+            report = _json_load(path)
+        except (OSError, ValueError):
+            continue
+        for name, item in (report.get("factors") or {}).items():
+            periods = item.get("periods") or {}
+            years = [(periods.get(key) or {}).get("excess_20") for key in ("before_regime", "regime")]
+            if any(value is None for value in years):
+                continue
+            years = [value * 252 / HORIZON for value in years]
+            verdicts[name] = "強" if min(years) >= EDGE else "反向" if max(years) <= -EDGE else "弱"
+    return verdicts
+
+
+def smc2_batch() -> list[DailyRule]:
+    """(c) the first version's frames decided once a week instead of every day, in the two holding styles that keep
+    a pick at least as long as the signal; (d) the weekly-structure factors the event study calls 強, the same way."""
+    verdicts = smc_event_verdicts()
+    strong = [name for name in SMC2_WEEKLY if verdicts.get(name) == "強"]
+    print(f"SMC 第二版：週線因子的事件研究 { {name: verdicts.get(name, '還沒量') for name in SMC2_WEEKLY} }，做規則的 {strong}",
+          flush=True)
+    output = []
+    for factor, words in [*SMC_WORDS.items(), *((name, SMC2_WORDS[name]) for name in strong)]:
+        for told, factors in ((words, {factor: 1.0}), (f"{words}＋站上 200 日線", {factor: 1.0, "trend_200": 1.0})):
+            for label, style in SMC2_STYLES:
+                output.append(DailyRule(name=f"SMC：{told}：前 20 名、同產業最多 3 成、每週決策｜持有：{label}",
+                                        factors=factors, check="weekly", industry_cap=0.3, eligibility="entry", **style))
+    return output
+
+
+def smc_veto_batch() -> list[DailyRule]:
+    """(b) the 44 BETA_GUARD rules with no new buy of a stock an SMC signal marks — only the signals whose event study
+    says 反向 (the evidence comes before the veto)."""
+    verdicts = smc_event_verdicts()
+    wanted = [code for code, factor in SMC2_VETO_EVENTS.items() if verdicts.get(factor) == "反向"]
+    print(f"SMC 否決：事件研究 { {factor: verdicts.get(factor, '還沒量') for factor in SMC2_VETO_EVENTS.values()} }，做的否決 {wanted}",
+          flush=True)
+    return _veto_rules([(trial, code) for code in wanted for group in BETA_GUARD.values() for trial in group])
+
+
 def new_data_batch() -> list[DailyRule]:
     from quant_platform.research.scan import SHORT
 
@@ -4442,7 +4518,8 @@ VETO_WORDS = {"h1": "不買散戶大增的五分之一", "h2": "不買股東大�
               "e1": "不買獲利衰退最多的五分之一", "he": "不買股東大增或獲利衰退最多的五分之一",
               "s1": "不買借券賣出最多的五分之一", "l1": "不買借券費率最高的五分之一",
               "x1": "不買技術機器人最不看好的五分之一", "b1": "不買連動最高的五分之一",
-              "c1": "不買現金獲利最差的五分之一"}
+              "c1": "不買現金獲利最差的五分之一",
+              "k1": "不買 10 天內掃低回收的（SMC）", "k2": "不買日線結構是空方的（SMC）"}
 # 2026-10-22 (research_method §7「否決第三版」, written before the run; the lists frozen at 14:4x from the passing single
 # rules ranking the top 20 without a veto, by end value): the holders' veto on the 120 richest, both vetoes together on
 # the 20 richest and on the three top-10 rules the margin veto moved onto the frontier
@@ -5411,6 +5488,21 @@ def model_v_batch() -> list[DailyRule]:
     base = {"factors": {"ml_gbm_v": 1.0}, "check": "weekly", "industry_cap": 0.3, "min_hold": 0}
     return [DailyRule.model_validate({**base, **change,
                                       "name": f"模型 V 單獨（模型 K 加上美國那一邊的特徵）、同產業最多 3 成、不設最短持有{word}"})
+            for word, change in MODEL_R_FRAMES]
+
+
+def model_w_batch() -> list[DailyRule]:
+    """2026-11-25 (docs/research/results.md「SMC 第二版」(a), written before the run): gbm-2.18.0 alone in model R's
+    three frames — only past its registered gate (model.down_gate against model K)."""
+    from quant_platform.research.model import stored_down_gate
+
+    check = stored_down_gate(Path("instance") / "research" / "models", "gbm-2.18.0")
+    print(f"gbm-2.18.0 門檻（2021-2025 前 20 名對加權指數，對 gbm-2.7.0）：{check}", flush=True)
+    if not check or not check.get("passed"):
+        return []
+    base = {"factors": {"ml_gbm_w": 1.0}, "check": "weekly", "industry_cap": 0.3, "min_hold": 0}
+    return [DailyRule.model_validate({**base, **change,
+                                      "name": f"模型 W 單獨（模型 K 加上 SMC 的 9 個讀數）、同產業最多 3 成、不設最短持有{word}"})
             for word, change in MODEL_R_FRAMES]
 
 
@@ -6791,3 +6883,6 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
 # 2026-11-22: the asked-again batches last - the pool's sources snapshot names a rule by the first batch holding it
 BATCHES.update({"rerun_poolsweep": pool_sweep_batch, "rerun_guardorigins": guard_origins_batch})
 BATCHES["smc"] = smc_batch                     # 2026-11-22
+BATCHES["smc2"] = smc2_batch                   # 2026-11-25
+BATCHES["smcveto"] = smc_veto_batch
+BATCHES["modelw"] = model_w_batch

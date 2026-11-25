@@ -51,14 +51,30 @@ ENTRY_WINDOW = 10    # sessions a retest, a sweep or a setup counts
 ZONE_LIFE = 60       # sessions an order block or a gap waits for its retest
 BLOCK_REACH = 20     # the order block's down candle is at most this many sessions before the break
 WARMUP = 60          # bars of a stock's own before its values count
-VERSION = "smc-1.0.0"
+VERSION = "smc-1.1.0"
 EVENTS = tuple(name for name in SMC_FACTORS if name != "smc_discount")
+# 2026-11-25 (使用者：做第二版; docs/research/results.md「SMC 第二版」, written before the run): the structure as a state
+# (the first version only said how new the last break upward was) and the higher timeframe SMC trades along — the
+# same structure read from weekly bars. A day of week W reads the weeks that ended before W: the week in progress is
+# never a bar, so cutting the data in the middle of a week changes nothing before the cut.
+SMC_V2 = {
+    "smc_structure": "SMC 日線結構（最近一次是收盤站上波段高點＝多方 +1，最近一次是收盤跌破波段低點＝空方 −1；還沒有突破過的沒有分數）",
+    "smc_bearish": "SMC 日線結構是空方（最近一次的結構突破是收盤跌破波段低點；多方或還沒突破過的沒有分數）",
+    "smc_w_structure": "SMC 週線結構（用到上週為止的週 K 棒，前後各 3 週的波段高低點：多方 +1、空方 −1）",
+    "smc_w_break_up_8": "SMC 週線結構向上突破（週收盤站上最近一個確認的週線波段高點，8 週內越新分數越高；週線結構轉空就歸零；用到上週為止）",
+    "smc_break_up_w": "SMC 結構向上突破、週線結構也是多方（日線 20 日內的向上突破，只算週線結構是多方的股票）",
+    "smc_fvg_retest_w": "SMC 回測多方缺口、週線結構也是多方（日線 10 日內第一次回到缺口，只算週線結構是多方的股票）",
+}
+EVENTS_V2 = ("smc_bearish", "smc_w_break_up_8", "smc_break_up_w", "smc_fvg_retest_w")
+WEEK_SWING = 3       # weekly bars each side of a weekly swing point
+WEEK_BREAK = 8       # weeks a weekly break upward counts
+WEEK_WARMUP = 26     # weekly bars of a stock's own before its weekly values count
 
 
 def measured(name: str, values: np.ndarray) -> np.ndarray:
     """An event factor with 0 where no event is in force — the stocks with a signal against every stock; the others
     (and ``smc_discount``, a place within the bullish stocks) as they are."""
-    return np.nan_to_num(values, nan=0.0) if name in EVENTS else values
+    return np.nan_to_num(values, nan=0.0) if name in EVENTS or name in EVENTS_V2 else values
 
 
 def swings(high: np.ndarray, low: np.ndarray, swing: int = SWING) -> tuple[np.ndarray, np.ndarray]:
@@ -85,7 +101,8 @@ def structure(open_: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.nd
     sessions, symbols = close.shape
     valid = np.isfinite(close) & np.isfinite(high) & np.isfinite(low)
     new_high, new_low = swings(np.where(valid, high, np.nan), np.where(valid, low, np.nan), swing)
-    output = {name: np.full((sessions, symbols), np.nan, dtype=np.float32) for name in SMC_FACTORS}
+    output = {name: np.full((sessions, symbols), np.nan, dtype=np.float32)
+              for name in (*SMC_FACTORS, "smc_structure", "smc_bearish")}
     never = -10 ** 9
     swing_high = np.full(symbols, np.nan)        # the last confirmed swing high not yet closed above
     swing_low = np.full(symbols, np.nan)         # the last confirmed swing low not yet traded below
@@ -174,9 +191,61 @@ def structure(open_: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.nd
             output["smc_setup_10"][t] = np.where(ready, fresh("setup", entry_window), 0.0)
             output["smc_discount"][t] = np.where(ready & v & bullish & np.isfinite(place),
                                                  np.clip(1.0 - place, 0.0, 1.0), np.nan)
+            output["smc_structure"][t] = np.where(ready & (trend != 0), trend, np.nan)
+            output["smc_bearish"][t] = np.where(ready & (trend == -1), 1.0, np.nan)
     for name in EVENTS:                        # no event in force: no value
         output[name] = np.where(output[name] > 0, output[name], np.nan).astype(np.float32)
     return output
+
+
+def week_numbers(sessions: list[date]) -> np.ndarray:
+    """Each session's week, 0 for the first session's (ISO weeks: Monday to Sunday)."""
+    monday = np.array([(day - date(1970, 1, 5)).days // 7 for day in sessions], dtype=np.int64)
+    return monday - monday[0] if len(monday) else monday
+
+
+def weekly_bars(open_: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.ndarray,
+                weeks: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """weeks × symbols: each week's first open, highest high, lowest low and last close among the days a stock traded
+    (NaN for a week it did not trade at all); ``weeks`` from ``week_numbers`` (a week without a session is NaN)."""
+    count = int(weeks[-1]) + 1 if len(weeks) else 0
+    shape = (count, close.shape[1])
+    week_open, week_high = np.full(shape, np.nan), np.full(shape, np.nan)
+    week_low, week_close = np.full(shape, np.nan), np.full(shape, np.nan)
+    traded = np.isfinite(close) & np.isfinite(high) & np.isfinite(low)
+    for t in range(close.shape[0]):
+        w, v = int(weeks[t]), traded[t]
+        first = v & ~np.isfinite(week_close[w])
+        week_open[w] = np.where(first, np.where(np.isfinite(open_[t]), open_[t], close[t]), week_open[w])
+        week_high[w] = np.where(v, np.fmax(week_high[w], high[t]), week_high[w])
+        week_low[w] = np.where(v, np.fmin(week_low[w], low[t]), week_low[w])
+        week_close[w] = np.where(v, close[t], week_close[w])
+    return week_open, week_high, week_low, week_close
+
+
+def weekly_structure(open_: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.ndarray, sessions: list[date],
+                     daily: dict[str, np.ndarray], swing: int = WEEK_SWING, break_window: int = WEEK_BREAK,
+                     warmup: int = WEEK_WARMUP) -> dict[str, np.ndarray]:
+    """The weekly factors of SMC_V2, sessions × symbols: the structure of the weekly bars as of the end of the week
+    before each session's own, and the daily break and gap retest (``daily``: ``structure``'s output) of the stocks
+    whose weekly structure is bullish."""
+    weeks = week_numbers(sessions)
+    found = structure(*weekly_bars(open_, high, low, close, weeks), swing=swing, break_window=break_window,
+                      warmup=warmup)
+    before = weeks - 1
+    known = before >= 0
+
+    def as_of_last_week(values: np.ndarray) -> np.ndarray:
+        output = np.full(close.shape, np.nan, dtype=np.float32)
+        output[known] = values[before[known]]
+        return output
+
+    state = as_of_last_week(found["smc_structure"])
+    bullish = state == 1
+    return {"smc_w_structure": state,
+            "smc_w_break_up_8": as_of_last_week(found["smc_break_up_20"]),
+            "smc_break_up_w": np.where(bullish, daily["smc_break_up_20"], np.nan).astype(np.float32),
+            "smc_fvg_retest_w": np.where(bullish, daily["smc_fvg_retest_10"], np.nan).astype(np.float32)}
 
 
 def _days(days) -> np.ndarray:
@@ -268,5 +337,8 @@ def matrix(fp, history: str | Path, factor: str) -> np.ndarray:
     """sessions × symbols; every SMC factor is computed once per panel."""
     cache = getattr(fp, "_smc", None)
     if cache is None:
-        cache = fp._smc = structure(*bars(fp.panel, history))
+        candles = bars(fp.panel, history)
+        cache = structure(*candles)
+        cache.update(weekly_structure(*candles, list(fp.panel.sessions), cache))
+        fp._smc = cache
     return cache[factor]

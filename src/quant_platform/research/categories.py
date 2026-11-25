@@ -37,7 +37,8 @@ FAMILY_FACTORS = {
     "美股連動": ("us_sox_beta",),          # 2026-11-21
     # 2026-11-22 (使用者：SMC加到策略研究裡): Smart Money Concepts, read from the candles' highs and lows
     "價格行為 SMC": ("smc_break_up_20", "smc_choch_up_20", "smc_ob_retest_10", "smc_fvg_retest_10", "smc_sweep_low_10",
-                    "smc_discount", "smc_setup_10"),
+                    "smc_discount", "smc_setup_10", "smc_structure", "smc_bearish", "smc_w_structure",
+                    "smc_w_break_up_8", "smc_break_up_w", "smc_fvg_retest_w"),
 }
 FACTOR_FAMILY = {factor: family for family, factors in FAMILY_FACTORS.items() for factor in factors}
 OPPOSITE = {"趨勢動能": "反轉", "反轉": "趨勢動能"}
@@ -184,7 +185,8 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
                            "t1": "不新買離年線最遠的股票", "e1": "不新買獲利衰退最多的股票",
                            "he": "不新買股東大增或獲利衰退最多的股票", "s1": "不新買借券賣出最多的股票",
                            "l1": "不新買借券費率最高的股票",
-                           "x1": "不新買技術機器人最不看好的股票"}.get(spec["exclude"], "有排除條件"))
+                           "x1": "不新買技術機器人最不看好的股票",
+                           "k1": "不新買 10 天內掃低回收的股票", "k2": "不新買日線結構是空方的股票"}.get(spec["exclude"], "有排除條件"))
         if spec.get("large_caps"):               # equal amounts unless weighted by calmness (its own trait)
             equal = spec.get("weighting", "equal") == "equal"
             traits.append(f"只挑市值前 {spec['large_caps']} 大" + ("、每檔等額" if equal else ""))

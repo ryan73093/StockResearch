@@ -285,7 +285,7 @@ def run_recent(history: str | Path, out_dir: str | Path, job=None, names: list[s
     labels = {**daily.FACTOR_LABELS, **daily.EARNINGS_FACTORS,       # 2026-10-28: the earnings family by name
               **daily.BETA_FACTORS, **daily.BEHAVIOR_FACTORS,          # 2026-11-20: the beta and literature ones
               **daily.BALANCE_FACTORS, **daily.CASH_FACTORS, **daily.REVERSED_FACTORS, **daily.US_FACTORS,
-              **daily.SMC_FACTORS}                                      # 2026-11-22
+              **daily.SMC_FACTORS, **daily.SMC_V2}                      # 2026-11-22, 11-25
     factors = [name for name in (names or daily.FACTOR_LABELS) if name in labels]
     sessions = fp.sessions
     positions = [index for index, day in enumerate(sessions)

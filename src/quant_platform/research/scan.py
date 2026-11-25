@@ -106,6 +106,9 @@ SHORT = {
     "smc_break_up_20": "SMC 結構突破", "smc_choch_up_20": "SMC 空翻多", "smc_ob_retest_10": "SMC 回測訂單塊",
     "smc_fvg_retest_10": "SMC 回測缺口", "smc_sweep_low_10": "SMC 掃低回收", "smc_discount": "SMC 折價區",
     "smc_setup_10": "SMC 完整進場",
+    "smc_structure": "SMC 日線結構", "smc_bearish": "SMC 日線空方", "smc_w_structure": "SMC 週線結構",
+    "smc_w_break_up_8": "SMC 週線突破", "smc_break_up_w": "SMC 突破＋週線多方", "smc_fvg_retest_w": "SMC 缺口＋週線多方",
+    "ml_gbm_w": "模型W",
 }
 
 
@@ -149,6 +152,7 @@ def failed_models(models_root: Path) -> set[str]:
               "ml_gbm_s": lambda: stored_down_gate(models_root, "gbm-2.14.0"),
               "ml_gbm_t": lambda: stored_down_gate(models_root, "gbm-2.15.0"),
               "ml_gbm_v": lambda: stored_down_gate(models_root, "gbm-2.17.0"),
+              "ml_gbm_w": lambda: stored_down_gate(models_root, "gbm-2.18.0"),
               "ml_gbm_u": lambda: stored_down_gate(models_root, "gbm-2.16.0"),
               "ml_gbm_ext_monthly": lambda: top_gate(models_root, "gbm-2.4.0", "gbm-2.2.0"),
               "ml_deep2_riskadj": lambda: deep2_gate(models_root, "dl-2.4.0"),

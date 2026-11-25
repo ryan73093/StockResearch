@@ -108,6 +108,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # features and target plus the US side (US_FEATURES_V): how a stock follows the US semiconductor index and its
           # US peers, its rate and dollar sensitivities, and six US market states
           "ml_gbm_v": {"version": "gbm-2.17.0", "label": "ensemble", "features": "extended_v"},
+          # 2026-11-25 (docs/research/results.md「SMC 第二版」(a), written before the run): model K's features and
+          # target plus the SMC readings (SMC_FEATURES_W) — alone their rules were all T3; a tree can use a reading
+          # that only tells the bad from the good (the sweep, the bearish structure)
+          "ml_gbm_w": {"version": "gbm-2.18.0", "label": "ensemble", "features": "extended_w"},
           # 2026-11-21 (docs/research/results.md「模型 U：扣掉大盤下跌日的連動」, written before the run): model Q with the
           # beta measured on the days TAIEX fell (Ang, Chen & Xing 2006) — model Q's registered next version (a)
           "ml_gbm_u": {"version": "gbm-2.16.0", "label": "ensemble", "features": "extended_k", "target": "down_residual"},
@@ -272,6 +276,8 @@ def version_features(version: str | None) -> tuple[str, ...]:
     if kind in ("extended_k_nolong", "extended_k_noshort", "extended_k_nobranch"):   # 2026-11-19: model K's list less some paid ones
         left = {"extended_k_nolong": PAID_LONG, "extended_k_noshort": PAID_SHORT}.get(kind, ("low_daytrade_5",))
         return tuple(name for name in version_features("gbm-2.7.0") if name not in left)
+    if kind == "extended_w":           # 2026-11-25: K's list and the SMC readings
+        return version_features("gbm-2.7.0") + SMC_FEATURES_W
     if kind == "extended_v":           # 2026-11-22: K's list and the US side
         return version_features("gbm-2.7.0") + US_FEATURES_V
     if kind == "extended_t":           # 2026-11-21: K's list and the factors measured in November
@@ -370,8 +376,12 @@ def feature_block(fp, columns: list[int], eligible: np.ndarray, names: tuple[str
         if name.startswith("market:"):
             block[:, :, index] = np.where(mask, market_state(fp, name)[columns][:, None], np.nan)
             continue
-        values = np.where(mask, fp.matrix(name)[:, columns].T, np.nan)
-        block[:, :, index] = _rank(values)
+        values = fp.matrix(name)[:, columns].T
+        if name.startswith("smc_"):         # 2026-11-25: an SMC event without a signal in force is 0, not unknown
+            from quant_platform.research.smc import measured
+
+            values = measured(name, values)
+        block[:, :, index] = _rank(np.where(mask, values, np.nan))
     return block
 
 
@@ -699,7 +709,10 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
 
 DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0", "gbm-2.13.0": "gbm-2.7.0", "gbm-2.13.1": "gbm-2.7.0", "gbm-2.13.2": "gbm-2.7.0",
               "gbm-2.13.3": "gbm-2.7.0", "gbm-2.14.0": "gbm-2.7.0", "gbm-2.15.0": "gbm-2.7.0",
-              "gbm-2.16.0": "gbm-2.7.0", "gbm-2.17.0": "gbm-2.7.0"}
+              "gbm-2.16.0": "gbm-2.7.0", "gbm-2.17.0": "gbm-2.7.0", "gbm-2.18.0": "gbm-2.7.0"}
+# 2026-11-25 (model W): the first version's seven SMC readings and the two structure states (smc.SMC_V2)
+SMC_FEATURES_W = ("smc_break_up_20", "smc_choch_up_20", "smc_ob_retest_10", "smc_fvg_retest_10", "smc_sweep_low_10",
+                  "smc_discount", "smc_setup_10", "smc_structure", "smc_w_structure")
 # 2026-11-22 (model V): the US side — one rule factor, five per-stock readings (us_factors.US_FEATURES) and six market
 # states (us_factors.US_MARKET, each against its own last MARKET_WINDOW sessions like the other market readings)
 US_FEATURES_V = ("us_sox_beta", "us_peer_mom_20", "us_peer_mom_60", "us_peer_gap_5", "us_rate_move_60", "us_dollar_move_60",
