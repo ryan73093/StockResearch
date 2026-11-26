@@ -242,14 +242,13 @@ POOL_FILTERS = ("q", "family", "tier", "trait")
 _READY: dict[str, tuple[float, object]] = {}
 READY_FOR = 15 * 60
 INLINE_VIEW_LOG_SECONDS = 1.0          # a view the page had to make itself, slower than this, is written to the web log
-# 2026-11-12: a view written before this process started was written by the version before it (the deploy of 15:01:
-# /research answered 500 for a minute — the overview kept by the old warm-up had no ``ahead_sold``); not used
-_STARTED = __import__("time").time()
 
 
 def ready(name: str, research_dir: Path, compute):
     """The view as the warm-up process last wrote it (dashboard/warm.py; at most READY_FOR old, read again only when the
-    file changes), else as this process last computed it, else computed now."""
+    file changes), else as this process last computed it, else computed now. The file is the one of this version of the
+    code (warm.code_stamp), so a view written before this process started counts: that is what makes the first click
+    after a deploy read instead of compute."""
     import pickle
     import time as clock
     from time import monotonic
@@ -263,7 +262,7 @@ def ready(name: str, research_dir: Path, compute):
         stamp = path.stat().st_mtime
     except OSError:
         stamp = None
-    if stamp is not None and stamp >= _STARTED and clock.time() - stamp < READY_FOR:
+    if stamp is not None and clock.time() - stamp < READY_FOR:
         if found is not None and len(found) > 2 and found[2] == stamp:
             return found[1]
         try:
@@ -278,11 +277,11 @@ def ready(name: str, research_dir: Path, compute):
     started = monotonic()
     value = compute()
     _READY[key] = (monotonic(), value)
-    # 2026-11-21 (使用者：整個 UI 非常慢): a view made inside the click (the warm-up had none written since this process
-    # started, or none younger than READY_FOR) was the 12–53 s page and left no trace
+    # 2026-11-21 (使用者：整個 UI 非常慢): a view made inside the click (the warm-up had none of this version younger than
+    # READY_FOR) was the 12–53 s page and left no trace
     if monotonic() - started > INLINE_VIEW_LOG_SECONDS:
-        logger.warning("view %s made inside the page: %.1f s (no warm-up file written since this process started "
-                       "and younger than %d min)", name, monotonic() - started, READY_FOR // 60)
+        logger.warning("view %s made inside the page: %.1f s (no warm-up file of this version younger than %d min)",
+                       name, monotonic() - started, READY_FOR // 60)
     return value
 
 
@@ -540,6 +539,13 @@ def roles_view(research_dir: Path) -> dict[str, object]:
     return {"growth": summary(research_dir), "rolling": rolling, "division": division, "holding": holding}
 
 
+def round_view_of(research_dir: Path) -> dict[str, object] | None:
+    """The development round's summary: the whole registry parsed (2026-11-26: 1.9 s inside the overview's click, again
+    after every trial the research wrote), so the warm-up keeps it. ``round_summary`` drops statistics of another data
+    basis itself."""
+    return round_summary(research_dir / "trials.jsonl", "development", latest_stats(research_dir / "stats", "development"))
+
+
 def ready_views(research_dir: Path) -> dict[str, object]:
     """name -> how to compute it: what the warm-up keeps ready."""
     from quant_platform.research.pool import pool_view
@@ -552,6 +558,7 @@ def ready_views(research_dir: Path) -> dict[str, object]:
             "downside": lambda: downside_table(research_dir), "forward": lambda: StockForwardTracker(research_dir).summary(),
             "status": lambda: research_status(research_dir), "scale": lambda: search_scale(research_dir),
             "ranking": lambda: trial_ranking(research_dir / "trials.jsonl", "development"),
+            "round": lambda: round_view_of(research_dir), "basis_counts": lambda: basis_counts(research_dir),
             "roles": lambda: roles_view(research_dir), "start": lambda: start_view(research_dir)}
 
 
@@ -855,10 +862,15 @@ def _model_gate(folder: Path, version: str, meta: dict) -> dict[str, object] | N
     return None
 
 
+def _basis_counts(research_dir: Path) -> dict[str, int]:
+    """Rules with results per starting capital, as the warm-up keeps it (2026-11-26: counted inside the click it parsed
+    the whole registry — 2.9 s of the overview's first click, again after every trial the research wrote)."""
+    return ready("basis_counts", research_dir, lambda: basis_counts(research_dir))
+
+
 def _default_basis(research_dir: Path) -> str:
     """The owner's account (starting capital plus monthly) once it has results, else the monthly view."""
-    counts = basis_counts(research_dir)
-    return "seed" if counts.get("seed") else "dca"
+    return "seed" if _basis_counts(research_dir).get("seed") else "dca"
 
 
 def _project_root() -> Path:
@@ -1615,17 +1627,20 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             return redirect(url_for("v2.research"))
         tab = tab if tab in RESEARCH_TABS else "overview"
         reports_dir = research_dir / "reports"
+        # 2026-11-26: the search-round numbers below are on the legacy tab only; every tab worked them out (the registry
+        # parsed for them: 3 s of the overview's first click)
+        old = tab == "legacy"
         # 2026-11-20: kept ready by the warm-up (7 s of a cold overview: the registry read and verified again)
-        ranking = ready("ranking", research_dir, lambda: trial_ranking(research_dir / "trials.jsonl", "development"))
-        stats = latest_stats(research_dir / "stats", "development")
+        ranking = ready("ranking", research_dir, lambda: trial_ranking(research_dir / "trials.jsonl", "development")) if old else None
+        stats = latest_stats(research_dir / "stats", "development") if old else None
         if stats and str(stats.get("basis") or "")[:12] != ranking.get("basis"):
             stats = None  # computed on another data basis than the ranked trials
         best_dsr = None
         if stats and stats.get("candidates"):
             best = max(stats["candidates"], key=lambda item: item["dsr"]["deflated_sharpe"] or 0)
             best_dsr = {"name": best["name"], "value": best["dsr"]["deflated_sharpe"], "trials": best["dsr"].get("trials")}
-        forward_rows = ForwardTracker(research_dir).summary()
-        round_view = round_summary(research_dir / "trials.jsonl", "development", stats)
+        forward_rows = ForwardTracker(research_dir).summary() if tab == "forward" else []
+        round_view = ready("round", research_dir, lambda: round_view_of(research_dir)) if old else None
         jobs = JobLog(research_dir).jobs()
         basis = _default_basis(research_dir)
         overview = ready(f"pool:{basis}", research_dir, lambda: pool_view(research_dir, basis=basis)) if tab == "overview" else None
@@ -1633,7 +1648,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         best_total = len(best)
         # 2026-10-30: variants with the very same results are one row (pool.merge_same)
         # 2026-11-14 (使用者：回測加前向綜合評估 但前向權重較重): by pool.combine's score, the backtest money after it
-        best = merge_same(sorted(best, key=lambda row: (-(row.get("combined") or 0), -(row.get("final_value") or 0))))[:BEST_ROWS]
+        best = merge_same(sorted(best, key=lambda row: (-(row.get("combined") or 0), -(row.get("final_value") or 0))), limit=BEST_ROWS)
         downside = ready("downside", research_dir, lambda: downside_table(research_dir)) if tab == "overview" else None
         if downside:
             downside_total = len(downside)
@@ -1661,8 +1676,8 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             agent=agent_status(dependencies.settings, research_dir),
             promotion=PromotionPipeline(
                 research_dir, FORWARD_PLAN, **promotion_limits(dependencies.investment_plan_service.current()),
-            ).overview(),
-            weekly=weekly_report(research_dir, datetime.now(TAIPEI).date()),
+            ).overview() if old else None,
+            weekly=weekly_report(research_dir, datetime.now(TAIPEI).date()) if old else None,
             tool_groups=TOOL_GROUPS,
             forward_rows=forward_rows,
             forward_start=FORWARD_START,
@@ -1700,13 +1715,13 @@ def create_v2_blueprint(dependencies) -> Blueprint:
                                          _project_root() / DOCS["research_results"][1])), default="9999"))
                          if tab == "overview" else []),
             round_view=round_view,
-            legacy=challenger_view(latest_challenger(research_dir / "legacy")),
+            legacy=challenger_view(latest_challenger(research_dir / "legacy")) if old else None,
             ranking=ranking,
-            stock_rules=stock_rule_rows(research_dir / "trials.jsonl", "development")[:25],  # the pool page has them all
+            stock_rules=stock_rule_rows(research_dir / "trials.jsonl", "development")[:25] if old else [],  # the pool page has them all
             stats=stats,
             best_dsr=best_dsr,
             # Baselines run on the full period; candidates never may (periods.check_gate).
-            baseline_rows=report_rows(latest_reports(reports_dir, limit=20, period="full", kind="baseline")),
+            baseline_rows=report_rows(latest_reports(reports_dir, limit=20, period="full", kind="baseline")) if old else [],
         )
 
     @blueprint.get("/research/pool")
@@ -1724,7 +1739,7 @@ def create_v2_blueprint(dependencies) -> Blueprint:
         return render_template("v2/research_pool.html", active_nav="research", pool=view, daily_rows=shown,
                                daily_matched=len(matched), picked=picked, pool_rows=POOL_ROWS,
                                distinct=len(merge_same(view["daily"])) if any(picked.values()) else len(matched),
-                               research_tab="pool", jobs=JobLog(research_dir).jobs(), counts=basis_counts(research_dir),
+                               research_tab="pool", jobs=JobLog(research_dir).jobs(), counts=_basis_counts(research_dir),
                                # 2026-11-15 (介面檢查 PL-1：8,233、8,161、8,159 三個「規則數」沒寫各算什麼)
                                rule_counts={"all": len(view["daily"]), "with_0050": sum(1 for row in view["daily"] if row.get("uses_0050")),
                                             "full_track": (ready("dashboard", research_dir, lambda: dashboard_data(research_dir)) or {}).get("rules"),

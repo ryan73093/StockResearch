@@ -197,6 +197,8 @@ def test_variants_with_the_same_results_are_one_row():
     merged = merge_same(sorted(rows, key=lambda item: -item["final_value"]))
     assert [item["trial_id"] for item in merged] == [9000, 6890, 7200]
     assert [other["trial_id"] for other in merged[1]["same"]] == [7166, 7187] and merged[0]["same"] == []
+    # 2026-11-26: the overview shows 40 of them — the first so many are the same rows, whole groups
+    assert merge_same(sorted(rows, key=lambda item: -item["final_value"]), limit=2) == merged[:2]
 
 
 def test_the_money_chart_draws_the_money_counted_beside_the_value():

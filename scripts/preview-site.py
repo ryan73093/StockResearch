@@ -16,11 +16,14 @@ os.environ["SCHEDULER_IN_WEB"] = "false"
 os.environ["SCHEDULER_ENABLED"] = "false"
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from quant_platform.dashboard import v2  # noqa: E402
+from quant_platform.container import _instance_dir  # noqa: E402
+from quant_platform.dashboard import warm  # noqa: E402
 from quant_platform.dashboard.app import build_container, create_app  # noqa: E402
 
-v2._STARTED = 0.0          # use the views the deployed warm-up already wrote
-app = create_app(build_container())
+dependencies = build_container()
+# use the views the deployed warm-up already wrote (each version of the code keeps its own; the source tree is another)
+warm.CODE = warm.newest_code(_instance_dir(dependencies.settings.database_url) / "research")
+app = create_app(dependencies)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
 app.run(host="127.0.0.1", port=5055, debug=False, use_reloader=False, threaded=True)

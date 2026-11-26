@@ -3093,6 +3093,36 @@ def _keep_research_warm(dependencies) -> None:
     threading.Thread(target=loop, name="research-warm", daemon=True).start()
 
 
+SEARCH_MODEL_AFTER = 20           # seconds after start: the first clicks first, searches fast from about 40 s on
+
+
+def _load_search_model(dependencies, after: float = SEARCH_MODEL_AFTER):
+    """2026-11-26: the first knowledge search after every restart took 11 s — the search model (BGE-M3, about 2 GB) was
+    read from disk inside that click; later searches take 0.1 s. It is read, and the keyword index built, in the
+    background 20 s after start (read at once it made the first clicks wait: the home page 1.1 s -> 2.5 s).
+    Nothing when the vectors or the model are not there; a failure leaves it to the page."""
+    import threading
+    from pathlib import Path
+
+    from quant_platform.container import _instance_dir
+
+    research_dir = _instance_dir(dependencies.settings.database_url) / "research"
+
+    def load() -> None:
+        time.sleep(after)
+        try:
+            from quant_platform.research import knowledge
+
+            knowledge.search(research_dir, "啟動時先建索引", limit=1)
+            knowledge.semantic(research_dir, "啟動時先載入模型", Path.cwd())
+        except Exception:  # noqa: BLE001 — the page loads them itself then
+            logging.getLogger(__name__).exception("Loading the search model at start failed")
+
+    thread = threading.Thread(target=load, name="search-model", daemon=True)
+    thread.start()
+    return thread
+
+
 def main() -> None:
     # Service logs go to instance/web.stderr.log (scripts/run_local_services.ps1).
     logging.basicConfig(
@@ -3107,6 +3137,7 @@ def main() -> None:
     )
     app = create_app(dependencies)
     _keep_research_warm(dependencies)
+    _load_search_model(dependencies)
     try:
         try:
             from waitress import serve

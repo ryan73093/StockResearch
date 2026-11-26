@@ -154,9 +154,112 @@ def test_a_slow_click_is_written_to_the_web_log(tmp_path, caplog, monkeypatch):
     assert not [record for record in caplog.records if "SLOW" in record.getMessage()]
 
 
+def test_the_search_model_is_read_at_start_not_inside_the_first_search(tmp_path, monkeypatch):
+    """2026-11-26: the first knowledge search after a restart took 11 s. A failure (no model, no vectors) must not stop
+    the site."""
+    from types import SimpleNamespace
+
+    from quant_platform.dashboard import app as app_module
+    from quant_platform.research import knowledge
+
+    asked = []
+    monkeypatch.setattr(knowledge, "search", lambda research, question, limit=20, **kwargs: asked.append(("index", research)))
+    monkeypatch.setattr(knowledge, "semantic", lambda research, question, root=None: asked.append(("model", research)))
+    dependencies = SimpleNamespace(settings=SimpleNamespace(database_url=f"sqlite:///{tmp_path / 'platform.db'}"))
+    app_module._load_search_model(dependencies, after=0).join(timeout=10)
+    assert asked == [("index", tmp_path / "research"), ("model", tmp_path / "research")]
+    assert 10 <= app_module.SEARCH_MODEL_AFTER <= 60               # after the first clicks, before a question is typed twice
+    monkeypatch.setattr(knowledge, "semantic", lambda *args, **kwargs: 1 / 0)
+    thread = app_module._load_search_model(dependencies, after=0)
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+
+
+def test_the_views_folder_follows_the_code(tmp_path):
+    """2026-11-26: deploy.ps1 computes the views from the source tree and the installed web reads them — the same stamp
+    for the same Python files wherever they are, another as soon as one differs."""
+    from quant_platform.dashboard import warm
+
+    source, installed = tmp_path / "src" / "quant_platform", tmp_path / "site-packages" / "quant_platform"
+    for root in (source, installed):
+        (root / "research").mkdir(parents=True)
+        (root / "__init__.py").write_bytes(b"")
+        (root / "research" / "pool.py").write_bytes(b"x = 1\n")
+    (installed / "research" / "pool.cpython-313.pyc").write_bytes(b"compiled")              # not part of the version
+    stamp = warm.code_stamp(source)
+    assert len(stamp) == 12 and warm.code_stamp(installed) == stamp
+    (installed / "research" / "pool.py").write_bytes(b"x = 2\n")
+    assert warm.code_stamp(installed) != stamp
+    (source / "research" / "new.py").write_bytes(b"")
+    assert warm.code_stamp(source) != stamp
+    assert warm.code_stamp() == warm.code_stamp() and len(warm.current_code()) == 12          # this very package
+
+
+def test_older_versions_views_are_removed_but_not_the_serving_sites(tmp_path, monkeypatch):
+    """During a deploy the old site is still serving from its folder while the new code computes into its own."""
+    import time
+
+    from quant_platform.dashboard import warm
+
+    now = time.time()
+    for code, age in (("oldest", 3000), ("serving", 60), ("older", 600)):
+        monkeypatch.setattr(warm, "CODE", code)
+        path = warm.write(tmp_path, "dashboard", code)
+        os.utime(path, (now - age, now - age))
+    assert warm.newest_code(tmp_path) == "serving"                      # scripts/preview-site.py reads the deployed one
+    flat = tmp_path / warm.FOLDER / "dashboard.pkl"                     # kept without a version folder before 2026-11-26
+    flat.write_bytes(b"x")
+    os.utime(flat, (now - 2 * 86400, now - 2 * 86400))
+    monkeypatch.setattr(warm, "CODE", "new")
+    warm.write(tmp_path, "dashboard", "new")
+    warm.prune(tmp_path)
+    assert sorted(item.name for item in (tmp_path / warm.FOLDER).iterdir()) == ["new", "serving"]
+    assert warm.newest_code(tmp_path) == "new" and warm.newest_code(tmp_path / "nothing") is None
+
+
+def test_prepared_means_every_view_of_this_version_is_there_and_young(tmp_path, monkeypatch):
+    """What deploy.ps1 asks after the install: anything missing, old or of another version means "compute again"."""
+    import time
+
+    from quant_platform.dashboard import v2, warm
+
+    names = list(v2.ready_views(tmp_path))
+    monkeypatch.setattr(warm, "CODE", "this-version")
+    assert not warm.prepared(tmp_path)
+    for name in names[:-1]:
+        warm.write(tmp_path, name, {})
+    assert not warm.prepared(tmp_path)                                   # one view missing
+    last = warm.write(tmp_path, names[-1], {})
+    assert warm.prepared(tmp_path)
+    old = time.time() - v2.READY_FOR - 60
+    os.utime(last, (old, old))
+    assert not warm.prepared(tmp_path)
+    os.utime(last)
+    monkeypatch.setattr(warm, "CODE", "the-source-changed")
+    assert not warm.prepared(tmp_path)
+
+
+def test_deploy_computes_the_views_before_it_stops_the_site():
+    """The order is the point: ask whether stopping is allowed, compute the new code's views while the old site serves,
+    then stop."""
+    from pathlib import Path
+
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    deploy = (scripts / "deploy.ps1").read_text(encoding="utf-8")
+    asked = deploy.index("-CheckOnly")
+    computed = deploy.index("-m quant_platform.dashboard.warm")
+    stopped = deploy.index("& powershell.exe @stopArguments")
+    assert asked < computed < stopped
+    installed, checked = deploy.index("pip install ."), deploy.index("warm.prepared(")
+    assert stopped < installed < checked < deploy.index("'start-services.ps1'")     # and again if the code had changed
+    stop = (scripts / "stop-services.ps1").read_text(encoding="utf-8")
+    assert stop.index("if ($CheckOnly)") > stop.index("Refusing to stop services while the worker runs")
+    assert stop.index("if ($CheckOnly)") < stop.index("Set-Content -LiteralPath $stopFlagPath")      # before anything stops
+
+
 def test_a_view_made_inside_the_page_is_written_to_the_web_log(tmp_path, caplog, monkeypatch):
-    """The 12-53 s pages are views the warm-up had not written since the process started (the minutes after a deploy)
-    or not within 15 minutes: the page makes the view itself. That is logged with the view's name and its seconds."""
+    """The 12-53 s pages are views the warm-up had no file of (until 2026-11-26 always the minutes after a deploy) or
+    none younger than 15 minutes: the page makes the view itself. That is logged with the view's name and its seconds."""
     import logging
 
     from quant_platform.dashboard import v2

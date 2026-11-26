@@ -521,22 +521,40 @@ def test_a_view_the_warm_up_process_wrote_is_read_from_its_file(tmp_path):
     assert warm.path_of(tmp_path, "pool:seed").name == "pool-seed.pkl"
 
 
-def test_a_view_written_before_this_process_started_is_not_used(tmp_path, monkeypatch):
+def test_a_view_another_version_of_the_code_wrote_is_not_used(tmp_path, monkeypatch):
     """2026-11-12: for a minute after the 15:01 deploy /research answered 500 — the page read the overview the warm-up
     of the version before had written (no ``ahead_sold``), and the new template formatted a value that was not there.
-    A file older than this process was written by the version before it: the page computes the view itself until the
-    warm-up of this version has written one."""
-    import os
-
+    Every version of the code keeps its own folder, so such a file is never read."""
     from quant_platform.dashboard import v2, warm
 
-    path = warm.write(tmp_path, "dashboard", {"made": "by the version before"})
-    monkeypatch.setattr(v2, "_STARTED", path.stat().st_mtime + 5)          # this process started after it
+    monkeypatch.setattr(warm, "CODE", "the-version-before")
+    warm.write(tmp_path, "dashboard", {"made": "by the version before"})
+    monkeypatch.setattr(warm, "CODE", "this-version")
     calls = []
     assert v2.ready("dashboard", tmp_path, lambda: calls.append(1) or {"made": "here"}) == {"made": "here"} and calls == [1]
     warm.write(tmp_path, "dashboard", {"made": "by this version"})
-    os.utime(path, (path.stat().st_mtime + 10, path.stat().st_mtime + 10))  # written after the start
     assert v2.ready("dashboard", tmp_path, lambda: calls.append(2)) == {"made": "by this version"} and calls == [1]
+
+
+def test_a_view_this_version_wrote_before_the_process_started_is_read(tmp_path):
+    """2026-11-26 (使用者：知道有問題了不修不然是要我幹嘛): the home page took 30.4 s after that morning's deploy — a
+    restarted web read nothing written before it started, so the first clicks computed the views. deploy.ps1 now computes
+    them before it stops the site; the new web reads them, written before it started as they are. One older than
+    READY_FOR is still not used."""
+    import os
+    import time
+
+    from quant_platform.dashboard import v2, warm
+
+    path = warm.write(tmp_path, "roles", {"made": "by deploy.ps1"})
+    earlier = time.time() - 5 * 60                                         # before any process this test could be
+    os.utime(path, (earlier, earlier))
+    calls = []
+    assert v2.ready("roles", tmp_path, lambda: calls.append(1)) == {"made": "by deploy.ps1"} and calls == []
+    stale = warm.write(tmp_path, "scale", {"made": "long ago"})
+    long_ago = time.time() - v2.READY_FOR - 60
+    os.utime(stale, (long_ago, long_ago))
+    assert v2.ready("scale", tmp_path, lambda: calls.append(2) or {"made": "here"}) == {"made": "here"} and calls == [2]
 
 
 def test_the_overview_shows_a_chain_summary_made_before_the_second_money(tmp_path):

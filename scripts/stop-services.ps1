@@ -3,7 +3,9 @@ param(
     # Allow stopping during the 13:30-14:40 after-hours decision window.
     [switch]$DuringTradingWindow,
     # Allow stopping while the worker runs a registered job or during 15:14-15:50 (2026-10-06).
-    [switch]$DuringWorkerJob
+    [switch]$DuringWorkerJob,
+    # Only say whether stopping is allowed now (the refusals below) and stop nothing (deploy.ps1, 2026-11-26).
+    [switch]$CheckOnly
 )
 
 # Stops this project's supervisor, web, API and worker. Every process is
@@ -45,6 +47,11 @@ if (-not $DuringWorkerJob) {
             throw "Refusing to stop services while the worker runs: $($busy -join ', '); pass -DuringWorkerJob to override."
         }
     }
+}
+
+if ($CheckOnly) {
+    Write-Host 'Stopping is allowed now (nothing was stopped).'
+    exit 0
 }
 
 function Get-ProjectServiceProcesses {

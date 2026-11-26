@@ -197,22 +197,23 @@ def _best_records(records: list, period: str, plan_kind: str = "ContributionPlan
     return chosen
 
 
-def merge_same(rows: list[dict]) -> list[dict]:
+def merge_same(rows: list[dict], limit: int | None = None) -> list[dict]:
     """2026-10-30 (使用者 10/29：結果完全一樣的變體，像 #6890、#7166、#7187): rules whose results are the same to the
     yuan — the money, the 2020-10 money and the drawdown (a market filter that never fired, a veto that never vetoed) —
-    are one row: the first registered stands for them, ``same`` lists the others (their numbers and names)."""
+    are one row: the first registered stands for them, ``same`` lists the others (their numbers and names). The rows
+    keep the order their first member has in ``rows``; ``limit`` makes only the first so many (2026-11-26: the overview
+    copied thousands of rows to show 40, 0.4 s on every visit)."""
     groups: dict[tuple, list[dict]] = {}
     for row in rows:
         key = (round(row.get("final_value") or 0), round(row.get("since_2020_final_value") or 0),
                round((row.get("max_drawdown") or 0) * 10_000), row.get("tier"))
-        groups.setdefault(key, []).append(row)
+        groups.setdefault(key, []).append(row)              # a dict keeps the order the groups first appeared in
     output = []
-    for members in groups.values():
+    for members in list(groups.values())[:limit]:
         members = sorted(members, key=lambda row: row.get("trial_id") or 0)
         output.append({**members[0], "same": [{"spec_hash": row["spec_hash"], "trial_id": row.get("trial_id"),
                                                "name": row.get("name")} for row in members[1:]]})
-    place = {row["spec_hash"]: number for number, row in enumerate(rows)}
-    return sorted(output, key=lambda row: min([place[row["spec_hash"]], *(place[other["spec_hash"]] for other in row["same"])]))
+    return output
 
 
 def rule_rows(research_dir: str | Path, basis: str = "seed") -> list[dict[str, object]]:

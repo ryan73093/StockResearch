@@ -9,7 +9,8 @@ site. GET only; what costs money or writes is skipped (knowledge ai=1, the hypot
     .venv\\Scripts\\python.exe scripts\\click-everything.py --limit 2    # exit code 1 when a click takes longer than 2 s
 
 Read the result as the owner's click: median under 0.3 s, nothing over 1 s on the second click, nothing over 3 s on the
-first. A first click after a deploy is slow for about a minute (the pages' views are made again); run it after that.
+first. This holds right after a deploy too (2026-11-26: deploy.ps1 computes the pages' views before it stops the
+services), so run it as soon as one is done; "view ... made inside the page" in instance\\web.stderr.log is a miss.
 """
 
 from __future__ import annotations
