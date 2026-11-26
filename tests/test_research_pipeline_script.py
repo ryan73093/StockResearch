@@ -107,3 +107,15 @@ def test_the_memory_wait_reserves_what_it_lets_in():
     text = (ROOT / "scripts" / "research-pipeline.ps1").read_text(encoding="utf-8-sig")
     body = text[text.index("function Wait-ForMemory"):text.index("function Wait-ForSimulationSlot")]
     assert "Request-Memory $script:ReservationFolder $PID" in body and "(Get-CommitFreeGB) -lt $need" not in body
+
+
+def test_a_step_waits_only_for_a_training_that_has_just_begun():
+    """2026-11-27 (交接檔：96 GB 到貨後量尖峰、重設門檻): dl-5.0.0's training held 19.5 GB from its first quarter hour
+    for a day while every other step waited for all of it; a step that is not a training now waits only for a training
+    in its first minutes (and for its own memory), a training still for any other training."""
+    text = (ROOT / "scripts" / "research-pipeline.ps1").read_text(encoding="utf-8-sig")
+    body = text[text.index("function Wait-ForMemory"):text.index("function Wait-ForSimulationSlot")]
+    deep, other = body.split("return\n    }", 1) if "return\n    }" in body else body.replace("\r\n", "\n").split("return\n    }", 1)
+    assert "(Test-DeepTraining) -or (Test-GpuSearch)" in deep
+    assert "(Test-DeepTrainingStarting) -or -not (Request-Memory" in other and "(Test-DeepTraining)" not in other
+    assert "$_.CreationDate -gt $since" in text and "$DeepGrowthMinutes = 15" in text

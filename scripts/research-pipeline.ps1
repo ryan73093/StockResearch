@@ -69,6 +69,18 @@ function Test-DeepTraining {
     [bool](Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
         $_.CommandLine -like "*quant_platform.research model --model-version dl-*" })
 }
+# 2026-11-27 (handoff: 96 GB 到貨後量尖峰、重設門檻; 94.9 GB installed 11-18): dl-5.0.0's training (4.9 million
+# weights) committed 19.5 GB from its first quarter hour and stayed there (peak 19.6 GB an hour and a half in), and its
+# flow runs a day; every other research step waited for all of it ("no deep training running", the 31 GB rule) with
+# 43.6 GB free to commit — the knowledge flow from 23:45 on. A training's memory grows only at its start, and since
+# 11-12 a step takes its memory by Request-Memory: a step that is not a training waits only while a training is in
+# its first DeepGrowthMinutes, then starts beside it when its own StepGB is free. Two trainings still never run together.
+$DeepGrowthMinutes = 15
+function Test-DeepTrainingStarting {
+    $since = (Get-Date).AddMinutes(-$DeepGrowthMinutes)
+    [bool](Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" | Where-Object {
+        $_.CommandLine -like "*quant_platform.research model --model-version dl-*" -and $_.CreationDate -gt $since })
+}
 # 2026-10-30: the GPU's other users — the full search's stage one (its --part processes) and the blend searches' stage
 # one. dl-2.2.1's flow looked at the GPU once, at its start, in the minutes between the full search's phases a and b,
 # then waited a day for memory and trained beside phase b: CUDA out of memory at 04:13
@@ -91,7 +103,7 @@ function Wait-ForMemory([string[]]$Arguments) {
     $deep = ($Arguments -join " ") -like "*--model-version dl-*"
     $wide = ($Arguments -join " ") -like "*--model-version dl-2.2.*"
     $need = if ($wide) { $WideTrainingGB } elseif ($deep) { $DeepTrainingGB } else { $StepGB }
-    $other = if ($deep) { "另一個深度學習訓練" } else { "深度學習訓練" }
+    $other = if ($deep) { "另一個深度學習訓練" } else { "剛開始 $DeepGrowthMinutes 分鐘內的深度學習訓練" }
     # 2026-11-12: the memory is taken, not only looked at (Request-Memory): the last of the conditions, so nothing is
     # reserved while the step still waits for something else
     # (the blocks below run inside Wait-While and read $need and $label from here, as the old ones read $need)
@@ -102,8 +114,8 @@ function Wait-ForMemory([string[]]$Arguments) {
                 -not (Request-Memory $script:ReservationFolder $PID $label $need (Get-CommitFreeGB)) } 60
         return
     }
-    Wait-While "等記憶體：這一步要約 $need GB 可用（扣掉別的流程剛預留的），而且沒有$($other)在跑（10/28 記憶體用完七次）" {
-        (Test-DeepTraining) -or -not (Request-Memory $script:ReservationFolder $PID $label $need (Get-CommitFreeGB)) } 60
+    Wait-While "等記憶體：這一步要約 $need GB 可用（扣掉別的流程剛預留的），而且沒有$($other)（它的記憶體還在長）" {
+        (Test-DeepTrainingStarting) -or -not (Request-Memory $script:ReservationFolder $PID $label $need (Get-CommitFreeGB)) } 60
 }
 
 # 2026-10-29 (AGENTS.md 研究規範：逐筆模擬的批次同時最多兩個程序): a batch of rules (daily --name) waits while two
