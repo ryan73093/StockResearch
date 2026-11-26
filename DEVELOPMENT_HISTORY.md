@@ -2,6 +2,16 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-11-26 18:30 — SMC 第三版：結構轉空才賣——對 SMC 自己的進場是對的出場，仍全部 T3；當通用的持有方式 44 個裡 0 個好
+
+- 起因：使用者 11/26「繼續」。第二版查到換手降不下來是因為訊號會過期、持股每 20 天全部換一輪，要改的是出場。
+- 程式：`DailyRule.hold` 多一種 `"structure"`（`daily.STATE_HOLDS`、`FactorPanel.structure_up`、`rule_inputs` 多讀 `smc_structure`）；批次 `smc3`（SMC 自己的 32 個）、`smcexit`（44 個既有規則只換持有方式）；流程 `smcexit`；`holding.py`、`pool.py`、`categories.py` 的設定文字。引擎版本不變（`daily-1.6.1`），既有規則的雜湊與結果不動。
+- 判定跑之前寫在 `docs/research/results.md`「SMC 第三版」（commit e7e7d43）；跑之前只數了天數與買賣筆數（`build/smc3_counts.py`）。
+- 結果（規則 #44146～#44221，`build/judge_smc3.py`）：(e) 32 個全部 T3（最好 #44154 291 萬對 0050 375 萬）；和同設定固定 20 天比，30 組裡 23 組錢比較多（中位數 190 萬對 144 萬）、每月委託 26 對 60 筆、回撤 −49% 對 −65%。(f) 44 個裡好的 0 個，錢的中位數剩原版的 51%，過門檻的從 44 剩 12。
+- 測試：`tests/test_research_smc.py` 新增 4 個；連同 daily、holding、pool、categories、流程腳本、文件守門共 130 個通過。全套沒跑。
+- 沒做：沒有部署（新的持有方式只有這 76 個規則用到，頁面文字部署後才看得到）。
+- 回復：`git revert` 這兩個 commit；已登記的 76 個規則留在紀錄裡（研究不論成敗都留）。
+
 ## 2026-11-26 18:10 — 弱勢盤換防守候選：沒過（線下防守輸共識 1.8 點）；下一個試驗：對照組的持股留久一點省費用
 
 - `build/defensive_pool.py` 295 個取樣日：指數在 200 日線下時防守股之後 20 日輸規則共識 1.79 點（t −1.0）、線上輸 3.57 點；照事前的判定不做。秋天那 22% 是在線上跌掉的。
