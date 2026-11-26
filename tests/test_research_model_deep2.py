@@ -310,10 +310,10 @@ def test_the_volatility_adjusted_version_learns_excess_over_volatility_and_train
     seen = {}
     real_fit = model_deep2._fit
 
-    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None):
+    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None, *large):
         seen.setdefault("labels", labels)
         seen.setdefault("judged", judged)
-        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged, *large)
     monkeypatch.setattr(model_deep2, "_fit", spy)
     _data, fp = _panel()
     meta = model.train(fp, tmp_path / "dl-2.4.0", years=[2017], label="deep2", version="dl-2.4.0")
@@ -380,9 +380,9 @@ def test_the_monthly_version_refits_every_month_on_labels_ended_before_it(monkey
     fits = []
     real_fit = model_deep2._fit
 
-    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None):
+    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None, *large):
         fits.append((max(train_days), max(held_days)))
-        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged, *large)
     monkeypatch.setattr(model_deep2, "_fit", spy)
     _data, fp = _panel()
     meta = model.train(fp, tmp_path / "dl-2.6.0", years=[2017], label="deep2", version="dl-2.6.0")
@@ -420,9 +420,9 @@ def test_a_months_refit_keeps_the_scores_in_use_and_never_writes_over_them(monke
     fits = []
     real_fit = model_deep2._fit
 
-    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None):
+    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None, *large):
         fits.append(max(held_days))
-        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged, *large)
     monkeypatch.setattr(model_deep2, "_fit", spy)
     folder = tmp_path / "dl-2.6.0"
     _data, short = _panel(until=date(2017, 10, 20))                       # the day October was fitted
@@ -460,9 +460,9 @@ def test_a_month_is_fitted_the_night_before_its_first_session(monkeypatch, tmp_p
     fits = []
     real_fit = model_deep2._fit
 
-    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None):
+    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None, *large):
         fits.append(max(held_days))
-        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged, *large)
     monkeypatch.setattr(model_deep2, "_fit", spy)
     folder = tmp_path / "dl-2.6.0"
     _data, fp = _panel(until=date(2017, 11, 30))                          # November's last session
@@ -561,10 +561,10 @@ def test_the_residual_version_learns_the_residual_and_trains(monkeypatch, tmp_pa
     seen = {}
     real_fit = model_deep2._fit
 
-    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None):
+    def spy(inputs, kind, seed, train_days, held_days, rows, labels, architecture="gru", judged=None, *large):
         seen.setdefault("labels", labels)
         seen.setdefault("judged", judged)
-        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged)
+        return real_fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture, judged, *large)
     monkeypatch.setattr(model_deep2, "_fit", spy)
     meta = model.train(fp, tmp_path / "dl-2.5.2", years=[2017], label="deep2", version="dl-2.5.2")
     assert meta["features"] == [*TECH_FEATURES, "ml_deep2_top"] and seen["judged"] is None
