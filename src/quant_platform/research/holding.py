@@ -19,6 +19,8 @@ _cache: dict[str, object] = {}
 def style_of(spec: dict) -> str | None:
     if spec.get("hold") == "trend":
         return "月線上續抱"
+    if spec.get("hold") == "structure":       # 2026-11-26: SMC's own exit — not one of the three styles compared
+        return None
     minimum = spec.get("min_hold", 20)
     if minimum in (None, 20):
         return "固定持有 20 天"

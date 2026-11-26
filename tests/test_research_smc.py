@@ -308,6 +308,101 @@ def test_the_weekly_batch_is_the_first_versions_frames_once_a_week_and_the_stron
     assert not set(daily.CASH_VETO_DEEP) & {trial for group in daily.BETA_GUARD.values() for trial in group}
 
 
+def test_hold_structure_keeps_a_holding_while_its_structure_is_bullish_and_sells_the_session_it_is_not():
+    """2026-11-26 (SMC 第三版): SMC's own exit. Out of the keep zone — or its signal lapsed, with eligibility "entry" —
+    a holding stays while the daily structure is bullish, and is sold the session it is not, whatever the rule's
+    decision days."""
+    from tests.test_research_daily import MarketPanel, weekdays
+
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 12))               # two weeks: decisions on the Mondays
+    script = {day: ["D", "E", "F", "A", "B", "C"] for day in days}
+    script[days[0]] = ["A", "B", "C"]
+
+    class Structured(MarketPanel):
+        def structure_up(self):
+            state = np.zeros((len(self.symbols), len(days)), dtype=bool)
+            state[self.row["A"], :] = True                             # bullish throughout
+            state[self.row["B"], :3] = True                            # turns bearish on the Thursday (session 3)
+            return state                                               # C: never had a structure
+
+    panel = Structured(days, script, "ABCDEF", rising="C")             # above its average does not keep C
+    rule = daily.DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, check="weekly", min_hold=20,
+                           hold="structure")
+    assert rule.min_hold == 0 and rule.canonical()["hold"] == "structure"
+    assert daily.rule_inputs(rule) == ["momentum_3", "smc_structure"]
+    ranks = daily.daily_rankings(panel, rule, days[0], days[-1])
+    assert ranks[days[0]] == ["A", "B", "C"]
+    assert ranks[days[1]] == ["A", "B"]                                # C sold the next session: no bullish structure
+    assert ranks[days[3]] == ["A"]                                     # B sold the Thursday its structure turned
+    assert ranks[days[5]] == ["A", "D", "E"]                           # the next Monday fills the places; A stays
+    trend = daily.DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, check="weekly", hold="trend")
+    assert daily.daily_rankings(panel, trend, days[0], days[1])[days[1]] == ["C"]     # the other state hold: its own
+    plain = daily.DailyRule(name="x", factors={"momentum_3": 1.0})
+    assert "hold" not in plain.canonical() and daily.rule_inputs(plain) == ["momentum_3"]
+
+
+def test_structure_up_is_the_bullish_state_of_the_daily_structure():
+    class Panel:
+        _cache: dict = {}
+
+        def matrix(self, factor):
+            assert factor == daily.STRUCTURE_FACTOR == "smc_structure"
+            return np.array([[np.nan, 1.0, -1.0], [1.0, 1.0, np.nan]], dtype=np.float32)
+
+    assert daily.FactorPanel.structure_up(Panel()).tolist() == [[False, True, False], [True, True, False]]
+
+
+def test_a_rule_holding_by_the_structure_says_so_wherever_its_settings_are_read():
+    from quant_platform.research import holding, pool
+
+    rule = daily.DailyRule(name="x", factors={"smc_break_up_20": 1.0}, eligibility="entry", hold="structure")
+    spec = rule.canonical()
+    assert holding.style_of(spec) is None                              # not one of the three styles compared
+    assert "持有：結構轉空才賣" in categories.classify(spec)["traits"]
+    assert any("結構轉空" in line for line in pool.describe_daily(spec))
+    sell = next(row for section in pool.settings_sections(spec) for row in section["rows"] if row["item"] == "什麼時候賣")
+    assert "結構轉空才賣" in sell["value"] and "波段低點" in sell["value"]
+
+
+def test_the_third_versions_batches_are_smcs_own_rules_and_the_44_holding_by_the_structure(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rules = daily.BATCHES["smc3"]()
+    assert len(rules) == len(smc.SMC_FACTORS) * 2 * 2 and len({rule.name for rule in rules}) == len(rules)
+    assert len({rule.rule_hash for rule in rules}) == len(rules)
+    for rule in rules:
+        assert (rule.hold, rule.min_hold, rule.eligibility, rule.industry_cap) == ("structure", 0, "entry", 0.3)
+        assert rule.name.endswith("｜持有：結構轉空才賣") and len(rule.name) <= 80
+    assert {rule.check for rule in rules} == {"daily", "weekly"}
+    earlier = {rule.rule_hash for name in ("smc", "smc2") for rule in daily.BATCHES[name]()}
+    assert not earlier & {rule.rule_hash for rule in rules}
+    _events(tmp_path / "instance" / "research" / "factors", "events-20261125-220000.json",
+            {"smc_break_up_w": (0.01, 0.01), "smc_w_break_up_8": (0.01, -0.01)})
+    assert len(daily.BATCHES["smc3"]()) == len(rules) + 4
+    # the 44: each rule's own settings, only the hold changed
+    import json
+    from types import SimpleNamespace
+
+    from quant_platform.research import registry
+
+    research = tmp_path / "instance" / "research"
+    (research / "reports").mkdir(parents=True)
+    trials = [trial for group in daily.BETA_GUARD.values() for trial in group]
+    stored = []
+    for trial in trials:
+        base = daily.DailyRule(name=f"深度模型＋外資買超：前 20 名、每週決策、看成本才換股 {trial}｜持有：月線上續抱",
+                               factors={"momentum_3": 1.0, "foreign_buy_20": float(1 + trial % 2)}, top=10 + trial % 7,
+                               check="weekly", hold="trend", execution="next")
+        (research / "reports" / f"{trial}.json").write_text(json.dumps({"spec": base.canonical()}), encoding="utf-8")
+        stored.append(SimpleNamespace(trial_id=trial, spec_name=base.name, report_file=f"{trial}.json"))
+    monkeypatch.setattr(registry, "TrialRegistry", lambda path: SimpleNamespace(records=lambda: stored))
+    made = daily.BATCHES["smcexit"]()
+    assert len(made) == 44 and len({rule.name for rule in made}) == 44
+    for trial, rule in zip(trials, made):
+        assert (rule.hold, rule.min_hold, rule.execution, rule.check) == ("structure", 0, "next", "weekly")
+        assert f"#{trial} 的設定" in rule.name and rule.name.endswith("｜持有：結構轉空才賣") and len(rule.name) <= 80
+        assert "月線上續抱" not in rule.name and rule.top == 10 + trial % 7
+
+
 def test_model_w_is_model_k_with_the_smc_readings(tmp_path, monkeypatch):
     import json
 

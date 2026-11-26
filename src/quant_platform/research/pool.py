@@ -511,6 +511,8 @@ def describe_daily(spec: dict) -> list[str]:
                  + (f"已持有的跌出前 {top * keep} 名才賣" if keep > 1 else "跌出前 {top} 名就賣"))
     if spec.get("hold") == "trend":
         lines.append("持有方式：跌出保留名次後，股價還在月線（20 日均線）上就續抱")
+    elif spec.get("hold") == "structure":
+        lines.append("持有方式：跌出保留名次後，日線結構還是多方就續抱，結構轉空（收盤跌破最近確認的波段低點）當天賣")
     elif spec.get("min_hold", 20):
         lines.append(f"持有方式：這個策略設定買進後至少持有 {spec.get('min_hold', 20)} 個交易日")
     else:
@@ -614,6 +616,9 @@ def _settings_rows(spec: dict) -> list[dict[str, str]]:
     leave = f"跌出前 {top * keep} 名" if keep > 1 else f"跌出前 {top} 名"
     if spec.get("hold") == "trend":
         sell = f"{leave}，而且股價跌破月線（20 日均線）才賣；還在月線上就續抱"
+    elif spec.get("hold") == "structure":
+        sell = (f"{leave}（或買進的訊號過期），而且日線結構轉空才賣：收盤跌破最近確認的波段低點（前後各 5 根 K 棒的最低點）"
+                "；結構還是多方就續抱，不設最短持有")
     elif spec.get("min_hold", 20):
         sell = f"{leave}，而且買進滿 {spec.get('min_hold', 20)} 個交易日才賣（沒滿不賣）"
     else:

@@ -157,6 +157,9 @@ RISK_FLOOR = 0.05           # weighting inverse_risk: a drop probability below t
 CLUSTERS = 15               # cluster_cap: groups of stocks that moved together, re-made every month
 CLUSTER_WINDOW = 120        # cluster_cap: sessions of daily returns the grouping looks at
 TREND_WINDOW = 20           # hold "trend": a holding outside the keep zone stays while above this average
+# the holds that keep a holding by a state of its own price, looked at every session, without a minimum
+STATE_HOLDS = ("trend", "structure")
+STRUCTURE_FACTOR = "smc_structure"       # hold "structure" (2026-11-26): +1 bullish, -1 bearish, none before a break
 SHADOW_WARMUP = 252         # sessions before the shadow account starts (the factors need a year)
 STOP_COOLDOWN = 20          # sessions a stopped-out stock may not be bought again
 ELIGIBILITY_BAND = 0.7      # eligibility "band": a holding is ineligible only under this share of the price and turnover lines
@@ -600,7 +603,11 @@ class DailyRule(BaseModel):
     # that leaves the keep zone is kept while its adjusted close is above its 20-session average (月線) and it
     # is still eligible, and sold at that close once it is not — no fixed minimum holding (min_hold is 0).
     # Left out of the hash when "days" (the fixed min_hold).
-    hold: Literal["days", "trend"] = "days"
+    # 2026-11-26 (使用者：繼續; docs/research/results.md「SMC 第三版」, written before the run): "structure" = SMC's own
+    # exit — a holding that leaves the keep zone is kept while its daily structure is bullish (the last break was a
+    # close above a swing high) and sold the session it is not (a close below a swing low, smc.py); like "trend" it is
+    # looked at every session and has no minimum. The engine's version is unchanged: no other rule's result moves.
+    hold: Literal["days", "trend", "structure"] = "days"
     # 2026-10-13 (engine 1.4.0; 使用者：所有交易都要照台股的機制): "same" = decide on the close and fill in the
     # same day's after-hours sessions (14:30); "next" = fill in the next session's closing auction — the
     # platform's numbers come after 15:14, so this is what it can actually do. Left out of the hash when "same".
@@ -655,7 +662,7 @@ class DailyRule(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _trend_has_no_minimum(cls, data):
-        if isinstance(data, dict) and data.get("hold") == "trend":
+        if isinstance(data, dict) and data.get("hold") in STATE_HOLDS:
             data = {**data, "min_hold": 0}
         return data
 
@@ -1403,6 +1410,13 @@ class FactorPanel:
             self._cache["__rising__"] = np.ascontiguousarray((self._prices > average).to_numpy().T)
         return self._cache["__rising__"]
 
+    def structure_up(self) -> np.ndarray:
+        """symbols × sessions: the daily SMC structure is bullish (hold "structure", 2026-11-26) — the last break was
+        a close above a swing high; a stock that never broke a swing point has no structure and is not kept by it."""
+        if "__structure_up__" not in self._cache:
+            self._cache["__structure_up__"] = np.ascontiguousarray(self.matrix(STRUCTURE_FACTOR) > 0)
+        return self._cache["__structure_up__"]
+
     def gone(self) -> dict[str, int]:
         """symbol -> the session (position) on which an unsold holding of it becomes worthless (engine 1.3.1,
         ``write_off_position``); ``delisted`` (code -> delisting dates) is set by ``load``."""
@@ -1706,12 +1720,12 @@ def _rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: d
 
     def keeps(symbol: str, count: int, keep_zone: set, eligible: set, rising) -> bool:
         """The rule's hold: in the keep zone; else, while eligible (or always, eligibility "entry"), still rising
-        (hold "trend") or held less than min_hold sessions."""
+        (hold "trend"), its structure still bullish (hold "structure") or held less than min_hold sessions."""
         if symbol in keep_zone:
             return True
         if symbol not in eligible and not entry_only:
             return False
-        if hold == "trend":
+        if hold in STATE_HOLDS:
             row = fp.row.get(symbol)
             return row is not None and bool(rising[row])
         return count - bought.get(symbol, count) < rule.min_hold
@@ -1818,7 +1832,7 @@ def _rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: d
             if not (current or pending_slots):
                 continue
             standing = out or risk_off or lost or pending_sells or pending_slots
-            if not standing and exit_agent is None and hold != "trend":
+            if not standing and exit_agent is None and hold not in STATE_HOLDS:
                 continue
         # 2026-10-28 (空頭防護第六版): below TAIEX's 200-session average the decision ranks by the defensive factors
         defensive = bear_rule is not None and not fp.risk_on(position)
@@ -1836,7 +1850,9 @@ def _rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: d
             barred = {symbol for symbol, at in stopped.items() if count - at < cooldown}
             ranked = [symbol for symbol in ranked if symbol not in barred]
         keep_zone, eligible = set(ranked[: rule.top * rule.keep]), set(ranked)
-        rising = fp.rising()[:, position] if hold == "trend" or winners else None
+        rising = (fp.structure_up()[:, position] if hold == "structure"
+                  else fp.rising()[:, position] if hold == "trend" or winners else None)
+        above = fp.rising()[:, position] if winners and hold == "structure" else rising     # winner_hold: the average
         asked = 0
         if risk_off:                          # the market filter: no stocks (1.5.0: every session)
             wanted: list[str] = []
@@ -1855,14 +1871,14 @@ def _rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: d
             if winners:                       # 2026-10-20: a winner up winner_hold and above its average runs on
                 for symbol in staying:
                     row = fp.row.get(symbol)
-                    if (symbol not in kept and symbol in eligible and row is not None and rising[row]
+                    if (symbol not in kept and symbol in eligible and row is not None and above[row]
                             and symbol in buy_price and buy_price[symbol] > 0
                             and fp.price(symbol, position) / buy_price[symbol] - 1 >= winners):
                         kept.append(symbol)
             wanted = kept + fill(ranked, kept, rule.top - len(kept), position)
         else:                                 # between decisions: the exits and the refused orders only
             wanted = [symbol for symbol in current if symbol not in out]
-            if hold == "trend":               # 1.4.3: out of the zone and below its average: sold that session
+            if hold in STATE_HOLDS:           # 1.4.3: out of the zone and below its average: sold that session
                 wanted = [symbol for symbol in wanted if keeps(symbol, count, keep_zone, eligible, rising)]
             elif pending_sells:               # a refused sell: sold if the rule still would
                 wanted = [symbol for symbol in wanted
@@ -1909,6 +1925,8 @@ def _rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: d
                     return cause[symbol]
                 if risk_off:
                     return "大盤跌破 200 日均線，全部出場（大盤濾網）"
+                if symbol not in eligible and entry_only and hold == "structure":
+                    return "買進的訊號已經過期，而且日線結構轉空（收盤跌破波段低點）"
                 if symbol not in eligible:
                     if banded:
                         return "不再符合選股條件（股價或成交值低於門檻的七成，或沒有分數）"
@@ -1919,6 +1937,8 @@ def _rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: d
                     text = "大盤在 200 日均線下，改用防禦因子排名：" + text
                 if hold == "trend":
                     text += "，而且跌破月線"
+                elif hold == "structure":
+                    text += "，而且日線結構轉空（收盤跌破波段低點）"
                 elif rule.min_hold:
                     text += f"；這個策略設定買進後至少持有 {rule.min_hold} 個交易日，已滿"
                 if switch is not None and decide:
@@ -3160,6 +3180,8 @@ def rule_inputs(rule) -> list[str]:
     signal = SIGNAL_VETOES.get(getattr(rule, "exclude", "none"))     # 2026-11-25
     if signal and signal not in names:
         names.append(signal)
+    if getattr(rule, "hold", "days") == "structure" and STRUCTURE_FACTOR not in names:      # 2026-11-26
+        names.append(STRUCTURE_FACTOR)
     if getattr(rule, "weighting", "equal") == "inverse_beta" and "low_beta_250" not in names:   # 2026-11-20
         names.append("low_beta_250")
     return names
@@ -4455,6 +4477,50 @@ def smc_veto_deep_batch() -> list[DailyRule]:
     return _veto_rules([(trial, "k2") for trial in CASH_VETO_DEEP])
 
 
+# 2026-11-26 (使用者：繼續; docs/research/results.md「SMC 第三版：結構轉空才賣」, written before the run). The second
+# version found why the turnover would not fall: a pick's signal lapses in 10 to 20 sessions, so every holding was
+# replaced whatever the deciding frequency — the exit has to change. SMC's own exit: hold "structure".
+SMC3_HOLD = "結構轉空才賣"
+SMC3_CHECKS = (("daily", "每天決策"), ("weekly", "每週決策"))
+
+
+def smc3_batch() -> list[DailyRule]:
+    """(e) SMC's own rules with SMC's own exit: the first version's seven factors and the weekly factors the event
+    study calls 強, alone and above the 200-session average, decided daily and weekly — bought on the signal, kept while
+    the daily structure is bullish, sold the session it is not."""
+    verdicts = smc_event_verdicts()
+    strong = [name for name in SMC2_WEEKLY if verdicts.get(name) == "強"]
+    print(f"SMC 第三版：做規則的週線因子 {strong}", flush=True)
+    output = []
+    for factor, words in [*SMC_WORDS.items(), *((name, SMC2_WORDS[name]) for name in strong)]:
+        for told, factors in ((words, {factor: 1.0}), (f"{words}＋站上 200 日線", {factor: 1.0, "trend_200": 1.0})):
+            for check, said in SMC3_CHECKS:
+                output.append(DailyRule(name=f"SMC：{told}：前 20 名、同產業最多 3 成、{said}｜持有：{SMC3_HOLD}",
+                                        factors=factors, check=check, industry_cap=0.3, eligibility="entry",
+                                        hold="structure"))
+    return output
+
+
+def smc_exit_batch() -> list[DailyRule]:
+    """(f) the 44 BETA_GUARD rules holding by the structure instead of their own style — everything else as it is."""
+    from quant_platform.research.registry import TrialRegistry
+
+    research = Path("instance") / "research"
+    records = {record.trial_id: record for record in TrialRegistry(research / "trials.jsonl").records()}
+    timing = {"same": "當天盤後成交", "next": "隔天收盤成交", "open": "隔天開盤成交", "split": "開盤賣、收盤買"}
+    output = []
+    for trial in (trial for group in BETA_GUARD.values() for trial in group):
+        base = DailyRule.model_validate(_json_load(research / "reports" / records[trial].report_file)["spec"])
+        stem = _stem(records[trial].spec_name).split("：")[0]
+        tail = (f"（#{trial} 的設定、前 {base.top} 名、{timing.get(base.canonical().get('execution', 'same'))}）"
+                f"｜持有：{SMC3_HOLD}")
+        if len(stem) + len(tail) > 80:
+            stem = stem[:max(4, 79 - len(tail))] + "…"
+        output.append(DailyRule.model_validate({**base.model_dump(), "name": stem + tail, "hold": "structure",
+                                                "min_hold": 0}))
+    return output
+
+
 def new_data_batch() -> list[DailyRule]:
     from quant_platform.research.scan import SHORT
 
@@ -4879,6 +4945,8 @@ def holding_batch() -> list:
             continue
         seen.add(key)
         stem = _stem(base.name)
+        if base.hold == "structure":                   # 2026-11-26: not one of the three styles compared
+            continue
         own = ("trend" if base.hold == "trend" else "days", 0 if base.hold == "trend" else base.min_hold)
         for label, style in HOLDING_STYLES:
             if (style["hold"], style["min_hold"]) == own:
@@ -4944,6 +5012,8 @@ def holding_families_batch() -> list:
         seen.add(key)
         per_family[family] = per_family.get(family, 0) + 1
         stem = _stem(rule.name)
+        if rule.hold == "structure":                       # 2026-11-26: not one of the three styles compared
+            continue
         own = ("trend" if rule.hold == "trend" else "days", 0 if rule.hold == "trend" else rule.min_hold)
         for label, style in HOLDING_STYLES:
             if (style["hold"], style["min_hold"]) == own:
@@ -6909,5 +6979,7 @@ BATCHES["smc"] = smc_batch                     # 2026-11-22
 BATCHES["smc2"] = smc2_batch                   # 2026-11-25
 BATCHES["smcveto"] = smc_veto_batch
 BATCHES["smcveto2"] = smc_veto_deep_batch
+BATCHES["smc3"] = smc3_batch                   # 2026-11-26
+BATCHES["smcexit"] = smc_exit_batch
 BATCHES["modelw"] = model_w_batch
 BATCHES["modelx"] = model_x_batch                 # 2026-11-26

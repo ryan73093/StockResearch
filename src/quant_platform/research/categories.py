@@ -167,6 +167,8 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
         # 2026-10-20 (使用者：持有 20 天是策略、月線上續抱也是策略): every rule shows its own holding style
         if spec.get("hold") == "trend":
             traits.append("持有：月線上續抱")
+        elif spec.get("hold") == "structure":                 # 2026-11-26
+            traits.append("持有：結構轉空才賣")
         elif spec.get("min_hold", 20) in (None, 20) and not spec.get("free"):
             traits.append("持有：買進後至少 20 個交易日")
         elif spec.get("min_hold"):
