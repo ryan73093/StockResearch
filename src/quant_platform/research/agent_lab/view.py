@@ -58,7 +58,9 @@ def design(variant, made: list[dict], names: dict[str, str]) -> dict[str, object
 
 
 def probe_summary(result: dict | None) -> dict | None:
-    if not result:
+    # a memory probe's result has its months; anything else kept in the folder is not one (2026-11-26: a list there made
+    # the page answer 500)
+    if not isinstance(result, dict) or "months" not in result:
         return None
     groups: dict[str, list[int]] = {}
     for row in result.get("months") or []:

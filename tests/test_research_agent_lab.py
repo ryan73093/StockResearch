@@ -280,7 +280,10 @@ def test_the_page_shows_each_designs_decision_the_board_a_replay_and_the_probe(t
     (probe_folder / "gpt-6-luna.json").write_text(json.dumps({"model": "gpt-6-luna", "made_at": "2026-11-20T01:35:00+08:00", "stocks": 40,
         "months": [{"month": "2025-03", "right": 27, "wrong": 13}, {"month": "2025-09", "right": 20, "wrong": 20},
                    {"month": "2026-06", "right": 0, "wrong": 0, "unknown": 40}, {"month": "2026-07", "error": "x"}]}), encoding="utf-8")
+    # 2026-11-26: another study kept its rows (a list) in the same folder and the page answered 500
+    (probe_folder / "defensive-20261126.json").write_text(json.dumps([{"day": "2020-10-05", "weak": False}]), encoding="utf-8")
     found = view.page(research)
+    assert len(found["probes"]) == 1
     info = next(item for item in found["designs"] if item["key"] == "info")
     assert [(row["code"], row["new"]) for row in info["holdings"]] == [("2330", False), ("2454", True)]
     assert [row["code"] for row in info["sold"]] == ["2317"] and info["tools"][0] == {"name": "個股資料", "count": 2}
