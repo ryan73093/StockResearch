@@ -204,7 +204,7 @@ def test_the_page_and_the_home_card(tmp_path):
     project = client.get("/issues/ai").get_data(as_text=True)
     assert "巨頭蓋 AI 資料中心的錢會不會燒過頭" in project and "現在怎麼看" in project and "追蹤什麼、為什麼" in project
     assert "台積電月營收（近 3 個月合計）年增率" in project and "轉負" in project                # the lit item and its line
-    assert "借錢蓋" in project                                                                  # the written reading
+    assert "靠舉債撐" in project                                                                  # the written reading
     assert client.get("/issues/nothing").status_code == 404
     home = client.get("/").get_data(as_text=True)
     assert "議題警示" in home and "台積電月營收（近 3 個月合計）年增率：-2.0%" in home and 'href="/issues/ai"' in home
