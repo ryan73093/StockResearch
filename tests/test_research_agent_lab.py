@@ -587,3 +587,11 @@ def test_the_pool_changes_only_under_a_weak_market_to_the_calmest_of_the_most_tr
     assert [code for code, *_ in weak.agreed_of("defend", 2)] == ["1104", "1102"]      # calmest first; 0050 never
     assert [code for code, *_ in weak.agreed_of("calm", 2)] == ["1104", "1102"]        # of the consensus' four
     assert [code for code, *_ in weak.agreed_of("calm", 1)] == ["1103"]                # of the consensus' first two
+    # a wider zone for what is held: the top, then the holdings ranked up to N; "up" only those at or above their
+    # own 60-session average (1102 has just fallen under it)
+    strong.held = ["1102", "1104"]
+    strong.close = close.copy()
+    strong.close[1, -1] = 90.0
+    assert [code for code, *_ in strong.agreed_of("keep4", 2)] == ["1101", "1103", "1102", "1104"]
+    assert [code for code, *_ in strong.agreed_of("keep4up", 2)] == ["1101", "1103", "1104"]
+    assert [code for code, *_ in strong.agreed_of("keep2", 2)] == ["1101", "1103"]
