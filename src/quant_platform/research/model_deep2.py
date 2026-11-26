@@ -159,6 +159,28 @@ for _new in NET_OF_MARKET:
 RECENT_GATED.update(NET_OF_MARKET)
 
 
+# 2026-11-26 (使用者：為什麼不再調模型；去建一個超大權重的模型，像 LLM 的那種; docs/research/results.md「深度學習第五版：
+# 大型 Transformer」, written before the run): every version so far kept dl-2.1.0's network (a 64-unit GRU and a small
+# head, a few tens of thousands of weights) — its size was never tried. dl-2.1.0's inputs, label, loss and walk-forward
+# with a Transformer encoder instead (``Large``): each of the 60 sessions a token, the day's snapshot a token before
+# them, the market's state added to every token. width × layers × heads; ``days`` a batch and ``seeds`` are what the
+# 16 GB card and the days of training allow. Gate: gate_check_d3 against dl-2.1.0 on 2021-2025 (as dl-3.0.1, dl-2.2.1).
+LARGE = {"dl-5.0.0": {"width": 256, "layers": 6, "heads": 8, "days": 2, "seeds": 4, "rate": 2e-4},
+         "dl-5.1.0": {"width": 384, "layers": 8, "heads": 8, "days": 1, "seeds": 4, "rate": 1e-4}}
+LARGE_DECAY = 0.01
+LARGE_WARMUP = 300                      # steps over which the learning rate rises to its value
+LARGE_CLIP = 1.0                        # the gradient's norm
+for _new, _size in LARGE.items():
+    LOSSES[_new] = "top10"
+    ARCHITECTURES[_new] = f"large:{_size['width']}x{_size['layers']}x{_size['heads']}"
+    AGAINST_OF[_new] = D3_AGAINST
+RECENT_GATED.update(LARGE)
+
+
+def seeds_of(version: str) -> tuple[int, ...]:
+    return tuple(range(LARGE[version]["seeds"])) if version in LARGE else SEEDS
+
+
 def gate_years(version: str) -> tuple[int, ...]:
     return RECENT_GATE_YEARS if version in RECENT_GATED else GATE_YEARS
 
@@ -296,6 +318,35 @@ def _network(sequence: int, snapshot: int, architecture: str = "gru"):
                 mixed.append(self.norm(day + seen).squeeze(0))
             return self.head(torch.cat([torch.cat(mixed), market], dim=1)).squeeze(-1)
 
+    class Large(torch.nn.Module):
+        """2026-11-26 (LARGE): a Transformer encoder over the snapshot token and the 60 session tokens."""
+
+        def __init__(self, width: int, layers: int, heads: int) -> None:
+            super().__init__()
+            self.steps = torch.nn.Linear(sequence, width)
+            self.now = torch.nn.Linear(snapshot, width)
+            self.state = torch.nn.Linear(len(MARKET), width)
+            self.place = torch.nn.Parameter(torch.zeros(LENGTH + 1, width))
+            torch.nn.init.normal_(self.place, std=0.02)
+            layer = torch.nn.TransformerEncoderLayer(width, heads, 4 * width, DROPOUT, activation="gelu",
+                                                     batch_first=True, norm_first=True)
+            self.encoder = torch.nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
+            self.norm = torch.nn.LayerNorm(width)
+            self.head = torch.nn.Sequential(torch.nn.Linear(2 * width + snapshot + len(MARKET), width), torch.nn.GELU(),
+                                            torch.nn.Dropout(DROPOUT), torch.nn.Linear(width, 1))
+
+        def forward(self, steps, now, market, groups=None):
+            half = steps.is_cuda                                   # half precision on the card (bfloat16: no scaler)
+            with torch.autocast("cuda" if half else "cpu", dtype=torch.bfloat16, enabled=half):
+                tokens = torch.cat([self.now(now)[:, None, :], self.steps(steps)], dim=1)
+                tokens = tokens + self.place[None, :, :] + self.state(market)[:, None, :]
+                seen = self.norm(self.encoder(tokens))
+                found = torch.cat([seen[:, 0], seen[:, 1:].mean(dim=1)], dim=1)
+            return self.head(torch.cat([found.float(), now, market], dim=1)).squeeze(-1)
+
+    if architecture.startswith("large:"):
+        width, layers, heads = (int(part) for part in architecture.split(":")[1].split("x"))
+        return Large(width, layers, heads)
     return Attention() if architecture == "attention" else Network()
 
 
@@ -396,7 +447,7 @@ def _gain(scores: np.ndarray, gains: np.ndarray) -> float | None:
 
 
 def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labels,
-         architecture: str = "gru", judged: tuple | None = None) -> tuple[dict, list[float]]:
+         architecture: str = "gru", judged: tuple | None = None, large: dict | None = None) -> tuple[dict, list[float]]:
     """One seed: the network with the best held-out top-20 gain, and the curve. ``judged`` (rows, labels): the
     stocks and labels the held-out days are judged on, when not the ones learned from (dl-2.2.0)."""
     import torch
@@ -408,7 +459,9 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
     learned = set(train_days)
     anchors = [day for day in train_days if day + STEP in learned] if kind == "direct" else None   # dl-4.0.0's pairs
     network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
-    optimiser = torch.optim.AdamW(network.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    optimiser = torch.optim.AdamW(network.parameters(), lr=large["rate"] if large else LEARNING_RATE,
+                                  weight_decay=LARGE_DECAY if large else WEIGHT_DECAY)
+    per_batch, stepped = (large["days"] if large else DAYS_PER_BATCH), 0
     held_rows, held_labels = judged or (rows, labels)
     held_pairs = np.concatenate([np.stack([np.full(held_rows[day].size, day), held_rows[day]], axis=1)
                                  for day in held_days])
@@ -421,8 +474,8 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
                        for start in range(0, len(order), half)]
         else:
             order = rng.permutation(len(train_days))
-            batches = [[train_days[index] for index in order[start:start + DAYS_PER_BATCH]]
-                       for start in range(0, len(order), DAYS_PER_BATCH)]
+            batches = [[train_days[index] for index in order[start:start + per_batch]]
+                       for start in range(0, len(order), per_batch)]
         for chosen in batches:
             groups, pairs, target, at = [], [], [], 0
             for day in chosen:
@@ -436,8 +489,13 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
                          torch.from_numpy(np.concatenate(target).astype(np.float32)).to(inputs.on), groups, stacked[:, 1])
             optimiser.zero_grad()
             loss.backward()
+            if large:
+                stepped += 1
+                for group in optimiser.param_groups:
+                    group["lr"] = large["rate"] * min(1.0, stepped / LARGE_WARMUP)
+                torch.nn.utils.clip_grad_norm_(network.parameters(), LARGE_CLIP)
             optimiser.step()
-        predicted = inputs.score(network, held_pairs)
+        predicted = inputs.score(network, held_pairs, 2048 if large else 16384)
         gains, tops, at = [], {}, 0
         for day in held_days:
             count = held_rows[day].size
@@ -699,16 +757,16 @@ def train_until(fp, out_dir: str | Path, version: str, cutoff, job=None) -> dict
     held_days = known[cut:]
     train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]           # purged
     networks, curves = [], []
-    for seed in SEEDS:
+    for seed in seeds_of(version):
         state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture,
-                            None if version in NET_OF_MARKET else judged)
+                            None if version in NET_OF_MARKET else judged, LARGE.get(version))
         network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
         network.load_state_dict(state)
         networks.append(network)
         curves.append(curve)
         files.save_beside(target / f"{cutoff.isoformat()}-{seed}.pt", lambda path: torch.save(state, path))
         if job:
-            job.update(current=f"{version}：重訓到 {cutoff}，第 {seed + 1}/{len(SEEDS)} 個種子，保留期前 20 名多 {max(curve):+.4f}",
+            job.update(current=f"{version}：重訓到 {cutoff}，第 {seed + 1}/{len(seeds_of(version))} 個種子，保留期前 20 名多 {max(curve):+.4f}",
                        force=True)
     kept = {}
     for column in range(first, len(fp.sessions)):
@@ -762,7 +820,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                  "learned_from": "listed and TPEx, trading normally" if version in WIDE else "eligible listed",
                  "features": list(names),
                  "sequence": [name for name in SEQUENCE if version not in TECHNICAL or name not in CHIPS],
-                 "market": list(MARKET), "length": LENGTH, "hidden": HIDDEN, "head": list(HEAD), "seeds": list(SEEDS),
+                 "market": list(MARKET), "length": LENGTH, "hidden": HIDDEN, "head": list(HEAD),
+                 "seeds": list(seeds_of(version)), **({"large": LARGE[version]} if version in LARGE else {}),
                  "epochs": EPOCHS, "patience": PATIENCE, "held_out": HELD_OUT, "horizon": HORIZON,
                  "device": device_name()})
     meta.setdefault("years", {})
@@ -816,9 +875,10 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
             held_days = known[cut:]
             train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]   # purged
             networks, curves, states = [], [], []
-            for seed in SEEDS:
+            for seed in seeds_of(version):
                 state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture,
-                                    None if version in RESIDUAL_OF or version in NET_OF_MARKET else judged)
+                                    None if version in RESIDUAL_OF or version in NET_OF_MARKET else judged,
+                                    LARGE.get(version))
                 network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
                 network.load_state_dict(state)
                 networks.append(network)
@@ -826,7 +886,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                 states.append((seed, state))
                 if job:
                     when = f"{year} 年" + (f" {month} 月" if month is not None else "")
-                    job.update(current=f"{version}：{when}第 {seed + 1}/{len(SEEDS)} 個種子，保留期前 20 名多 {max(curve):+.4f}")
+                    job.update(current=f"{version}：{when}第 {seed + 1}/{len(seeds_of(version))} 個種子，保留期前 20 名多 {max(curve):+.4f}")
             # 2026-11-17: the networks are written once all seeds are fitted — written one by one, a run that
             # stopped half way left some of the old month's and some of the new, and every read scored with the mix
             for seed, state in states:

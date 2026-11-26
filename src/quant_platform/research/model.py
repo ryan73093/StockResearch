@@ -161,6 +161,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # units of the stock's own volatility (model_deep2.NET_LABELS)
           "ml_deep2_netz": {"version": "dl-2.8.1", "label": "deep2"},
           "ml_deep3_r": {"version": "dl-3.0.1", "label": "deep2"},
+          # 2026-11-26 (使用者：去建一個超大權重的模型): dl-2.1.0 with a Transformer encoder of 4.9 and 14.6 million
+          # weights instead of its 25 thousand (model_deep2.LARGE)
+          "ml_deep5": {"version": "dl-5.0.0", "label": "deep2"},
+          "ml_deep5_wide": {"version": "dl-5.1.0", "label": "deep2"},
           # 2026-10-17 (docs/research_dl_exits_review.md D3): dl-2.1.0 with cross-stock attention and a market gate
           "ml_deep3": {"version": "dl-3.0.0", "label": "deep2"},
           # 2026-10-18 (S9-W15): dl-2.1.0 learning from every listed and TPEx stock that trades normally

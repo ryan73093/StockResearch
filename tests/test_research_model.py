@@ -242,6 +242,36 @@ def test_the_regated_versions_copy_every_setting_of_the_old_one():
     assert check["passed"] and check["years"] == [2021, 2022, 2023, 2024, 2025]
 
 
+def test_the_large_versions_are_dl_2_1_0_with_a_transformer_encoder(monkeypatch):
+    """2026-11-26 (使用者：為什麼不再調模型；去建一個超大權重的模型): dl-5.0.0 and dl-5.1.0 change the network only —
+    the loss, the gate's years and the yardstick (dl-2.1.0 by D3's margin) are the registered ones; the network takes
+    the same three blocks and gives one score a row; fewer seeds, kept in the version's own table."""
+    import torch
+
+    from quant_platform.research import daily, model_deep2 as d
+
+    monkeypatch.setenv("QUANT_NO_GPU", "1")
+    assert set(d.LARGE) == {"dl-5.0.0", "dl-5.1.0"}
+    for version, size in d.LARGE.items():
+        assert d.LOSSES[version] == d.LOSSES["dl-2.1.0"] and d.gate_years(version) == d.RECENT_GATE_YEARS
+        assert d.AGAINST_OF[version] == "dl-2.1.0" and version not in d.WIDE and version not in d.MONTHLY
+        assert d.ARCHITECTURES[version] == f"large:{size['width']}x{size['layers']}x{size['heads']}"
+        assert d.seeds_of(version) == tuple(range(size["seeds"]))
+        assert model.VERSIONS[version] == {"version": version, "label": "deep2"}
+        assert daily.LARGE_FACTORS[version] in MODEL_FACTORS
+    assert d.seeds_of("dl-2.1.0") == d.SEEDS
+    assert d.LARGE["dl-5.1.0"]["width"] > d.LARGE["dl-5.0.0"]["width"]
+    network = d._network(len(d.SEQUENCE), 7, "large:32x2x4")
+    steps, now, market = torch.randn(5, d.LENGTH, len(d.SEQUENCE)), torch.randn(5, 7), torch.randn(5, len(d.MARKET))
+    found = network(steps, now, market, [(0, 5)])
+    assert found.shape == (5,) and found.dtype == torch.float32 and bool(torch.isfinite(found).all())
+    found.sum().backward()                                   # every block reaches the score
+    assert all(value.grad is not None for name, value in network.named_parameters())
+    small = sum(value.numel() for value in d._network(len(d.SEQUENCE), 7, "gru").parameters())
+    large = sum(value.numel() for value in d._network(len(d.SEQUENCE), 7, d.ARCHITECTURES["dl-5.0.0"]).parameters())
+    assert large > 100 * small
+
+
 def test_a_blocks_scores_are_kept_by_what_they_come_from(tmp_path, monkeypatch):
     """2026-10-29 (S9-W39; 使用者：是你的程式太肥；不要為了省效能最後又給我錯的資料): every run had scored every session
     since 2013 again. A block's scores are kept under the digest of the model file, the code, the stocks, the sessions,
