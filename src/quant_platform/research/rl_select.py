@@ -32,6 +32,11 @@ COST = 0.005                            # a rule replaced: its whole list sold a
 YEARS_BETTER = 4
 WARM = 36                               # months of a rule's record before it is valued
 ENGINE = "daily-1.6.1"
+# 2026-11-27 the second version (results.md「RL 第十版」第二版, written before its run): the first replaced 82% of its
+# rules a month — its value of a rule's next month moved too much. The value is of the next SLOW_MONTHS months and
+# a rule held stays within the top SLOW_KEEP; the fixed ways are compared with the same keep zone.
+SLOW_MONTHS = 6
+SLOW_KEEP = 500
 FEATURES = ("active_1", "active_3", "active_6", "active_12", "active_12_place", "active_3_place", "spread_12",
             "return_12", "behind_12", "beta_36", "down_36", "family", "guard", "blend", "base_1", "base_3", "base_12")
 
@@ -105,11 +110,11 @@ def features(data: dict, at: int) -> np.ndarray:
     return np.stack(columns, axis=1)
 
 
-def choose(scores: np.ndarray, held: list[int], families: list[str]) -> list[int]:
+def choose(scores: np.ndarray, held: list[int], families: list[str], keep: int | None = None) -> list[int]:
     """The month's holdings: the ones held still within the top KEEP stay, the rest filled from the top, at most
     PER_FAMILY of a family."""
     order = np.argsort(-scores)
-    zone = set(order[:KEEP].tolist())
+    zone = set(order[:keep or KEEP].tolist())
     chosen, counts = [], {}
     for rule in [item for item in held if item in zone] + order.tolist():
         if len(chosen) >= PICK:
@@ -121,7 +126,7 @@ def choose(scores: np.ndarray, held: list[int], families: list[str]) -> list[int
     return chosen
 
 
-def follow(data: dict, start: int, score) -> dict[str, object]:
+def follow(data: dict, start: int, score, keep: int | None = None) -> dict[str, object]:
     """The account that holds ``choose`` of ``score(at)`` each month from the month after ``start``; costs taken."""
     held, months, gains, swapped = [], [], [], []
     for at in range(start, len(data["months"]) - 1):
@@ -129,7 +134,7 @@ def follow(data: dict, start: int, score) -> dict[str, object]:
         if scores is None:                                       # every rule equally, nothing to replace
             gain, turned = float(data["returns"][:, at + 1].mean()), 0.0
         else:
-            chosen = choose(scores, held, data["families"])
+            chosen = choose(scores, held, data["families"], keep)
             turned = len(set(chosen) - set(held)) / PICK
             gain = float(data["returns"][chosen, at + 1].mean()) - COST * turned
             held = chosen
@@ -154,9 +159,9 @@ def summary(run: dict, base: np.ndarray) -> dict[str, object]:
             "swapped_a_month": round(float(np.mean(run["swapped"][1:])), 4) if len(run["swapped"]) > 1 else 0.0}
 
 
-def robot(data: dict, start: int):
+def robot(data: dict, start: int, ahead: int = 1):
     """The robot's value of each rule at a month's end; refitted at ``start`` and every January after on the
-    (rule, month) samples whose next month had ended."""
+    (rule, month) samples whose next ``ahead`` months had ended."""
     from sklearn.ensemble import HistGradientBoostingRegressor
 
     kept: dict[int, np.ndarray] = {}
@@ -169,9 +174,11 @@ def robot(data: dict, start: int):
 
     def score(at: int) -> np.ndarray:
         if state["model"] is None or (data["months"][at + 1].endswith("-01") and state["fitted_at"] != at):
-            learn = list(range(WARM - 1, at))                    # a sample's next month is at most ``at``: known
+            learn = list(range(WARM - 1, at - ahead + 1))        # a sample's months ahead end by ``at``: known
             inputs = np.concatenate([block(month) for month in learn])
-            target = np.concatenate([_place(data["returns"][:, month + 1] - data["base"][month + 1]) for month in learn])
+            target = np.concatenate([_place((data["returns"][:, month + 1:month + 1 + ahead]
+                                             - data["base"][None, month + 1:month + 1 + ahead]).sum(axis=1))
+                                     for month in learn])
             model = HistGradientBoostingRegressor(max_iter=200, learning_rate=0.05, max_leaf_nodes=15,
                                                   min_samples_leaf=200, l2_regularization=1.0, random_state=0,
                                                   categorical_features=[FEATURES.index("family")])
@@ -192,17 +199,18 @@ def judge(found: dict[str, dict]) -> dict[str, object]:
             "passed": bool(money and better >= YEARS_BETTER)}
 
 
-def run(research: str | Path) -> Path:
+def run(research: str | Path, slow: bool = False) -> Path:
     data = load(research)
+    ahead, keep = (SLOW_MONTHS, SLOW_KEEP) if slow else (1, KEEP)
     months = data["months"]
     start = months.index(FIRST) - 1
     active = data["returns"] - data["base"][None, :]
-    ways = {"robot": robot(data, start),
+    ways = {"robot": robot(data, start, ahead),
             "last12": lambda at: active[:, at - 11:at + 1].sum(axis=1),
             "to_date": lambda at: active[:, :at + 1].sum(axis=1),
             "all": lambda at: None}
     base = data["base"][start + 1:]
-    runs = {name: follow(data, start, way) for name, way in ways.items()}
+    runs = {name: follow(data, start, way, keep) for name, way in ways.items()}
     found = {name: summary(item, base) for name, item in runs.items()}
     held = [{"trial": data["trials"][rule], "name": data["names"][rule], "family": data["families"][rule]}
             for rule in runs["robot"]["held"]]
@@ -210,12 +218,12 @@ def run(research: str | Path) -> Path:
     for name in data["families"]:
         families[name] = families.get(name, 0) + 1
     result = {"at": datetime.now(TAIPEI).isoformat(timespec="seconds"), "rules": len(data["trials"]),
-              "families": families, "first": FIRST, "last": months[-1], "pick": PICK, "keep": KEEP,
+              "families": families, "first": FIRST, "last": months[-1], "pick": PICK, "keep": keep, "months_ahead": ahead,
               "per_family": PER_FAMILY, "cost": COST, "features": list(FEATURES),
               "base_multiple": round(float(np.prod(1 + base)), 4), **found, "judgment": judge(found),
               "passed": judge(found)["passed"], "robot_holds_last": held}
     folder = Path(research) / "rl"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"select-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
+    path = folder / f"select{'-slow' if slow else ''}-{datetime.now(TAIPEI):%Y%m%d-%H%M%S}.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     return path

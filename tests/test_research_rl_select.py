@@ -49,6 +49,9 @@ def test_the_robot_learns_only_from_months_that_had_ended_and_is_judged_as_writt
     score = rl_select.robot(data, start)
     first = score(start)
     assert max(seen) == start and min(seen) == rl_select.WARM - 1          # samples: months 35..69, valued: month 70
+    seen.clear()
+    rl_select.robot(data, start, ahead=6)(start)                           # the second version: six months ahead
+    assert sorted(set(seen))[-2:] == [start - 6, start]                    # the last sample's six months end at 70
     run = rl_select.follow(data, start, score)
     found = rl_select.summary(run, data["base"][start + 1:])
     assert len(run["months"]) == 100 - start - 1 and run["months"][0] == data["months"][start + 1]
