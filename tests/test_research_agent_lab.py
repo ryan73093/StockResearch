@@ -553,3 +553,37 @@ def test_the_trader_that_may_keep_cash_leaves_places_open_and_never_holds_under_
     made = [{"date": sessions[0].isoformat(), "llm": {"hold": [str(n) for n in range(20)]}},
             {"date": sessions[2].isoformat(), "llm": {"hold": [str(n) for n in range(12)]}}]
     assert evaluate.invested(fp, made, 20) == {sessions[1]: 1.0, sessions[2]: 1.0, sessions[3]: 0.6, sessions[4]: 0.6}
+
+
+def test_the_pool_changes_only_under_a_weak_market_to_the_calmest_of_the_most_traded():
+    # 2026-11-26 (docs/research/results.md「候選名單與盤勢」): "defend" and "calm" keep the consensus above the index's
+    # 200-session average; under it "defend" is the least volatile of the most traded, "calm" the least volatile
+    # half of twice the consensus
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from quant_platform.research.agent_lab import desk as desk_module
+
+    sessions, codes = 260, ["1101", "1102", "1103", "1104", "0050"]
+    swings = [0.03, 0.01, 0.02, 0.005, 0.001]                # 1104 is the calmest common stock, 0050 is not one
+    close = np.array([[100 * (1 + swing * (1 if t % 2 else -1)) for t in range(sessions)] for swing in swings])
+    turnover = np.tile(np.array([[5.0], [4.0], [3.0], [2.0], [9.0]]), (1, sessions))
+
+    def desk_with(market):
+        desk = object.__new__(desk_module.LabDesk)
+        desk.fp = SimpleNamespace(market=np.array(market, dtype=float), row={f"{code}.TW": at for at, code in enumerate(codes)},
+                                  turnover_120=turnover)
+        desk.position, desk.close, desk.tradable = sessions - 1, close, np.ones(len(codes), dtype=bool)
+        desk.agreed = lambda top, panel=None: [(code, 1, ["趨勢"]) for code in ["1101", "1103", "1102", "1104"]][:top]
+        return desk
+
+    strong = desk_with([100.0] * (sessions - 1) + [101.0])
+    weak = desk_with([100.0] * (sessions - 1) + [99.0])
+    assert not strong.weak_market() and weak.weak_market()
+    for kind in ("money", "defend", "calm"):
+        assert [code for code, *_ in strong.agreed_of(kind, 2)] == ["1101", "1103"]
+    assert [code for code, *_ in weak.agreed_of("money", 2)] == ["1101", "1103"]
+    assert [code for code, *_ in weak.agreed_of("defend", 2)] == ["1104", "1102"]      # calmest first; 0050 never
+    assert [code for code, *_ in weak.agreed_of("calm", 2)] == ["1104", "1102"]        # of the consensus' four
+    assert [code for code, *_ in weak.agreed_of("calm", 1)] == ["1103"]                # of the consensus' first two

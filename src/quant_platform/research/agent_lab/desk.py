@@ -59,6 +59,9 @@ EVIDENCE = {
 # panel takes it among the fifth of the list's passing rules that moved least with 0050 in the backtest before the
 # cutoff (of 3,275 rules, 22.7% of that fifth held up from 9/1 against 8.7%, 1.1%, 0.2%, 0% of the others).
 STEADY_SHARE = 0.2
+REGIME_DAYS = 200              # the market is weak under this average of the index (the market tool's own line)
+DEFEND_DAYS = 60               # the defensive pool: volatility over these sessions…
+DEFEND_LIQUID = 300            # …among this many most traded stocks
 LIST_OVERRIDE: Path | None = None   # a replay of a stretch before the first monthly list (``decide --run … --list``): the
                                     # list every day reads — chosen on data that covers the stretch, so the candidates are
                                     # flattered and only what does not depend on them is read from such a run
@@ -152,9 +155,57 @@ class LabDesk(Desk):
                     continue
         return self._steady
 
+    def weak_market(self) -> bool:
+        """The index closed under its REGIME_DAYS-session average today (the line the market tool shows)."""
+        market, at = self.fp.market, self.position
+        if market is None or at < REGIME_DAYS - 1:
+            return False
+        return bool(market[at] < float(np.nanmean(market[at - REGIME_DAYS + 1: at + 1])))
+
+    def volatility(self) -> np.ndarray:
+        """Each stock's standard deviation of the last DEFEND_DAYS daily moves known today (NaN when under 55 of them)."""
+        at = self.position
+        window = self.close[:, max(0, at - DEFEND_DAYS): at + 1]
+        moves = window[:, 1:] / window[:, :-1] - 1
+        output = np.nanstd(moves, axis=1)
+        output[np.sum(np.isfinite(moves), axis=1) < DEFEND_DAYS - 5] = np.nan
+        return output
+
+    def defensive(self, top: int) -> list[tuple[str, int, list[str]]]:
+        """The ``top`` least volatile of the DEFEND_LIQUID most traded listed common stocks (120-session turnover),
+        calmest first — the candidates of a design that changes its pool under a weak market (docs/research/
+        results.md「候選名單與盤勢」)."""
+        at, vol = self.position, self.volatility()
+        turnover = np.asarray(self.fp.turnover_120[:, at], dtype=float)
+        rows = [(symbol, row) for symbol, row in self.fp.row.items()
+                if self.allowed(self.code_of(symbol)) and np.isfinite(turnover[row]) and np.isfinite(vol[row])
+                and np.isfinite(self.close[row, at])]
+        liquid = sorted(rows, key=lambda item: -turnover[item[1]])[:DEFEND_LIQUID]
+        return [(self.code_of(symbol), 0, ["防守"]) for symbol, row in sorted(liquid, key=lambda item: (vol[item[1]], item[0]))[:top]]
+
     def agreed_of(self, kind: str, top: int) -> list[tuple[str, int, list[str]]]:
-        """The agreed stocks of a design's panel: "money" (the lab's own) or "steady"."""
-        return self.agreed(top, self.steady_panel()) if kind == "steady" else self.agreed(top)
+        """The agreed stocks of a design's panel: "money" (the lab's own) or "steady"; "defend" and "calm" change the
+        pool only while the market is weak — "defend": the defensive stocks; "calm": the least volatile ``top`` of the
+        consensus' 2 × ``top``."""
+        if kind == "steady":
+            return self.agreed(top, self.steady_panel())
+        if kind.startswith("keep"):
+            # a wider zone for what is already held: the consensus' ``top``, then the holdings ranked up to keepN — the
+            # twin keeps a holding while it is on this list and fills from its head, so it sells later and buys the same
+            wide = self.agreed(int(kind[4:]))
+            held = set(self.held)
+            return wide[:top] + [item for item in wide[top:] if item[0] in held]
+        if kind in ("defend", "calm") and self.weak_market():
+            if kind == "defend":
+                return self.defensive(top)
+            vol = self.volatility()
+
+            def calm(item) -> float:
+                row = self.fp.row.get(f"{item[0]}.TW")
+                return float(vol[row]) if row is not None and np.isfinite(vol[row]) else 9.0
+
+            return sorted(self.agreed(2 * top), key=calm)[:top]
+        return self.agreed(top)
 
     # --- gated news -----------------------------------------------------------------------------------------------
     def scored_news(self) -> list[dict]:
