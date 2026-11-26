@@ -1,6 +1,6 @@
 # 交易研究分析平台 — 開發路線圖
 
-更新：2026-11-21（S9-W02 持續研究：11 月新量的因子、依連動配置的搜尋飽和、模型 T、投機特徵反過來用）。本檔是階段、工作包、狀態與工時的唯一來源。需求寫在 [`REQUIREMENTS.md`](../REQUIREMENTS.md)，架構寫在 [系統架構](system_architecture.md)，每輪交付與證據寫在 [`DEVELOPMENT_HISTORY.md`](../DEVELOPMENT_HISTORY.md)，當前工作包寫在 [交接記錄](development_handoff.md)。
+更新：2026-11-26（S9-W02 持續研究：11/22 美國資料每天 07:10 更新、景氣過熱減碼 A 版進前向觀察、模型 V 沒過；11/22～11/26 SMC 三版；11/25 減資表改成提前抓並在 15:15 記帳前再抓；11/26 模型 X 登錄。串接前向 11/26 是 58／60 個交易日，第一次判 T0 仍是 11/30 收盤後）。本檔是階段、工作包、狀態與工時的唯一來源。需求寫在 [`REQUIREMENTS.md`](../REQUIREMENTS.md)，架構寫在 [系統架構](system_architecture.md)，每輪交付與證據寫在 [`DEVELOPMENT_HISTORY.md`](../DEVELOPMENT_HISTORY.md)，當前工作包寫在 [交接記錄](development_handoff.md)。
 
 狀態代碼：`done` 完成（有程式、測試、實際執行證據）、`doing` 進行中、`todo` 待開始、`blocked` 等待外部條件。工時為 AI 協作初估工作天，每個階段完成後依實際進度重估。
 

@@ -141,6 +141,30 @@ def test_model_v_is_model_k_with_the_us_side(tmp_path, monkeypatch):
     assert len(rules) == 3 and all(rule.factors == {"ml_gbm_v": 1.0} for rule in rules)
 
 
+def test_model_x_is_model_u_with_the_four_us_features_model_v_used(tmp_path, monkeypatch):
+    """2026-11-26 (docs/research/results.md「模型 X：模型 U 加上四個美國特徵」, written before the run)."""
+    import json
+
+    from quant_platform.research import model
+    from quant_platform.research.scan import SHORT, failed_models
+
+    features = model.version_features("gbm-2.19.0")
+    assert features == model.version_features("gbm-2.16.0") + model.US_FEATURES_X
+    assert set(model.US_FEATURES_X) < set(model.US_FEATURES_V) and "market:us_curve" not in model.US_FEATURES_X
+    assert model.MODELS["ml_gbm_x"]["target"] == model.MODELS["ml_gbm_u"]["target"] == "down_residual"
+    assert model.DOWN_GATES["gbm-2.19.0"] == "gbm-2.7.0"
+    assert "ml_gbm_x" in daily.MODEL_FACTORS and SHORT["ml_gbm_x"] == "模型X"
+    monkeypatch.chdir(tmp_path)
+    assert daily.BATCHES["modelx"]() == []                           # not trained: no rules
+    folder = tmp_path / "instance" / "research" / "models" / "gbm-2.19.0"
+    folder.mkdir(parents=True)
+    (folder / "meta.json").write_text(json.dumps({"down_gate": {"passed": False, "top20_gain": 0.012, "against_top20_gain": 0.013}}), encoding="utf-8")
+    assert daily.BATCHES["modelx"]() == [] and "ml_gbm_x" in failed_models(folder.parent)
+    (folder / "meta.json").write_text(json.dumps({"down_gate": {"passed": True}}), encoding="utf-8")
+    rules = daily.BATCHES["modelx"]()
+    assert len(rules) == 3 and all(rule.factors == {"ml_gbm_x": 1.0} for rule in rules)
+
+
 def test_a_us_market_reading_is_dated_before_the_session(tmp_path):
     import gzip
     import json

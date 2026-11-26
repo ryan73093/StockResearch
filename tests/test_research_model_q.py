@@ -154,7 +154,7 @@ def test_model_q_is_model_k_s_features_with_the_other_target_and_its_own_gate(tm
     assert model.version_features("gbm-2.12.0") == model.version_features("gbm-2.7.0")
     assert model.VERSIONS["gbm-2.12.0"]["target"] == "residual" and "target" not in model.VERSIONS["gbm-2.7.0"]
     assert set(model.DOWN_GATES) == {"gbm-2.12.0", "gbm-2.13.0", "gbm-2.13.1", "gbm-2.13.2", "gbm-2.13.3", "gbm-2.14.0",
-                                     "gbm-2.15.0", "gbm-2.16.0", "gbm-2.17.0", "gbm-2.18.0"}
+                                     "gbm-2.15.0", "gbm-2.16.0", "gbm-2.17.0", "gbm-2.18.0", "gbm-2.19.0"}
     assert set(model.version_features("gbm-2.12.0")) - set(model.version_features("gbm-2.13.3")) == {"low_daytrade_5"}
     assert set(model.DOWN_GATES.values()) == {"gbm-2.7.0"}
     whole = model.version_features("gbm-2.12.0")                     # 2026-11-19: the two halves of the paid features

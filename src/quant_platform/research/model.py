@@ -115,6 +115,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # 2026-11-21 (docs/research/results.md「模型 U：扣掉大盤下跌日的連動」, written before the run): model Q with the
           # beta measured on the days TAIEX fell (Ang, Chen & Xing 2006) — model Q's registered next version (a)
           "ml_gbm_u": {"version": "gbm-2.16.0", "label": "ensemble", "features": "extended_k", "target": "down_residual"},
+          # 2026-11-26 (docs/research/results.md「模型 X：模型 U 加上四個美國特徵」, written before the run): model V's
+          # registered next version — model U's target (the return less the downside beta) with the four US features
+          # model V's trees used (US_FEATURES_X); the yield curve (reversed out of sample) and the five unused ones left out
+          "ml_gbm_x": {"version": "gbm-2.19.0", "label": "ensemble", "features": "extended_x", "target": "down_residual"},
           # 2026-11-19 (docs/research/results.md「模型 Q 靠哪幾份付費表」, written before the run): model R failed and its
           # rules earn half of model Q's — which tables carry it: model Q without the five long-history features
           # (margin maintenance, loans, block trades: PAID_LONG), and without the four that start in 2021-22
@@ -278,6 +282,8 @@ def version_features(version: str | None) -> tuple[str, ...]:
         return tuple(name for name in version_features("gbm-2.7.0") if name not in left)
     if kind == "extended_w":           # 2026-11-25: K's list and the SMC readings
         return version_features("gbm-2.7.0") + SMC_FEATURES_W
+    if kind == "extended_x":           # 2026-11-26: K's list and the four US features model V used
+        return version_features("gbm-2.7.0") + US_FEATURES_X
     if kind == "extended_v":           # 2026-11-22: K's list and the US side
         return version_features("gbm-2.7.0") + US_FEATURES_V
     if kind == "extended_t":           # 2026-11-21: K's list and the factors measured in November
@@ -709,7 +715,8 @@ def _train_ensemble(fp, out: Path, x: np.ndarray, samples: list[int], eligible: 
 
 DOWN_GATES = {"gbm-2.12.0": "gbm-2.7.0", "gbm-2.13.0": "gbm-2.7.0", "gbm-2.13.1": "gbm-2.7.0", "gbm-2.13.2": "gbm-2.7.0",
               "gbm-2.13.3": "gbm-2.7.0", "gbm-2.14.0": "gbm-2.7.0", "gbm-2.15.0": "gbm-2.7.0",
-              "gbm-2.16.0": "gbm-2.7.0", "gbm-2.17.0": "gbm-2.7.0", "gbm-2.18.0": "gbm-2.7.0"}
+              "gbm-2.16.0": "gbm-2.7.0", "gbm-2.17.0": "gbm-2.7.0", "gbm-2.18.0": "gbm-2.7.0",
+              "gbm-2.19.0": "gbm-2.7.0"}
 # 2026-11-25 (model W): the first version's seven SMC readings and the two structure states (smc.SMC_V2)
 SMC_FEATURES_W = ("smc_break_up_20", "smc_choch_up_20", "smc_ob_retest_10", "smc_fvg_retest_10", "smc_sweep_low_10",
                   "smc_discount", "smc_setup_10", "smc_structure", "smc_w_structure")
@@ -718,6 +725,9 @@ SMC_FEATURES_W = ("smc_break_up_20", "smc_choch_up_20", "smc_ob_retest_10", "smc
 US_FEATURES_V = ("us_sox_beta", "us_peer_mom_20", "us_peer_mom_60", "us_peer_gap_5", "us_rate_move_60", "us_dollar_move_60",
                  "market:us_sox_20", "market:us_vix", "market:us_yield2_60", "market:us_curve", "market:us_dollar_60",
                  "market:us_hot")
+# 2026-11-26 (model X): the four of them model V's trees used (build/modelv_importance.py: 15th, 16th, 18th and 32nd
+# of 86); the yield curve was reversed out of sample and the peers', rate and dollar readings were 48th to 81st
+US_FEATURES_X = ("us_sox_beta", "market:us_hot", "market:us_vix", "market:us_yield2_60")
 # 2026-11-21 (model T): the factors measured in November, outside FACTOR_LABELS — beta, the literature's behavior
 # factors (the skewness one way: a tree reads both ends), the balance sheet and the cash flow statement
 NOVEMBER_FEATURES = ("low_beta_250", "low_down_beta_250", "cgo_250", "beta_resid_mom_12", "illiquidity_60", "pair_gap_20",

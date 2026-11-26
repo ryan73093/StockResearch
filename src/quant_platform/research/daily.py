@@ -280,6 +280,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_gbm_r": "機器學習集成 R（模型 Q 拿掉 FinMind 付費資料的 9 個特徵：不續約也能跑）",
                  "ml_gbm_s": "機器學習集成 S（模型 K 的做法，用上市加上櫃一起訓練、只替上市股打分數）",
                  "ml_gbm_u": "機器學習集成 U（模型 K 的特徵，學扣掉「大盤下跌日的連動」之後的報酬：跌的時候不跟著跌）",
+                 "ml_gbm_x": "機器學習集成 X（模型 U 的學法，加上美國那一邊的 4 個特徵：費半連動、景氣過熱個數、VIX、2 年期殖利率變化）",
                  "ml_gbm_v": "機器學習集成 V（模型 K 的特徵，加上美國那一邊的 12 個：費半連動、美股同業動能與差距、利率與美元敏感度，以及費半、VIX、殖利率、美元、景氣過熱六個大盤狀態）",
                  "ml_gbm_t": "機器學習集成 T（模型 K 的特徵，加上 11 月新量的 16 個因子：連動、偏態、處分效果、資產成長、現金流量表、存貨與應收）",
                  "ml_gbm_w": "機器學習集成 W（模型 K 的特徵，加上 SMC 的 9 個讀數：結構突破、空翻多、訂單塊與缺口回測、掃低回收、折價區、完整進場、日線與週線的結構）",
@@ -5468,6 +5469,21 @@ def model_s_batch() -> list[DailyRule]:
             for word, change in MODEL_R_FRAMES]
 
 
+def model_x_batch() -> list[DailyRule]:
+    """2026-11-26 (docs/research/results.md「模型 X：模型 U 加上四個美國特徵」, written before the run): gbm-2.19.0 alone
+    in model R's three frames — only past its registered gate (model.down_gate against model K)."""
+    from quant_platform.research.model import stored_down_gate
+
+    check = stored_down_gate(Path("instance") / "research" / "models", "gbm-2.19.0")
+    print(f"gbm-2.19.0 門檻（2021-2025 前 20 名對加權指數，對 gbm-2.7.0）：{check}", flush=True)
+    if not check or not check.get("passed"):
+        return []
+    base = {"factors": {"ml_gbm_x": 1.0}, "check": "weekly", "industry_cap": 0.3, "min_hold": 0}
+    return [DailyRule.model_validate({**base, **change,
+                                      "name": f"模型 X 單獨（扣掉下跌日的連動，加四個美國特徵）、同產業最多 3 成、不設最短持有{word}"})
+            for word, change in MODEL_R_FRAMES]
+
+
 def model_u_batch() -> list[DailyRule]:
     """2026-11-21 (docs/research/results.md「模型 U：扣掉大盤下跌日的連動」, written before the run): gbm-2.16.0 alone
     in model R's three frames — only past its registered gate (model.down_gate against model K)."""
@@ -6894,3 +6910,4 @@ BATCHES["smc2"] = smc2_batch                   # 2026-11-25
 BATCHES["smcveto"] = smc_veto_batch
 BATCHES["smcveto2"] = smc_veto_deep_batch
 BATCHES["modelw"] = model_w_batch
+BATCHES["modelx"] = model_x_batch                 # 2026-11-26
