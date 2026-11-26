@@ -41,11 +41,23 @@ $quoted = ($arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -rep
 $old = $env:PYTHONPATH
 $env:PYTHONPATH = Join-Path $root "src"
 $env:PYTHONIOENCODING = "utf-8"
+# 2026-11-27：大型模型訓練中（顯示卡 99%、用了 12.6 GB）跑全套，測試搶卡、一個掃描測試卡住，訓練也被分走資源。
+# 顯示卡上已經用掉 6 GB 以上（有別的工作在用）時，測試改用處理器跑。
+$oldCard = $env:CUDA_VISIBLE_DEVICES
+if (-not $oldCard) {
+    $used = 0
+    try { $used = [int](& nvidia-smi.exe --query-gpu=memory.used --format=csv,noheader,nounits | Select-Object -First 1) } catch { }
+    if ($used -ge 6000) {
+        $env:CUDA_VISIBLE_DEVICES = "-1"
+        Write-Output ("顯示卡正在用（已用 {0} MB），這次測試不碰顯示卡。" -f $used)
+    }
+}
 try {
     $process = Start-Process -FilePath $Python -ArgumentList $quoted -WorkingDirectory $root -WindowStyle Hidden `
         -RedirectStandardOutput $log -RedirectStandardError $errors -PassThru
 } finally {
     $env:PYTHONPATH = $old
+    $env:CUDA_VISIBLE_DEVICES = $oldCard
 }
 function Remove-Scratch {
     # the temp folder of this run (made by this script): the suite's scratch grew to 28 GB when nothing removed it
