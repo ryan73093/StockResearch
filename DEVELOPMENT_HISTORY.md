@@ -12,6 +12,15 @@
 - 測試：`tests/test_research_smc.py` 21 個，和流程腳本、文件守門一起 44 個通過；全套測試這一輪沒跑。沒部署：工作程序在抓分 K（另一個對話的減資表修正也在等），網站要部署後才看得到新讀數的說明與否決的字樣；新的否決版規則照一般流程進名單與前向。
 - 回復方式：`git revert` 這幾個 commit；登錄的試驗（#44002～#44145）留著，不在名單上的不影響前向。
 
+## 2026-11-25 21:45 — YtSummary 知識多了「AI 雷達」；讀取模組認得 `trend`
+
+- 目標：使用者要 YtSummary 的 AI 技術有更多網友經驗、新專案與模型評分。YtSummary 新增知識類別 `trend`（Arena 模型排行、GitHub 新 AI 專案、Hugging Face 熱門，主題固定 AI），本專案只需讀得懂。
+- 做法：`research/video_knowledge.py` 的 `KIND_LABELS` 加 `trend`「AI 雷達」（`--kind trend` 也可用）。`docs/rag-knowledge.md` 補一句：AI 雷達是排行與清單，不是市場消息。
+- 沒改：交易員、代理人、`agent_lab` 與任何正式提示詞。
+- 測試：`scripts/run-tests.ps1 tests/test_research_video_knowledge.py tests/test_docs_guard.py` 22 passed（論壇那一項多了 AI 雷達標籤的檢查）。
+- commit：11/26 使用者同意 commit，這一筆與 11/20、11/22、11/25 12:10 三筆 YtSummary 讀取模組的修改一起 commit；沒有 push（D-041 的 push 待使用者決定）。`scripts/run_local_services.ps1` 與 11/19 那一筆是另一個對話的修改，不在這次 commit。
+- 回復：還原 `KIND_LABELS` 的 `trend` 與測試裡的那一行斷言、`rag-knowledge.md` 那一句。
+
 ## 2026-11-25 20:40 — 對帳紅燈的 3 個帳戶：減資表只在晚上抓，潤隆恢復買賣那天的紀錄還是舊股數；改成提前抓、記帳前再抓
 
 - 起因：使用者 11/25「現在呢？」。`status` 的 16:00 檢查「前向帳戶對帳 0 問題」從 11/24 起紅，3 個帳戶（同一個四因子規則的三種持有方式）。
@@ -28,6 +37,27 @@
 - 讀了四篇實測的結果表（LiveTradeBench、StockBench、Agent Market Arena、FINSABER）：模型的一般能力排名和報酬的等級相關 0.054；GPT-5 在 StockBench 輸買進持有；同一個架構便宜的模型贏貴的有兩組；重跑的差距和模型之間的差距一樣大。限制也寫了（都只有 2～4 個月、沒有台股、沒有 Haiku 5.5）。
 - 寫進結果紀錄「模型強弱會不會影響代理人的成績」、實驗室文件 §2 與分期 A5。沒有呼叫模型、沒有改程式。
 - 順便核對前向：11/23～11/25 九個設計三天都做出決定、都是鎖定的 Haiku 5.5；`cash` 真的開始以後持股比例約 70%～77%（回測裡幾乎都滿檔）。
+
+## 2026-11-25 12:10 — YtSummary 知識多了國外論壇討論；讀取模組認得 `discussion`
+
+- 目標：使用者在 YtSummary 加入國外論壇討論（Hacker News、Lobsters，Reddit 待金鑰）；本專案只需讀得懂新的類別。
+- 做法：`research/video_knowledge.py` 新增 `KIND_LABELS`（影片／新聞／論壇），`brief` 用它標類別，命令列 `--kind` 多 `discussion`。`docs/rag-knowledge.md` 補一段：論壇是網友意見，只能當觀點；YtSummary 資料改存 PostgreSQL，但對外仍是同一個輸出資料夾。
+- 沒改：交易員、代理人、`agent_lab` 與任何正式提示詞。
+- 測試：`scripts/run-tests.ps1 tests/test_research_video_knowledge.py tests/test_docs_guard.py` 22 passed（多一個論壇標籤的檢查）。
+- commit：未 commit（使用者先前指示先不要 commit；D-041 的 commit＋push 待使用者決定）。
+- 回復：還原 `video_knowledge.py` 的 `KIND_LABELS` 與 `--kind` 選項、測試最後一個斷言、`rag-knowledge.md` 新增的兩行。
+
+## 2026-11-22 22:00 — YtSummary 知識改依內容分類；讀取模組只比對主要主題
+
+- 起因：使用者指出 YtSummary 的三個分類混在一起。YtSummary 改成依內容分成財經投資（`財經`）、AI 技術（`AI`）、科技新聞（`科技`），另加 `其他`；既有紀錄也重新分類，版本與入庫時間不變。
+- 改了：
+  - `research/video_knowledge.py` 的主題篩選只看主要主題 `topic`，不再看次要主題 `topics`。財經新聞順帶提到 AI 不算 AI 技術。
+  - `brief` 顯示中文主題名稱。
+  - `docs/rag-knowledge.md` 補一句主題的定義。
+- 測試：`scripts\run-tests.ps1` 跑 `tests/test_research_video_knowledge.py` 和 `tests/test_docs_guard.py`，22 個通過。
+- 實際資料：以 11/22 21:00 為決定時點往前 3 天，財經 606、AI 55、科技 177、其他 171 筆。
+- 未 commit（使用者 11/21 說先不要 commit）。
+- 回復方式：把那一行篩選改回同時比對 `topic` 與 `topics`。
 
 ## 2026-11-22 21:40 — 使用者決定：代理人不換更強的模型；沒有研究和證據不提要花錢的事（D-060）
 
@@ -224,6 +254,34 @@
 - 測試：實驗室、第一版代理人、需求檢查、排程失敗 62 passed；頁面加「分數預測力」後實驗室 23 passed；文件守門 18 passed。
 - 沒做：部署——工作目錄裡另外兩個對話有改到一半、還沒 commit 的程式（含服務啟動腳本），頁面改動等下一次部署一起上。
 - 回復方式：`git revert` 這個 commit（指示回到原本的版本；11/23 之前 revert 不影響任何前向紀錄）。
+
+## 2026-11-20 19:40 — 讀取 YtSummary 的財經／AI／科技影音與新聞知識（只讀，不改實驗）
+
+- 使用者要求：
+  - 指定 YouTube 頻道（大多是財經）和市場、AI、科技新聞，每天自動收集成知識庫，並產生每日摘要。
+  - 這些知識要能當 StockResearch LLM 評估的參考。
+  - 11/20 選「先做讀取模組，不改實驗」：交易員和選股代理人的 prompt 不改，前向紀錄不受影響。
+- 做了：
+  - 新增 `research/video_knowledge.py`，讀 YtSummary 輸出資料夾（`YT_KNOWLEDGE_DIR`）的 JSONL 和每日摘要，有時間閘門：
+    - 只回 `available_at <= decided_at` 的紀錄；預設決定時點 15:40，和 agent_lab 一致。
+    - 修訂過的紀錄讀當時那一版；發布時間早於查詢區間的舊影片不算這段期間的消息。
+    - 寫到一半的行會跳過；資料夾不存在時回空結果。
+  - 可以用 `python -m quant_platform.research.video_knowledge --day … --code …` 查某個時點能讀到什麼。
+  - `docs/rag-knowledge.md` 補上一節說明。
+  - 沒有改 llm_trader、llm_agent、agent_lab、`research/__main__.py`。
+- 測試：`scripts\run-tests.ps1` 跑 `tests/test_research_video_knowledge.py`（新 4 個）和 `tests/test_docs_guard.py`，22 個通過。
+- 尚未完成：
+  - YtSummary 原本直接呼叫 OpenAI，但額度用完（API 回 429 credit_balance_exhausted），輸出資料夾一度沒有知識紀錄。
+  - 使用者 11/20 晚上指示：所有 AI 額度改從 AI API 平台拿，模型用 Claude Haiku。YtSummary 已改走平台，「實際讀到入庫的影片和新聞」的驗收補記在本筆最後。
+  - 本專案自己的 LLM 呼叫（`research/agent/llm.py` 有平台和 OpenAI 兩條路）這次沒有改。
+- 規則衝突：本專案的 D-041 要求每個工作包 commit 並 push，但這次任務規定沒有使用者同意不能 commit。這一筆先不 commit，收尾時請使用者決定。
+- 實際資料驗收（20:22）：YtSummary 改走 AI API 平台後，輸出資料夾有 206 筆知識和 11/20 的每日摘要。
+  - `python -m quant_platform.research.video_knowledge --day 2026-11-20 --time 21:00`：
+    - 讀得到 201 筆（財經 139、AI 42、科技 20）和當天的每日摘要。
+    - 影片 Gooaye 股癌 EP715 帶出 NVDA、TAIEX 的看法。
+    - 加 `--code NVDA` 查得到相關新聞。
+  - `--time 15:40`（這些資料入庫之前）是 0 筆、沒有摘要，時間閘門有效。
+- 回復方式：刪除 `research/video_knowledge.py`、`tests/test_research_video_knowledge.py`，以及 `docs/rag-knowledge.md` 最後一節。沒有其他程式會讀它們。
 
 ## 2026-11-20 16:20 — 大搜尋第二階段的上限、連動的三個試驗、總覽變快、核對分類
 
