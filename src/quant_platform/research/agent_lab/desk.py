@@ -192,9 +192,19 @@ class LabDesk(Desk):
         if kind.startswith("keep"):
             # a wider zone for what is already held: the consensus' ``top``, then the holdings ranked up to keepN — the
             # twin keeps a holding while it is on this list and fills from its head, so it sells later and buys the same
-            wide = self.agreed(int(kind[4:]))
+            # "keepNup": the wider zone only for a holding that closed at or above its own DEFEND_DAYS-session average
+            rising = kind.endswith("up")
+            wide = self.agreed(int(kind[4:-2] if rising else kind[4:]))
             held = set(self.held)
-            return wide[:top] + [item for item in wide[top:] if item[0] in held]
+
+            def up(code: str) -> bool:
+                row = self.fp.row.get(f"{code}.TW")
+                if row is None:
+                    return False
+                window = self.close[row, max(0, self.position - DEFEND_DAYS + 1): self.position + 1]
+                return bool(np.isfinite(window[-1]) and window[-1] >= np.nanmean(window))
+
+            return wide[:top] + [item for item in wide[top:] if item[0] in held and (not rising or up(item[0]))]
         if kind in ("defend", "calm") and self.weak_market():
             if kind == "defend":
                 return self.defensive(top)
