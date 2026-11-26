@@ -350,7 +350,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "retry-check", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "llm-agent", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "volume-bias", "noise-check", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
+                            "rl-select", "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "volume-bias", "noise-check", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
@@ -1093,6 +1093,20 @@ def main() -> int:
             print(side, "機器人", part["robot"], "固定", part["fixed"], "多賺", part["lead"], "開盤後一分鐘成交的比例",
                   part["minute_share"], flush=True)
         print("判定", "過" if found.get("passed") else "沒過", f"已寫入 {path}")
+        return 0
+
+    if args.command == "rl-select":
+        # 2026-11-27 (docs/research/results.md「RL 第十版：機器人每個月挑規則」): the rules are the actions, offline
+        from quant_platform.research import rl_select
+
+        path = rl_select.run(RESEARCH)
+        found = json.loads(path.read_text(encoding="utf-8"))
+        print(f"規則 {found['rules']} 個，{found['first']}～{found['last']}；0050 {found['base_multiple']} 倍", flush=True)
+        for label, key in (("機器人", "robot"), ("近 12 個月最好", "last12"), ("2015-06 至今最好", "to_date"), ("全部平均", "all")):
+            part = found[key]
+            print(label, f"{part['multiple']} 倍、最大回撤 {part['max_drawdown']:.1%}、輸 0050 的月 {part['months_behind_0050']}/{part['months']}、"
+                  f"每月換掉 {part['swapped_a_month']:.0%}", part["years"], flush=True)
+        print("判定", found["judgment"], "過" if found.get("passed") else "沒過", f"已寫入 {path}")
         return 0
 
     if args.command == "rl-switch":
