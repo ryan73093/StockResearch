@@ -165,6 +165,8 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # weights instead of its 25 thousand (model_deep2.LARGE)
           "ml_deep5": {"version": "dl-5.0.0", "label": "deep2"},
           "ml_deep5_wide": {"version": "dl-5.1.0", "label": "deep2"},
+          # 2026-11-27: dl-5.0.0's network, its encoder pretrained without labels on listed and TPEx (model_deep2.PRETRAINED)
+          "ml_deep6": {"version": "dl-6.0.0", "label": "deep2"},
           # 2026-10-17 (docs/research_dl_exits_review.md D3): dl-2.1.0 with cross-stock attention and a market gate
           "ml_deep3": {"version": "dl-3.0.0", "label": "deep2"},
           # 2026-10-18 (S9-W15): dl-2.1.0 learning from every listed and TPEx stock that trades normally

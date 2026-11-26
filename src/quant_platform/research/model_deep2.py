@@ -170,9 +170,21 @@ LARGE = {"dl-5.0.0": {"width": 256, "layers": 6, "heads": 8, "days": 2, "seeds":
 LARGE_DECAY = 0.01
 LARGE_WARMUP = 300                      # steps over which the learning rate rises to its value
 LARGE_CLIP = 1.0                        # the gradient's norm
+# 2026-11-27 (docs/research/results.md「深度學習第六版：先預訓練再學選股」, written before the run): dl-5.0.0's network,
+# its encoder first taught without labels on every stock of the panel that trades normally (listed and TPEx,
+# ``wide_mask``) — ``span``-session stretches of the 60 sessions hidden (about ``mask`` of them) and rebuilt, and the
+# next ``ahead`` sessions' average inputs forecast from the first token — on the sessions before the fold's first
+# only; then fine-tuned as dl-5.0.0 with the encoder at ``encoder`` × the head's learning rate. A fold's encoder
+# continues the fold before it (``more`` epochs over the sessions up to its own first), the earliest starts from
+# nothing (``epochs``); kept in pretrain/<year>.pt.
+PRETRAINED = {"dl-6.0.0": {"mask": 0.3, "span": 5, "ahead": 5, "epochs": 10, "more": 3, "rows": 1024, "rate": 3e-4}}
+LARGE["dl-6.0.0"] = {"width": 256, "layers": 6, "heads": 8, "days": 2, "seeds": 4, "rate": 2e-4, "encoder": 0.25}
+PRETRAIN_DIR = "pretrain"
+PRETRAIN_HUBER = 1.0
 for _new, _size in LARGE.items():
     LOSSES[_new] = "top10"
-    ARCHITECTURES[_new] = f"large:{_size['width']}x{_size['layers']}x{_size['heads']}"
+    ARCHITECTURES[_new] = (f"large:{_size['width']}x{_size['layers']}x{_size['heads']}"
+                           + (":pre" if _new in PRETRAINED else ""))
     AGAINST_OF[_new] = D3_AGAINST
 RECENT_GATED.update(LARGE)
 
@@ -321,8 +333,12 @@ def _network(sequence: int, snapshot: int, architecture: str = "gru"):
     class Large(torch.nn.Module):
         """2026-11-26 (LARGE): a Transformer encoder over the snapshot token and the 60 session tokens."""
 
-        def __init__(self, width: int, layers: int, heads: int) -> None:
+        def __init__(self, width: int, layers: int, heads: int, pre: bool = False) -> None:
             super().__init__()
+            if pre:                      # PRETRAINED: the hidden sessions' token, and the two outputs it learns with
+                self.blank = torch.nn.Parameter(torch.zeros(width))
+                self.rebuild = torch.nn.Linear(width, sequence)
+                self.ahead = torch.nn.Linear(width, sequence)
             self.steps = torch.nn.Linear(sequence, width)
             self.now = torch.nn.Linear(snapshot, width)
             self.state = torch.nn.Linear(len(MARKET), width)
@@ -335,18 +351,31 @@ def _network(sequence: int, snapshot: int, architecture: str = "gru"):
             self.head = torch.nn.Sequential(torch.nn.Linear(2 * width + snapshot + len(MARKET), width), torch.nn.GELU(),
                                             torch.nn.Dropout(DROPOUT), torch.nn.Linear(width, 1))
 
-        def forward(self, steps, now, market, groups=None):
+        def encode(self, steps, now, market, hidden=None):
+            """rows × (1 + LENGTH) × width; ``hidden`` (rows × LENGTH, bool): those sessions replaced by the blank."""
             half = steps.is_cuda                                   # half precision on the card (bfloat16: no scaler)
             with torch.autocast("cuda" if half else "cpu", dtype=torch.bfloat16, enabled=half):
-                tokens = torch.cat([self.now(now)[:, None, :], self.steps(steps)], dim=1)
+                days = self.steps(steps)
+                if hidden is not None:
+                    days = torch.where(hidden[:, :, None], self.blank.to(days.dtype)[None, None, :], days)
+                tokens = torch.cat([self.now(now)[:, None, :], days], dim=1)
                 tokens = tokens + self.place[None, :, :] + self.state(market)[:, None, :]
-                seen = self.norm(self.encoder(tokens))
-                found = torch.cat([seen[:, 0], seen[:, 1:].mean(dim=1)], dim=1)
+                return self.norm(self.encoder(tokens))
+
+        def forward(self, steps, now, market, groups=None):
+            seen = self.encode(steps, now, market)
+            found = torch.cat([seen[:, 0], seen[:, 1:].mean(dim=1)], dim=1)
             return self.head(torch.cat([found.float(), now, market], dim=1)).squeeze(-1)
 
+        def restore(self, steps, now, market, hidden):
+            """PRETRAINED: every session's inputs rebuilt (judged on the hidden ones), and the next sessions' forecast."""
+            seen = self.encode(steps, now, market, hidden).float()
+            return self.rebuild(seen[:, 1:]), self.ahead(seen[:, 0])
+
     if architecture.startswith("large:"):
-        width, layers, heads = (int(part) for part in architecture.split(":")[1].split("x"))
-        return Large(width, layers, heads)
+        parts = architecture.split(":")
+        width, layers, heads = (int(part) for part in parts[1].split("x"))
+        return Large(width, layers, heads, pre=len(parts) > 2)
     return Attention() if architecture == "attention" else Network()
 
 
@@ -447,9 +476,11 @@ def _gain(scores: np.ndarray, gains: np.ndarray) -> float | None:
 
 
 def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labels,
-         architecture: str = "gru", judged: tuple | None = None, large: dict | None = None) -> tuple[dict, list[float]]:
+         architecture: str = "gru", judged: tuple | None = None, large: dict | None = None,
+         start: dict | None = None) -> tuple[dict, list[float]]:
     """One seed: the network with the best held-out top-20 gain, and the curve. ``judged`` (rows, labels): the
-    stocks and labels the held-out days are judged on, when not the ones learned from (dl-2.2.0)."""
+    stocks and labels the held-out days are judged on, when not the ones learned from (dl-2.2.0). ``start``
+    (PRETRAINED): the weights it begins from; its output layers (``head``) begin as new."""
     import torch
 
     from quant_platform.research.model import STEP
@@ -459,8 +490,20 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
     learned = set(train_days)
     anchors = [day for day in train_days if day + STEP in learned] if kind == "direct" else None   # dl-4.0.0's pairs
     network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
-    optimiser = torch.optim.AdamW(network.parameters(), lr=large["rate"] if large else LEARNING_RATE,
-                                  weight_decay=LARGE_DECAY if large else WEIGHT_DECAY)
+    if start is not None:
+        network.load_state_dict({key: value for key, value in start.items() if not key.startswith("head.")},
+                                strict=False)
+    rate = large["rate"] if large else LEARNING_RATE
+    if large and start is not None and large.get("encoder"):       # the pretrained part moves more slowly
+        named = list(network.named_parameters())
+        parts = [{"params": [value for name, value in named if name.startswith("head.")], "lr": rate},
+                 {"params": [value for name, value in named if not name.startswith("head.")],
+                  "lr": rate * large["encoder"]}]
+    else:
+        parts = [{"params": list(network.parameters()), "lr": rate}]
+    optimiser = torch.optim.AdamW(parts, lr=rate, weight_decay=LARGE_DECAY if large else WEIGHT_DECAY)
+    for group in optimiser.param_groups:
+        group["full"] = group["lr"]
     per_batch, stepped = (large["days"] if large else DAYS_PER_BATCH), 0
     held_rows, held_labels = judged or (rows, labels)
     held_pairs = np.concatenate([np.stack([np.full(held_rows[day].size, day), held_rows[day]], axis=1)
@@ -492,7 +535,7 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
             if large:
                 stepped += 1
                 for group in optimiser.param_groups:
-                    group["lr"] = large["rate"] * min(1.0, stepped / LARGE_WARMUP)
+                    group["lr"] = group["full"] * min(1.0, stepped / LARGE_WARMUP)
                 torch.nn.utils.clip_grad_norm_(network.parameters(), LARGE_CLIP)
             optimiser.step()
         predicted = inputs.score(network, held_pairs, 2048 if large else 16384)
@@ -685,6 +728,82 @@ def gate(models_root: str | Path, version: str) -> dict[str, object]:
     return _judge(version, json.loads(paths[0].read_text(encoding="utf-8")), root)
 
 
+class Pretrainer:
+    """PRETRAINED: the version's encoder taught without labels, a fold at a time (the table's text)."""
+
+    def __init__(self, fp, out: Path, version: str, names: tuple[str, ...]) -> None:
+        self.settings, self.architecture, self.out, self.version = PRETRAINED[version], ARCHITECTURES[version], out, version
+        self.known = wide_mask(fp)                               # symbols × sessions
+        self.inputs = Inputs(fp, self.known, names)              # normalised among the stocks it learns from
+
+    def pairs(self, first: int) -> np.ndarray:
+        """(session, symbol) of every window whose forecast ends before ``first``."""
+        last = first - self.settings["ahead"]
+        found = np.argwhere(self.known.T[LENGTH:max(last, LENGTH)])
+        found[:, 0] += LENGTH
+        return found
+
+    def fit(self, first: int, state: dict | None, epochs: int, note=None) -> tuple[dict, list[float]]:
+        import torch
+
+        settings, inputs = self.settings, self.inputs
+        torch.manual_seed(0)
+        rng = np.random.default_rng(0)
+        network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], self.architecture).to(inputs.on)
+        if state is not None:
+            network.load_state_dict(state)
+        optimiser = torch.optim.AdamW(network.parameters(), lr=settings["rate"], weight_decay=LARGE_DECAY)
+        pairs = self.pairs(first)
+        spans = max(1, round(settings["mask"] * LENGTH / settings["span"]))
+        within = torch.arange(settings["span"], device=inputs.on)
+        after = torch.arange(1, settings["ahead"] + 1, device=inputs.on)
+        functional, curve, stepped = torch.nn.functional, [], 0
+        for epoch in range(epochs):
+            order, total, count = rng.permutation(len(pairs)), 0.0, 0
+            for at in range(0, len(order), settings["rows"]):
+                chosen = pairs[order[at:at + settings["rows"]]]
+                steps, now, market = inputs.batch(chosen)
+                begins = torch.randint(0, LENGTH - settings["span"] + 1, (len(chosen), spans), device=inputs.on)
+                hidden = torch.zeros((len(chosen), LENGTH), dtype=torch.bool, device=inputs.on)
+                hidden.scatter_(1, (begins[:, :, None] + within[None, None, :]).flatten(1), True)
+                sessions = torch.as_tensor(chosen[:, 0], device=inputs.on)
+                symbols = torch.as_tensor(chosen[:, 1], device=inputs.on)
+                coming = inputs.sequence[sessions[:, None] + after[None, :], symbols[:, None], :].float().mean(dim=1)
+                rebuilt, forecast = network.restore(steps, now, market, hidden)
+                loss = (functional.huber_loss(rebuilt[hidden], steps[hidden], delta=PRETRAIN_HUBER)
+                        + functional.huber_loss(forecast, coming, delta=PRETRAIN_HUBER))
+                optimiser.zero_grad()
+                loss.backward()
+                stepped += 1
+                for group in optimiser.param_groups:
+                    group["lr"] = settings["rate"] * min(1.0, stepped / LARGE_WARMUP)
+                torch.nn.utils.clip_grad_norm_(network.parameters(), LARGE_CLIP)
+                optimiser.step()
+                total += float(loss.detach()) * len(chosen)
+                count += len(chosen)
+            curve.append(round(total / max(count, 1), 5))
+            if note:
+                note(f"{self.version}：預訓練第 {epoch + 1}/{epochs} 輪（{len(pairs):,} 個視窗），損失 {curve[-1]:.4f}")
+        return {key: value.detach().clone() for key, value in network.state_dict().items()}, curve
+
+    def until(self, first: int, label: int, note=None, keep: Path | None = None) -> tuple[dict, list[float]]:
+        """The encoder for a fold whose first session is ``first``: the kept one, else the fold before it continued,
+        else from nothing. ``label``: the fold's year; ``keep``: where to write it when not pretrain/<label>.pt."""
+        import torch
+
+        folder = self.out / PRETRAIN_DIR
+        path = keep or folder / f"{label}.pt"
+        if path.is_file():
+            return torch.load(path, weights_only=True, map_location=self.inputs.on), []
+        before = sorted(int(item.stem) for item in folder.glob("*.pt") if item.stem.isdigit() and
+                        (int(item.stem) < label or (keep is not None and int(item.stem) == label)))
+        state = torch.load(folder / f"{before[-1]}.pt", weights_only=True, map_location=self.inputs.on) if before else None
+        state, curve = self.fit(first, state, self.settings["more"] if before else self.settings["epochs"], note)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        files.save_beside(path, lambda target: torch.save(state, target))
+        return state, curve
+
+
 def _prepare(fp, out: Path, version: str):
     """The inputs, labels and sample rows a version learns from (train, train_until)."""
     from quant_platform.research.model import HORIZON, eligibility, label_block, trained_features
@@ -757,9 +876,13 @@ def train_until(fp, out_dir: str | Path, version: str, cutoff, job=None) -> dict
     held_days = known[cut:]
     train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]           # purged
     networks, curves = [], []
+    begun = None
+    if version in PRETRAINED:            # the year's encoder continued over the sessions up to the cutoff
+        begun, _curve = Pretrainer(fp, out, version, _names).until(
+            first, cutoff.year, keep=out / PRETRAIN_DIR / f"{cutoff.isoformat()}.pt")
     for seed in seeds_of(version):
         state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture,
-                            None if version in NET_OF_MARKET else judged, LARGE.get(version))
+                            None if version in NET_OF_MARKET else judged, LARGE.get(version), begun)
         network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
         network.load_state_dict(state)
         networks.append(network)
@@ -809,6 +932,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
     out.mkdir(parents=True, exist_ok=True)
     kind, architecture, names, eligible, inputs, columns, labels, rows, judged = _prepare(fp, out, version)
     weekly = set(sample_columns(len(fp.sessions)))
+    pretrainer = Pretrainer(fp, out, version, names) if version in PRETRAINED else None
     report_labels = judged[1] if judged else labels
     ranks = {column: pd.Series(report_labels[column]).rank(pct=True).to_numpy() for column in columns}
     years = years or list(range(FIRST_YEAR, fp.sessions[-1].year + 1))
@@ -822,6 +946,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                  "sequence": [name for name in SEQUENCE if version not in TECHNICAL or name not in CHIPS],
                  "market": list(MARKET), "length": LENGTH, "hidden": HIDDEN, "head": list(HEAD),
                  "seeds": list(seeds_of(version)), **({"large": LARGE[version]} if version in LARGE else {}),
+                 **({"pretrained": PRETRAINED[version]} if version in PRETRAINED else {}),
                  "epochs": EPOCHS, "patience": PATIENCE, "held_out": HELD_OUT, "horizon": HORIZON,
                  "device": device_name()})
     meta.setdefault("years", {})
@@ -875,10 +1000,15 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
             held_days = known[cut:]
             train_days = [column for column in known[:cut] if column < held_days[0] - HORIZON]   # purged
             networks, curves, states = [], [], []
+            begun = None
+            if pretrainer:
+                begun, taught = pretrainer.until(first, year, (lambda text: job.update(current=text, force=True)) if job else None)
+                if taught:
+                    meta.setdefault("pretrain_curves", {})[str(year)] = taught
             for seed in seeds_of(version):
                 state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture,
                                     None if version in RESIDUAL_OF or version in NET_OF_MARKET else judged,
-                                    LARGE.get(version))
+                                    LARGE.get(version), begun)
                 network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
                 network.load_state_dict(state)
                 networks.append(network)

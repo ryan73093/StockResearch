@@ -267,6 +267,50 @@ def test_the_attention_version_trains(monkeypatch, tmp_path):
     assert np.isfinite(scores[later[-1]]).sum() >= 50
 
 
+def test_the_pretrained_version_teaches_its_encoder_before_each_fold_without_later_sessions(monkeypatch, tmp_path):
+    """2026-11-27 (使用者 11/26：去建一個像 LLM 的大型模型；docs/research/results.md「深度學習第六版」): dl-6.0.0's
+    encoder is taught without labels on the sessions before the fold's first only, a later fold continues the one
+    before it, and the fine-tuned networks score like any other version."""
+    import torch
+
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "RECENT_GATE_YEARS", (2017,))
+    monkeypatch.setattr(model_deep2, "D3_COUNT", 1)                       # one gate year here
+    monkeypatch.setitem(model_deep2.LARGE, "dl-6.0.0", {"width": 16, "layers": 1, "heads": 2, "days": 8, "seeds": 1,
+                                                        "rate": 1e-3, "encoder": 0.25})
+    monkeypatch.setitem(model_deep2.PRETRAINED, "dl-6.0.0", {"mask": 0.3, "span": 2, "ahead": 5, "epochs": 2, "more": 1,
+                                                             "rows": 512, "rate": 1e-3})
+    monkeypatch.setitem(model_deep2.ARCHITECTURES, "dl-6.0.0", "large:16x1x2:pre")
+    for name, years in (("gbm-2.2.0", {}), ("dl-2.1.0", {"2017": {"top20_gain": -9.0}})):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "meta.json").write_text(json.dumps({"version": name, "features": ["momentum_3"], "years": years}),
+                                                   encoding="utf-8")
+    _data, fp = _panel()
+    seen = []
+    real = model_deep2.Pretrainer.fit
+
+    def spy(self, first, state, epochs, note=None):
+        seen.append((fp.sessions[first].year, state is not None, epochs, int(self.pairs(first)[:, 0].max()) + 5 < first))
+        return real(self, first, state, epochs, note)
+    monkeypatch.setattr(model_deep2.Pretrainer, "fit", spy)
+    meta = model.train(fp, tmp_path / "dl-6.0.0", years=[2017, 2018], label="deep2", version="dl-6.0.0")
+    assert seen == [(2017, False, 2, True), (2018, True, 1, True)]        # from nothing, then continued; never later days
+    assert meta["architecture"].endswith(":pre") and meta["gate"]["passed"] and meta["gate"]["against"] == "dl-2.1.0"
+    assert len(meta["pretrain_curves"]["2017"]) == 2 and len(meta["pretrain_curves"]["2018"]) == 1
+    assert meta["years"]["2018"]["top20_gain"] is not None
+    kept = sorted(path.name for path in (tmp_path / "dl-6.0.0" / "pretrain").glob("*.pt"))
+    assert kept == ["2017.pt", "2018.pt"]
+    encoder = torch.load(tmp_path / "dl-6.0.0" / "pretrain" / "2018.pt", weights_only=True)
+    tuned = torch.load(tmp_path / "dl-6.0.0" / "2018-0.pt", weights_only=True)
+    assert set(encoder) == set(tuned) and not torch.equal(encoder["steps.weight"].cpu(), tuned["steps.weight"].cpu())
+    seen.clear()
+    model.train(fp, tmp_path / "dl-6.0.0", years=[2018], label="deep2", version="dl-6.0.0")
+    assert seen == []                                                     # a kept encoder is not taught again
+    scores = model.scores(fp, tmp_path / "dl-6.0.0")
+    assert np.isfinite(scores[fp.index[fp.sessions[-1]]]).sum() >= 50
+
+
 def test_the_wide_version_learns_from_tpex_too_but_scores_the_listed(monkeypatch, tmp_path):
     """2026-10-18 (S9-W15): dl-2.2.0 learns from every stock that trades normally, TPEx (.TWO) and small ones included;
     it is scored and judged on the eligible listed stocks only, against dl-2.1.0."""
