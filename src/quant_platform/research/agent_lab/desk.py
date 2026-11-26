@@ -59,7 +59,8 @@ EVIDENCE = {
 # panel takes it among the fifth of the list's passing rules that moved least with 0050 in the backtest before the
 # cutoff (of 3,275 rules, 22.7% of that fifth held up from 9/1 against 8.7%, 1.1%, 0.2%, 0% of the others).
 STEADY_SHARE = 0.2
-REGIME_DAYS = 200              # the market is weak under this average of the index (the market tool's own line)
+HELD_PANEL: dict | None = None      # {day: [(code, rules holding it, their families)]} for the panel "held" (a replay's check)
+REGIME_DAYS = 200             # the market is weak under this average of the index (the market tool's own line)
 DEFEND_DAYS = 60               # the defensive pool: volatility over these sessions…
 DEFEND_LIQUID = 300            # …among this many most traded stocks
 LIST_OVERRIDE: Path | None = None   # a replay of a stretch before the first monthly list (``decide --run … --list``): the
@@ -189,6 +190,15 @@ class LabDesk(Desk):
         consensus' 2 × ``top``."""
         if kind == "steady":
             return self.agreed(top, self.steady_panel())
+        if kind == "held":
+            # what the panel's rules hold in their own accounts at today's close (their own holding periods, exits and
+            # guards — D-017), most held first; short of ``top``, the consensus fills the rest. The table is made by
+            # the caller (build/held_replay.py): a replay's check, no live design reads it.
+            if HELD_PANEL is None or self.day not in HELD_PANEL:
+                raise KeyError(f"no held panel for {self.day}")
+            rows = [item for item in HELD_PANEL[self.day] if self.allowed(item[0])][:top]
+            seen = {item[0] for item in rows}
+            return rows + [item for item in self.agreed(top) if item[0] not in seen][:top - len(rows)]
         if kind.startswith("keep"):
             # a wider zone for what is already held: the consensus' ``top``, then the holdings ranked up to keepN — the
             # twin keeps a holding while it is on this list and fills from its head, so it sells later and buys the same
