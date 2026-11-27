@@ -1925,7 +1925,9 @@ switch ($Name) {
         # 2026-11-27 docs/research/results.md「RL 第十一版：機器人看規則當下的持股挑規則」(written before the run): every
         # rule's month-end lists from the engine's rankings (CPU, six processes), then the robot with them; no card
         Wait-While "13:30～14:40 盤後單時段，研究程式避開" { (Get-Date).TimeOfDay -ge [TimeSpan]"13:30" -and (Get-Date).TimeOfDay -lt [TimeSpan]"14:40" } 300
-        Invoke-Step "1-lists" @("-m", "quant_platform.research", "rl-holdings-lists", "--workers", "6")
+        # 11/27 18:50: six processes took the machine to 2 GB free and were stopped; measured, one settles near
+        # 7.7 GB (the model features it loads, not the factor matrices), so two
+        Invoke-Step "1-lists" @("-m", "quant_platform.research", "rl-holdings-lists", "--workers", "2")
         Invoke-Step "2-robot" @("-m", "quant_platform.research", "rl-holdings")
     }
     "rlselect2" {
