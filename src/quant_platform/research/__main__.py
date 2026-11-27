@@ -1514,9 +1514,14 @@ def main() -> int:
 
         token = env_token(Path.cwd())
         found_plan = plan(token) if token else None
-        if not found_plan or (found_plan.get("limit") or 0) <= 600:
-            print("FinMind 不是付費方案（即時快照只限 Sponsor），今天不抓", file=sys.stderr)
+        if not found_plan:
+            print("查不到 FinMind 方案，今天不抓", file=sys.stderr)
             return 3
+        if (found_plan.get("limit") or 0) <= 600:
+            # 2026-11-27: the plan ended 11/21 and this was marked failed every trading day after. With no paid plan there
+            # is nothing to capture: said, not failed (the stopped paid data is the 16:00「付費資料每天更新」 item)
+            print("FinMind 不是付費方案（即時快照只限 Sponsor），今天不抓")
+            return 0
         with JobLog(RESEARCH).start("盤中資金流（每 15 秒全市場快照，09:00～13:30）",
                                     "python -m quant_platform.research " + " ".join(sys.argv[1:])) as job:
             found = live_flow.run(Path(args.base), RESEARCH, token, job=job)

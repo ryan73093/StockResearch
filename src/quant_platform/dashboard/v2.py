@@ -2167,9 +2167,10 @@ def create_v2_blueprint(dependencies) -> Blueprint:
             page["buyers"] = [row for row in page["stocks"] if row["net"] > 0][:30]
             page["sellers"] = sorted((row for row in page["stocks"] if row["net"] < 0), key=lambda row: row["net"])[:30]
         now = datetime.now(TAIPEI)
-        live = (dependencies.market_calendar.calendar("TW").is_trading_day(now.date())
+        ended = live_flow.plan_ended(research_dir, now.date())
+        live = (ended is None and dependencies.market_calendar.calendar("TW").is_trading_day(now.date())
                 and time(8, 59) <= now.time() <= time(13, 31))
-        return render_template("v2/live.html", active_nav="market", page=page, live=live)
+        return render_template("v2/live.html", active_nav="market", page=page, live=live, ended=ended)
 
     @blueprint.get("/market/live.json")
     def market_live_json():

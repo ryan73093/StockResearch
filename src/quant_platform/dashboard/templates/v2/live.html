@@ -4,7 +4,7 @@
 <header class="page-head">
   <div>
     <h1>盤中資金流</h1>
-    <p class="page-head__sub">{% if page %}{{ page.date }}・更新到 {{ page.updated[11:19] }}{% if live %}（盤中每 30 秒自動更新）{% else %}（今天的盤中已結束或還沒開始）{% endif %}{% else %}交易日 09:00～13:30 每 15 秒抓一次全市場快照{% endif %}</p>
+    <p class="page-head__sub">{% if page %}{{ page.date }}・更新到 {{ page.updated[11:19] }}{% if live %}（盤中每 30 秒自動更新）{% elif ended is none %}（今天的盤中已結束或還沒開始）{% else %}（之後沒有再抓）{% endif %}{% else %}交易日 09:00～13:30 每 15 秒抓一次全市場快照{% endif %}</p>
   </div>
   <div class="page-head__meta"><a href="/market">市場總覽</a>・<a href="/">回今日</a></div>
 </header>
@@ -31,6 +31,9 @@
   </div>
   <p class="col-help"><b>欄位說明</b>　<b>外盤減內盤</b>：買方主動減賣方主動的估計金額（見「說明」）。<b>外盤比</b>：外盤佔外盤加內盤的比例。<b>漲跌</b>：相對昨天收盤。</p>
 {% endmacro %}
+{% if ended is not none %}
+<section class="card" data-notab><p><b>盤中資料停了：</b>FinMind 付費方案{% if ended %}在 <span class="nowrap">{{ ended }}</span> {% endif %}到期，抓不到盤中快照{% if page %}；下面是 <span class="nowrap">{{ page.date }}</span> 最後一次抓到的，不是今天的{% endif %}。續訂後，下一個交易日 08:57 會自動再開始。</p></section>
+{% endif %}
 {% if not page %}
 <section class="card"><p class="muted">還沒有盤中資料。交易日 08:57 自動啟動，09:00 起每 15 秒抓一次 FinMind 全市場快照（需要 Sponsor 方案）。</p></section>
 {% else %}

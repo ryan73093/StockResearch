@@ -1,5 +1,6 @@
 """2026-10-22 (使用者 2026-10-20：我也要這個——盤中資金流向): the session's money by side, by hand."""
 import json
+import sys
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -74,6 +75,36 @@ def test_the_page_shows_the_industries_and_stocks(tmp_path):
     body = client.get("/market/live").get_data(as_text=True)
     assert "半導體業" in body and "20.0 億" in body and "主動買超個股" in body and "欄位說明" in body
     assert client.get("/market/live.json").get_json()["industries"][0]["industry"] == "半導體業"
+
+
+def test_after_the_paid_plan_the_page_says_the_data_stopped(tmp_path, monkeypatch):
+    """2026-11-27: the plan ended 11/21; the page showed 11/20 as if latest and the 08:57 flow failed every day."""
+    import json
+
+    from quant_platform.config.settings import Settings
+    from quant_platform.container import build_container
+    from quant_platform.dashboard.app import create_app
+    from quant_platform.research import __main__ as command
+    from quant_platform.research.history import finmind
+
+    research = tmp_path / "research"
+    plan = research / "history" / "raw" / "finmind" / "plan.json"
+    plan.parent.mkdir(parents=True)
+    assert live_flow.plan_ended(research, date(2026, 11, 27)) is None                       # not known: say nothing
+    plan.write_text(json.dumps({"limit": 6000, "expires": "2027-01-01"}), encoding="utf-8")
+    assert live_flow.plan_ended(research, date(2026, 11, 27)) is None
+    plan.write_text(json.dumps({"limit": 600, "expires": "2026-11-21"}), encoding="utf-8")
+    assert live_flow.plan_ended(research, date(2026, 11, 27)) == "2026-11-21"
+    container = build_container(Settings(database_url=f"sqlite:///{tmp_path / 'ended.db'}"))
+    body = create_app(container).test_client().get("/market/live").get_data(as_text=True)
+    assert "盤中資料停了" in body and '在 <span class="nowrap">2026-11-21</span> 到期' in body
+
+    monkeypatch.setattr(sys, "argv", ["research", "live-flow"])
+    monkeypatch.setattr(finmind, "env_token", lambda root: "t")
+    monkeypatch.setattr(finmind, "plan", lambda token: {"limit": 600})
+    assert command.main() == 0                                          # nothing to capture is not a failure
+    monkeypatch.setattr(finmind, "plan", lambda token: None)
+    assert command.main() == 3                                          # FinMind did not say: that one is
 
 
 def test_one_industry_named_two_ways_is_one_row():

@@ -29,6 +29,19 @@ def folder(research: str | Path, day: date) -> Path:
     return Path(research) / "live" / day.isoformat()
 
 
+def plan_ended(research: str | Path, today: date) -> str | None:
+    """2026-11-27: the paid plan's last day (or "") when there is no paid plan any more, None while there is one or it is
+    not known (plan.json, rewritten by the downloads). The snapshots need Sponsor: the plan ended 11/21 and the page
+    went on showing 11/20 as if it were the latest."""
+    try:
+        found = json.loads((Path(research) / "history" / "raw" / "finmind" / "plan.json").read_text(encoding="utf-8"))
+        limit = int(found.get("limit") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    ended = str(found.get("expires") or "")
+    return ended if limit <= 600 or (ended and ended < today.isoformat()) else None
+
+
 def fetch(token: str) -> list[dict]:
     request = urllib.request.Request(URL, headers={"Authorization": f"Bearer {token}", "User-Agent": "StockResearch/1.0"})
     with urllib.request.urlopen(request, timeout=30) as response:
