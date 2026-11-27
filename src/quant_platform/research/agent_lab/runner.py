@@ -438,8 +438,15 @@ def decide(fp, base: Path, research: Path, variant: Variant, day: date, client=N
             record["list"] = desk_module.LIST_OVERRIDE.stem      # the list was chosen after these days
     context = f"{run or 'live'}-{variant.key}-{day.isoformat()}"
     asked_before = len(getattr(client, "served", None) or [])
-    if variant.mode == "twin":
-        llm: dict = {"hold": control_choice(agreed, held, blocked)}
+    if variant.mode == "twin" and variant.cash:
+        # a twin that follows accounts (panel "follow"): the heaviest stocks of the blend, as many of MOST as the
+        # blend's share in stocks — the places left open are cash, as the accounts hold it
+        share = desk.follow_rows()[1]
+        llm: dict = {"hold": [code for code in agreed if code not in blocked or code in held][:min(MOST, round(MOST * share))],
+                     "share": round(share, 4)}
+        record["model"] = None
+    elif variant.mode == "twin":
+        llm = {"hold": control_choice(agreed, held, blocked)}
         record["model"] = None
     elif client is None:
         llm = {"hold": held, "fallback": "沒有呼叫模型"}

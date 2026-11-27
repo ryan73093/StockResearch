@@ -93,6 +93,11 @@ COHORT: tuple[Variant, ...] = (
     Variant("fwd", "對照組・規則改照前向加回測的綜合分數挑（沒有語言模型）", "twin", (),
             "共識用的規則加看前向紀錄來挑（平台自己的排序），是不是比只看回測賺最多好", "twin", since="2026-11-30",
             panel="forward", wave=2),
+    # 2026-11-27 (docs/research/results.md「照規則自己的帳戶持有」, written before it runs): the same rules as fwd, held
+    # as their own accounts hold (holding rule, exits, guards, cash) instead of a fully invested consensus of rankings
+    Variant("own", "對照組・照同一批規則自己的帳戶實際持有的來持有，連它們留的現金（沒有語言模型）", "twin", (),
+            "照規則帳戶實際持有的（含現金），是不是比拿規則的排名組共識滿檔持有好", "fwd", since="2026-11-30",
+            panel="follow", cash=True, wave=2),
 )
 BY_KEY = {variant.key: variant for variant in COHORT}
 FACTORS = {variant.factor: f"AI 代理人實驗室・{variant.label}" for variant in COHORT}

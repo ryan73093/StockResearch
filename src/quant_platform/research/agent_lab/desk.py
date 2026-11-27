@@ -173,6 +173,48 @@ def forward_rows(research: Path, path: Path, day: date) -> list[dict]:
     return rows
 
 
+# 2026-11-27 (docs/research/results.md「照規則自己的帳戶持有」): twice — the 11/26 "held" replays and the 11/27 look back
+# — the rules' own accounts were far better than a fully invested consensus of their rankings (the rules chosen on
+# 10/30 were 2 to 11 points ahead of 0050 in their accounts; the consensus of their rankings lost a tenth to it in the
+# next 20 sessions). The panel "follow" runs each forward-panel rule in the engine as its own account (its holding
+# rule, exits, guards and cash — D-017) from the session after the list's cutoff, and blends the accounts equally.
+MARKET_DATA = None                  # the engine's price data (``daily.load``'s first value), set by whoever loads it
+FOLLOW_THROUGH: date | None = None  # a replay: the accounts are run once through this day instead of once a day
+_ACCOUNTS: dict = {}                # (rule hash, start, through) → {day: (cash, {symbol: shares})}
+
+
+def rule_account(data, fp, rule, start: date, through: date) -> dict:
+    """{day: (cash, {symbol: shares})} of the rule's own account in the engine, the owner's plan and broker."""
+    from quant_platform.research import daily, decisions
+    from quant_platform.research.costs import broker_costs
+    from quant_platform.research.stock_rules import SeedPlan
+
+    costs = broker_costs("cathay")
+    ranks = daily.daily_rankings(fp, rule, start, through)
+    weights, parked, exposure = decisions.sizing(data, fp, rule, costs, ranks, start)
+    snapshots: dict = {}
+    daily.simulate_daily(data, rule, costs, start, through, ranks, SeedPlan(calendar=list(data.sessions)),
+                         snapshots=snapshots, weights=weights, parked=parked, exposure=exposure)
+    return snapshots
+
+
+def blend_accounts(accounts: list[tuple[str, float, dict[str, float]]]) -> tuple[list[tuple[str, float, list[str]]], float]:
+    """The equal blend of accounts [(family, cash, {code: value held})] — ([(code, weight, families)], heaviest first,
+    and the blend's share in stocks). An account's weights are its values over its own total; an empty one is cash."""
+    weight: dict[str, float] = {}
+    families: dict[str, list[str]] = {}
+    for family, cash, values in accounts:
+        total = cash + sum(values.values())
+        if total <= 0:
+            continue
+        for code, value in values.items():
+            if value > 0:
+                weight[code] = weight.get(code, 0.0) + value / total / len(accounts)
+                families.setdefault(code, []).append(family)
+    rows = sorted(weight.items(), key=lambda item: (-item[1], item[0]))
+    return [(code, share, families[code]) for code, share in rows], float(sum(weight.values()))
+
+
 def decision_moment(day: date) -> datetime:
     return datetime.combine(day, DECISION_TIME, TAIPEI)
 
@@ -194,6 +236,7 @@ class LabDesk(Desk):
         self._tables = None
         self._steady = None
         self._forward = None
+        self._follow = None
 
     def list_path(self) -> Path:
         return LIST_OVERRIDE or super().list_path()
@@ -223,6 +266,36 @@ class LabDesk(Desk):
                 except Exception:  # noqa: BLE001 - a rule this code no longer reads is left out
                     continue
         return self._forward
+
+    def follow_rows(self) -> tuple[list[tuple[str, float, list[str]]], float]:
+        """([(code, weight in the equal blend of the forward panel's own accounts, families)], the blend's share in
+        stocks) at today's close. An ETF an account parks in is not a stock: it counts as cash."""
+        if self._follow is None:
+            from quant_platform.research.blend import parse_spec
+
+            data = MARKET_DATA
+            if data is None:
+                raise RuntimeError("沒有引擎的價格資料（desk.MARKET_DATA）：規則自己的帳戶跑不出來")
+            cutoff = date.fromisoformat(self.list_path().stem[:10])
+            start = next(day for day in self.fp.sessions if day > cutoff)
+            through = FOLLOW_THROUGH if FOLLOW_THROUGH and FOLLOW_THROUGH >= self.day else self.day
+            accounts = []
+            for row in forward_rows(self.research, self.list_path(), self.day):
+                key = (row["rule_hash"], start, through)
+                if key not in _ACCOUNTS:
+                    _ACCOUNTS[key] = rule_account(data, self.fp, parse_spec(row["spec"]), start, through)
+                cash, owned = _ACCOUNTS[key].get(self.day, (0.0, {}))
+                values, parked = {}, 0.0
+                for symbol, count in owned.items():
+                    value = count * (data.closes.get(symbol, {}).get(self.day) or data.last_close(symbol, self.day) or 0.0)
+                    code = self.code_of(symbol)
+                    if symbol.endswith(".TW") and not symbol.startswith("00") and self.allowed(code):
+                        values[code] = values.get(code, 0.0) + value
+                    else:
+                        parked += value
+                accounts.append((row["family"], cash + parked, values))
+            self._follow = blend_accounts(accounts)
+        return self._follow
 
     def weak_market(self) -> bool:
         """The index closed under its REGIME_DAYS-session average today (the line the market tool shows)."""
@@ -260,6 +333,8 @@ class LabDesk(Desk):
             return self.agreed(top, self.steady_panel())
         if kind == "forward":
             return self.agreed(top, self.forward_panel())
+        if kind == "follow":
+            return [(code, len(families), families) for code, _weight, families in self.follow_rows()[0]][:top]
         if kind == "held":
             # what the panel's rules hold in their own accounts at today's close (their own holding periods, exits and
             # guards — D-017), most held first; short of ``top``, the consensus fills the rest. The table is made by

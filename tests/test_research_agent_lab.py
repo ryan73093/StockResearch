@@ -649,6 +649,8 @@ def test_a_design_that_joined_later_does_not_move_the_first_cohorts_start_and_ca
     assert evaluate.first_common_day(tmp_path, None) == "2026-11-23"          # fwd has no decision yet
     assert evaluate.first_common_day(tmp_path, None, 2) is None
     stores["fwd"] = [{"date": "2026-11-30", "llm": {"hold": ["2330"]}}]
+    assert evaluate.first_common_day(tmp_path, None, 2) is None               # every design of the wave has to have one
+    stores["own"] = [{"date": "2026-11-30", "llm": {"hold": ["2330"]}}]
     assert evaluate.first_common_day(tmp_path, None) == "2026-11-23" and evaluate.first_common_day(tmp_path, None, 2) == "2026-11-30"
     # its failure is skipped; a first-cohort design's failure still stops the day
     asked = []
@@ -688,3 +690,44 @@ def test_the_panel_skips_a_rule_reading_a_table_that_stopped_before_the_day(tmp_
     assert panel(date(2026, 11, 20)) == ["規則 0"] and panel(date(2026, 11, 23)) == ["規則 1"]
     monkeypatch.setattr(pool, "data_stopped", lambda _research, _day=None: None)
     assert panel(date(2026, 11, 23)) == ["規則 0"]
+
+
+def test_the_twin_that_follows_the_rules_accounts_holds_their_blend_and_leaves_their_cash(tmp_path, monkeypatch):
+    """2026-11-27 (docs/research/results.md「照規則自己的帳戶持有」): the accounts are blended equally; the lab's account
+    holds the heaviest stocks, as many of 20 as the blend's share in stocks."""
+    from quant_platform.research import llm_agent
+    from quant_platform.research.agent_lab import desk as desk_module
+
+    rows, share = desk_module.blend_accounts([("趨勢", 50.0, {"1101": 30.0, "1102": 20.0}),      # half cash
+                                              ("多因子", 0.0, {"1101": 60.0, "1103": 40.0}),
+                                              ("空手", 100.0, {}), ("沒錢", 0.0, {})])
+    assert [(code, round(weight, 4), families) for code, weight, families in rows] == [
+        ("1101", 0.225, ["趨勢", "多因子"]), ("1103", 0.1, ["多因子"]), ("1102", 0.05, ["趨勢"])]
+    assert round(share, 4) == 0.375                                       # of four accounts: 0.5, 1, 0 and an empty one
+    own = variants.BY_KEY["own"]
+    assert (own.mode, own.panel, own.cash, own.wave, own.against, own.since, own.calls) == ("twin", "follow", True, 2, "fwd", "2026-11-30", 0)
+    # the decision: the heaviest 20 × share of them; a stock under disposition is not bought anew
+    day = date(2026, 11, 30)
+    codes = [str(1101 + number) for number in range(30)]
+
+    class Desk:
+        seen: set = set()
+
+        def __init__(self, *_args, **_more):
+            pass
+
+        def agreed_of(self, kind, _top):
+            assert kind == "follow"
+            return [(code, 1, ["趨勢"]) for code in codes]
+
+        def follow_rows(self):
+            return [], 0.62
+
+    monkeypatch.setattr(runner, "LabDesk", Desk)
+    monkeypatch.setattr(llm_agent, "disposition", lambda _base, _day: {"1102", "1103"})
+    monkeypatch.setattr(runner, "records", lambda _research, key, run=None: [{"date": "2026-11-27", "llm": {"hold": ["1103"]}}])
+    kept = {}
+    monkeypatch.setattr(runner, "append", lambda _research, _key, record, _run=None: kept.update(record))
+    record = runner.decide(SimpleNamespace(index={day: 0}), tmp_path, tmp_path, own, day)
+    assert kept is not None and record["llm"]["share"] == 0.62 and len(record["llm"]["hold"]) == 12      # 20 × 0.62
+    assert "1102" not in record["llm"]["hold"] and "1103" in record["llm"]["hold"] and record["model"] is None

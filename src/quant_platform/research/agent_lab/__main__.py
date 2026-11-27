@@ -40,6 +40,7 @@ def main() -> int:
 
     from quant_platform.config.settings import Settings
     from quant_platform.research import daily
+    from quant_platform.research.agent_lab import desk as desk_module
     from quant_platform.research.agent_lab import environment, evaluate, probe, runner
     from quant_platform.research.jobs import JobLog
 
@@ -48,7 +49,6 @@ def main() -> int:
     if args.list_day:
         if not args.run:
             parser.error("--list 只能和 --run 一起用（真的決定只讀當月的名單）")
-        from quant_platform.research.agent_lab import desk as desk_module
 
         desk_module.LIST_OVERRIDE = RESEARCH / "rolling" / f"{args.list_day}.json"
         if not desk_module.LIST_OVERRIDE.is_file():
@@ -73,6 +73,7 @@ def main() -> int:
                 job.update(current=f"還沒有 {day} 的收盤資料，5 分鐘後再試（第 {attempt + 1} 次）", force=True)
                 time.sleep(300)
             data, fp = loaded
+            desk_module.MARKET_DATA = data           # the design that follows the rules' own accounts runs them in the engine
             model = client()
             if args.run:
                 made = runner.replay(fp, base, RESEARCH, date.fromisoformat(args.first or day.isoformat()), day, args.run,
