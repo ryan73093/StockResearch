@@ -252,6 +252,8 @@ def test_deploy_computes_the_views_before_it_stops_the_site():
     assert asked < computed < stopped
     installed, checked = deploy.index("pip install ."), deploy.index("warm.prepared(")
     assert stopped < installed < checked < deploy.index("'start-services.ps1'")     # and again if the code had changed
+    searched = deploy.index("/research/knowledge?q=")                  # the search model, read before "done"
+    assert deploy.index("'start-services.ps1'") < searched < deploy.index("catch {", searched)      # never fails it
     stop = (scripts / "stop-services.ps1").read_text(encoding="utf-8")
     assert stop.index("if ($CheckOnly)") > stop.index("Refusing to stop services while the worker runs")
     assert stop.index("if ($CheckOnly)") < stop.index("Set-Content -LiteralPath $stopFlagPath")      # before anything stops

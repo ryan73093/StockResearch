@@ -84,3 +84,15 @@ finally {
 
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'start-services.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'start-services.ps1 reported unhealthy services.' }
+
+# 2026-11-27: a knowledge search made right after an update waited 24 s while the search model (about 2 GB) was read
+# from disk beside everything else that was starting. One search is made here (read only), so the update is done once
+# the new web has the model. It never fails the deploy.
+$watch = [Diagnostics.Stopwatch]::StartNew()
+try {
+    Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:5000/research/knowledge?q=%E5%81%9C%E6%90%8D' -TimeoutSec 180 | Out-Null
+    Write-Host ('First knowledge search made ({0:N0} s); the search model is loaded.' -f $watch.Elapsed.TotalSeconds)
+}
+catch {
+    Write-Host "The first knowledge search did not answer; the model loads with the next one. $($_.Exception.Message)" -ForegroundColor Yellow
+}
