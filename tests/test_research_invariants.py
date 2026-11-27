@@ -355,7 +355,12 @@ def test_the_paid_tables_must_cover_the_previous_session_while_the_plan_lasts(tm
     through.write_text(_json.dumps({name: "2026-10-30" for name in tables}), encoding="utf-8")
     assert invariants.paid_check(research, _date(2026, 11, 2))["ok"]
     plan.write_text(_json.dumps({"limit": 6000, "expires": "2026-11-21"}), encoding="utf-8")
-    assert invariants.paid_check(research, _date(2026, 11, 23))["ok"]               # past the plan's end: not checked
+    ended = invariants.paid_check(research, _date(2026, 11, 23))             # past the plan's end: the data stopped
+    assert not ended["ok"] and "2026-11-21 到期" in ended["detail"] and "停在 2026-10-30" in ended["detail"]
+    plan.write_text(_json.dumps({"limit": 600, "expires": "2026-11-21"}), encoding="utf-8")     # what the free plan says
+    assert not invariants.paid_check(research, _date(2026, 11, 27))["ok"]
+    through.unlink()                                                          # never downloaded: nothing to check
+    assert invariants.paid_check(research, _date(2026, 11, 27))["ok"]
 
 
 def test_the_records_and_the_closes_must_reach_the_exchanges_latest_session(tmp_path):

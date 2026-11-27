@@ -678,7 +678,11 @@ def docs_check(root: Path) -> dict[str, object]:
 
 def paid_check(research: Path, today: date, now: datetime | None = None) -> dict[str, object]:
     """While the FinMind plan (plan.json) is paid and not past its end, every paid table covers the previous session
-    (paid/through.json) — what today's 13:50 orders read (paiddaily runs at 22:05 and 07:05)."""
+    (paid/through.json) — what today's 13:50 orders read (paiddaily runs at 22:05 and 07:05).
+
+    2026-11-27: after the plan's end the downloaded tables are no longer updated and the rules reading them decide on old
+    values: red, saying where they stop (D-045 第 5 項：資料若真的停了這一項會紅). The plan ended 11/21 and this passed as
+    「不檢查」 every day after."""
     import json
 
     from quant_platform.research.chips import PAID_SOURCES
@@ -689,13 +693,18 @@ def paid_check(research: Path, today: date, now: datetime | None = None) -> dict
         plan = json.loads((history / "raw" / "finmind" / "plan.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         plan = {}
-    if not plan.get("limit") or int(plan["limit"]) <= 600 or str(plan.get("expires") or "") < today.isoformat():
-        return _check(name, source, True, "付費方案沒有在用（或已到期），不檢查")
-    due = collected_due(research, today, now, (7, 30)).isoformat()             # 2026-11-03: the exchange's calendar
     try:
         covered = json.loads((history / "paid" / "through.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         covered = {}
+    ended = str(plan.get("expires") or "")
+    if not plan.get("limit") or int(plan["limit"]) <= 600 or ended < today.isoformat():
+        if not covered:
+            return _check(name, source, True, "沒有用過付費資料")
+        return _check(name, source, False, (f"付費方案 {ended} 到期" if ended else "付費方案沒有在用")
+                      + f"，付費資料停在 {max(covered.values())}，讀它的規則之後照舊資料決定；要續訂，或照 "
+                      "docs/finmind_renewal_2026-11-13.md「決定不續的話」處理")
+    due = collected_due(research, today, now, (7, 30)).isoformat()             # 2026-11-03: the exchange's calendar
     late = {table: covered.get(table, "沒有") for table in sorted(set(PAID_SOURCES.values())) if covered.get(table, "") < due}
     return _check(name, source, not late, f"應涵蓋到 {due}" + ("；落後：" + "、".join(f"{table} {day}" for table, day in late.items())
                                                             if late else "，全部涵蓋"))
