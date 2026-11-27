@@ -475,6 +475,31 @@ def _gain(scores: np.ndarray, gains: np.ndarray) -> float | None:
     return float(gains[np.argsort(-scores)[:20]].mean() - gains.mean())
 
 
+def _give_back(inputs: Inputs) -> None:
+    """2026-11-27: dl-5.1.0's training held 11.5 GB of the card and 4.4 GB more in shared (system) memory by its
+    fourth fold (Windows' GPU counters; the 30-step probe before the run had peaked at 5.4 GB), and that fold was
+    past seven hours where the first took 39 minutes — work spilled off the card runs many times slower. A day's
+    batch has a different number of stocks every step, so the blocks PyTorch keeps for reuse pile up in sizes that
+    no longer fit. They are given back at each epoch's end; what the fold really needed is kept in the meta
+    (``_peak``) so the next run says whether this was the cause."""
+    import torch
+
+    if inputs.on.type == "cuda":
+        torch.cuda.empty_cache()
+
+
+def _peak(inputs: Inputs) -> dict[str, float] | None:
+    """The most of the card's memory PyTorch used (in tensors) and held (with its cache) since the last call, GB."""
+    import torch
+
+    if inputs.on.type != "cuda":
+        return None
+    found = {"used": round(torch.cuda.max_memory_allocated() / 2 ** 30, 2),
+             "held": round(torch.cuda.max_memory_reserved() / 2 ** 30, 2)}
+    torch.cuda.reset_peak_memory_stats()
+    return found
+
+
 def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labels,
          architecture: str = "gru", judged: tuple | None = None, large: dict | None = None,
          start: dict | None = None) -> tuple[dict, list[float]]:
@@ -553,6 +578,8 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
         if turns:                        # dl-4.0.0: the held-out top 20 after the same cost
             held -= DIRECT_COST * DIRECT_WEEKS * float(np.mean(turns))
         curve.append(round(held, 5))
+        if large:
+            _give_back(inputs)
         if held > best[0]:
             best, waited = (held, {key: value.clone() for key, value in network.state_dict().items()}), 0
         else:
@@ -782,6 +809,7 @@ class Pretrainer:
                 total += float(loss.detach()) * len(chosen)
                 count += len(chosen)
             curve.append(round(total / max(count, 1), 5))
+            _give_back(inputs)
             if note:
                 note(f"{self.version}：預訓練第 {epoch + 1}/{epochs} 輪（{len(pairs):,} 個視窗），損失 {curve[-1]:.4f}")
         return {key: value.detach().clone() for key, value in network.state_dict().items()}, curve
@@ -1050,6 +1078,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                                     "ic": round(float(np.mean(ics)), 4) if ics else None,
                                     "top20_gain": round(float(np.mean(top20)), 5) if top20 else None,
                                     "held_curves": curves}
+        if version in LARGE:
+            meta["years"][str(year)]["gpu_gb"] = _peak(inputs)
         if version in RESIDUAL_OF:
             meta["years"][str(year)]["residual"] = residual_check(
                 {column: stored[fp.sessions[column].isoformat()] for column in reported}, fp.matrix(RESIDUAL_OF[version]),
