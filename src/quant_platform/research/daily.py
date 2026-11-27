@@ -596,7 +596,7 @@ class DailyRule(BaseModel):
     # (retail_down_4w lowest), "h2" = of the fifth whose holders grew the most (holders_down_4w lowest)
     # 2026-11-20 (docs/research/results.md「不買現金獲利最差的五分之一」): "c1"
     exclude: Literal["none", "v1", "h1", "h2", "m1", "hm", "t1", "e1", "he", "s1", "l1", "x1", "b1", "c1",
-                     "k1", "k2"] = "none"
+                     "k1", "k2", "k2x"] = "none"
     # 2026-10-12 (全面研究「之後再試」第 1 項): "cost1" = a holding that leaves the keep zone is replaced only when
     # the replacement's expected next-20-session excess beats the holding's by more than a round trip (about
     # 0.99%: fee both ways, the sell tax, slippage both ways). The expectation is the rule's own score
@@ -1831,6 +1831,12 @@ def _rankings(fp: FactorPanel, rule: DailyRule, start: date, end: date, fixed: d
             risky_out = {symbol for symbol in current if symbol in fp.risky(position, RISK_EXIT_SHARE)}
             out |= risky_out
             cause.update({symbol: "深度風險模型：下跌機率最高的 5%" for symbol in risky_out})
+        if current and getattr(rule, "exclude", "none") in SIGNAL_EXITS:
+            # 2026-11-27 (SMC 第四版): the signal that bars a buy also sells a holding, every session
+            marked = fp.signal_vetoed(position, SIGNAL_VETOES[rule.exclude])
+            turned = {symbol for symbol in current if symbol in marked and symbol not in out}
+            out |= turned
+            cause.update({symbol: "日線結構轉空（收盤跌破波段低點），照 SMC 的時機賣出" for symbol in turned})
         risk_off = rule.market_filter != "none" and not fp.risk_on(position, rule.market_filter)
         if not decide:
             if not (current or pending_slots):
@@ -4338,7 +4344,11 @@ HOLDER_VETO_SHARE = 0.2
 # 2026-11-25 (docs/research/results.md「SMC 第二版」, written before the run): vetoes by a signal in force, not by a
 # fifth — "k1" no new buy within 10 sessions of a sweep of a swing low (the first version measured it reversed in both
 # periods), "k2" none while the daily structure is bearish (SMC trades along the structure)
-SIGNAL_VETOES = {"k1": "smc_sweep_low_10", "k2": "smc_bearish"}
+SIGNAL_VETOES = {"k1": "smc_sweep_low_10", "k2": "smc_bearish", "k2x": "smc_bearish"}
+# 2026-11-27 (使用者：別人用 SMC 就用得不錯; docs/research/results.md「SMC 第四版：當時機用」, written before the run):
+# "k2x" = SMC as the timing of the rule's own picks — no new buy while the daily structure is bearish ("k2") and a
+# holding sold the session its structure is (the rule picks the stock, SMC says when to be in it)
+SIGNAL_EXITS = ("k2x",)
 
 # 2026-10-21 (使用者付了 FinMind Sponsor：請繼續研究; research_method §7「FinMind 付費資料的因子與策略」, written before the
 # strength results): the new data's factors that the strength analysis calls strong (or reversed: bet the other way),
@@ -4525,6 +4535,31 @@ def smc_exit_batch() -> list[DailyRule]:
     return output
 
 
+# 2026-11-27 (使用者：別人用 SMC 就用得不錯; docs/research/results.md「SMC 第四版：當時機用」, written before the run). The
+# people who trade by SMC watch a few liquid names and time them; the three versions ranked every eligible stock.
+SMC4_CAPS = (50, 150)
+SMC4_TOP = 10
+
+
+def smc4_batch() -> list[DailyRule]:
+    """(h) the watchlist: SMC's entries among the largest stocks only, a few held, SMC's own exit."""
+    verdicts = smc_event_verdicts()
+    strong = [name for name in SMC2_WEEKLY if verdicts.get(name) == "強"]
+    print(f"SMC 第四版：做規則的週線因子 {strong}", flush=True)
+    return [DailyRule(name=f"SMC：{words}：市值前 {caps} 大裡前 {SMC4_TOP} 名、同產業最多 3 成、每天決策｜持有：{SMC3_HOLD}",
+                      factors={factor: 1.0}, top=SMC4_TOP, large_caps=caps, industry_cap=0.3, eligibility="entry",
+                      hold="structure")
+            for factor, words in [*SMC_WORDS.items(), *((name, SMC2_WORDS[name]) for name in strong)]
+            for caps in SMC4_CAPS]
+
+
+def smc_timing_batch() -> list[DailyRule]:
+    """(i) SMC as the timing of the rules' own picks ("k2x"): the 44 BETA_GUARD rules and the 24 deep-learning rules
+    the veto "k2" was adopted on — everything else as it is."""
+    return _veto_rules([(trial, "k2x") for group in BETA_GUARD.values() for trial in group]
+                       + [(trial, "k2x") for trial in CASH_VETO_DEEP])
+
+
 def new_data_batch() -> list[DailyRule]:
     from quant_platform.research.scan import SHORT
 
@@ -4597,7 +4632,8 @@ VETO_WORDS = {"h1": "不買散戶大增的五分之一", "h2": "不買股東大�
               "s1": "不買借券賣出最多的五分之一", "l1": "不買借券費率最高的五分之一",
               "x1": "不買技術機器人最不看好的五分之一", "b1": "不買連動最高的五分之一",
               "c1": "不買現金獲利最差的五分之一",
-              "k1": "不買 10 天內掃低回收的（SMC）", "k2": "不買日線結構是空方的（SMC）"}
+              "k1": "不買 10 天內掃低回收的（SMC）", "k2": "不買日線結構是空方的（SMC）",
+              "k2x": "日線結構空方不買、持股轉空就賣（SMC）"}
 # 2026-10-22 (research_method §7「否決第三版」, written before the run; the lists frozen at 14:4x from the passing single
 # rules ranking the top 20 without a veto, by end value): the holders' veto on the 120 richest, both vetoes together on
 # the 20 richest and on the three top-10 rules the margin veto moved onto the frontier
@@ -7024,5 +7060,7 @@ BATCHES["smcveto"] = smc_veto_batch
 BATCHES["smcveto2"] = smc_veto_deep_batch
 BATCHES["smc3"] = smc3_batch                   # 2026-11-26
 BATCHES["smcexit"] = smc_exit_batch
+BATCHES["smc4"] = smc4_batch                   # 2026-11-27
+BATCHES["smctiming"] = smc_timing_batch
 BATCHES["modelw"] = model_w_batch
 BATCHES["modelx"] = model_x_batch                 # 2026-11-26

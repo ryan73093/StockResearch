@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 
 import numpy as np
+import pytest
 
 from quant_platform.research import categories, daily, model, scan, smc
 
@@ -251,7 +252,7 @@ def test_a_signal_veto_keeps_out_the_stocks_with_the_signal_in_force_and_is_part
 
     assert daily.FactorPanel.signal_vetoed(Panel(), 0, "smc_sweep_low_10") == {"2330.TW"}
     assert daily.FactorPanel.signal_vetoed(Panel(), 1, "smc_sweep_low_10") == {"1101.TW"}
-    assert daily.SIGNAL_VETOES == {"k1": "smc_sweep_low_10", "k2": "smc_bearish"}
+    assert daily.SIGNAL_VETOES == {"k1": "smc_sweep_low_10", "k2": "smc_bearish", "k2x": "smc_bearish"}
     assert not set(daily.SIGNAL_VETOES) & set(daily.VETO_FACTORS) and set(daily.SIGNAL_VETOES) <= set(daily.VETO_WORDS)
     for code, factor in daily.SIGNAL_VETOES.items():
         rule = daily.DailyRule(name="x", factors={"momentum_3": 1.0}, exclude=code)
@@ -438,3 +439,76 @@ def test_a_model_reads_an_smc_event_without_a_signal_as_zero_not_as_unknown():
     event, place = block[0, :, 0], block[0, :, 1]
     assert np.isfinite(event[:3]).all() and event[1] > event[0] == event[2] and np.isnan(event[3])
     assert np.isnan(place[0]) and np.isfinite(place[1])              # a place in the leg stays unknown outside it
+
+
+def test_timing_one_stock_is_in_after_the_entry_and_out_after_the_structure_turns():
+    """2026-11-27 (SMC 第四版 (g)): a policy says after each close whether it wants the stock; the order fills at the
+    next session's open, the costs on that day; a session without a trade changes nothing."""
+    nan = np.nan
+    found = {"smc_structure": np.array([[nan], [1.0], [1.0], [1.0], [-1.0], [-1.0], [1.0]], dtype=np.float32),
+             "smc_w_structure": np.array([[1.0], [1.0], [-1.0], [1.0], [1.0], [1.0], [1.0]], dtype=np.float32),
+             "smc_ob_retest_10": np.array([[nan], [nan], [1.0], [0.9], [nan], [1.0], [nan]], dtype=np.float32),
+             "smc_fvg_retest_10": np.full((7, 1), nan, dtype=np.float32),
+             "smc_setup_10": np.full((7, 1), nan, dtype=np.float32),
+             "smc_sweep_low_10": np.array([[nan], [nan], [nan], [nan], [1.0], [0.9], [nan]], dtype=np.float32)}
+    assert smc.timing_wants(found, "structure")[:, 0].tolist() == [False, True, True, True, False, False, True]
+    assert smc.timing_wants(found, "structure_w")[:, 0].tolist() == [False, True, False, True, False, False, True]
+    # the retest inside a bullish structure starts it (session 2), the bearish structure ends it; the retest of
+    # session 5 is in a bearish structure and starts nothing
+    assert smc.timing_wants(found, "block")[:, 0].tolist() == [False, False, True, True, False, False, False]
+    assert smc.timing_wants(found, "sweep")[:, 0].tolist() == [False, False, False, False, True, True, False]
+    assert not smc.timing_wants(found, "gap").any() and set(smc.TIMING_POLICIES) >= set(smc.TIMING_ENTRIES)
+    open_ = np.array([[10.0], [10.0], [11.0], [nan], [12.0], [9.0], [9.5]])
+    close = np.array([[10.0], [10.5], [11.5], [nan], [12.5], [9.2], [9.8]])
+    wants = smc.timing_wants(found, "structure")
+    returns, inside, entered = smc.timing_returns(open_, close, wants, buy=0.01, sell=0.02)
+    assert entered[:, 0].tolist() == [False, False, True, False, False, False, False]
+    assert inside[:, 0].tolist() == [False, False, True, True, True, True, False]
+    assert returns[2, 0] == pytest.approx(11.5 / 11.0 * 0.99 - 1)       # bought at session 2's open
+    assert returns[3, 0] == 0.0                                         # no trade: nothing changes
+    assert returns[4, 0] == pytest.approx(12.5 / 11.5 - 1)              # held, from the last traded close
+    assert returns[5, 0] == pytest.approx(9.0 / 12.5 * 0.98 - 1)        # sold at the open after the bearish close
+    assert returns[6, 0] == 0.0 and returns[:2, 0].tolist() == [0.0, 0.0]
+
+
+def test_the_timing_veto_bars_a_bearish_stock_and_sells_a_holding_the_session_it_turns():
+    """2026-11-27 (SMC 第四版 (i)): exclude "k2x" — the rule picks the stock, SMC says when to be in it."""
+    from tests.test_research_daily import MarketPanel, weekdays
+
+    days = weekdays(date(2024, 1, 1), date(2024, 1, 12))
+    script = {day: ["A", "B", "C", "D", "E", "F"] for day in days}
+
+    class Timed(MarketPanel):
+        def signal_vetoed(self, position, factor):
+            assert factor == "smc_bearish"
+            marked = {"C"}                                             # bearish throughout: never bought
+            if position >= self.index[days[3]]:
+                marked.add("B")                                        # turns bearish on the Thursday
+            return marked
+
+    panel = Timed(days, script, "ABCDEF")
+    rule = daily.DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, check="weekly", exclude="k2x")
+    assert daily.rule_inputs(rule) == ["momentum_3", "smc_bearish"] and rule.canonical()["exclude"] == "k2x"
+    ranks = daily.daily_rankings(panel, rule, days[0], days[-1])
+    assert ranks[days[0]] == ["A", "B", "D"]                           # C is barred; the next best takes its place
+    assert ranks[days[3]] == ["A", "D"]                                # B sold the session it turned, between decisions
+    assert ranks[days[5]] == ["A", "D", "E"]                           # the next Monday: B still barred, E bought
+    veto = daily.DailyRule(name="x", factors={"momentum_3": 1.0}, top=3, keep=1, check="weekly", exclude="k2")
+    kept = daily.daily_rankings(panel, veto, days[0], days[-1])
+    assert all("B" in names for names in kept.values())                # "k2" alone never sells a holding
+    assert daily.SIGNAL_EXITS == ("k2x",) and "k2x" in daily.VETO_WORDS
+    assert "日線結構空方不買、持股轉空就賣" in categories.classify(rule.canonical())["traits"]
+
+
+def test_the_fourth_versions_batches_are_the_large_stock_watchlist_and_the_timing_of_68_rules(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rules = daily.BATCHES["smc4"]()
+    assert len(rules) == len(smc.SMC_FACTORS) * 2 and len({rule.rule_hash for rule in rules}) == len(rules)
+    for rule in rules:
+        assert (rule.hold, rule.eligibility, rule.top, rule.check) == ("structure", "entry", 10, "daily")
+        assert rule.large_caps in (50, 150) and len(rule.factors) == 1 and len(rule.name) <= 80
+    asked: list = []
+    monkeypatch.setattr(daily, "_veto_rules", lambda pairs: asked.extend(pairs) or [])
+    daily.BATCHES["smctiming"]()
+    assert {code for _trial, code in asked} == {"k2x"} and len(asked) == 44 + 24
+    assert [trial for trial, _code in asked][44:] == list(daily.CASH_VETO_DEEP)

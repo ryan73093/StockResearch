@@ -342,3 +342,71 @@ def matrix(fp, history: str | Path, factor: str) -> np.ndarray:
         cache.update(weekly_structure(*candles, list(fp.panel.sessions), cache))
         fp._smc = cache
     return cache[factor]
+
+
+# 2026-11-27 (使用者：別人用 SMC 就用得不錯; docs/research/results.md「SMC 第四版：當時機用」, written before the run). The
+# three versions before ranked every stock by an SMC reading and bought the first 20 — a stock picker. The people who
+# trade by SMC time one instrument: in after its entry, out when its structure breaks. Measured here stock by stock,
+# against holding that same stock: a policy says after each close whether it wants the stock, the order fills at the
+# next session's open.
+TIMING_BUY = 0.001425 + 0.002                 # the fee and the slippage daily.ROUND_TRIP counts, on the way in
+TIMING_SELL = 0.001425 + 0.003 + 0.002        # the fee, the tax and the slippage on the way out
+TIMING_POLICIES = {
+    "structure": "日線結構是多方就持有（收盤站上波段高點的隔天開盤買，收盤跌破波段低點的隔天開盤賣）",
+    "structure_w": "日線、週線結構都是多方才持有（其中一個轉空的隔天開盤賣）",
+    "block": "多方結構裡回測訂單塊的隔天開盤買，日線結構轉空的隔天開盤賣",
+    "gap": "多方結構裡回測缺口（FVG）的隔天開盤買，日線結構轉空的隔天開盤賣",
+    "setup": "完整進場（多方結構、折價區、回測訂單塊或缺口）的隔天開盤買，日線結構轉空的隔天開盤賣",
+    "sweep": "掃低回收的隔天開盤買，訊號失效（滿 10 天或收盤跌破掃低那天的最低價）的隔天開盤賣",
+}
+TIMING_ENTRIES = {"block": "smc_ob_retest_10", "gap": "smc_fvg_retest_10", "setup": "smc_setup_10"}
+
+
+def timing_wants(found: dict[str, np.ndarray], policy: str) -> np.ndarray:
+    """sessions × symbols: after session t's close the policy wants to hold the stock (``found``: ``structure``'s
+    output with ``weekly_structure``'s). An entry policy starts on its event's own session inside a bullish
+    structure and lasts until the structure is no longer bullish."""
+    bullish = found["smc_structure"] == 1
+    if policy == "structure":
+        return bullish
+    if policy == "structure_w":
+        return bullish & (found["smc_w_structure"] == 1)
+    if policy == "sweep":
+        return np.isfinite(found["smc_sweep_low_10"])
+    fired = (found[TIMING_ENTRIES[policy]] >= 1.0) & bullish        # an event factor is 1 on its event's session
+    wants = np.zeros(bullish.shape, dtype=bool)
+    held = np.zeros(bullish.shape[1], dtype=bool)
+    for t in range(bullish.shape[0]):
+        held = np.where(held, bullish[t], fired[t])
+        wants[t] = held
+    return wants
+
+
+def timing_returns(open_: np.ndarray, close: np.ndarray, wants: np.ndarray, buy: float = TIMING_BUY,
+                   sell: float = TIMING_SELL) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """sessions × symbols: each session's return of an account that is in the stock when the policy wanted it at the
+    close before (bought and sold at the session's open, costs taken on the day), whether it is in a trade that
+    session (the selling session included) and whether it bought that session. A session the stock did not trade
+    changes nothing: the order waits for the next one it trades."""
+    sessions, symbols = close.shape
+    returns = np.zeros(close.shape)
+    inside = np.zeros(close.shape, dtype=bool)
+    entered = np.zeros(close.shape, dtype=bool)
+    held = np.zeros(symbols, dtype=bool)
+    last = np.full(symbols, np.nan)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        for t in range(sessions):
+            o, c = open_[t], close[t]
+            traded = np.isfinite(o) & np.isfinite(c) & (o > 0)
+            target = wants[t - 1] if t else np.zeros(symbols, dtype=bool)
+            enter = traded & target & ~held
+            leave = traded & ~target & held
+            stay = traded & held & ~leave & np.isfinite(last)
+            row = np.zeros(symbols)
+            row[stay] = c[stay] / last[stay] - 1
+            row[enter] = c[enter] / o[enter] * (1 - buy) - 1
+            row[leave] = o[leave] / last[leave] * (1 - sell) - 1
+            returns[t], inside[t], entered[t] = row, held | enter, enter
+            held = (held | enter) & ~leave
+            last = np.where(traded, c, last)
+    return returns, inside, entered

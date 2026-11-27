@@ -188,7 +188,8 @@ def classify(spec: dict, source: str = "") -> dict[str, object]:
                            "he": "不新買股東大增或獲利衰退最多的股票", "s1": "不新買借券賣出最多的股票",
                            "l1": "不新買借券費率最高的股票",
                            "x1": "不新買技術機器人最不看好的股票",
-                           "k1": "不新買 10 天內掃低回收的股票", "k2": "不新買日線結構是空方的股票"}.get(spec["exclude"], "有排除條件"))
+                           "k1": "不新買 10 天內掃低回收的股票", "k2": "不新買日線結構是空方的股票",
+                           "k2x": "日線結構空方不買、持股轉空就賣"}.get(spec["exclude"], "有排除條件"))
         if spec.get("large_caps"):               # equal amounts unless weighted by calmness (its own trait)
             equal = spec.get("weighting", "equal") == "equal"
             traits.append(f"只挑市值前 {spec['large_caps']} 大" + ("、每檔等額" if equal else ""))
