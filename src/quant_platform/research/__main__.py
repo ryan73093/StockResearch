@@ -350,7 +350,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "retry-check", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "llm-agent", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "rl-select", "rl-select-slow", "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "volume-bias", "noise-check", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
+                            "rl-select", "rl-select-slow", "rl-holdings-lists", "rl-holdings", "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "volume-bias", "noise-check", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
@@ -1093,6 +1093,25 @@ def main() -> int:
             print(side, "機器人", part["robot"], "固定", part["fixed"], "多賺", part["lead"], "開盤後一分鐘成交的比例",
                   part["minute_share"], flush=True)
         print("判定", "過" if found.get("passed") else "沒過", f"已寫入 {path}")
+        return 0
+
+    if args.command in ("rl-holdings-lists", "rl-holdings"):
+        # 2026-11-27 (docs/research/results.md「RL 第十一版：機器人看規則當下的持股挑規則」): every rule's month-end
+        # lists from the engine's own rankings, then the tenth version's robot with them
+        from quant_platform.research import rl_holdings
+
+        if args.command == "rl-holdings-lists":
+            found = rl_holdings.lists(RESEARCH, RESEARCH / "history", workers=args.workers, progress=lambda done, total, failed: print(
+                f"名單 {done}/{total}（失敗 {failed}）", flush=True))
+            print(f"子規則 {found['parts']} 個：原本有 {found['kept_before']}、這次算 {found['computed']}、失敗 {found['failed']}；{found['folder']}", flush=True)
+            return 0
+        path = rl_holdings.run(RESEARCH, RESEARCH / "history")
+        found = json.loads(path.read_text(encoding="utf-8"))
+        print(f"規則 {found['rules']} 個（缺名單沒算進來 {found['rules_left_out']}），{found['first']}～{found['last']}；0050 {found['base_multiple']} 倍", flush=True)
+        for label, key in (("機器人（看持股）", "robot"), ("機器人（不看持股）", "robot_plain"), ("近 12 個月最好", "last12"), ("2015-06 至今最好", "to_date"), ("全部平均", "all")):
+            part = found[key]
+            print(f"  {label}：{part['multiple']} 倍、最大回撤 {part['max_drawdown']:.1%}、每月換 {part['swapped_a_month']:.0%}", flush=True)
+        print(f"  判定：{'過' if found['passed'] else '沒過'}（{found['judgment']}）；{path}", flush=True)
         return 0
 
     if args.command in ("rl-select", "rl-select-slow"):
