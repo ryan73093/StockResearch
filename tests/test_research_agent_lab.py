@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from quant_platform.research.agent_lab import environment, evaluate, probe, runner, variants
 from quant_platform.research.agent_lab.desk import LabDesk, decision_moment
@@ -548,7 +549,7 @@ def test_the_trader_that_may_keep_cash_leaves_places_open_and_never_holds_under_
     assert "空位由程式" not in text and runner.instructions(trade) == runner.TRADE_INSTRUCTIONS
     for variant in variants.COHORT:                                     # a design is compared with a twin of its own candidates
         other = variants.BY_KEY.get(variant.against)
-        if other is not None:
+        if other is not None and variant.mode != "twin":                # a twin of other candidates asks about the candidates
             assert other.panel == variant.panel, variant.key
     # the account's share in stocks follows the decision before each session
     sessions = [date(2026, 9, 1) + timedelta(days=number) for number in range(5)]
@@ -598,3 +599,92 @@ def test_the_pool_changes_only_under_a_weak_market_to_the_calmest_of_the_most_tr
     assert [code for code, *_ in strong.agreed_of("keep4", 2)] == ["1101", "1103", "1102", "1104"]
     assert [code for code, *_ in strong.agreed_of("keep4up", 2)] == ["1101", "1103", "1104"]
     assert [code for code, *_ in strong.agreed_of("keep2", 2)] == ["1101", "1103"]
+
+
+def test_the_forward_panel_takes_each_familys_rule_by_the_platforms_score_and_is_kept_for_the_list(tmp_path, monkeypatch):
+    """2026-11-27 (docs/research/results.md「挑規則加看前向」): the rule of each family with the highest combined score
+    (forward 0.7, D-045) among those with a chained record that read no stopped table; made once for a list, only on
+    the day itself."""
+    from quant_platform.research import pool
+    from quant_platform.research.agent_lab import desk as desk_module
+
+    research = tmp_path / "research"
+    (research / "rolling").mkdir(parents=True)
+    spec = lambda number: {"name": f"規則 {number}", "factors": {"trend_200": 1.0}, "top": 20}     # noqa: E731
+    graded = [{"passed": number != 4, "rule_hash": f"h{number}", "spec": spec(number),
+               "metrics": {"since_2020_final_value": 1000.0 * (9 - number)}} for number in range(6)]
+    path = research / "rolling" / "2026-09-30.json"
+    path.write_text(json.dumps({"graded": graded}), encoding="utf-8")
+    chain = {"sessions": 39, "excess": 0.01, "sold_excess": 0.02}
+    scored = {"h0": {"combined": 0.3, "chain": chain},                         # the most backtest money, a low score
+              "h1": {"combined": 0.9, "chain": chain, "stale_data": {"through": "2026-11-20"}},   # reads a stopped table
+              "h2": {"combined": 0.8},                                         # no chained forward record
+              "h3": {"combined": 0.7, "chain": chain},
+              "h4": {"combined": 0.95, "chain": chain},                        # not passing on the list
+              "h5": {"combined": 0.7, "chain": chain}}                         # the same score: the smaller hash stays
+    rows = desk_module.forward_pick(graded, scored)
+    assert [(row["rule_hash"], row["combined"]) for row in rows] == [("h3", 0.7)]
+    assert desk_module.forward_pick(graded, scored, stale=False)[0]["rule_hash"] == "h1"
+    # another day than today has no pool to read: a replay names its own file
+    with pytest.raises(FileNotFoundError):
+        desk_module.forward_rows(research, path, date(2026, 11, 2))
+    monkeypatch.setattr(pool, "daily_rows", lambda _research: [{"spec_hash": key, **value} for key, value in scored.items()])
+    today = datetime.now(desk_module.TAIPEI).date()
+    assert [row["rule_hash"] for row in desk_module.forward_rows(research, path, today)] == ["h3"]
+    kept = json.loads((research / "agent_lab" / "panels" / "forward-2026-09-30.json").read_text(encoding="utf-8"))
+    assert kept["made"] == today.isoformat() and kept["list"] == "2026-09-30.json"
+    monkeypatch.setattr(pool, "daily_rows", lambda _research: 1 / 0)
+    assert desk_module.forward_rows(research, path, date(2026, 12, 1))[0]["rule_hash"] == "h3"     # kept for the list
+    monkeypatch.setattr(desk_module, "FORWARD_PANEL", tmp_path / "none.json")
+    with pytest.raises(FileNotFoundError):
+        desk_module.forward_rows(research, path, today)
+
+
+def test_a_design_that_joined_later_does_not_move_the_first_cohorts_start_and_cannot_stop_its_day(tmp_path, monkeypatch):
+    fwd = variants.BY_KEY["fwd"]
+    assert fwd.mode == "twin" and fwd.against == "twin" and fwd.panel == "forward" and fwd.wave == 2 and not fwd.calls
+    assert fwd.since > max(variant.since for variant in variants.COHORT if variant.wave == 1)
+    stores = {variant.key: [{"date": "2026-11-23", "llm": {"hold": ["2330"]}}] for variant in variants.COHORT if variant.wave == 1}
+    monkeypatch.setattr(runner, "records", lambda _research, key, run=None: stores.get(key, []))
+    assert evaluate.first_common_day(tmp_path, None) == "2026-11-23"          # fwd has no decision yet
+    assert evaluate.first_common_day(tmp_path, None, 2) is None
+    stores["fwd"] = [{"date": "2026-11-30", "llm": {"hold": ["2330"]}}]
+    assert evaluate.first_common_day(tmp_path, None) == "2026-11-23" and evaluate.first_common_day(tmp_path, None, 2) == "2026-11-30"
+    # its failure is skipped; a first-cohort design's failure still stops the day
+    asked = []
+
+    def decide(_fp, _base, _research, variant, *_args, **_more):
+        asked.append(variant.key)
+        if variant.key in ("fwd", "veto"):
+            raise ValueError(variant.key)
+        return {"date": "2026-11-30", "llm": {"hold": []}}
+
+    monkeypatch.setattr(runner, "decide", decide)
+    with pytest.raises(ValueError, match="veto"):
+        runner.decide_day(None, tmp_path, tmp_path, date(2026, 11, 30))
+    assert "fwd" in asked and asked.index("fwd") < asked.index("veto")
+
+
+def test_the_panel_skips_a_rule_reading_a_table_that_stopped_before_the_day(tmp_path, monkeypatch):
+    """2026-11-27: the panel's 機器學習 rule had voted on paid tables that stopped on 11/20 — from the session after the
+    stop the family's next rule by money is taken; up to the stop nothing changes."""
+    from quant_platform.research import blend, pool
+
+    research = tmp_path / "research"
+    (research / "rolling").mkdir(parents=True)
+    graded = [{"passed": True, "rule_hash": f"h{number}", "spec": {"name": f"規則 {number}", "factors": {"trend_200": 1.0}, "top": 20},
+               "metrics": {"since_2020_final_value": 1000.0 * (9 - number)}} for number in range(3)]
+    path = research / "rolling" / "2026-09-30.json"
+    path.write_text(json.dumps({"graded": graded}), encoding="utf-8")
+    monkeypatch.setattr(blend, "parse_spec", lambda spec: spec["name"])
+    monkeypatch.setattr(pool, "data_stopped", lambda _research, _day=None: "2026-11-20")
+    monkeypatch.setattr(pool, "stale_data", lambda _research, spec, _stopped: {"through": "2026-11-20"} if spec["name"] == "規則 0" else None)
+
+    def panel(day):
+        desk = object.__new__(LabDesk)
+        desk.research, desk.day, desk._panel = research, day, None
+        return [rule for _family, rule in desk.panel()]
+
+    assert panel(date(2026, 11, 20)) == ["規則 0"] and panel(date(2026, 11, 23)) == ["規則 1"]
+    monkeypatch.setattr(pool, "data_stopped", lambda _research, _day=None: None)
+    assert panel(date(2026, 11, 23)) == ["規則 0"]

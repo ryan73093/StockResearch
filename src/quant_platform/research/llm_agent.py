@@ -216,6 +216,7 @@ class Desk:
 
             path = self.list_path()
             best: dict[str, tuple[float, dict]] = {}
+            ranked: dict[str, list[tuple[float, dict]]] = {}
             if path.is_file():
                 for row in json.loads(path.read_text(encoding="utf-8")).get("graded") or []:
                     spec = row.get("spec") or {}
@@ -224,9 +225,19 @@ class Desk:
                         continue
                     family = str(classify(spec).get("family"))
                     money = float((row.get("metrics") or {}).get("since_2020_final_value") or 0.0)
-                    if family not in best or money > best[family][0]:
+                    ranked.setdefault(family, []).append((money, spec))
+            # 2026-11-27 (found 11/27: the 機器學習 rule of the panel read paid tables that stopped on 11/20 and had
+            # voted on old values since 11/23): a rule reading a table that stopped by the day is not the rule that was
+            # registered (pool.stale_data, the platform's own exclusion from T0) — the family's next by money is taken
+            from quant_platform.research.pool import data_stopped, stale_data
+
+            stopped = data_stopped(self.research, self.day)
+            for family, found in ranked.items():
+                for money, spec in sorted(found, key=lambda item: -item[0]):
+                    if not stopped or stopped >= self.day.isoformat() or not stale_data(self.research, spec, stopped):
                         best[family] = (money, spec)
-            chosen = sorted(best.items(), key=lambda item: -item[1][0])[:PANEL_FAMILIES]
+                        break
+            chosen =sorted(best.items(), key=lambda item: -item[1][0])[:PANEL_FAMILIES]
             self._panel = []
             for family, (_money, spec) in chosen:
                 try:

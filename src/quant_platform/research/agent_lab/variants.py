@@ -44,6 +44,9 @@ class Variant:
     panel: str = "money"         # where its candidates come from: "money" (the lab's consensus) | "steady" (desk.steady_rows;
                                  # 2026-11-22: tried as twin2/trade2 and not adopted — docs/research/results.md「穩健候選」)
     cash: bool = False           # a trader whose places left open stay cash (CASH_LEAST stocks at least)
+    wave: int = 1                # 2 and later: a design that joined after the cohort started — the board compares it in
+                                 # a table of its own, every account in it (its twin too) starting at its first decision,
+                                 # so the first cohort's start and judgement day do not move
 
     @property
     def model_name(self) -> str:
@@ -84,6 +87,12 @@ COHORT: tuple[Variant, ...] = (
     Variant("cash", f"持股經理・可以留現金：賣掉的可以不補，空位留現金（最少持有 {CASH_LEAST} 檔）", "trade",
             ("market", "mood", "headlines", "portfolio", "card", "events"),
             "讓持股經理自己決定留多少現金，是不是比永遠滿檔好", "trade", steps=1, calls=1, since="2026-11-23", cash=True),
+    # 2026-11-27 (使用者：沒達到目標不要停; docs/research/results.md「挑規則加看前向」, written before it runs): the twin's
+    # rules are each family's best by backtest money alone — on 11/27 all seven were 10% to 22% behind 0050 in their own
+    # chained forward records. The same twin on the rules the platform's own score takes (forward 0.7, D-045). No model.
+    Variant("fwd", "對照組・規則改照前向加回測的綜合分數挑（沒有語言模型）", "twin", (),
+            "共識用的規則加看前向紀錄來挑（平台自己的排序），是不是比只看回測賺最多好", "twin", since="2026-11-30",
+            panel="forward", wave=2),
 )
 BY_KEY = {variant.key: variant for variant in COHORT}
 FACTORS = {variant.factor: f"AI 代理人實驗室・{variant.label}" for variant in COHORT}

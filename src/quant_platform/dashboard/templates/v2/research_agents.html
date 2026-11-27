@@ -92,6 +92,15 @@
   {% if board and board.rows %}
   <p class="small" style="margin:0 0 8px">帳戶從 <b>{{ board.start }}</b> 起算到 <b>{{ board.through }}</b>（{{ board.sessions }}／{{ sessions_to_judge }} 個交易日），每個帳戶投入 {{ money(board.benchmark.contributed) }} 元；同樣的錢全部買 0050、今天賣掉是 <b>{{ money(board.benchmark.sold) }} 元</b>。未滿 {{ sessions_to_judge }} 個交易日只列數字、不判定。</p>
   {{ board_table(board) }}
+  {% for later in board.later or [] %}
+  <h3 style="margin:14px 0 6px">後來加入的設計（第 {{ later.wave }} 批）</h3>
+  {% if later.rows %}
+  <p class="small" style="margin:0 0 8px">這一表的帳戶（連同拿來比的對照組）都從這一批第一次決定的隔天 <b>{{ later.start }}</b> 起算到 <b>{{ later.through }}</b>（{{ later.sessions }}／{{ sessions_to_judge }} 個交易日），每個帳戶投入 {{ money(later.benchmark.contributed) }} 元；同樣的錢全部買 0050、今天賣掉是 <b>{{ money(later.benchmark.sold) }} 元</b>。上面那一表的起算日和判定日不受影響。</p>
+  {{ board_table(later) }}
+  {% else %}
+  <p class="muted" style="margin:0">{{ later.note or '還沒有可以比的數字。' }}</p>
+  {% endif %}
+  {% endfor %}
   {% else %}
   <p class="muted" style="margin:0">{{ (board.note if board else '') or '第一次決定之後的下一個交易日收盤才成交，再過一個交易日才有可以比的數字。' }}</p>
   {% endif %}

@@ -119,6 +119,60 @@ def steady_rows(research: Path, path: Path, until: str | None = None) -> list[di
     return rows
 
 
+# 2026-11-27 (docs/research/results.md「挑規則加看前向」): the lab's consensus takes each family's rule by backtest money
+# alone; the platform orders its best rules by pool.combine (the chained forward record 0.7, the backtest 0.3 — D-045).
+# On 11/27 the seven rules taken by money were 10% to 22% behind 0050 in their own chained forward records, and one of
+# them read paid tables that stopped on 11/20. The forward panel takes each family's rule by the platform's score,
+# among the rules with a chained record that read no stopped table; chosen once per monthly list and kept.
+FORWARD_PANEL: Path | None = None   # a check's override: a panel file made from the record up to an earlier day
+
+
+def forward_pick(listed: list[dict], scored: dict[str, dict], stale: bool = True) -> list[dict]:
+    """The forward panel — [{family, rule_hash, name, spec, combined, chain}], best score first: of the list's passing
+    single rules (the consensus' own filter) the one of each family with the highest ``combined`` in ``scored`` (the
+    pool's rows by rule hash). A rule with no chained forward record, or (``stale``) reading a table that stopped,
+    is not taken; equal scores go to the smaller hash."""
+    from quant_platform.research.categories import classify
+
+    best: dict[str, dict] = {}
+    for row in listed:
+        spec = row.get("spec") or {}
+        factors = spec.get("factors") or {}
+        if not row.get("passed") or spec.get("sleeves") or not factors or any(name.startswith("llm_") for name in factors):
+            continue
+        key = str(row.get("rule_hash"))
+        mine = scored.get(key) or {}
+        if mine.get("combined") is None or not mine.get("chain") or (stale and mine.get("stale_data")):
+            continue
+        item = {"family": str(classify(spec).get("family")), "rule_hash": key, "name": spec.get("name"), "spec": spec,
+                "combined": float(mine["combined"]), "chain": mine["chain"]}
+        held = best.get(item["family"])
+        if held is None or (-item["combined"], key) < (-held["combined"], held["rule_hash"]):
+            best[item["family"]] = item
+    return sorted(best.values(), key=lambda item: (-item["combined"], item["rule_hash"]))[:PANEL_FAMILIES]
+
+
+def forward_rows(research: Path, path: Path, day: date) -> list[dict]:
+    """The forward panel of a monthly list, kept beside the lab's records. Made on the first day that asks for it, from
+    the pool as it stands — so only for today's decision: a replay of another day must name the panel file it reads
+    (``FORWARD_PANEL``), or it would read a record that did not exist yet."""
+    kept = FORWARD_PANEL or Path(research) / "agent_lab" / "panels" / f"forward-{path.stem}.json"
+    if kept.is_file():
+        return json.loads(kept.read_text(encoding="utf-8"))["rows"]
+    if FORWARD_PANEL is not None or day != datetime.now(TAIPEI).date():
+        raise FileNotFoundError(f"沒有 {day} 可以用的前向規則名單：{kept}")
+    from quant_platform.research import pool
+
+    scored = {row["spec_hash"]: row for row in pool.daily_rows(research)}
+    rows = forward_pick(json.loads(path.read_text(encoding="utf-8")).get("graded") or [], scored)
+    if not rows:
+        raise ValueError(f"{path.name} 沒有任何規則有串接前向紀錄")
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    kept.write_text(json.dumps({"list": path.name, "made": day.isoformat(), "rows": rows}, ensure_ascii=False, indent=1),
+                    encoding="utf-8")
+    return rows
+
+
 def decision_moment(day: date) -> datetime:
     return datetime.combine(day, DECISION_TIME, TAIPEI)
 
@@ -139,6 +193,7 @@ class LabDesk(Desk):
         self._events = None
         self._tables = None
         self._steady = None
+        self._forward = None
 
     def list_path(self) -> Path:
         return LIST_OVERRIDE or super().list_path()
@@ -155,6 +210,19 @@ class LabDesk(Desk):
                 except Exception:  # noqa: BLE001 - a rule this code no longer reads is left out
                     continue
         return self._steady
+
+    def forward_panel(self) -> list[tuple[str, object]]:
+        """(family, rule) of the forward panel (``forward_rows``) for the day's list."""
+        if self._forward is None:
+            from quant_platform.research.blend import parse_spec
+
+            self._forward = []
+            for row in forward_rows(self.research, self.list_path(), self.day):
+                try:
+                    self._forward.append((row["family"], parse_spec(row["spec"])))
+                except Exception:  # noqa: BLE001 - a rule this code no longer reads is left out
+                    continue
+        return self._forward
 
     def weak_market(self) -> bool:
         """The index closed under its REGIME_DAYS-session average today (the line the market tool shows)."""
@@ -190,6 +258,8 @@ class LabDesk(Desk):
         consensus' 2 × ``top``."""
         if kind == "steady":
             return self.agreed(top, self.steady_panel())
+        if kind == "forward":
+            return self.agreed(top, self.forward_panel())
         if kind == "held":
             # what the panel's rules hold in their own accounts at today's close (their own holding periods, exits and
             # guards — D-017), most held first; short of ``top``, the consensus fills the rest. The table is made by

@@ -137,12 +137,14 @@ def score_skill(fp, made: list[dict], horizon: int = SCORE_HORIZON, close: np.nd
             "held_minus_all": round(float(np.mean(spreads)), 4) if spreads else None, "by_day": days}
 
 
-def first_common_day(research: Path, run: str | None) -> str | None:
+def first_common_day(research: Path, run: str | None, wave: int = 1) -> str | None:
     """The first day every variant has a decision of its own (in a replay: every variant the replay covers). A day
     kept from the day before — no answer, no credit at the model's — is not one: an account that never chose holds
     nothing, and comparing it would be comparing cash (2026-11-20: the model account ran out of credit)."""
     firsts = []
     for variant in variants.COHORT:
+        if not run and variant.wave != wave:        # a design that joined later has a table of its own (Variant.wave)
+            continue
         made = [item for item in runner.records(research, variant.key, run) if not (item.get("llm") or {}).get("fallback")]
         if not made:
             if run and not runner.records(research, variant.key, run):      # a replay may cover some of the designs only
@@ -185,8 +187,10 @@ def invested(fp, made: list[dict], most: int) -> dict[date, float]:
 
 
 def board(base: str | Path, research: str | Path, run: str | None = None, broker: str = "cathay", loaded=None,
-          now: datetime | None = None, through: date | None = None) -> dict[str, object]:
-    """``through``: the last session counted (a replay of a stretch in the past; the default is the newest session)."""
+          now: datetime | None = None, through: date | None = None, wave: int = 1) -> dict[str, object]:
+    """``through``: the last session counted (a replay of a stretch in the past; the default is the newest session).
+    ``wave``: the designs of that wave (``Variant.wave``) and the designs they are compared with, every account from
+    that wave's first decision; the first wave's board carries the later ones' under ``later``."""
     from quant_platform.research import daily
     from quant_platform.research.costs import broker_costs
     from quant_platform.research.metrics import max_drawdown, unit_values
@@ -196,7 +200,9 @@ def board(base: str | Path, research: str | Path, run: str | None = None, broker
     output: dict[str, object] = {"version": VERSION, "run": run, "replayed": bool(run),
                                  "made_at": (now or datetime.now(TAIPEI)).isoformat(timespec="seconds"),
                                  "sessions_to_judge": SESSIONS_TO_JUDGE, "rows": []}
-    first_day = first_common_day(research, run)
+    first_day = first_common_day(research, run, wave)
+    if wave > 1:
+        output["wave"] = wave
     if first_day is None:
         output["note"] = "還有設計沒有做過任何決定，沒有可以比的帳戶。"
         return output
@@ -219,6 +225,10 @@ def board(base: str | Path, research: str | Path, run: str | None = None, broker
         (variant.key, variant.label, variant.factor, runner.records(research, variant.key, run)) for variant in variants.COHORT]
     entries = [entry for entry in entries if entry[3]]
     if not run:
+        mine = {variant.key for variant in variants.COHORT if variant.wave == wave}
+        mine |= {variants.BY_KEY[key].against for key in mine} if wave > 1 else set()
+        entries = [entry for entry in entries if entry[0] in mine]
+    if not run and wave == 1:
         entries += [(name, label, name, None) for name, label in variants.OUTSIDE]
     units_of: dict[str, np.ndarray] = {}
     rows: dict[str, dict] = {}
@@ -289,6 +299,9 @@ def board(base: str | Path, research: str | Path, run: str | None = None, broker
             row["verdict"] = ("好：兩種錢都不輸比較對象，也不輸 0050" if both and ahead else
                               "有用但不夠：贏比較對象、輸 0050" if ahead else "沒用：輸比較對象")
     output["rows"] = list(rows.values())
+    if not run and wave == 1:
+        output["later"] = [board(base, research, None, broker, (data, fp), now, through, number)
+                           for number in sorted({variant.wave for variant in variants.COHORT if variant.wave > 1})]
     return output
 
 
@@ -327,4 +340,7 @@ def text(result: dict[str, object]) -> str:
             part += (f"；分數和之後 {skill['horizon']} 個交易日漲跌的名次相關平均 {skill['mean_rho']:+.3f}"
                      f"（{skill['days']} 天、{100 * skill['positive']:.0f}% 的天數大於 0）")
         lines.append(part + f"｜{row['verdict']}")
+    for item in result.get("later") or []:
+        lines.append(f"後來加入的設計（第 {item.get('wave')} 批；這一表的帳戶都從它們第一次決定起算）：")
+        lines.append(text(item))
     return "\n".join(lines)

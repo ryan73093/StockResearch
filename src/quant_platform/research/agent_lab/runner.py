@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from datetime import date, datetime
 from pathlib import Path
@@ -594,7 +595,14 @@ def decide_day(fp, base: Path, research: Path, day: date, client=None, run: str 
         if job:
             job.update(done=number, total=len(wanted), current=f"{day.isoformat()}：{variant.label}", force=True)
         mine = (clients or {}).get(variant.model_name, client) if variant.model else client
-        record = decide(fp, base, research, variant, day, mine, run, twin_hold=twins.get(variant.panel))
+        try:
+            record = decide(fp, base, research, variant, day, mine, run, twin_hold=twins.get(variant.panel))
+        except Exception:  # noqa: BLE001
+            if variant.wave == 1:
+                raise
+            # a design that joined later must not stop the first cohort's day; its missing day turns the 16:00 check red
+            logging.getLogger(__name__).exception("agent lab: %s could not decide on %s", variant.key, day)
+            continue
         if variant.mode == "twin":
             found = record or next((item for item in records(research, variant.key, run) if item["date"] == day.isoformat()), None)
             twins[variant.panel] = list((found or {}).get("llm", {}).get("hold") or []) or None
