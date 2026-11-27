@@ -347,6 +347,9 @@ flowchart LR
 | `research/branches.py`、`research/govbank_events.py` | 付費資料的研究：值得跟的分點與隔日沖分點；八大行庫異常大買的事件研究 |
 | `research/stress.py` | 大空頭壓力測試：2015-06 起挑的策略放到沒挑過的年份（2008 等）跑，只測試不挑選 |
 | `research/rl_concentration.py`、`research/rl_switch.py`、`research/rl_execution.py` | RL 第四～六版：集中或分散、換股時機、成交執行 |
+| `research/rl_select.py`、`research/rl_holdings.py` | RL 第十、十一版（2026-11-27）：把規則當動作，每月底挑 20 個規則；第十一版先用引擎的 `daily_rankings` 算出每個子規則每個月底要持有的名單（`rl/holdings/lists-*.jsonl`），再給機器人持股的 12 個特徵。離線、不用顯示卡；名單一個程序約佔 7.7 GB，流程只開 2 個 |
+| `research/model_deep2.py` 的 `LARGE`、`PRETRAINED`、`Pretrainer` | 大型 Transformer（2026-11-26～27）：dl-5.0.0／5.1.0（492 萬、1,457 萬個參數）、dl-5.2.0（一輪看四次保留期）、dl-6.0.0（先不用標籤預訓練）；每輪歸還顯示卡記憶體（`_give_back`）、每折記尖峰（`gpu_gb`）；流程 `deeplarge`、`deeppre`、`deepfine` 共用一張顯示卡、依序跑 |
+| `research/pool.py` 的 `data_stopped`、`stale_data` | 付費方案到期後，讀停更資料的規則不判 T0（2026-11-27，`docs/trading_rules.md` §7） |
 | `research/forced_followup.py` | 前向帳戶每筆「不再符合選股條件」的賣出，之後 20／60 個交易日比留著的持股多賺或少賺 |
 | `research/reproduce_check.py` | 每週日抽樣重算選手池的結果，核對重算得出來（2026-10-28 重現性漏洞之後） |
 | `scripts/stop-research.ps1` | 停研究流程：只結束核對過的程序，紀錄標「stopped」與原因（2026-11-03） |
