@@ -650,3 +650,31 @@ def test_the_forward_days_are_scored_from_the_snapshot_of_those_days_only(monkey
     monkeypatch.setattr(model_deep2, "snapshot_inputs", real)
     assert np.array_equal(model.scores(_panel()[1], folder), every, equal_nan=True)
     assert np.isfinite(every[later[-1]]).sum() >= 50
+
+
+def test_the_fine_version_reads_the_held_out_days_four_times_an_epoch(monkeypatch, tmp_path):
+    """2026-11-27 (docs/research/results.md「深度學習第五版之二」): dl-5.0.0's held-out curve peaked at its first epoch;
+    dl-5.2.0 reads the held-out days ``checks`` times an epoch and stops ``patience`` readings after its best. A version
+    without ``checks`` reads once an epoch as before."""
+    monkeypatch.setattr(model_deep2, "EPOCHS", 2)
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "RECENT_GATE_YEARS", (2017,))
+    monkeypatch.setattr(model_deep2, "D3_COUNT", 1)
+    small = {"width": 16, "layers": 1, "heads": 2, "days": 8, "seeds": 1, "rate": 1e-3}
+    monkeypatch.setitem(model_deep2.LARGE, "dl-5.2.0", {**small, "checks": 4, "patience": 100})
+    monkeypatch.setitem(model_deep2.LARGE, "dl-5.0.0", small)
+    for version in ("dl-5.2.0", "dl-5.0.0"):
+        monkeypatch.setitem(model_deep2.ARCHITECTURES, version, "large:16x1x2")
+    for name, years in (("gbm-2.2.0", {}), ("dl-2.1.0", {"2017": {"top20_gain": -9.0}})):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "meta.json").write_text(json.dumps({"version": name, "features": ["momentum_3"], "years": years}),
+                                                   encoding="utf-8")
+    _data, fp = _panel()
+    fine = model.train(fp, tmp_path / "dl-5.2.0", years=[2017], label="deep2", version="dl-5.2.0")
+    plain = model.train(fp, tmp_path / "dl-5.0.0", years=[2017], label="deep2", version="dl-5.0.0")
+    assert len(fine["years"]["2017"]["held_curves"][0]) == 8 and len(plain["years"]["2017"]["held_curves"][0]) == 2
+    assert fine["large"]["checks"] == 4 and fine["years"]["2017"]["top20_gain"] is not None
+    monkeypatch.setitem(model_deep2.LARGE, "dl-5.2.0", {**small, "checks": 4, "patience": 1})
+    monkeypatch.setattr(model_deep2, "_gain", lambda scores, gains: 0.0)          # never better after the first reading
+    stopped = model.train(fp, tmp_path / "dl-5.2.0", years=[2017], label="deep2", version="dl-5.2.0")
+    assert len(stopped["years"]["2017"]["held_curves"][0]) == 2                  # the first, and one more without a better

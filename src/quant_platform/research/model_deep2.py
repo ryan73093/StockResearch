@@ -179,6 +179,12 @@ LARGE_CLIP = 1.0                        # the gradient's norm
 # nothing (``epochs``); kept in pretrain/<year>.pt.
 PRETRAINED = {"dl-6.0.0": {"mask": 0.3, "span": 5, "ahead": 5, "epochs": 10, "more": 3, "rows": 1024, "rate": 3e-4}}
 LARGE["dl-6.0.0"] = {"width": 256, "layers": 6, "heads": 8, "days": 2, "seeds": 4, "rate": 2e-4, "encoder": 0.25}
+# 2026-11-27 (docs/research/results.md「深度學習第五版之二：一輪之內就停」, written before the run): dl-5.0.0's held-out
+# curve was highest at its first epoch in 16 of 20 fits and fell from there — the best network is somewhere inside
+# the first epoch, where nothing looked. dl-5.0.0 with the held-out days read ``checks`` times an epoch and stopped
+# after ``patience`` readings without a better one; nothing else changed.
+LARGE["dl-5.2.0"] = {"width": 256, "layers": 6, "heads": 8, "days": 2, "seeds": 4, "rate": 2e-4, "checks": 4,
+                     "patience": 6}
 PRETRAIN_DIR = "pretrain"
 PRETRAIN_HUBER = 1.0
 for _new, _size in LARGE.items():
@@ -534,6 +540,26 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
     held_pairs = np.concatenate([np.stack([np.full(held_rows[day].size, day), held_rows[day]], axis=1)
                                  for day in held_days])
     best, curve, waited = (-np.inf, None), [], 0
+    checks, patience = (large or {}).get("checks", 1), (large or {}).get("patience", PATIENCE)
+
+    def read() -> float:
+        """The held-out days' top-20 gain with the network as it is now."""
+        predicted = inputs.score(network, held_pairs, 2048 if large else 16384)
+        gains, tops, at = [], {}, 0
+        for day in held_days:
+            count = held_rows[day].size
+            value = _gain(predicted[at:at + count], held_labels[day][held_rows[day]])
+            if kind == "direct" and value is not None:
+                tops[day] = set(held_rows[day][np.argsort(-predicted[at:at + count])[:20]].tolist())
+            at += count
+            if value is not None:
+                gains.append(value)
+        held = float(np.mean(gains)) if gains else -np.inf
+        turns = [1 - len(tops[day] & tops[day + STEP]) / 20 for day in tops if day + STEP in tops]
+        if turns:                        # dl-4.0.0: the held-out top 20 after the same cost
+            held -= DIRECT_COST * DIRECT_WEEKS * float(np.mean(turns))
+        return held
+
     for _epoch in range(EPOCHS):
         if anchors is not None:          # half the anchors an epoch, each with its day a week later: as many days
             order = rng.permutation(len(anchors))[:len(anchors) // 2]
@@ -544,7 +570,8 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
             order = rng.permutation(len(train_days))
             batches = [[train_days[index] for index in order[start:start + per_batch]]
                        for start in range(0, len(order), per_batch)]
-        for chosen in batches:
+        marks = {round(len(batches) * part / checks) for part in range(1, checks + 1)}   # the last is the epoch's end
+        for number, chosen in enumerate(batches, 1):
             groups, pairs, target, at = [], [], [], 0
             for day in chosen:
                 count = rows[day].size
@@ -563,29 +590,20 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
                     group["lr"] = group["full"] * min(1.0, stepped / LARGE_WARMUP)
                 torch.nn.utils.clip_grad_norm_(network.parameters(), LARGE_CLIP)
             optimiser.step()
-        predicted = inputs.score(network, held_pairs, 2048 if large else 16384)
-        gains, tops, at = [], {}, 0
-        for day in held_days:
-            count = held_rows[day].size
-            value = _gain(predicted[at:at + count], held_labels[day][held_rows[day]])
-            if kind == "direct" and value is not None:
-                tops[day] = set(held_rows[day][np.argsort(-predicted[at:at + count])[:20]].tolist())
-            at += count
-            if value is not None:
-                gains.append(value)
-        held = float(np.mean(gains)) if gains else -np.inf
-        turns = [1 - len(tops[day] & tops[day + STEP]) / 20 for day in tops if day + STEP in tops]
-        if turns:                        # dl-4.0.0: the held-out top 20 after the same cost
-            held -= DIRECT_COST * DIRECT_WEEKS * float(np.mean(turns))
-        curve.append(round(held, 5))
-        if large:
-            _give_back(inputs)
-        if held > best[0]:
-            best, waited = (held, {key: value.clone() for key, value in network.state_dict().items()}), 0
-        else:
-            waited += 1
-            if waited >= PATIENCE:
-                break
+            if number not in marks:
+                continue
+            held = read()
+            curve.append(round(held, 5))
+            if large:
+                _give_back(inputs)
+            if held > best[0]:
+                best, waited = (held, {key: value.clone() for key, value in network.state_dict().items()}), 0
+            else:
+                waited += 1
+                if waited >= patience:
+                    break
+        if waited >= patience:
+            break
     return best[1], curve
 
 

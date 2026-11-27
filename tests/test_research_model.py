@@ -251,7 +251,7 @@ def test_the_large_versions_are_dl_2_1_0_with_a_transformer_encoder(monkeypatch)
     from quant_platform.research import daily, model_deep2 as d
 
     monkeypatch.setenv("QUANT_NO_GPU", "1")
-    assert set(d.LARGE) == {"dl-5.0.0", "dl-5.1.0", "dl-6.0.0"} and set(d.PRETRAINED) == {"dl-6.0.0"}
+    assert set(d.LARGE) == {"dl-5.0.0", "dl-5.1.0", "dl-5.2.0", "dl-6.0.0"} and set(d.PRETRAINED) == {"dl-6.0.0"}
     for version, size in d.LARGE.items():
         assert d.LOSSES[version] == d.LOSSES["dl-2.1.0"] and d.gate_years(version) == d.RECENT_GATE_YEARS
         assert d.AGAINST_OF[version] == "dl-2.1.0" and version not in d.WIDE and version not in d.MONTHLY
@@ -259,10 +259,13 @@ def test_the_large_versions_are_dl_2_1_0_with_a_transformer_encoder(monkeypatch)
                                             + (":pre" if version in d.PRETRAINED else ""))
         assert d.seeds_of(version) == tuple(range(size["seeds"]))
         assert model.VERSIONS[version] == {"version": version, "label": "deep2"}
-        assert {**daily.LARGE_FACTORS, **daily.PRETRAINED_FACTORS}[version] in MODEL_FACTORS
+        assert {**daily.LARGE_FACTORS, **daily.PRETRAINED_FACTORS, **daily.FINE_FACTORS}[version] in MODEL_FACTORS
     # 2026-11-27: the pretrained version is dl-5.0.0's network; the rules of the two flows stay apart
     assert {key: d.LARGE["dl-6.0.0"][key] for key in ("width", "layers", "heads")} == {key: d.LARGE["dl-5.0.0"][key] for key in ("width", "layers", "heads")}
     assert "dl-6.0.0" not in daily.LARGE_FACTORS and set(daily.BATCHES) >= {"deeplarge", "deeppre"}
+    # 2026-11-27: dl-5.2.0 is dl-5.0.0 but for when the held-out days are read and the fit stops
+    assert ({key: value for key, value in d.LARGE["dl-5.2.0"].items() if key not in ("checks", "patience")} == d.LARGE["dl-5.0.0"]
+            and d.LARGE["dl-5.2.0"]["checks"] == 4 and "deepfine" in daily.BATCHES)
     assert d.seeds_of("dl-2.1.0") == d.SEEDS
     assert d.LARGE["dl-5.1.0"]["width"] > d.LARGE["dl-5.0.0"]["width"]
     network = d._network(len(d.SEQUENCE), 7, "large:32x2x4")
