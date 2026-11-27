@@ -17,11 +17,19 @@ foreach ($port in (Get-NetTCPConnection -OwningProcess $tunnel.ProcessId -State 
         break
     } catch { }
 }
-if (-not $ready -or $ready.readyConnections -lt 1) {
+if ($ready -and $ready.readyConnections -lt 1) {
     Write-Output "FAIL tunnel: PID $($tunnel.ProcessId) has no ready connection"
     exit 1
 }
-Write-Output "OK   tunnel: PID $($tunnel.ProcessId), $($ready.readyConnections) connections"
+if ($ready) {
+    Write-Output "OK   tunnel: PID $($tunnel.ProcessId), $($ready.readyConnections) connections"
+} else {
+    # 2026-11-27: 14 tunnels on this machine share cloudflared's five default status ports (20241-20245); ours then
+    # takes a random one, and a shell that is not elevated cannot list another session's listening ports - the check
+    # said "no ready connection" right after a deploy while the site answered. Without the port the answer below
+    # decides: a tunnel with no connection gives 530 there, not this site's login redirect.
+    Write-Output "WARN tunnel: PID $($tunnel.ProcessId) runs; its status port is not visible from this shell - judged by the public answer"
+}
 
 $answer = & curl.exe -sS -o NUL -w '%{http_code} %{redirect_url}' --max-time 15 "https://$hostname/"
 $code, $location = "$answer" -split ' ', 2
