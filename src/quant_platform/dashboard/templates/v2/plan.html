@@ -14,7 +14,7 @@
 {% if error %}<p class="form-error" role="alert"><strong>沒有儲存：</strong>{{ error }}</p>{% endif %}
 {# 2026-11-15 (D-046 第 9 項；介面檢查 U2、P-1): this page is used only after going live, and it says so #}
 <section class="card prelaunch" data-notab>
-  <p><span class="badge badge--warn">上線以後才會用到</span>　這一頁是「真的拿錢照做」時設定每月投入用的。<b>現在沒有任何個股規則可以上線</b>：要先有規則成為 T0（最快 {{ first_t0[:10] }} 收盤後判第一次）、再由你核准。下面目前只能選舊的 0050／債券基準——它們是拿來比較的對照組，不是研究找到的策略；核准的規則之後會出現在「採用策略」。研究走到哪一步看<a href="/">首頁的六步</a>，照某個規則今天要買賣什麼（只能看）在<a href="/research/my-orders">研究 › 今天我的帳戶要買賣什麼</a>。</p>
+  <p><span class="badge badge--warn">上線以後才會用到</span>　這一頁是「真的拿錢照做」時設定每月投入用的。<b>現在沒有任何個股規則可以上線</b>：要規則是 T0（第一次判定在 {{ first_t0[:10] }} 收盤後）、再由你核准，核准的功能還沒做。下面目前只能選舊的 0050／債券基準——它們是拿來比較的對照組，不是研究找到的策略；核准的規則之後會出現在「採用策略」。研究走到哪一步看<a href="/">首頁的六步</a>，照某個規則今天要買賣什麼（只能看）在<a href="/research/my-orders">研究 › 今天我的帳戶要買賣什麼</a>。</p>
 </section>
     {% if preview %}
     <section class="card card--highlight order-1" id="plan-preview">

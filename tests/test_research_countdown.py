@@ -76,6 +76,10 @@ def test_a_rule_reading_paid_tables_that_stopped_is_not_judged(tmp_path):
     found = t0_list(chained, rows, {}, {})
     assert [row["spec_hash"] for row in found["rows"]] == ["a"]
     assert (found["stale"], found["stale_ahead"], found["stale_through"]) == (2, 1, "2026-11-20")
+    waiting = t0_list(chained, [{**row, "tier": "T0 候選"} for row in rows], {}, {})
+    assert waiting["t0"] == 0 and len(waiting["rows"]) == 1                        # 候選 until the pool grades it T0
+    graded = t0_list(chained, [{**row, "tier": "T0（高風險）"} for row in rows], {}, {})
+    assert graded["t0"] == 1 and len(graded["rows"]) == 1                          # the listed rule the pool graded T0
     assert judged_count(chained, rows, PASSING) == 1
 
     history = tmp_path / "history"

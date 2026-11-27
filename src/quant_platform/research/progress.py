@@ -388,6 +388,8 @@ def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, 
         kinds[row["family"]] = kinds.get(row["family"], 0) + 1
     return {"sessions": sessions, "needed": FORWARD_SESSIONS, "rules": len(longest), "start": start,
             "stale": len(stale), "stale_ahead": stale_ahead,
+            # 2026-11-27: on and after the judgment day, how many of the rows the pool graded T0 (not a 候選)
+            "t0": sum(1 for row in output if str(row["tier"]).startswith("T0") and "候選" not in str(row["tier"])),
             "stale_through": next((rows[key]["stale_data"]["through"] for key in stale), None),
             "end": max((value["parts"][-1]["to"] for value in longest.values()), default=None),
             "benchmark": next(iter(longest.values()))["benchmark_return"] if longest else None,

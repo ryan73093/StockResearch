@@ -385,7 +385,8 @@ def start_view(research_dir: Path) -> dict[str, object]:
 
     wait = countdown(now.date(), first, date.fromisoformat(state["forward"]) if state.get("forward") else None, chain["sessions"],
                      chain["needed"], _calendar(research_dir).is_trading_day, not_behind_both=t0.get("not_behind_both"),
-                     t0_rules=t0_rules, judged=judged_count(chained, pool, PASSING))
+                     t0_rules=t0_rules, judged=judged_count(chained, pool, PASSING),
+                     live=0)      # approving a T0 is not built (S10-W02): none can be approved, so none can go live
 
     def big(count: float) -> str:
         return f"{count / 1e8:,.2f} 億" if count >= 1e8 else (f"{count / 1e4:,.0f} 萬" if count >= 1e5 else f"{count:,.0f}")
@@ -412,8 +413,10 @@ def start_view(research_dir: Path) -> dict[str, object]:
                   + (f"到目前兩種算法都不輸 0050 的有 {t0['not_behind_both']:,} 個。" if t0.get("not_behind_both") is not None else "")),
          "href": "/research#dashboard"},
         {"title": "T0 → 你核准 → 上線", "number": f"{t0_rules:,}", "unit": "個 T0",
-         "text": (f"串接滿 60 個交易日、兩種算法都不輸 0050 才是 T0；第一次可能在 {first.month}/{first.day} 收盤後。"
-                  "T0 也要你核准才會進「今日」的建議；平台永遠不會自己下單。"),
+         "text": ("串接滿 60 個交易日、兩種算法都不輸 0050 才是 T0；"
+                  + (f"第一次判定在 {first.month}/{first.day} 收盤後，之後每天收盤後重算。" if wait["reached"]
+                     else f"第一次可能在 {first.month}/{first.day} 收盤後。")
+                  + "T0 也要你核准才會進「今日」的建議（核准的功能還沒做）；平台永遠不會自己下單。"),
          "href": "/project/trading"},
     ]
     red = state["checks"].get("red") or []

@@ -35,13 +35,15 @@ def judged_count(chained: dict[str, dict] | None, pool_rows: list[dict], passing
 
 def countdown(today: date, first: date, through: date | None, sessions: int, needed: int,
               is_trading_day: Callable[[date], bool], not_behind_both: int | None = None,
-              t0_rules: int = 0, judged: int | None = None) -> dict[str, object]:
+              t0_rules: int = 0, judged: int | None = None, live: int = 0) -> dict[str, object]:
     """The state of the wait for the first T0, as the pages say it.
 
     ``first``: the day the chained record reaches ``needed`` sessions (the roadmap's date table); ``through``: the last
     session the forward records have; ``sessions``: how many the chained record has; ``not_behind_both``: how many rules
     with the longest run are not behind 0050 by both moneys today; ``judged``: how many of those the T0 judgment looks at
-    (``judged_count``); ``t0_rules``: rules that are T0 now."""
+    (``judged_count``); ``t0_rules``: rules that are T0 now; ``live``: T0 rules the owner has approved — the only ones
+    that can go live (交易規則 §7). 2026-11-27 (rehearsal of 11/30): the card showed the T0 count under 「現在可以上線的」,
+    which on the judgment day would have said some hundred rules can go live with none approved."""
     left: list[date] = []
     day = through or today
     while day < first and len(left) < 400:
@@ -52,7 +54,7 @@ def countdown(today: date, first: date, through: date | None, sessions: int, nee
         "first": first.isoformat(), "first_label": day_label(first), "today": today.isoformat(), "today_label": day_label(today),
         "days": (first - today).days, "sessions_left": len(left), "dates": [day_label(item) for item in left],
         "sessions": sessions, "needed": needed, "through_label": day_label(through) if through else "",
-        "not_behind_both": not_behind_both, "judged": judged, "t0": t0_rules,
+        "not_behind_both": not_behind_both, "judged": judged, "t0": t0_rules, "live": live,
         # the day has come: the record has its sessions (or the date is past), whatever the rules do
         "reached": not left and (sessions >= needed or today > first),
     }

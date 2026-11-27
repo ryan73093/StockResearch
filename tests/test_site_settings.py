@@ -61,3 +61,23 @@ def test_the_overview_and_the_home_page_say_how_long_until_the_first_t0(tmp_path
         assert "還有 6 個交易日（8 天）" in body and "11/30（一）" in body and "11/23（一）" in body, path
         assert "54<small>／60 個交易日" in body and "347" in body and "以前不會有 T0" in body, path
         assert "會被判的有 <b>324</b> 個" in body and 'href="/research/t0-list"' in body, path       # both counts, related, not two answers
+        assert "現在是 T0 的" not in body, path
+
+    # 2026-11-27 (11/30 的預演): on the judgment day the card showed the T0 count under 「現在可以上線的」 — some hundred rules
+    # "can go live" with none approved. T0 has its own tile; what can go live is what the owner approved (none: not built)
+    judged = countdown(date(2026, 11, 30), date(2026, 11, 30), date(2026, 11, 30), 60, 60, lambda day: day.weekday() < 5,
+                       not_behind_both=140, judged=107, t0_rules=107)
+    assert judged["reached"] and judged["t0"] == 107 and judged["live"] == 0
+    warm.write(tmp_path / "research", "start", {"countdown": judged, "steps": [], "today": [], "red": [], "due": "2026-11-30",
+                                                "at": "2026-11-30T17:50", "first_t0": "2026-11-30"})
+    for path in ("/research", "/"):
+        body = client.get(path).get_data(as_text=True)
+        assert "已經判了：107 個規則是 T0，等你核准" in body and "還有 0 個交易日" not in body, path
+        assert '現在是 T0 的</div><div class="kpi__value">107<small>' in body, path
+        assert '現在可以上線的</div><div class="kpi__value">0<small>' in body and "你還沒核准任何一個" in body, path
+        assert "T0 不等於可以上線" in body and "以前不會有 T0" not in body, path
+    nobody = {**judged, "t0": 0}
+    warm.write(tmp_path / "research", "start", {"countdown": nobody, "steps": [], "today": [], "red": [], "due": "2026-11-30",
+                                                "at": "2026-11-30T17:50", "first_t0": "2026-11-30"})
+    body = client.get("/").get_data(as_text=True)
+    assert "已經判了：沒有規則是 T0" in body and "你還沒核准任何一個" not in body

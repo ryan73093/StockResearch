@@ -218,6 +218,10 @@ def status_now(chained: dict[str, dict], rows: list[dict], families: list[dict],
     everyone = [row for members in groups.values() for _key, row in members]
     return {"sessions": longest, "needed": FORWARD_SESSIONS, "rules": len(everyone),
             "holding": sum(row["holding"] for row in output),
+            # 2026-11-27: what the headline says once the record is full — the pool's T0 grade (reconciled, passing,
+            # no 0050, not reading stopped data), not everyone holding up
+            "t0": sum(1 for row in rows if str(row.get("tier") or "").startswith("T0") and "候選" not in str(row.get("tier"))
+                      and not row.get("uses_0050")),
             "benchmark": everyone[0]["benchmark_return"] if everyone else None,
             "start": min((row["parts"][0]["from"] for row in everyone), default=None),
             "end": max((row["parts"][-1]["to"] for row in everyone), default=None),

@@ -1,6 +1,6 @@
 {# 2026-11-19 (使用者：我現在根本不知道到底可不可以上線): the rules T0 would be judged on today (research/progress.py
    t0_list) — both moneys, the beta, the reconciliation, the kind and the day first registered. #}
-<p class="small" style="margin:0 0 8px">前向紀錄 {{ t.sessions }}／{{ t.needed }} 個交易日{% if t.start %}（{{ t.start }}～{{ t.end }}）{% endif %}，同期 0050 {% if t.benchmark is not none %}{{ '{:+.1%}'.format(t.benchmark) }}{% endif %}。一直留在每月名單上的 {{ '{:,}'.format(t.rules) }} 個規則裡，下面 {{ '{:,}'.format(t.rows|length) }} 個到今天兩種算法都不輸 0050。{% if t.sessions < t.needed %}滿 {{ t.needed }} 個交易日那天還不輸、對帳正常的才是 T0，再由你核准；現在還不是。{% else %}已滿 {{ t.needed }} 個交易日：對帳正常的是 T0，等你核准。{% endif %}</p>
+<p class="small" style="margin:0 0 8px">前向紀錄 {{ t.sessions }}／{{ t.needed }} 個交易日{% if t.start %}（{{ t.start }}～{{ t.end }}）{% endif %}，同期 0050 {% if t.benchmark is not none %}{{ '{:+.1%}'.format(t.benchmark) }}{% endif %}。一直留在每月名單上的 {{ '{:,}'.format(t.rules) }} 個規則裡，下面 {{ '{:,}'.format(t.rows|length) }} 個到今天兩種算法都不輸 0050。{% if t.sessions < t.needed %}滿 {{ t.needed }} 個交易日那天還不輸、對帳正常的才是 T0，再由你核准；現在還不是。{% else %}已滿 {{ t.needed }} 個交易日：{% if t.t0 is defined %}其中 <b>{{ '{:,}'.format(t.t0) }}</b> 個是 T0（名稱後面標「T0」）{% else %}對帳正常的是 T0{% endif %}，等你核准。T0 不等於可以上線：核准的功能還沒做，平台不會自己下單。{% endif %}</p>
 <ul class="small" style="margin:0 0 10px; padding-left:1.2em">
   {# 2026-11-27: rules reading the paid tables that stopped are not judged (交易規則 §7); said, with how many #}
   {% if t.stale %}<li>那 {{ '{:,}'.format(t.rules) }} 個裡有 <b>{{ '{:,}'.format(t.stale) }}</b> 個讀的付費資料停在 <span class="nowrap">{{ t.stale_through }}</span>（FinMind 方案到期），之後是照舊資料決定的，<b>不列入判定</b>；其中到今天兩種算法都不輸 0050 的 {{ '{:,}'.format(t.stale_ahead) }} 個。</li>{% endif %}
@@ -11,7 +11,7 @@
   <li>第一次登錄在前向紀錄開始之後的 {{ t.after_start }} 個：這些規則開始之前的那一段是事後補做的（只用截止日以前的資料選，但不是當時就在記）。</li>
 </ul>
 {% macro rule_row(row) %}
-      <tr><td data-primary><a href="/research/forward/{{ row.spec_hash }}" title="{{ row.name }}">{{ rule_no(row.spec_hash) }} {{ row.name|short }}</a>{% if '高風險' in row.tier %} <span class="badge badge--bad">高風險</span>{% endif %}{% if not row.reconciled %} <span class="badge badge--bad" title="每天的持股與現金要能由前一天加當天的交易算出來；有問題的不能是 T0">對帳有 {{ row.problems }} 個問題</span>{% endif %}</td>
+      <tr><td data-primary><a href="/research/forward/{{ row.spec_hash }}" title="{{ row.name }}">{{ rule_no(row.spec_hash) }} {{ row.name|short }}</a>{% if row.tier.startswith('T0') and '候選' not in row.tier %} <span class="badge badge--ok">T0</span>{% endif %}{% if '高風險' in row.tier %} <span class="badge badge--bad">高風險</span>{% endif %}{% if not row.reconciled %} <span class="badge badge--bad" title="每天的持股與現金要能由前一天加當天的交易算出來；有問題的不能是 T0">對帳有 {{ row.problems }} 個問題</span>{% endif %}</td>
         <td data-label="類別">{{ row.family }}</td>
         <td class="num up" data-label="比 0050（已拿到）">{{ '{:+.1f}'.format(row.excess * 100) }} 點</td>
         <td class="num up" data-label="比 0050（都賣掉）">{{ '{:+.1f}'.format(row.sold_excess * 100) }} 點</td>
@@ -47,4 +47,4 @@
 </div>
 </details>
 {% endif %}
-<p class="col-help">「點」＝百分點。排序：兩種算法裡比較差的那個由大到小。這張表每天收盤後跟著前向紀錄更新，不是判定結果；判定在滿 {{ t.needed }} 個交易日那天收盤後。</p>
+<p class="col-help">「點」＝百分點。排序：兩種算法裡比較差的那個由大到小。這張表每天收盤後跟著前向紀錄更新{% if t.sessions < t.needed %}，不是判定結果；判定在滿 {{ t.needed }} 個交易日那天收盤後{% else %}，T0 也跟著每天重算：之後落後 0050 或對帳出問題的會退回 T0 候選{% endif %}。</p>

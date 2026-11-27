@@ -599,7 +599,15 @@ def test_the_overview_opens_on_what_can_go_live_and_how_each_kind_is_doing(tmp_p
         assert "這段是下跌" in page and 'data-family="多因子"' in page
         ready = render_template_string('{% from "v2/_dashboard.html" import now_panel %}{{ now_panel(now) }}',
                                        now={**now, "sessions": 60})
-        assert "有 142 個規則達到條件，等你核准" in ready and "已滿" in ready
+        assert "已滿" in ready and "現在可以上線嗎：還不行</h3>" in ready          # a view made before the count: no number made up
+        # 2026-11-27 (11/30 的預演): the headline's number is the pool's T0 grade, not everyone holding up, and a T0
+        # still waits for the owner's approval — it never read "可以上線"
+        judged = render_template_string('{% from "v2/_dashboard.html" import now_panel %}{{ now_panel(now) }}',
+                                        now={**now, "sessions": 60, "t0": 107})
+        assert "還不行——有 107 個規則是 T0，等你核准" in judged and "有 142 個規則達到條件" not in judged
+        nobody = render_template_string('{% from "v2/_dashboard.html" import now_panel %}{{ now_panel(now) }}',
+                                        now={**now, "sessions": 60, "t0": 0})
+        assert "還不行——前向紀錄滿了，沒有規則是 T0" in nobody
 
 
 def test_the_t0_list_window_opens_without_any_forward_record(tmp_path):
@@ -622,6 +630,18 @@ def test_the_t0_list_window_opens_without_any_forward_record(tmp_path):
         said = render_template("v2/research_t0_list.html", t=found)
     assert "2,970 個裡有 <b>496</b> 個讀的付費資料停在" in said and "2026-11-20" in said and "不列入判定" in said
     assert "兩種算法都不輸 0050 的 0 個" in said
+    assert "現在還不是" in said and "不是判定結果" in said
+
+    # 2026-11-27 (11/30 的預演): once the record is full the list says how many are T0, marks them, and says T0 is not live
+    row = {"spec_hash": "a" * 16, "name": "甲", "tier": "T0", "months": None, "settings": "", "family": "多因子", "excess": 0.02,
+           "sold_excess": 0.03, "beta": 0.5, "return": 0.05, "reconciled": True, "problems": 0, "first": "2026-10-27",
+           "after_start": True}
+    waiting = {**row, "spec_hash": "b" * 16, "name": "乙", "tier": "T0 候選", "reconciled": False, "problems": 2}
+    with client.application.test_request_context("/research/t0-list"):
+        full = render_template("v2/research_t0_list.html", t={**found, "sessions": 60, "rows": [row, waiting], "t0": 1})
+    assert "已滿 60 個交易日：其中 <b>1</b> 個是 T0" in full and "T0 不等於可以上線" in full and "現在還不是" not in full
+    assert full.count('<span class="badge badge--ok">T0</span>') == 1 and "對帳有 2 個問題" in full
+    assert "不是判定結果" not in full and "退回 T0 候選" in full
 
 
 def test_my_orders_page_brings_a_rule_to_the_owners_account_and_only_shows(tmp_path):
