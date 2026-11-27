@@ -533,7 +533,9 @@ class DailyRule(BaseModel):
     # "taiex_200s" (2026-10-24, 空頭減碼第二版): out only while TAIEX is below its 200-session average and that average is
     # lower than MARKET_SLOPE sessions before — a correction inside a rising trend does not sell everything.
     stop_loss: float = Field(default=0.0, ge=0.0, le=0.5)
-    market_filter: Literal["none", "taiex_200", "taiex_10m", "taiex_12m", "taiex_200s"] = "none"
+    # 2026-11-27 (SMC 第五版, docs/research/results.md, written before the run): "taiex_smc" = no stocks while TAIEX's
+    # own daily SMC structure is bearish (its last break was a close below a swing low)
+    market_filter: Literal["none", "taiex_200", "taiex_10m", "taiex_12m", "taiex_200s", "taiex_smc"] = "none"
     # R7b (2026-10-06), risk controls that look at the holdings themselves, left out of the hash when
     # off. weighting "inverse_vol": each pick's target in proportion to 1 / its 60-session volatility
     # (the calmer, the more money) instead of equal amounts. account_filter "own_200": while this rule's
@@ -583,7 +585,8 @@ class DailyRule(BaseModel):
     # (market_signals.us_hot: HOT_COUNT of five readings high against their own history, as published before the
     # session) — "half": half also above the line while it overheats; "quarter": below the line, a quarter while it does
     vol_scale: Literal["none", "v1", "taiex_half", "taiex_staged", "risk_half", "taiex_vol", "taiex_trend",
-                       "own_drawdown", "own_trend", "own_excess", "us_hot_half", "us_hot_quarter"] = "none"
+                       "own_drawdown", "own_trend", "own_excess", "us_hot_half", "us_hot_quarter",
+                       "smc_half"] = "none"         # "smc_half" (2026-11-27): half while TAIEX's structure is bearish
     # 2026-10-09 (使用者：只在大型股裡挑，但不要照 0050 的比例買台積電): only the ``large_caps`` largest listed
     # stocks by market value (the previous close times shares issued, chips.py ``market_cap``) can be picked;
     # the picks still get equal amounts, so no stock is held at its market-value share. 0 = no limit, left
@@ -1355,6 +1358,8 @@ class FactorPanel:
     def risk_on(self, position: int, kind: str = "taiex_200") -> bool:
         """TAIEX at or above its 200-session average (true until 200 sessions exist); "taiex_10m" / "taiex_12m" the
         month-end decisions (``monthly_risk``)."""
+        if kind == "taiex_smc":                  # 2026-11-27: TAIEX's own daily structure is not bearish
+            return bool(self.market_structure()[position] != -1)
         if self.market is None:
             raise ValueError("市場濾網需要加權指數序列（FactorPanel market）")
         if kind in ("taiex_10m", "taiex_12m"):
@@ -1366,6 +1371,23 @@ class FactorPanel:
                 return True
             return bool(self.market[position] >= average or average >= before)
         return bool(not np.isfinite(average) or self.market[position] >= average)
+
+    def market_structure(self) -> np.ndarray:
+        """Per session: TAIEX's own daily SMC structure (smc.structure on the index's bars: +1 after a close above a
+        confirmed swing high, -1 after a close below a confirmed swing low, NaN before its first break). The bars come
+        from the research folder's TAIEX file, or from ``market_bars`` (open, high, low, close) when a panel is given
+        them."""
+        if "__market_structure__" not in self._cache:
+            bars = getattr(self, "market_bars", None)
+            if bars is None:
+                if self.chips is None:
+                    raise ValueError("加權指數的結構需要研究資料夾（FactorPanel chips）或 market_bars")
+                bars = market_bars(Path(self.chips._folder).parent, list(self.sessions))
+            from quant_platform.research.smc import structure
+
+            found = structure(*(np.asarray(column, dtype=float).reshape(-1, 1) for column in bars))
+            self._cache["__market_structure__"] = found["smc_structure"][:, 0].astype(float)
+        return self._cache["__market_structure__"]
 
     def monthly_risk(self, kind: str) -> np.ndarray:
         """Per session, the latest month-end decision at or before it (a month's last session decides on its close, the
@@ -2299,7 +2321,7 @@ def simulate_daily(data: LegacyData, rule: DailyRule | None, costs: CostModel, s
                         excess = units[symbol] * price(symbol, day) - targets.get(symbol, 0.0)
                         if units[symbol] > 0 and excess >= minimum:
                             sell_all(symbol, day, excess,
-                                     why=f"這個策略的減碼條件成立（{'大盤跌破 200 日均線' if getattr(rule, 'vol_scale', '') in ('taiex_half', 'taiex_staged') else '波動或風險升高'}），個股部位降到 {level:.0%}")
+                                     why=f"這個策略的減碼條件成立（{'大盤跌破 200 日均線' if getattr(rule, 'vol_scale', '') in ('taiex_half', 'taiex_staged') else '加權指數的日線結構轉空' if getattr(rule, 'vol_scale', '') == 'smc_half' else '波動或風險升高'}），個股部位降到 {level:.0%}")
                 if rule.trim_above and today is not None and not park and not again:
                     for symbol in picks:                 # 2026-10-18: a winner grown past trim_above × its target
                         target, held_value = targets.get(symbol, 0.0), units[symbol] * price(symbol, day)
@@ -2489,7 +2511,8 @@ RISK_WINDOW = 750                    # "risk_half": the market's predicted drop 
 RISK_TOP = 0.2                       # half while it is in this top share of them (known from 250 sessions)
 
 
-MARKET_SCALES = ("taiex_half", "taiex_staged", "taiex_vol", "taiex_trend", "risk_half", "us_hot_half", "us_hot_quarter")
+MARKET_SCALES = ("taiex_half", "taiex_staged", "taiex_vol", "taiex_trend", "risk_half", "us_hot_half", "us_hot_quarter",
+                 "smc_half")
 US_HOT_SCALES = ("us_hot_half", "us_hot_quarter")
 
 
@@ -2517,6 +2540,13 @@ def us_hot_digest(history: str | Path, sessions: list[date], until: date) -> str
 
 def _market_exposure(fp: FactorPanel, rule: DailyRule) -> dict[date, float]:
     """exposure_schedule for the settings read from TAIEX or the deep risk model alone (MARKET_SCALES)."""
+    if rule.vol_scale == "smc_half":              # 2026-11-27 (SMC 第五版): half while TAIEX's structure is bearish
+        output = {day: 1.0 if fp.risk_on(position, "taiex_smc") else MARKET_HALF
+                  for position, day in enumerate(fp.sessions)}
+        if lag_of(rule):
+            later = dict(zip(fp.sessions, fp.sessions[1:]))
+            output = {later[day]: value for day, value in output.items() if day in later}
+        return output
     if rule.vol_scale in ("taiex_half", "taiex_staged"):   # 2026-10-24/25: by TAIEX against its average (and high)
         high = pd.Series(fp.market).rolling(MARKET_HIGH, min_periods=1).max().to_numpy()
 
@@ -3099,6 +3129,24 @@ def market_closes(history: str | Path, sessions: list[date]) -> np.ndarray:
     return pd.Series([closes.get(day, np.nan) for day in sessions], dtype=float).ffill().to_numpy()
 
 
+def market_bars(history: str | Path, sessions: list[date]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """TAIEX's open, high, low and close on each session (NaN on a session the file has no bar for), for the index's
+    own structure (2026-11-27)."""
+    rows = {row["date"]: row for row in read_series(Path(history) / "daily" / "TAIEX.parquet") if row["close"]}
+
+    def column(name: str) -> np.ndarray:
+        return np.array([float(rows[day][name] or np.nan) if day in rows else np.nan for day in sessions], dtype=float)
+
+    return column("open"), column("high"), column("low"), column("close")
+
+
+def market_bars_digest(history: str | Path, sessions: list[date], until: date) -> str:
+    """What a run with a setting read from TAIEX's structure read: the index's bars to ``until``."""
+    kept = [index for index, day in enumerate(sessions) if day <= until]
+    bars = np.vstack([column[kept] for column in market_bars(history, sessions)])
+    return hashlib.sha256(np.nan_to_num(bars, nan=-1.0).round(2).tobytes()).hexdigest()
+
+
 def load(history: str | Path, universe: str = "twse") -> tuple[LegacyData, FactorPanel]:
     data = load_stock_data(history, RECENT_START.year - WARMUP_YEARS, RECENT_END.year, universe=universe)
     panel = Panel(data)
@@ -3165,6 +3213,10 @@ def run_trial(rule: DailyRule, history: str | Path, registry: TrialRegistry, rep
             payload["meta1_primary"] = digest(model_dir(history, MODELS["ml_deep2_top"]["version"]), until=RECENT_END)
     scales = {getattr(rule, "vol_scale", "none")} | {getattr(sleeve.rule, "vol_scale", "none")
                                                      for sleeve in getattr(rule, "sleeves", None) or ()}
+    filters = {getattr(rule, "market_filter", "none")} | {getattr(sleeve.rule, "market_filter", "none")
+                                                            for sleeve in getattr(rule, "sleeves", None) or ()}
+    if "smc_half" in scales or "taiex_smc" in filters:            # 2026-11-27: the index's bars it read
+        payload["taiex_bars"] = market_bars_digest(history, list(fp.sessions), RECENT_END)
     if scales & set(US_HOT_SCALES):                              # 2026-11-22: the US readings it read
         payload["us_hot"] = us_hot_digest(history, list(fp.sessions), RECENT_END)
     delisted = sorted((code, day.isoformat()) for code, days in (data.notes.get("delisted") or {}).items()
@@ -4558,6 +4610,13 @@ def smc_timing_batch() -> list[DailyRule]:
     the veto "k2" was adopted on — everything else as it is."""
     return _veto_rules([(trial, "k2x") for group in BETA_GUARD.values() for trial in group]
                        + [(trial, "k2x") for trial in CASH_VETO_DEEP])
+
+
+def smc_market_batch() -> list:
+    """2026-11-27 (使用者：繼續; docs/research/results.md「SMC 第五版：加權指數自己的結構當大盤開關」, written before the
+    run): the 44 BETA_GUARD rules with no stocks, or half, while TAIEX's own daily structure is bearish."""
+    return _guarded(tuple(trial for group in BETA_GUARD.values() for trial in group),
+                    [BEAR_GUARDS["taiex_smc"], BEAR_GUARDS["smc_half"]])
 
 
 def new_data_batch() -> list[DailyRule]:
@@ -6294,6 +6353,9 @@ BEAR_GUARDS = {
     "taiex_200": ("加權指數跌破 200 日均線就不持股", {"market_filter": "taiex_200"}),
     "taiex_200s": ("加權指數跌破下彎的 200 日均線才不持股", {"market_filter": "taiex_200s"}),
     "taiex_half": ("加權指數跌破 200 日均線就減碼一半", {"vol_scale": "taiex_half"}),
+    # 2026-11-27 (SMC 第五版): the index's own SMC structure as the switch
+    "taiex_smc": ("加權指數日線結構轉空就不持股（SMC）", {"market_filter": "taiex_smc"}),
+    "smc_half": ("加權指數日線結構轉空就減碼一半（SMC）", {"vol_scale": "smc_half"}),
 }
 
 
@@ -7062,5 +7124,6 @@ BATCHES["smc3"] = smc3_batch                   # 2026-11-26
 BATCHES["smcexit"] = smc_exit_batch
 BATCHES["smc4"] = smc4_batch                   # 2026-11-27
 BATCHES["smctiming"] = smc_timing_batch
+BATCHES["smcmarket"] = smc_market_batch
 BATCHES["modelw"] = model_w_batch
 BATCHES["modelx"] = model_x_batch                 # 2026-11-26

@@ -512,3 +512,58 @@ def test_the_fourth_versions_batches_are_the_large_stock_watchlist_and_the_timin
     daily.BATCHES["smctiming"]()
     assert {code for _trial, code in asked} == {"k2x"} and len(asked) == 44 + 24
     assert [trial for trial, _code in asked][44:] == list(daily.CASH_VETO_DEEP)
+
+
+def test_the_index_own_structure_is_a_market_switch(tmp_path, monkeypatch):
+    """2026-11-27 (SMC 第五版): market_filter "taiex_smc" holds nothing, vol_scale "smc_half" half, while TAIEX's own
+    daily structure is bearish — the last break of the index's bars was a close below a confirmed swing low."""
+    from quant_platform.research.daily import DailyRule, FactorPanel, Panel
+    from tests.test_research_daily import FREE, market, weekdays
+
+    days = weekdays(date(2023, 1, 2), date(2023, 12, 29))
+    data = market(days, {"1101.TW": {day: 10.0 for day in days}})
+    wave = np.array([100 + 8 * np.sin(index / 6) + (0.15 * index if index < 130 else 19.5 - 0.5 * (index - 130))
+                     for index in range(len(days))])
+    fp = FactorPanel(Panel(data), market=wave)
+    fp.market_bars = (wave, wave + 1, wave - 1, wave)
+    state = fp.market_structure()
+    expected = smc.structure(*(column.reshape(-1, 1) for column in fp.market_bars))["smc_structure"][:, 0]
+    assert np.array_equal(state, expected, equal_nan=True)
+    bearish, bullish = np.flatnonzero(state == -1), np.flatnonzero(state == 1)
+    assert len(bearish) > 20 and len(bullish) > 20 and np.isnan(state[0])
+    assert fp.risk_on(0, "taiex_smc")                                   # before its first break: not bearish
+    assert not fp.risk_on(int(bearish[0]), "taiex_smc") and fp.risk_on(int(bullish[0]), "taiex_smc")
+    rule = DailyRule(name="x", factors={"trend_200": 1.0}, vol_scale="smc_half")
+    levels = daily.exposure_schedule(data, fp, rule, FREE)
+    assert levels[days[int(bearish[0])]] == daily.MARKET_HALF and levels[days[int(bullish[0])]] == 1.0
+    assert rule.canonical()["vol_scale"] == "smc_half" and "smc_half" in daily.MARKET_SCALES
+    filtered = DailyRule(name="x", factors={"trend_200": 1.0}, market_filter="taiex_smc")
+    assert filtered.canonical()["market_filter"] == "taiex_smc"
+    from quant_platform.research import pool
+
+    assert "結構轉空" in pool.FILTER_WORDS["taiex_smc"] and "結構轉空" in pool.SCALE_WORDS["smc_half"]
+    assert "大盤結構轉空就不持股" in categories.classify(filtered.canonical())["traits"]
+    assert "大盤結構轉空減碼一半" in categories.classify(rule.canonical())["traits"]
+    # the batch: the 44 with each switch
+    asked: list = []
+    monkeypatch.setattr(daily, "_guarded", lambda trials, guards: asked.append((trials, guards)) or [])
+    daily.BATCHES["smcmarket"]()
+    trials, guards = asked[0]
+    assert len(trials) == 44 and [fields for _word, fields in guards] == [{"market_filter": "taiex_smc"},
+                                                                         {"vol_scale": "smc_half"}]
+
+
+def test_the_index_bars_are_read_from_the_stored_index_and_fingerprinted(tmp_path):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    days = [date(2024, 1, 2), date(2024, 1, 3), date(2024, 1, 4)]
+    (tmp_path / "daily").mkdir()
+    pq.write_table(pa.table({"date": [days[0], days[2]], "open": [100.0, 103.0], "high": [102.0, 104.0],
+                             "low": [99.0, 100.5], "close": [101.0, 102.0]}), tmp_path / "daily" / "TAIEX.parquet")
+    open_, high, low, close = daily.market_bars(tmp_path, days)
+    assert open_.tolist()[0] == 100.0 and np.isnan(open_[1]) and high.tolist()[2] == 104.0 and low[0] == 99.0
+    assert close[2] == 102.0
+    first = daily.market_bars_digest(tmp_path, days, days[1])
+    assert first == daily.market_bars_digest(tmp_path, days[:2], days[2])   # only the bars to the day asked
+    assert first != daily.market_bars_digest(tmp_path, days, days[2])
