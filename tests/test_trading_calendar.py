@@ -136,11 +136,39 @@ def test_uncovered_year_falls_back_to_weekdays_and_reports_it(store):
 
 
 def test_other_markets_use_weekday_rule_without_coverage_warning(store):
-    calendar = store.calendar("US")
+    calendar = store.calendar("JP")
 
     assert calendar.holiday_aware is False
     assert calendar.covers(date(2031, 1, 1))
     assert calendar.is_trading_day(date(2026, 9, 25))
+
+
+def test_new_york_holidays_follow_the_exchange_rules(store):
+    """2026-11-27: the US calendar was weekdays only; the run after Thanksgiving expected a session that never was."""
+    calendar = store.calendar("US")
+
+    def closed(year):
+        return [day for day in (date(year, 1, 1) + timedelta(days=offset) for offset in range(365))
+                if day.weekday() < 5 and not calendar.is_trading_day(day)]
+
+    assert closed(2026) == [date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16), date(2026, 4, 3),
+                            date(2026, 5, 25), date(2026, 6, 19), date(2026, 7, 3), date(2026, 9, 7),
+                            date(2026, 11, 26), date(2026, 12, 25)]
+    assert closed(2027) == [date(2027, 1, 1), date(2027, 1, 18), date(2027, 2, 15), date(2027, 3, 26),
+                            date(2027, 5, 31), date(2027, 6, 18), date(2027, 7, 5), date(2027, 9, 6),
+                            date(2027, 11, 25), date(2027, 12, 24)]
+    assert calendar.is_trading_day(date(2027, 12, 31))            # New Year's Day 2028 is a Saturday
+    assert calendar.covers(date(2027, 6, 1)) and calendar.holiday_aware
+    assert calendar.is_trading_day(date(2026, 9, 25))             # a Taiwan holiday, an ordinary US day
+
+
+def test_us_run_after_thanksgiving_expects_wednesdays_session(store):
+    calendar = store.calendar("US")
+    expected = DailyMarketDataPipeline.expected_session_date
+
+    # 06:30 Taipei on 27 November is 17:30 in New York on Thanksgiving
+    assert expected("US", _taipei(2026, 11, 27, 6, 30), calendar) == date(2026, 11, 25)
+    assert expected("US", _taipei(2026, 11, 28, 6, 30), calendar) == date(2026, 11, 27)
 
 
 def test_manual_typhoon_closure_is_applied_and_removable(store):
@@ -332,6 +360,19 @@ def test_scheduled_workflow_skips_tw_holiday_but_runs_us(tmp_path):
     assert skipped is None
     assert ran == "ran"
     assert calls == ["us_daily_market_data"]
+
+
+def test_us_run_is_not_skipped_by_taipeis_date(tmp_path):
+    """06:30 Taipei on 25 December is the evening of the 24th in New York, a session the run has to fetch."""
+    container = _scheduler_container(tmp_path)
+    calls = []
+    container.automation_service.execute = lambda job_key: calls.append(job_key) or "ran"
+
+    ran = run_scheduled_workflow(
+        container, "us_daily_market_data", "US", "Asia/Taipei", _taipei(2026, 12, 25, 6, 30)
+    )
+
+    assert ran == "ran" and calls == ["us_daily_market_data"]
 
 
 def test_startup_catch_up_does_not_rerun_tw_on_holiday(tmp_path):

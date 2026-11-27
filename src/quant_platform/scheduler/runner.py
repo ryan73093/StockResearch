@@ -109,7 +109,13 @@ def _is_scheduled_weekday(value: str, weekday: int) -> bool:
 
 
 def _exchange_closure(container: "Container", market: str, local_now: datetime) -> str | None:
-    """Name of today's exchange closure for holiday-aware markets, else ``None``."""
+    """Name of today's closure of the Taiwan exchange, else ``None``.
+
+    2026-11-27: the US run is not skipped by this date: it is at 06:30 Taipei (Tuesday to Saturday) for the New York
+    session that just ended, so Taipei's date is not the exchange's day. Its expected session rolls back over US
+    holidays instead (market_calendar/nyse.py)."""
+    if market.upper() != "TW":
+        return None
     calendar = container.market_calendar.calendar(market)
     if not calendar.holiday_aware:
         return None

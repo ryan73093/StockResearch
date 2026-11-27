@@ -10,6 +10,7 @@ from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from quant_platform.market_calendar.core import MarketClosure, TradingCalendar, weekday_calendar
+from quant_platform.market_calendar.nyse import nyse_calendar
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,8 @@ class MarketCalendarStore:
         return TradingCalendar("TW", closures, covered_years=years.keys())
 
     def calendar(self, market: str) -> TradingCalendar:
+        if market.upper() == "US":
+            return nyse_calendar()
         if market.upper() != "TW":
             return weekday_calendar(market)
         signature = (self._mtime(self._cache_path), self._mtime(self._manual_path))
