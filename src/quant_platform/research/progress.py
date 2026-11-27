@@ -362,11 +362,17 @@ def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, 
     longest = {key: value for key, value in listed.items() if value["sessions"] == sessions}
     start = min((value["parts"][0]["from"] for value in longest.values()), default=None)
     output = []
+    # 2026-11-27: a rule reading the paid tables that stopped is not judged (pool.stale_data); counted, not hidden
+    stale = [key for key in longest if rows[key].get("stale_data")]
+    stale_ahead = 0
     for key, value in longest.items():
         sold = value.get("sold_excess", value["excess"])
         if value["excess"] < 0 or sold < 0:
             continue
         row = rows[key]
+        if row.get("stale_data"):
+            stale_ahead += 1
+            continue
         problems = (summary.get(key) or {}).get("problems") or []
         output.append({"spec_hash": key, "name": row["name"], "tier": row["tier"],
                        "months": market_months(research, row.get("report_file"), start[:7] if start else None) if research else None,
@@ -381,6 +387,8 @@ def t0_list(chained: dict[str, dict], pool_rows: list[dict], summary: dict[str, 
     for row in output:
         kinds[row["family"]] = kinds.get(row["family"], 0) + 1
     return {"sessions": sessions, "needed": FORWARD_SESSIONS, "rules": len(longest), "start": start,
+            "stale": len(stale), "stale_ahead": stale_ahead,
+            "stale_through": next((rows[key]["stale_data"]["through"] for key in stale), None),
             "end": max((value["parts"][-1]["to"] for value in longest.values()), default=None),
             "benchmark": next(iter(longest.values()))["benchmark_return"] if longest else None,
             "rows": output, "beta": betas[len(betas) // 2] if betas else None,

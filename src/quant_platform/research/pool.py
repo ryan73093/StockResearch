@@ -318,6 +318,42 @@ def _spec_of(base: Path, report_file: str | None) -> dict:
     return _SPECS[report_file]
 
 
+STOPPED_KINDS = ("paid", "govbank", "branches")    # dashboard.source_groups' kinds only FinMind's paid plan gives
+
+
+def data_stopped(research_dir: str | Path, today: date | None = None) -> str | None:
+    """The last day the paid tables cover when the FinMind plan has ended (None while it runs, or was never used) —
+    the same reading as ``invariants.paid_check``. 集保 (holders) is not among them: read from the public data since
+    2026-10-20."""
+    history = Path(research_dir) / "history"
+    try:
+        covered = json.loads((history / "paid" / "through.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    try:
+        plan = json.loads((history / "raw" / "finmind" / "plan.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        plan = {}
+    running = plan.get("limit") and int(plan["limit"]) > 600 and str(plan.get("expires") or "") >= (today or date.today()).isoformat()
+    return None if running or not covered else max(covered.values())
+
+
+def stale_data(research_dir: str | Path, spec: dict, stopped: str | None) -> dict[str, object] | None:
+    """2026-11-27 (docs/finmind_renewal_2026-11-13.md「這些帳戶 11/21 以後的前向紀錄不能拿來判 T0」; the plan ended
+    11/21 and nothing excluded them): what a rule reads — itself, its veto, its sleeves, its models through their
+    features (``dashboard.sources``) — of the tables that stopped, and the day they stop. From the session after, the
+    rule decides on old values and is no longer the rule that was registered."""
+    if not stopped or not spec:
+        return None
+    from quant_platform.research.dashboard import source_groups, sources
+
+    kinds = sources(spec, Path(research_dir) / "models")[0] & set(STOPPED_KINDS)
+    if not kinds:
+        return None
+    labels = {key: label for key, label, _paid, _group in source_groups()}
+    return {"kinds": sorted(kinds), "labels": [labels[key] for key in STOPPED_KINDS if key in kinds], "through": stopped}
+
+
 def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
     """The new design (S9-W02): every daily-decision rule's latest run on 2015-06..2026-09 with the
     owner's account, passed rules first."""
@@ -339,11 +375,16 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
     chained = tracker.chained(date.today()) if latest else {}
     judged = {key: {**value, "problems": (forward.get(key) or {}).get("problems") or []} for key, value in chained.items()}
     rows = []
+    stopped = data_stopped(base) if latest else None
     for spec_hash, record in latest.items():
         metrics = record.metrics
         reasons = daily_gate(metrics)
         one, three = _window(metrics, "1y"), _window(metrics, "3y")
         grade, why = tier(metrics, judged.get(spec_hash))
+        stale = stale_data(base, _spec_of(base, record.report_file), stopped)
+        if stale and grade.startswith("T0") and "候選" not in grade:       # the record after the stop is not this rule's
+            grade = grade.replace("T0", "T0 候選", 1)
+            why = f"讀的付費資料停在 {stale['through']}，之後的前向紀錄是照舊資料決定的，不能拿來判 T0（原本：{why}）"
         rows.append({
             "tier": grade, "tier_label": TIER_LABELS[grade], "tier_reason": why,
             "spec_hash": spec_hash, "name": record.spec_name, "source": origin.get(spec_hash, "其他"),
@@ -371,6 +412,7 @@ def daily_rows(research_dir: str | Path) -> list[dict[str, object]]:
             "forward_since": since.get(spec_hash), "report_file": record.report_file, "start": metrics.get("start"),
             "category": classify(_spec_of(base, record.report_file), origin.get(spec_hash, "")),
             "uses_0050": uses_0050(_spec_of(base, record.report_file)),
+            "stale_data": stale,
         })
     # 2026-10-09: rules that hold 0050 are listed last and never count as candidates (categories.NO_0050)
     rows.sort(key=lambda row: (row["uses_0050"], TIERS.index(row["tier"]), -(row["excess"] if row["excess"] is not None else -9)))

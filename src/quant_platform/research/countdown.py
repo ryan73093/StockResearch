@@ -21,15 +21,16 @@ def day_label(day: date) -> str:
 
 def judged_count(chained: dict[str, dict] | None, pool_rows: list[dict], passing: tuple[str, ...] | set[str]) -> int:
     """How many rules the T0 judgment would look at today — the number the 判定清單 lists (``progress.t0_list``): the longest run
-    on the monthly lists, a passing tier, no 0050 in the rule, not behind 0050 by either money. A count of its own because the
+    on the monthly lists, a passing tier, no 0050 in the rule, not behind 0050 by either money, not reading paid tables that stopped (``pool.stale_data``). A count of its own because the
     home page's "兩種算法都不輸 0050" counts every rule with the longest run (``dashboard.chain_summary``), 0050 ones and
     failing ones included; the two are shown together so the pages do not say two numbers for one question (D-046 第 9 項)."""
     rows = {row["spec_hash"]: row for row in pool_rows}
     listed = {key: value for key, value in (chained or {}).items()
               if value.get("parts") and (rows.get(key) or {}).get("tier") in passing and not (rows.get(key) or {}).get("uses_0050")}
     longest = max((value["sessions"] for value in listed.values()), default=0)
-    return sum(1 for value in listed.values()
-               if value["sessions"] == longest and value["excess"] >= 0 and value.get("sold_excess", value["excess"]) >= 0)
+    return sum(1 for key, value in listed.items()          # 2026-11-27: not the ones reading tables that stopped
+               if value["sessions"] == longest and value["excess"] >= 0 and value.get("sold_excess", value["excess"]) >= 0
+               and not rows[key].get("stale_data"))
 
 
 def countdown(today: date, first: date, through: date | None, sessions: int, needed: int,

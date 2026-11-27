@@ -54,3 +54,41 @@ def test_no_forward_record_counts_from_today():
     found = countdown(date(2026, 11, 22), date(2026, 11, 24), None, 0, 60, _weekdays)
     assert found["dates"] == ["11/23（一）", "11/24（二）"] and found["through_label"] == ""
     assert day_label(date(2026, 12, 6)) == "12/6（日）"
+
+
+def test_a_rule_reading_paid_tables_that_stopped_is_not_judged(tmp_path):
+    """2026-11-27 (docs/finmind_renewal_2026-11-13.md): after the plan's end those rules decide on old values; the T0 list and
+    the countdown leave them out and say how many, and the pool does not grade them T0."""
+    import json
+
+    from quant_platform.research import pool
+    from quant_platform.research.countdown import judged_count
+    from quant_platform.research.progress import PASSING, t0_list
+
+    def run(excess):
+        return {"sessions": 60, "excess": excess, "sold_excess": excess, "parts": [{"from": "2026-09-01", "to": "2026-11-30"}],
+                "return": 0.1, "benchmark_return": 0.05, "beta": 0.9}
+
+    chained = {"a": run(0.02), "b": run(0.03), "c": run(-0.01)}
+    stale = {"kinds": ["paid"], "labels": ["付費"], "through": "2026-11-20"}
+    rows = [{"spec_hash": key, "name": key, "tier": PASSING[0], "category": {"family": "多因子"}, "uses_0050": False,
+             "stale_data": stale if key in "bc" else None} for key in chained]
+    found = t0_list(chained, rows, {}, {})
+    assert [row["spec_hash"] for row in found["rows"]] == ["a"]
+    assert (found["stale"], found["stale_ahead"], found["stale_through"]) == (2, 1, "2026-11-20")
+    assert judged_count(chained, rows, PASSING) == 1
+
+    history = tmp_path / "history"
+    (history / "paid").mkdir(parents=True)
+    (history / "raw" / "finmind").mkdir(parents=True)
+    assert pool.data_stopped(tmp_path, date(2026, 11, 27)) is None                    # never used
+    (history / "paid" / "through.json").write_text(json.dumps({"A": "2026-11-20", "B": "2026-11-19"}), encoding="utf-8")
+    (history / "raw" / "finmind" / "plan.json").write_text(json.dumps({"limit": 6000, "expires": "2026-11-21"}), encoding="utf-8")
+    assert pool.data_stopped(tmp_path, date(2026, 11, 21)) is None                    # the plan still runs
+    assert pool.data_stopped(tmp_path, date(2026, 11, 27)) == "2026-11-20"
+    (history / "raw" / "finmind" / "plan.json").write_text(json.dumps({"limit": 600, "expires": "2026-11-21"}), encoding="utf-8")
+    assert pool.data_stopped(tmp_path, date(2026, 11, 20)) == "2026-11-20"            # the free plan
+    paid = {"factors": {"margin_safe": 1.0}}
+    assert pool.stale_data(tmp_path, paid, None) is None
+    assert pool.stale_data(tmp_path, {"factors": {"momentum_60": 1.0}}, "2026-11-20") is None
+    assert pool.stale_data(tmp_path, paid, "2026-11-20")["kinds"] == ["paid"]
