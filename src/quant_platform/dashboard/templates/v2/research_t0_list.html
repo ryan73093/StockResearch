@@ -2,6 +2,8 @@
    t0_list) — both moneys, the beta, the reconciliation, the kind and the day first registered. #}
 <p class="small" style="margin:0 0 8px">前向紀錄 {{ t.sessions }}／{{ t.needed }} 個交易日{% if t.start %}（{{ t.start }}～{{ t.end }}）{% endif %}，同期 0050 {% if t.benchmark is not none %}{{ '{:+.1%}'.format(t.benchmark) }}{% endif %}。一直留在每月名單上的 {{ '{:,}'.format(t.rules) }} 個規則裡，下面 {{ '{:,}'.format(t.rows|length) }} 個到今天兩種算法都不輸 0050。{% if t.sessions < t.needed %}滿 {{ t.needed }} 個交易日那天還不輸、對帳正常的才是 T0，再由你核准；現在還不是。{% else %}已滿 {{ t.needed }} 個交易日：對帳正常的是 T0，等你核准。{% endif %}</p>
 <ul class="small" style="margin:0 0 10px; padding-left:1.2em">
+  {# 2026-11-27: rules reading the paid tables that stopped are not judged (交易規則 §7); said, with how many #}
+  {% if t.stale %}<li>那 {{ '{:,}'.format(t.rules) }} 個裡有 <b>{{ '{:,}'.format(t.stale) }}</b> 個讀的付費資料停在 <span class="nowrap">{{ t.stale_through }}</span>（FinMind 方案到期），之後是照舊資料決定的，<b>不列入判定</b>；其中到今天兩種算法都不輸 0050 的 {{ '{:,}'.format(t.stale_ahead) }} 個。</li>{% endif %}
   <li>各類：{% for name, count in t.kinds %}{{ name }} {{ count }} 個{{ '、' if not loop.last else '' }}{% endfor %}。</li>
   {% if t.beta is not none %}<li>跟 0050 的連動：中間那個 {{ '{:.2f}'.format(t.beta) }} 倍，{{ t.low_beta }} 個低於 0.8 倍。{% if t.benchmark is not none and t.benchmark < -0.05 %}這段 0050 是跌的，連動低的規則光是跌得少就會領先，不代表選股比較準；0050 反彈時它們可能落後。{% endif %}</li>{% endif %}
   {% if t.with_months %}<li>0050 反彈時跟不跟得上（看回測，2020-10 起的每個月）：{{ t.with_months }} 個有回測月資料的規則裡，{{ t.up_too }} 個在 0050 上漲的月份平均也不輸 0050。這是回測——規則就是在這段期間選出來的，只能當參考；真正的答案要等前向紀錄裡出現上漲的月份。</li>{% endif %}

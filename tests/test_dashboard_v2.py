@@ -610,6 +610,18 @@ def test_the_t0_list_window_opens_without_any_forward_record(tmp_path):
     assert page.status_code == 200
     text = page.get_data(as_text=True)
     assert "現在沒有規則兩種算法都不輸 0050" in text and "第一次登錄" in text and "對帳" in text
+    assert "不列入判定" not in text                                       # nothing reads stopped data: no line
+
+    # 2026-11-27: the rules left out because the data they read stopped are said, with how many
+    from flask import render_template
+
+    found = {"sessions": 59, "needed": 60, "rules": 2970, "rows": [], "start": "2026-09-01", "end": "2026-11-27",
+             "benchmark": -0.14, "beta": None, "low_beta": 0, "unreconciled": 0, "after_start": 0, "with_months": 0,
+             "up_too": 0, "kinds": [], "stale": 496, "stale_ahead": 0, "stale_through": "2026-11-20"}
+    with client.application.test_request_context("/research/t0-list"):
+        said = render_template("v2/research_t0_list.html", t=found)
+    assert "2,970 個裡有 <b>496</b> 個讀的付費資料停在" in said and "2026-11-20" in said and "不列入判定" in said
+    assert "兩種算法都不輸 0050 的 0 個" in said
 
 
 def test_my_orders_page_brings_a_rule_to_the_owners_account_and_only_shows(tmp_path):
