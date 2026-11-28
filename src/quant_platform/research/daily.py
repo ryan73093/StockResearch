@@ -465,6 +465,10 @@ def pair_gaps(log_returns: np.ndarray, groups: dict[str, list[int]], month_start
 
 
 RULE_FACTORS.update(BEHAVIOR_FACTORS)          # 2026-11-20: rule factors too
+# 2026-11-28 (docs/research/results.md「滾動共識名單」, written before the run; research/rolling_vote.py): how many of
+# the month's 20 to-date-best rules hold the stock at the month's end — the voters chosen again every month
+ROLLING_VOTE_FACTORS = {"rolling_consensus": "滾動共識票數（每月底照到當時為止累計最好重選 20 個規則，實際持有這檔股票的有幾個）"}
+RULE_FACTORS.update(ROLLING_VOTE_FACTORS)
 RULE_FACTORS.update(REVERSED_FACTORS)          # 2026-11-21
 from quant_platform.research.us_factors import US_FACTORS, US_FEATURES  # noqa: E402 - 2026-11-21: read from the US side
 
@@ -897,6 +901,10 @@ class FactorPanel:
                                                       "rolling35_equal")
                                 else "robot",
                                 version)
+        if factor in ROLLING_VOTE_FACTORS:
+            from quant_platform.research.rolling_vote import matrix as vote_matrix
+
+            return vote_matrix(self, self.models)                                      # sessions × symbols
         if factor in CONSENSUS_FACTORS:
             from quant_platform.research.consensus import scores as consensus_scores
 
@@ -3429,6 +3437,10 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
         from quant_platform.research.exits import exits_dir
 
         payload["exit"] = exits_digest(exits_dir(history))
+    if any(name in ROLLING_VOTE_FACTORS for name in factor_names):   # 2026-11-28: the votes file
+        from quant_platform.research.rolling_vote import digest as vote_digest
+
+        payload["rolling_vote"] = vote_digest(models_root(history))
     if any(name in CONSENSUS_FACTORS for name in factor_names):  # 2026-10-11: the members and their models
         from quant_platform.research.consensus import digest as consensus_digest
 
@@ -3888,6 +3900,19 @@ def consensus_batch() -> list[DailyRule]:
                   factors={"t0_consensus": 1.0}, top=20, **common),
         DailyRule(name="T0 共識清單（25 個 T0 候選投票）：前 40 名、同產業最多 3 成、每週決策",
                   factors={"t0_consensus": 1.0}, top=40, **common),
+    ]
+
+
+def rolling_vote_batch() -> list[DailyRule]:
+    """2026-11-28 (docs/research/results.md「滾動共識名單」, written before the run): the stocks most of the month's
+    20 to-date-best rules hold — top 20 (judged) and top 40 (the structural counterpart), in ``consensus_batch``'s
+    framework."""
+    common = {"check": "weekly", "keep": 3, "min_hold": 20, "industry_cap": 0.3}
+    return [
+        DailyRule(name="滾動共識名單（每月重選 20 個規則投票、票數看實際持股）：前 20 名、同產業最多 3 成、每週決策",
+                  factors={"rolling_consensus": 1.0}, top=20, **common),
+        DailyRule(name="滾動共識名單（每月重選 20 個規則投票、票數看實際持股）：前 40 名、同產業最多 3 成、每週決策",
+                  factors={"rolling_consensus": 1.0}, top=40, **common),
     ]
 
 
@@ -7118,6 +7143,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
 # 2026-11-22: the asked-again batches last - the pool's sources snapshot names a rule by the first batch holding it
 BATCHES.update({"rerun_poolsweep": pool_sweep_batch, "rerun_guardorigins": guard_origins_batch})
 BATCHES["smc"] = smc_batch                     # 2026-11-22
+BATCHES["rollvote"] = rolling_vote_batch       # 2026-11-28
 BATCHES["smc2"] = smc2_batch                   # 2026-11-25
 BATCHES["smcveto"] = smc_veto_batch
 BATCHES["smcveto2"] = smc_veto_deep_batch

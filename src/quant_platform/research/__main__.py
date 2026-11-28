@@ -350,7 +350,7 @@ def main() -> int:
                             "forward", "factors", "daily", "snapshot", "model", "rl", "exits", "execution", "rl-sleeves", "researcher", "news-events", "scan", "tech-rl", "rl-strategies", "diagnose", "scan-trials", "leakcheck",
                             "forward-board", "deep2-diagnose", "deep2-leakcheck", "exit2", "robustness", "retry-check", "hypotheses", "trade-audit", "tech-rl2", "factor-rl21", "block-rl3", "block-rl31", "block-rl32", "block-rl33", "block-rl34", "block-rl35", "meta-label", "scan-large", "llm-trader", "llm-agent", "pipeline-wait", "worst-rl", "free-rl4", "free-rl41", "rolling",
                             "window-weight", "intraday", "limits-check", "live-flow", "market-signals", "open-feasibility",
-                            "rl-select", "rl-select-slow", "rl-holdings-lists", "rl-holdings", "rl-spread", "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "volume-bias", "noise-check", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
+                            "rl-select", "rl-select-slow", "rl-holdings-lists", "rl-holdings", "rl-spread", "rolling-vote", "limits-overrides", "knowledge", "govbank-events", "branches", "stress-train", "stress", "stress-protect", "stress-guards", "forward-audit", "volume-bias", "noise-check", "forward-forced", "rl-concentration", "rl-switch", "rl-execution", "forward-minutes", "reproduce-check", "screen-check", "scan-full", "scan-full-spread", "windows2020", "issues", "status"),
     )
     parser.add_argument("--date", help="forward：記錄哪一天（預設今天；補記的會標示為補記）")
     parser.add_argument("--full", action="store_true",
@@ -1093,6 +1093,19 @@ def main() -> int:
             print(side, "機器人", part["robot"], "固定", part["fixed"], "多賺", part["lead"], "開盤後一分鐘成交的比例",
                   part["minute_share"], flush=True)
         print("判定", "過" if found.get("passed") else "沒過", f"已寫入 {path}")
+        return 0
+
+    if args.command == "rolling-vote":
+        # 2026-11-28 (docs/research/results.md「滾動共識名單」): the month-end votes of the 20 to-date-best rules,
+        # written where the engine reads the factor rolling_consensus
+        from quant_platform.research import rolling_vote
+        from quant_platform.research.model import models_root
+
+        path = rolling_vote.build(RESEARCH, RESEARCH / "history", models_root(RESEARCH / "history"))
+        found = json.loads(path.read_text(encoding="utf-8"))
+        counts = [len(item["votes"]) for item in found["months"].values()]
+        print(f"規則 {found['rules']} 個（缺名單沒算進來 {found['rules_left_out']}）；{len(counts)} 個月底（{min(found['months'])}～{max(found['months'])}）；"
+              f"每個月有票的股票 {min(counts)}～{max(counts)} 檔；{path}", flush=True)
         return 0
 
     if args.command == "rl-spread":
