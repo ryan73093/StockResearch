@@ -136,6 +136,10 @@ MODELS = {"ml_gbm": {"version": "gbm-1.0.0", "label": "rank"},
           # (research/model_deep2.py), two registered losses aimed at the top of the list
           "ml_deep2": {"version": "dl-2.0.0", "label": "deep2"},
           "ml_deep2_top": {"version": "dl-2.1.0", "label": "deep2"},
+          # 2026-11-28: dl-2.1.0 again, the same seeds and ten others — a measurement of its rerun difference
+          # (model_deep2.SEEDS_OF); no rule reads them
+          "ml_deep2_again": {"version": "dl-2.1.1", "label": "deep2"},
+          "ml_deep2_seeds": {"version": "dl-2.1.2", "label": "deep2"},
           # 2026-10-20: dl-2.1.0 refitted every month (model_deep2.MONTHLY)
           "ml_deep2_monthly": {"version": "dl-2.6.0", "label": "deep2"},
           # 2026-10-22 (集保因子第五版): dl-2.1.0 seeing model I's features (the holder brackets too)

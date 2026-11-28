@@ -55,7 +55,8 @@ LARGE = 100
 CORRELATION_LIMIT = 0.9
 # overlays; 2026-10-19 the insiders' notices and the buybacks failed their registered event study (research_method §7):
 # features for the models (model H), not signals for the search
-LEFT_OUT = ("ml_gbm_q_nolong", "ml_gbm_q_noshort", "ml_gbm_q_nobranch",          # 2026-11-19: measurements, not signals
+LEFT_OUT = ("ml_deep2_again", "ml_deep2_seeds",        # 2026-11-28: dl-2.1.0 rerun, a measurement
+            "ml_gbm_q_nolong", "ml_gbm_q_noshort", "ml_gbm_q_nobranch",          # 2026-11-19: measurements, not signals
             # 2026-11-20: the five literature factors wait for their strength analysis (as the paid tables did)
             "cgo_250", "beta_resid_mom_12", "illiquidity_60", "pair_gap_20", "low_iskew_250", "short_cover_ahead",
             "revenue_yoy", "revenue_yoy_3m", "revenue_accel", "market_cap", "dl_risk", "dl_risk2", "low_insider_sell_60",

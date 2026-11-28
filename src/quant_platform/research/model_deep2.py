@@ -218,7 +218,20 @@ for _new, _size in CROSS.items():
 RECENT_GATED.update(CROSS)
 
 
+# 2026-11-28 (docs/research/results.md「深度學習：同一個 dl-2.1.0 換種子差多少」, written before the run): how much
+# dl-2.1.0 differs from itself was never measured, while versions were stopped for losing a year by 0.14-0.42 points.
+# dl-2.1.1 is dl-2.1.0 with the same seeds on today's data and code, dl-2.1.2 with ten other seeds; nothing else
+# differs. A measurement: no rules read them (no factor label in daily.py), and all five years are run.
+SEEDS_OF = {"dl-2.1.1": tuple(range(10)), "dl-2.1.2": tuple(range(10, 20))}
+for _new in SEEDS_OF:
+    LOSSES[_new] = LOSSES["dl-2.1.0"]
+    AGAINST_OF[_new] = D3_AGAINST
+RECENT_GATED.update(SEEDS_OF)
+
+
 def seeds_of(version: str) -> tuple[int, ...]:
+    if version in SEEDS_OF:
+        return SEEDS_OF[version]
     return tuple(range(LARGE[version]["seeds"])) if version in LARGE else SEEDS
 
 
@@ -1267,7 +1280,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                                     "ic": round(float(np.mean(ics)), 4) if ics else None,
                                     "top20_gain": round(float(np.mean(top20)), 5) if top20 else None,
                                     "held_curves": curves}
-        if version in LARGE or version in CROSS:
+        if version in LARGE or version in CROSS or version in SEEDS_OF:
             meta["years"][str(year)]["gpu_gb"] = _peak(inputs)
             meta["years"][str(year)]["finished_at"] = datetime.now(UTC).isoformat(timespec="seconds")
         if version in RESIDUAL_OF:

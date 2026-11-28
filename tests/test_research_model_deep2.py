@@ -799,3 +799,32 @@ def test_the_frozen_cross_version_keeps_the_trained_network_and_may_keep_it_alon
     kept = torch.load(tmp_path / "dl-7.1.0" / "2017-0.pt", weights_only=True)
     assert not kept["adjust.weight"].any() and not kept["adjust.bias"].any()        # it stayed dl-2.1.0 as it is
     assert len(again["years"]["2017"]["held_curves"][0]) == 3
+
+
+def test_the_seed_measurement_versions_are_the_plain_version_with_other_seeds_and_feed_no_rule(monkeypatch, tmp_path):
+    """2026-11-28 (docs/research/results.md「深度學習：同一個 dl-2.1.0 換種子差多少」): dl-2.1.1 and dl-2.1.2 change
+    nothing of dl-2.1.0 but the seeds; they are a measurement, so no rule factor reads them."""
+    from quant_platform.research import daily
+
+    assert model_deep2.seeds_of("dl-2.1.1") == model_deep2.seeds_of("dl-2.1.0") == tuple(range(10))
+    assert model_deep2.seeds_of("dl-2.1.2") == tuple(range(10, 20))
+    for version in ("dl-2.1.1", "dl-2.1.2"):
+        assert model_deep2.LOSSES[version] == model_deep2.LOSSES["dl-2.1.0"] and version not in model_deep2.ARCHITECTURES
+        assert not any(version in group for group in (model_deep2.WIDE, model_deep2.TECHNICAL, model_deep2.MONTHLY,
+                                                      model_deep2.RISK_ADJUSTED, model_deep2.LARGE, model_deep2.CROSS))
+        assert model_deep2.gate_years(version) == (2021, 2022, 2023, 2024, 2025)
+    from quant_platform.research import scan
+
+    assert {"ml_deep2_again", "ml_deep2_seeds"} <= set(scan.LEFT_OUT) and "ml_deep2_seeds" not in scan.signals()
+    assert daily.MODEL_FACTORS["ml_deep2_seeds"].startswith("量測用")
+    monkeypatch.setattr(model_deep2, "EPOCHS", 1)
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "RECENT_GATE_YEARS", (2017,))
+    monkeypatch.setitem(model_deep2.SEEDS_OF, "dl-2.1.2", (10, 11))
+    for name, years in (("gbm-2.2.0", {}), ("dl-2.1.0", {"2017": {"top20_gain": 9.0}})):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "meta.json").write_text(json.dumps({"version": name, "features": ["momentum_3"], "years": years}),
+                                                   encoding="utf-8")
+    meta = model.train(_panel()[1], tmp_path / "dl-2.1.2", years=[2017], label="deep2", version="dl-2.1.2")
+    assert meta["seeds"] == [10, 11] and meta["architecture"] == "gru" and meta["gate"]["passed"] is False
+    assert sorted(path.name for path in (tmp_path / "dl-2.1.2").glob("2017-*.pt")) == ["2017-10.pt", "2017-11.pt"]
