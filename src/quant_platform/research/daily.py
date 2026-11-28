@@ -6607,6 +6607,58 @@ def bear14_batch() -> list:
     return _guarded(BEAR_GUARD_ORIGINS + BEAR_HALF_WIDE, BEAR_US_HOT)
 
 
+US_HOT_SAMPLE = 300
+
+
+def us_hot_twin(spec: dict, trial: int):
+    """The rule ``spec`` (one with the half guard) with the guard "us_hot_half" instead, nothing else changed."""
+    from quant_platform.research.holding import style_of
+
+    word = BEAR_US_HOT[0][0]
+    tail = f"・{word}（#{trial}）｜持有：{style_of(spec) or '固定持有 20 天'}"
+    stem = str(spec.get("name") or "").split("｜")[0].split("・加權指數跌破 200 日均線就減碼一半")[0]
+    name = stem[:max(4, 80 - len(tail) - 1)] + ("…" if len(stem) > 80 - len(tail) - 1 else "") + tail
+    return DailyRule.model_validate({**spec, **BEAR_US_HOT[0][1], "name": name})
+
+
+def us_hot_sample(items: list[tuple[int, str, dict]], registered: set[str], count: int = US_HOT_SAMPLE) -> list:
+    """``count`` of the (trial, rule hash, spec) drawn by the SHA-256 of the rule hash — a draw that reads no result
+    and can be made again — each as its us_hot_half twin; a twin whose settings are registered is left out."""
+    import hashlib
+
+    drawn = sorted(items, key=lambda item: hashlib.sha256(item[1].encode()).hexdigest())[:count]
+    output = []
+    for trial, _hash, spec in drawn:
+        twin = us_hot_twin(spec, trial)
+        if twin.rule_hash not in registered:
+            output.append(twin)
+    return output
+
+
+def us_hot_twins_sample() -> list:
+    """2026-11-28 (docs/research/results.md「空頭防護第十五版」, written before the run): the US-overheating guard
+    passed on 55 fixed rules (bear14); here on US_HOT_SAMPLE of the latest passing single rules that carry the half
+    guard, each against its own original."""
+    import json as _json
+
+    from quant_platform.research.registry import TrialRegistry, newest
+
+    research = Path("instance") / "research"
+    records = TrialRegistry(research / "trials.jsonl").records()
+    latest = newest(records, lambda record: record.kind == "candidate" and record.period == "recent")
+    items = []
+    for record in latest.values():
+        if tier(record.metrics or {})[0] not in PASSING_TIERS:
+            continue
+        try:
+            spec = _json.loads((research / "reports" / record.report_file).read_text(encoding="utf-8"))["spec"]
+        except (OSError, ValueError, KeyError):
+            continue
+        if spec.get("kind") != "blend" and spec.get("vol_scale") == "taiex_half":
+            items.append((record.trial_id, record.spec_hash, spec))
+    return us_hot_sample(items, set())
+
+
 def bear11_batch() -> list:
     """2026-10-29 (空頭防護第十一版, written before the run): the 55 fixed rules with the half guard and half again while
     the rule's own half-guarded account fell behind 0050 (the same money) over the last year (BEAR_OWN_EXCESS). Graded
@@ -7162,6 +7214,7 @@ BATCHES.update({"rerun_poolsweep": pool_sweep_batch, "rerun_guardorigins": guard
 BATCHES["smc"] = smc_batch                     # 2026-11-22
 BATCHES["rollvote"] = rolling_vote_batch       # 2026-11-28
 BATCHES["rollvote2"] = rolling_vote_guard_batch
+BATCHES["bear15"] = us_hot_twins_sample           # 2026-11-28
 BATCHES["smc2"] = smc2_batch                   # 2026-11-25
 BATCHES["smcveto"] = smc_veto_batch
 BATCHES["smcveto2"] = smc_veto_deep_batch
