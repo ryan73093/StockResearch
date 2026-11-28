@@ -66,3 +66,15 @@ def test_the_votes_are_in_force_from_the_next_months_first_session_and_enter_the
     assert (first.check, first.keep, first.min_hold, first.industry_cap) == (same.check, same.keep, same.min_hold,
                                                                              same.industry_cap)
     assert "rolling_consensus" in daily.RULE_FACTORS and daily.BATCHES["rollvote"] is daily.rolling_vote_batch
+
+
+def test_a_rule_reading_the_votes_carries_the_votes_files_digest(tmp_path):
+    from quant_platform.research.model import models_root
+
+    found = daily.input_digests(tmp_path, ["rolling_consensus"], False)
+    assert found["rolling_vote"] == "missing"
+    folder = models_root(tmp_path) / rolling_vote.VERSION
+    folder.mkdir(parents=True)
+    (folder / rolling_vote.FILE).write_text(json.dumps({"months": {}}), encoding="utf-8")
+    assert daily.input_digests(tmp_path, ["rolling_consensus"], False)["rolling_vote"] == rolling_vote.digest(models_root(tmp_path))
+    assert "rolling_vote" not in daily.input_digests(tmp_path, ["momentum_3"], False)

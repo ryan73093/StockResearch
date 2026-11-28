@@ -203,10 +203,17 @@ RECENT_GATED.update(LARGE)
 # (one 64-wide attention layer among the eligible listed stocks) only tied twice; the context beyond the eligible
 # stocks, the depth, and starting from dl-2.1.0 are what was not tried. Gate: gate_check_d3 against dl-2.1.0, 2021-2025.
 CROSS = {"dl-7.0.0": {"width": 256, "layers": 4, "heads": 8}}
+# 2026-11-28 (「深度學習第七版之二：dl-2.1.0 固定不動，新的一路只學剩下的」, written before the run): dl-7.0.0's
+# correction grew to 1.6-1.9 times the own score's spread, mostly the same way, both parts moving together. Here the
+# own part is the fold's and seed's trained dl-2.1.0 network (``frozen``), never updated; the held-out days are read
+# once before training — the correction is zero, so that reading is dl-2.1.0 — and it counts among the readings the
+# best is kept from: a seed whose correction never does better on the held-out days stays dl-2.1.0 as it is.
+CROSS["dl-7.1.0"] = {"width": 256, "layers": 4, "heads": 8, "frozen": "dl-2.1.0"}
 CROSS_RATE = 2e-4                       # the new part's learning rate (the large versions'); its decay LARGE_DECAY
 for _new, _size in CROSS.items():
     LOSSES[_new] = "top10"
-    ARCHITECTURES[_new] = f"cross:{_size['width']}x{_size['layers']}x{_size['heads']}"
+    ARCHITECTURES[_new] = (f"cross:{_size['width']}x{_size['layers']}x{_size['heads']}"
+                           + (":frozen" if _size.get("frozen") else ""))
     AGAINST_OF[_new] = D3_AGAINST
 RECENT_GATED.update(CROSS)
 
@@ -418,10 +425,19 @@ def _network(sequence: int, snapshot: int, architecture: str = "gru"):
             self.adjust = torch.nn.Linear(width, 1)
             torch.nn.init.zeros_(self.adjust.weight)               # it begins as dl-2.1.0
             torch.nn.init.zeros_(self.adjust.bias)
+            self.frozen = False                                    # dl-7.1.0: the own part as trained, never updated
+
+        def train(self, mode: bool = True):
+            super().train(mode)
+            if self.frozen:                                        # no dropout in it: it scores as dl-2.1.0 does
+                self.gru.eval()
+                self.head.eval()
+            return self
 
         def own(self, steps, now, market):
-            _out, last = self.gru(steps)
-            return self.head(torch.cat([last[-1], now, market], dim=1)).squeeze(-1)
+            with torch.set_grad_enabled(not self.frozen):
+                _out, last = self.gru(steps)
+                return self.head(torch.cat([last[-1], now, market], dim=1)).squeeze(-1)
 
         def correction(self, around):
             steps, now, market, flag, days, where = around
@@ -637,7 +653,17 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
     learned = set(train_days)
     anchors = [day for day in train_days if day + STEP in learned] if kind == "direct" else None   # dl-4.0.0's pairs
     network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2], architecture).to(inputs.on)
-    if start is not None:
+    frozen = architecture.endswith(":frozen")
+    if frozen:                           # dl-7.1.0: the own part is the trained network handed in, and stays so
+        missing = network.load_state_dict(start, strict=False)
+        if missing.unexpected_keys or any(key.startswith(("gru.", "head.")) for key in missing.missing_keys):
+            raise ValueError("the frozen part's weights do not fit the network")
+        network.frozen = True
+        for name, value in network.named_parameters():
+            if name.startswith(("gru.", "head.")):
+                value.requires_grad_(False)
+        network.train()
+    elif start is not None:
         network.load_state_dict({key: value for key, value in start.items() if not key.startswith("head.")},
                                 strict=False)
     rate = large["rate"] if large else LEARNING_RATE
@@ -654,7 +680,7 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
         named = list(network.named_parameters())
         added = [value for name, value in named if not name.startswith(("gru.", "head."))]
         parts = [{"params": [value for name, value in named if name.startswith(("gru.", "head."))], "lr": rate},
-                 {"params": added, "lr": CROSS_RATE, "weight_decay": LARGE_DECAY}]
+                 {"params": added, "lr": CROSS_RATE, "weight_decay": LARGE_DECAY}][1 if frozen else 0:]
     optimiser = torch.optim.AdamW(parts, lr=rate, weight_decay=LARGE_DECAY if large else WEIGHT_DECAY)
     for group in optimiser.param_groups:
         group["full"] = group["lr"]
@@ -685,6 +711,10 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
             held -= DIRECT_COST * DIRECT_WEEKS * float(np.mean(turns))
         return held
 
+    if frozen:                           # the reading before any step is dl-2.1.0 itself, and may be the one kept
+        held = read()
+        curve.append(round(held, 5))
+        best = (held, {key: value.clone() for key, value in network.state_dict().items()})
     for _epoch in range(EPOCHS):
         if anchors is not None:          # half the anchors an epoch, each with its day a week later: as many days
             order = rng.permutation(len(anchors))[:len(anchors) // 2]
@@ -1189,6 +1219,9 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                 if taught:
                     meta.setdefault("pretrain_curves", {})[str(year)] = taught
             for seed in seeds_of(version):
+                if CROSS.get(version, {}).get("frozen"):       # the fold's and seed's trained network of that version
+                    begun = torch.load(out.parent / CROSS[version]["frozen"] / f"{year}-{seed}.pt", weights_only=True,
+                                       map_location=inputs.on)
                 state, curve = _fit(inputs, kind, seed, train_days, held_days, rows, labels, architecture,
                                     None if version in RESIDUAL_OF or version in NET_OF_MARKET else judged,
                                     LARGE.get(version), begun)
@@ -1197,6 +1230,7 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                 networks.append(network)
                 curves.append(curve)
                 states.append((seed, state))
+                begun = None if CROSS.get(version, {}).get("frozen") else begun
                 if job:
                     when = f"{year} 年" + (f" {month} 月" if month is not None else "")
                     job.update(current=f"{version}：{when}第 {seed + 1}/{len(seeds_of(version))} 個種子，保留期前 20 名多 {max(curve):+.4f}")

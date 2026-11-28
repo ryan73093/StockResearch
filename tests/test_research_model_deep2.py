@@ -765,3 +765,37 @@ def test_the_cross_version_begins_as_the_plain_network_and_sees_the_stocks_aroun
     assert meta["gate"]["against"] == "dl-2.1.0"
     kept = model.scores(_panel()[1], tmp_path / "dl-7.0.0")              # read back (and the days after, scored anew)
     assert np.isfinite(kept).any()
+
+
+def test_the_frozen_cross_version_keeps_the_trained_network_and_may_keep_it_alone(monkeypatch, tmp_path):
+    """2026-11-28 (docs/research/results.md「深度學習第七版之二」): dl-7.1.0's own part is the fold's and seed's trained
+    dl-2.1.0 network, never updated; the reading before any step (the correction is zero) is among those the best is
+    kept from."""
+    import torch
+
+    monkeypatch.setattr(model_deep2, "EPOCHS", 2)
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "RECENT_GATE_YEARS", (2017,))
+    monkeypatch.setattr(model_deep2, "D3_COUNT", 1)
+    monkeypatch.setitem(model_deep2.CROSS, "dl-7.1.0", {"width": 16, "layers": 1, "heads": 2, "frozen": "dl-2.1.0"})
+    monkeypatch.setitem(model_deep2.ARCHITECTURES, "dl-7.1.0", "cross:16x1x2:frozen")
+    assert model.VERSIONS["dl-7.1.0"]["label"] == "deep2" and model_deep2.AGAINST_OF["dl-7.1.0"] == "dl-2.1.0"
+    (tmp_path / "gbm-2.2.0").mkdir()
+    (tmp_path / "gbm-2.2.0" / "meta.json").write_text(json.dumps({"version": "gbm-2.2.0", "features": ["momentum_3"],
+                                                                  "years": {}}), encoding="utf-8")
+    _data, fp = _panel()
+    old = model.train(fp, tmp_path / "dl-2.1.0", years=[2017], label="deep2", version="dl-2.1.0")
+    before = torch.load(tmp_path / "dl-2.1.0" / "2017-0.pt", weights_only=True)
+    meta = model.train(fp, tmp_path / "dl-7.1.0", years=[2017], label="deep2", version="dl-7.1.0")
+    curve = meta["years"]["2017"]["held_curves"][0]
+    assert len(curve) == 3 and meta["architecture"] == "cross:16x1x2:frozen"       # before any step, then two epochs
+    kept = torch.load(tmp_path / "dl-7.1.0" / "2017-0.pt", weights_only=True)
+    assert all(torch.equal(kept[key].cpu(), value.cpu()) for key, value in before.items())    # the own part did not move
+    assert meta["years"]["2017"]["top20_gain"] is not None and old["years"]["2017"]["top20_gain"] is not None
+
+    monkeypatch.setattr(model_deep2, "_gain", lambda scores, gains: 0.0)            # no reading better than the first
+    again = model.train(fp, tmp_path / "dl-7.1.0", years=[2017], label="deep2", version="dl-7.1.0")
+    kept = torch.load(tmp_path / "dl-7.1.0" / "2017-0.pt", weights_only=True)
+    assert not kept["adjust.weight"].any() and not kept["adjust.bias"].any()        # it stayed dl-2.1.0 as it is
+    assert len(again["years"]["2017"]["held_curves"][0]) == 3

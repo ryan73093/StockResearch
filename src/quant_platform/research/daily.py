@@ -308,6 +308,7 @@ MODEL_FACTORS = {"ml_gbm": "機器學習綜合分數（30 個因子、排名標�
                  "ml_deep5_wide": "深度學習第五版・大型 Transformer 加大（寬 384、8 層、1,457 萬個參數；輸入與學法同第二版・前一成）",
                  "ml_deep5_fine": "深度學習第五版之二・大型 Transformer 一輪看四次保留期（寬 256、6 層；和第五版同一個網路，只改什麼時候停）",
                  "ml_deep7": "深度學習第七版・每檔股票看得到當天整個市場（深度學習第二版加上一個跨股票的修正；上市加上櫃當背景）",
+                 "ml_deep7_resid": "深度學習第七版之二・深度學習第二版固定不動，跨股票的修正只學剩下的",
                  "ml_deep6": "深度學習第六版・先預訓練的大型 Transformer（寬 256、6 層；先用上市加上櫃的序列自己學，再學選股）",
                  "ml_deep": "深度學習（GRU 讀每檔最近 40 個交易日的報酬、成交值與 12 個因子名次，逐年滾動訓練）",
                  "ml_deep2": "深度學習第二版（GRU 讀 60 個交易日的價量與籌碼 z 分數＋當天因子快照與大盤狀態；標籤 20 日超額報酬，損失 Huber＋偏重前段的 ListNet；10 個種子）",
@@ -3438,9 +3439,10 @@ def input_digests(history: str | Path, factor_names: list[str], uses_exit: bool)
 
         payload["exit"] = exits_digest(exits_dir(history))
     if any(name in ROLLING_VOTE_FACTORS for name in factor_names):   # 2026-11-28: the votes file
+        from quant_platform.research.model import models_root as models_of   # (imported under another name below)
         from quant_platform.research.rolling_vote import digest as vote_digest
 
-        payload["rolling_vote"] = vote_digest(models_root(history))
+        payload["rolling_vote"] = vote_digest(models_of(history))
     if any(name in CONSENSUS_FACTORS for name in factor_names):  # 2026-10-11: the members and their models
         from quant_platform.research.consensus import digest as consensus_digest
 
