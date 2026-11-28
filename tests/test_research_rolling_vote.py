@@ -78,3 +78,13 @@ def test_a_rule_reading_the_votes_carries_the_votes_files_digest(tmp_path):
     (folder / rolling_vote.FILE).write_text(json.dumps({"months": {}}), encoding="utf-8")
     assert daily.input_digests(tmp_path, ["rolling_consensus"], False)["rolling_vote"] == rolling_vote.digest(models_root(tmp_path))
     assert "rolling_vote" not in daily.input_digests(tmp_path, ["momentum_3"], False)
+
+
+def test_the_guarded_rules_are_the_measured_consensus_rules_with_the_factor_changed():
+    plain, half, by_vol, us_hot = daily.rolling_vote_guard_batch()
+    assert [rule.vol_scale for rule in (plain, half, by_vol, us_hot)] == ["none", "taiex_half", "taiex_vol", "us_hot_half"]
+    for rule in (plain, half, by_vol, us_hot):
+        assert rule.factors == {"rolling_consensus": 1.0} and rule.execution == "split"
+        assert (rule.top, rule.check, rule.keep, rule.min_hold, rule.industry_cap) == (20, "weekly", 3, 20, 0.3)
+    assert len({rule.canonical_hash() if hasattr(rule, "canonical_hash") else rule.name for rule in (plain, half, by_vol, us_hot)}) == 4
+    assert daily.BATCHES["rollvote2"] is daily.rolling_vote_guard_batch

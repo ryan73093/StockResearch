@@ -3920,6 +3920,19 @@ def rolling_vote_batch() -> list[DailyRule]:
     ]
 
 
+def rolling_vote_guard_batch() -> list[DailyRule]:
+    """2026-11-28 (docs/research/results.md「滾動共識名單加大盤護欄」, written before the run): the rolling consensus
+    top 20 sold at the open and bought at the close — as the T0 consensus list's rules the guards were measured on
+    (#41643, #41644, #42610, #43939) — without a guard (the reference) and with each of the three guards."""
+    common = {"factors": {"rolling_consensus": 1.0}, "top": 20, "check": "weekly", "keep": 3, "min_hold": 20,
+              "industry_cap": 0.3, "execution": "split"}
+    head = "滾動共識名單（每月重選 20 個規則投票）：前 20 名、同產業最多 3 成、每週決策＋開盤賣、收盤買"
+    return [DailyRule(name=head, **common),
+            DailyRule(name=head + "・加權指數跌破 200 日均線就減碼一半", vol_scale="taiex_half", **common),
+            DailyRule(name=head + "・大盤跌破 200 日均線依大盤波動減碼（最多一半）", vol_scale="taiex_vol", **common),
+            DailyRule(name=head + "・大盤跌破 200 日均線或美國景氣過熱就減碼一半", vol_scale="us_hot_half", **common)]
+
+
 def dev_consensus_batch() -> list[DailyRule]:
     """2026-10-11: the clean test of the consensus method — the 180 development-period scan finalists voting,
     top 20 and top 40 registered together, weekly like ``consensus_batch``."""
@@ -7148,6 +7161,7 @@ BATCHES = {"factors": factor_batch, "risk": risk_batch, "chips": chip_batch, "co
 BATCHES.update({"rerun_poolsweep": pool_sweep_batch, "rerun_guardorigins": guard_origins_batch})
 BATCHES["smc"] = smc_batch                     # 2026-11-22
 BATCHES["rollvote"] = rolling_vote_batch       # 2026-11-28
+BATCHES["rollvote2"] = rolling_vote_guard_batch
 BATCHES["smc2"] = smc2_batch                   # 2026-11-25
 BATCHES["smcveto"] = smc_veto_batch
 BATCHES["smcveto2"] = smc_veto_deep_batch
