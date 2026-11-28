@@ -693,3 +693,75 @@ def test_the_cache_is_given_back_only_on_the_card_and_only_past_the_limit(monkey
     assert model_deep2._keep_under(card) is True and len(given) == 1      # 12 GB held, the limit is 10
     held[0] = 6 * 2 ** 30
     assert model_deep2._keep_under(card) is False and len(given) == 1     # what the folds really used stays
+
+
+def test_the_cross_version_begins_as_the_plain_network_and_sees_the_stocks_around(monkeypatch, tmp_path):
+    """2026-11-28 (docs/research/results.md「深度學習第七版」): dl-7.0.0 is dl-2.1.0's network plus a correction from a
+    Transformer over every stock shown that day; the correction's layer starts at zero, the eligible stocks' own
+    inputs are left as they are, and the stocks around are scaled by the eligible stocks' mean and spread."""
+    import torch
+
+    monkeypatch.setattr(model_deep2, "EPOCHS", 2)
+    monkeypatch.setattr(model_deep2, "LENGTH", 10)
+    monkeypatch.setattr(model_deep2, "SEEDS", (0,))
+    monkeypatch.setattr(model_deep2, "RECENT_GATE_YEARS", (2017,))
+    monkeypatch.setattr(model_deep2, "D3_COUNT", 1)
+    monkeypatch.setitem(model_deep2.CROSS, "dl-7.0.0", {"width": 16, "layers": 1, "heads": 2})
+    monkeypatch.setitem(model_deep2.ARCHITECTURES, "dl-7.0.0", "cross:16x1x2")
+    assert model_deep2.AGAINST_OF["dl-7.0.0"] == "dl-2.1.0" and "dl-7.0.0" in model_deep2.RECENT_GATED
+    assert model.VERSIONS["dl-7.0.0"]["label"] == "deep2"
+
+    _data, fp = _panel()
+    eligible = model.eligibility(fp).copy()
+    eligible[::3] = False                                               # a third of the stocks: shown, never eligible
+    around = np.ones_like(eligible)
+    names = ("momentum_3", "reversal_1")
+    plain = model_deep2.Inputs(fp, eligible, names)
+    wide = model_deep2.Inputs(fp, eligible, names, around=around)
+    assert torch.equal(plain.sequence, wide.sequence)                   # the eligible stocks' block is untouched
+    outside = ~eligible.T                                               # session × symbol
+    assert not plain.sequence.cpu().numpy()[outside].any() and wide.context.cpu().numpy()[outside].any()
+    inside = eligible.T
+    assert np.array_equal(wide.context.cpu().numpy()[inside], plain.sequence.cpu().numpy()[inside])
+
+    day = max(position for position in range(len(fp.sessions)) if eligible[:, position].sum() >= 3)
+    live = np.flatnonzero(eligible[:, day])
+    pairs = np.stack([np.full(live.size, day), live], axis=1)
+    steps, now, market, seen = wide.batch(pairs)
+    assert len(plain.batch(pairs)) == 3 and torch.equal(plain.batch(pairs)[0], steps)
+    assert seen[0].shape[0] == len(fp.symbols) and seen[4] == [(0, len(fp.symbols))]
+    assert torch.equal(seen[3][seen[5]], torch.ones(live.size, device=wide.on))        # the scored ones are eligible
+    with pytest.raises(ValueError):
+        wide.shown[live[0], day] = False
+        wide._members.clear()
+        wide.batch(pairs)
+    wide.shown[live[0], day] = True
+    wide._members.clear()
+
+    torch.manual_seed(3)
+    cross = model_deep2._network(plain.sequence.shape[2], plain.snapshot.shape[2], "cross:16x1x2").to(wide.on).eval()
+    torch.manual_seed(3)
+    old = model_deep2._network(plain.sequence.shape[2], plain.snapshot.shape[2], "gru").to(wide.on).eval()
+    with torch.no_grad():
+        assert torch.allclose(cross(steps, now, market, seen), old(steps, now, market), atol=1e-6)   # dl-2.1.0's start
+        with pytest.raises(ValueError):
+            cross(steps, now, market)
+        torch.nn.init.normal_(cross.adjust.weight)
+        moved = cross(steps, now, market, seen)
+        changed = list(seen)
+        changed[0] = seen[0].clone()
+        other = int(np.flatnonzero(~np.isin(np.arange(len(fp.symbols)), live[:1]))[0])
+        changed[0][other] += 1.0                                         # another stock's sessions that day
+        assert not torch.allclose(cross(steps, now, market, tuple(changed)), moved)
+        assert torch.allclose(cross.own(steps, now, market), old(steps, now, market), atol=1e-6)
+
+    for name, years in (("gbm-2.2.0", {}), ("dl-2.1.0", {"2017": {"top20_gain": -9.0}})):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "meta.json").write_text(json.dumps({"version": name, "features": ["momentum_3"], "years": years}),
+                                                   encoding="utf-8")
+    meta = model.train(fp, tmp_path / "dl-7.0.0", years=[2017], label="deep2", version="dl-7.0.0")
+    assert meta["architecture"] == "cross:16x1x2" and meta["cross"]["context"].startswith("listed and TPEx")
+    assert meta["years"]["2017"]["top20_gain"] is not None and len(meta["years"]["2017"]["held_curves"]) == 1
+    assert meta["gate"]["against"] == "dl-2.1.0"
+    kept = model.scores(_panel()[1], tmp_path / "dl-7.0.0")              # read back (and the days after, scored anew)
+    assert np.isfinite(kept).any()

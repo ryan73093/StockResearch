@@ -193,6 +193,22 @@ for _new, _size in LARGE.items():
                            + (":pre" if _new in PRETRAINED else ""))
     AGAINST_OF[_new] = D3_AGAINST
 RECENT_GATED.update(LARGE)
+# 2026-11-28 (docs/research/results.md「深度學習第七版：每檔股票看得到當天整個市場」, written before the run): the four
+# large versions all saw one stock's 60 sessions and all lost to dl-2.1.0. dl-7.0.0 is dl-2.1.0 itself — its network,
+# inputs, label, loss, batches, seeds, learning rate and stopping, the same starting weights for a seed — plus a
+# correction: every stock trading normally that day (listed and TPEx, ``wide_mask``, and the eligible ones) is a token
+# (another GRU over its 60 sessions, scaled by the eligible stocks' mean and spread; the snapshot for the eligible
+# ones, zero for the rest; a flag for eligible), the day's tokens go through a Transformer of width × layers × heads,
+# and the eligible stocks' tokens give a value added to dl-2.1.0's score. That value's layer starts at zero. dl-3.0
+# (one 64-wide attention layer among the eligible listed stocks) only tied twice; the context beyond the eligible
+# stocks, the depth, and starting from dl-2.1.0 are what was not tried. Gate: gate_check_d3 against dl-2.1.0, 2021-2025.
+CROSS = {"dl-7.0.0": {"width": 256, "layers": 4, "heads": 8}}
+CROSS_RATE = 2e-4                       # the new part's learning rate (the large versions'); its decay LARGE_DECAY
+for _new, _size in CROSS.items():
+    LOSSES[_new] = "top10"
+    ARCHITECTURES[_new] = f"cross:{_size['width']}x{_size['layers']}x{_size['heads']}"
+    AGAINST_OF[_new] = D3_AGAINST
+RECENT_GATED.update(CROSS)
 
 
 def seeds_of(version: str) -> tuple[int, ...]:
@@ -214,8 +230,9 @@ GATE_FLOOR = 0.006
 GATE_COUNT = 4
 
 
-def _zscore(values: np.ndarray, eligible: np.ndarray) -> np.ndarray:
-    """sessions × symbols: each session's z-score among its eligible stocks, clipped at ±CLIP, 0 where unknown."""
+def _zscore(values: np.ndarray, eligible: np.ndarray, shown: np.ndarray | None = None) -> np.ndarray:
+    """sessions × symbols: each session's z-score among its eligible stocks, clipped at ±CLIP, 0 where unknown.
+    ``shown`` (CROSS): the stocks given a value — by the eligible stocks' mean and spread — instead of the eligible."""
     import warnings
 
     masked = np.where(eligible, values, np.nan).T
@@ -223,6 +240,8 @@ def _zscore(values: np.ndarray, eligible: np.ndarray) -> np.ndarray:
         warnings.simplefilter("ignore", RuntimeWarning)
         mean = np.nanmean(masked, axis=1, keepdims=True)
         spread = np.nanstd(masked, axis=1, keepdims=True)
+    if shown is not None:
+        masked = np.where(shown, values, np.nan).T
     with np.errstate(invalid="ignore", divide="ignore"):
         z = (masked - mean) / np.where(spread > 0, spread, np.nan)
     return np.nan_to_num(np.clip(z, -CLIP, CLIP), nan=0.0)
@@ -232,9 +251,9 @@ def _average(prices: np.ndarray, sessions: int) -> np.ndarray:
     return pd.DataFrame(prices.T).rolling(sessions, min_periods=max(5, sessions // 2)).mean().to_numpy().T
 
 
-def sequence_inputs(fp, eligible: np.ndarray, chips: bool = True) -> np.ndarray:
+def sequence_inputs(fp, eligible: np.ndarray, chips: bool = True, shown: np.ndarray | None = None) -> np.ndarray:
     """session × symbol × SEQUENCE (float16): the day's z-scores (see the module text); without the CHIPS columns
-    when ``chips`` is false (TECHNICAL)."""
+    when ``chips`` is false (TECHNICAL). ``shown`` (CROSS): the stocks given values (``_zscore``)."""
     import warnings
 
     panel = fp.panel
@@ -256,7 +275,7 @@ def sequence_inputs(fp, eligible: np.ndarray, chips: bool = True) -> np.ndarray:
     columns += [fp.matrix(name) for name in CHIPS] if chips else []
     output = np.zeros((len(fp.sessions), len(fp.symbols), len(columns)), dtype=np.float16)
     for index, values in enumerate(columns):
-        output[:, :, index] = _zscore(values, eligible).astype(np.float16)
+        output[:, :, index] = _zscore(values, eligible, shown).astype(np.float16)
     return output
 
 
@@ -378,6 +397,51 @@ def _network(sequence: int, snapshot: int, architecture: str = "gru"):
             seen = self.encode(steps, now, market, hidden).float()
             return self.rebuild(seen[:, 1:]), self.ahead(seen[:, 0])
 
+    class Cross(torch.nn.Module):
+        """2026-11-28 (CROSS): dl-2.1.0's network (``gru``, ``head``: made first, so a seed starts them as dl-2.1.0's)
+        and a correction from a Transformer over the day's tokens — every stock shown that day."""
+
+        def __init__(self, width: int, layers: int, heads: int) -> None:
+            super().__init__()
+            self.gru = torch.nn.GRU(sequence, HIDDEN, batch_first=True)
+            parts, size = [], HIDDEN + snapshot + len(MARKET)
+            for units in HEAD:
+                parts += [torch.nn.Linear(size, units), torch.nn.ReLU(), torch.nn.Dropout(DROPOUT)]
+                size = units
+            self.head = torch.nn.Sequential(*parts, torch.nn.Linear(size, 1))
+            self.around = torch.nn.GRU(sequence, HIDDEN, batch_first=True)
+            self.lift = torch.nn.Linear(HIDDEN + snapshot + len(MARKET) + 1, width)
+            layer = torch.nn.TransformerEncoderLayer(width, heads, 4 * width, DROPOUT, activation="gelu",
+                                                     batch_first=True, norm_first=True)
+            self.encoder = torch.nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
+            self.norm = torch.nn.LayerNorm(width)
+            self.adjust = torch.nn.Linear(width, 1)
+            torch.nn.init.zeros_(self.adjust.weight)               # it begins as dl-2.1.0
+            torch.nn.init.zeros_(self.adjust.bias)
+
+        def own(self, steps, now, market):
+            _out, last = self.gru(steps)
+            return self.head(torch.cat([last[-1], now, market], dim=1)).squeeze(-1)
+
+        def correction(self, around):
+            steps, now, market, flag, days, where = around
+            _out, last = self.around(steps)
+            tokens = self.lift(torch.cat([last[-1], now, market, flag[:, None]], dim=1))
+            half = tokens.is_cuda
+            seen = []
+            with torch.autocast("cuda" if half else "cpu", dtype=torch.bfloat16, enabled=half):
+                for start, end in days:                               # one day's stocks see each other
+                    seen.append(self.norm(self.encoder(tokens[start:end].unsqueeze(0))).squeeze(0))
+            return self.adjust(torch.cat(seen).float()[where]).squeeze(-1)
+
+        def forward(self, steps, now, market, around=None, groups=None):
+            if around is None:
+                raise ValueError("the cross network needs the day's other stocks (Inputs(around=...))")
+            return self.own(steps, now, market) + self.correction(around)
+
+    if architecture.startswith("cross:"):
+        width, layers, heads = (int(part) for part in architecture.split(":")[1].split("x"))
+        return Cross(width, layers, heads)
     if architecture.startswith("large:"):
         parts = architecture.split(":")
         width, layers, heads = (int(part) for part in parts[1].split("x"))
@@ -398,8 +462,11 @@ def _runs(sessions: np.ndarray) -> list[tuple[int, int]]:
 class Inputs:
     """The three input blocks on the device, and the batches of (session, symbol) pairs drawn from them."""
 
-    def __init__(self, fp, eligible: np.ndarray, names: tuple[str, ...], chips: bool = True, positions=None) -> None:
-        """``positions``: the sessions that will be scored (the snapshot of only those, ``snapshot_inputs``)."""
+    def __init__(self, fp, eligible: np.ndarray, names: tuple[str, ...], chips: bool = True, positions=None,
+                 around: np.ndarray | None = None) -> None:
+        """``positions``: the sessions that will be scored (the snapshot of only those, ``snapshot_inputs``).
+        ``around`` (CROSS; symbols × sessions): the stocks every day's batch also carries as context — their own
+        sequence block (the eligible stocks' block is left as it is), and which of them are eligible."""
         import torch
 
         from quant_platform.research.gpu import device
@@ -408,15 +475,48 @@ class Inputs:
         self.sequence = torch.from_numpy(sequence_inputs(fp, eligible, chips)).to(self.on)
         self.snapshot = torch.from_numpy(snapshot_inputs(fp, eligible, names, positions)).to(self.on)
         self.market = torch.from_numpy(market_inputs(fp, eligible)).to(self.on)
+        self.shown = None
+        if around is not None:
+            self.shown = around | eligible
+            self.context = torch.from_numpy(sequence_inputs(fp, eligible, chips, self.shown)).to(self.on)
+            self.flag = torch.from_numpy(np.ascontiguousarray(eligible.T).astype(np.float32)).to(self.on)
+            self._members: dict[int, np.ndarray] = {}
+
+    def _block(self, sequence, sessions, symbols):
+        import torch
+
+        steps = sessions[:, None] + torch.arange(-LENGTH + 1, 1, device=self.on)[None, :]
+        return sequence[steps, symbols[:, None], :].float()
 
     def batch(self, pairs: np.ndarray):
         import torch
 
         sessions = torch.as_tensor(pairs[:, 0], device=self.on)
         symbols = torch.as_tensor(pairs[:, 1], device=self.on)
-        steps = sessions[:, None] + torch.arange(-LENGTH + 1, 1, device=self.on)[None, :]
-        return (self.sequence[steps, symbols[:, None], :].float(), self.snapshot[sessions, symbols, :].float(),
-                self.market[sessions])
+        own = (self._block(self.sequence, sessions, symbols), self.snapshot[sessions, symbols, :].float(),
+               self.market[sessions])
+        if self.shown is None:
+            return own
+        every, where, days, at = [], [], [], 0                  # CROSS: each day's shown stocks, in symbol order
+        for start, end in _runs(pairs[:, 0]):
+            day = int(pairs[start, 0])
+            if day not in self._members:
+                self._members[day] = np.flatnonzero(self.shown[:, day])
+            members = self._members[day]
+            spots = np.searchsorted(members, pairs[start:end, 1])
+            if spots.size and (spots.max() >= members.size or not np.array_equal(members[spots], pairs[start:end, 1])):
+                raise ValueError(f"session {day}: a stock scored is not among the stocks shown")
+            every.append(np.stack([np.full(members.size, day), members], axis=1))
+            where.append(spots + at)
+            days.append((at, at + members.size))
+            at += members.size
+        stacked = np.concatenate(every)
+        all_sessions = torch.as_tensor(stacked[:, 0], device=self.on)
+        all_symbols = torch.as_tensor(stacked[:, 1], device=self.on)
+        return (*own, (self._block(self.context, all_sessions, all_symbols),
+                       self.snapshot[all_sessions, all_symbols, :].float(), self.market[all_sessions],
+                       self.flag[all_sessions, all_symbols], days,
+                       torch.as_tensor(np.concatenate(where), device=self.on)))
 
     def score(self, network, pairs: np.ndarray, size: int = 16384) -> np.ndarray:
         """Scores in the pairs' order; the chunks hold whole days (a day's stocks attend to each other in D3)."""
@@ -434,7 +534,7 @@ class Inputs:
                     last += 1
                 chunk = pairs[first: runs[last][1]]
                 groups = [(start - first, end - first) for start, end in runs[index: last + 1]]
-                output.append(network(*self.batch(chunk), groups).float().cpu().numpy())
+                output.append(network(*self.batch(chunk), groups=groups).float().cpu().numpy())
                 index = last + 1
         network.train()
         return np.concatenate(output) if output else np.zeros(0, dtype=np.float32)
@@ -548,6 +648,13 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
                   "lr": rate * large["encoder"]}]
     else:
         parts = [{"params": list(network.parameters()), "lr": rate}]
+    cross = architecture.startswith("cross:")
+    added = []
+    if cross:                            # dl-2.1.0's part as dl-2.1.0 learns; the new part as the large versions do
+        named = list(network.named_parameters())
+        added = [value for name, value in named if not name.startswith(("gru.", "head."))]
+        parts = [{"params": [value for name, value in named if name.startswith(("gru.", "head."))], "lr": rate},
+                 {"params": added, "lr": CROSS_RATE, "weight_decay": LARGE_DECAY}]
     optimiser = torch.optim.AdamW(parts, lr=rate, weight_decay=LARGE_DECAY if large else WEIGHT_DECAY)
     for group in optimiser.param_groups:
         group["full"] = group["lr"]
@@ -560,7 +667,9 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
 
     def read() -> float:
         """The held-out days' top-20 gain with the network as it is now."""
-        predicted = inputs.score(network, held_pairs, 2048 if large else 16384)
+        # 2026-11-28: the cross network carries every shown stock of a chunk's days — 16,384 rows (45 days) took
+        # 9.3 GB in tensors and 20.6 GB held on the 16 GB card, 2,048 rows 1.8 and 4.4 (build/probe_cross2.py)
+        predicted = inputs.score(network, held_pairs, 2048 if large or cross else 16384)
         gains, tops, at = [], {}, 0
         for day in held_days:
             count = held_rows[day].size
@@ -596,7 +705,7 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
                 pairs.append(np.stack([np.full(count, day), rows[day]], axis=1))
                 target.append(labels[day][rows[day]])
             stacked = np.concatenate(pairs)
-            loss = _loss(kind, network(*inputs.batch(stacked), groups),
+            loss = _loss(kind, network(*inputs.batch(stacked), groups=groups),
                          torch.from_numpy(np.concatenate(target).astype(np.float32)).to(inputs.on), groups, stacked[:, 1])
             optimiser.zero_grad()
             loss.backward()
@@ -605,8 +714,10 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
                 for group in optimiser.param_groups:
                     group["lr"] = group["full"] * min(1.0, stepped / LARGE_WARMUP)
                 torch.nn.utils.clip_grad_norm_(network.parameters(), LARGE_CLIP)
+            if cross:
+                torch.nn.utils.clip_grad_norm_(added, LARGE_CLIP)
             optimiser.step()
-            if large:
+            if large or cross:
                 _keep_under(inputs)
             if number not in marks:
                 continue
@@ -648,6 +759,11 @@ def wide_mask(fp) -> np.ndarray:
     """symbols × sessions: every stock of the panel that trades normally — dl-2.2.0 learns from these."""
     with np.errstate(invalid="ignore"):
         return (fp.panel.close >= WIDE_PRICE) & (fp.turnover_20 >= WIDE_TURNOVER) & (fp.age >= WIDE_AGE)
+
+
+def _around(fp, meta: dict) -> np.ndarray | None:
+    """The context a kept version's networks need when read (CROSS), by its meta."""
+    return wide_mask(fp) if str(meta.get("architecture", "")).startswith("cross:") else None
 
 
 def gate_check_d3(meta: dict, against: dict, years: tuple[int, ...] = GATE_YEARS) -> dict[str, object]:
@@ -885,7 +1001,8 @@ def _prepare(fp, out: Path, version: str):
     else:
         snapshot = SNAPSHOT_OF.get(version, SNAPSHOT_VERSION)
         names = trained_features(out.parent / snapshot, snapshot)
-    inputs = Inputs(fp, learned, names, chips=version not in TECHNICAL)
+    inputs = Inputs(fp, learned, names, chips=version not in TECHNICAL,
+                    around=wide_mask(fp) if version in CROSS else None)
     start = LENGTH + 200
     columns = list(range(start, len(fp.sessions)))
     excess = label_block(fp, columns, eligible, "excess", HORIZON)                 # column × symbol, judged on
@@ -1010,6 +1127,8 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                  "sequence": [name for name in SEQUENCE if version not in TECHNICAL or name not in CHIPS],
                  "market": list(MARKET), "length": LENGTH, "hidden": HIDDEN, "head": list(HEAD),
                  "seeds": list(seeds_of(version)), **({"large": LARGE[version]} if version in LARGE else {}),
+                 **({"cross": {**CROSS[version], "rate": CROSS_RATE, "context": "listed and TPEx, trading normally"}}
+                    if version in CROSS else {}),
                  **({"pretrained": PRETRAINED[version]} if version in PRETRAINED else {}),
                  "epochs": EPOCHS, "patience": PATIENCE, "held_out": HELD_OUT, "horizon": HORIZON,
                  "device": device_name()})
@@ -1114,8 +1233,9 @@ def train(fp, out_dir: str | Path, version: str, years: list[int] | None = None,
                                     "ic": round(float(np.mean(ics)), 4) if ics else None,
                                     "top20_gain": round(float(np.mean(top20)), 5) if top20 else None,
                                     "held_curves": curves}
-        if version in LARGE:
+        if version in LARGE or version in CROSS:
             meta["years"][str(year)]["gpu_gb"] = _peak(inputs)
+            meta["years"][str(year)]["finished_at"] = datetime.now(UTC).isoformat(timespec="seconds")
         if version in RESIDUAL_OF:
             meta["years"][str(year)]["residual"] = residual_check(
                 {column: stored[fp.sessions[column].isoformat()] for column in reported}, fp.matrix(RESIDUAL_OF[version]),
@@ -1181,7 +1301,8 @@ def scores(fp, folder: str | Path) -> np.ndarray:
         meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
         eligible = eligibility(fp)
         inputs = Inputs(fp, eligible, tuple(meta["features"]),
-                        chips=len(meta.get("sequence") or SEQUENCE) == len(SEQUENCE), positions=later)
+                        chips=len(meta.get("sequence") or SEQUENCE) == len(SEQUENCE), positions=later,
+                        around=_around(fp, meta))
         year = max(int(path.stem.split("-")[0]) for path in saved)
         networks = []
         for path in [path for path in saved if path.stem.startswith(f"{year}-")]:
@@ -1229,7 +1350,8 @@ def _monthly(fp, folder: Path, output: np.ndarray) -> np.ndarray:
         meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
         eligible = eligibility(fp)
         inputs = Inputs(fp, eligible, tuple(meta["features"]),
-                        chips=len(meta.get("sequence") or SEQUENCE) == len(SEQUENCE), positions=missing)
+                        chips=len(meta.get("sequence") or SEQUENCE) == len(SEQUENCE), positions=missing,
+                        around=_around(fp, meta))
         networks = []
         for path in saved:
             network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2],
@@ -1324,7 +1446,7 @@ def leak_check(history: Path, data, models_root: str | Path, version: str, days:
         position = fp.index[day]
         kept = _load_scores(folder, fp.symbols).get(day.isoformat())
         eligible = eligibility(fp)
-        inputs = Inputs(fp, eligible, tuple(meta["features"]))
+        inputs = Inputs(fp, eligible, tuple(meta["features"]), around=_around(fp, meta))
         networks = []
         for path in sorted(folder.glob(f"{day.year}-*.pt")):
             network = _network(inputs.sequence.shape[2], inputs.snapshot.shape[2],
