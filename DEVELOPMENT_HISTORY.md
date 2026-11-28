@@ -2,6 +2,13 @@
 
 每輪交付一筆，最新在最上方。記錄目標、做法、測試結果、證據、commit 與回復方式。v3.9 以前的研究平台版本紀錄見 [`docs/archive/module-status-v2.7-v3.9.md`](docs/archive/module-status-v2.7-v3.9.md)。
 
+## 2026-11-28 18:20 — 滾動共識名單沒過：有贏 0050，但回撤 −54%
+
+- #44394 前 20 名：2020-10 起 459 萬（0050 377 萬、現有 T0 共識清單 601 萬），最大回撤 −54.1%（0050 −34.0%）。兩個條件都沒過；門檻沒動。
+- 第一次開跑時規則那一步當場出錯（`input_digests` 裡用了後面才匯入的名稱），修掉、補測試（`test_a_rule_reading_the_votes_carries_the_votes_files_digest`）後重跑。
+- dl-7.1.0（`deepresid`）17:28 開跑：2021 是 3.95 點對 dl-2.1.0 的 4.13 點。
+- 測試：`test_research_rolling_vote.py`（4 個）、`test_research_model_deep2.py`（28 個）、`test_research_scan.py`、`test_research_model.py`、`test_docs_guard.py`；全套沒有跑。
+
 ## 2026-11-28 18:05 — 滾動共識名單的程式與開跑；dl-7.1.0（dl-2.1.0 固定、只學剩下的）判定先寫
 
 - `research/rolling_vote.py`、因子 `rolling_consensus`、兩個規則（前 20、前 40）、指令 `rolling-vote`、流程 `rollvote`（17:23 開跑）。票數隔月第一個交易日才生效；規則的指紋含票數檔。
