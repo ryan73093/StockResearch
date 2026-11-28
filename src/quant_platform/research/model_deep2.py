@@ -760,8 +760,9 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
             if cross:
                 torch.nn.utils.clip_grad_norm_(added, LARGE_CLIP)
             optimiser.step()
-            if large or cross:
-                _keep_under(inputs)
+            # 2026-11-28: every version — dl-2.1.0's own folds used 4.7 GB in tensors and held 11.8 to 19.7 GB
+            # (dl-2.1.1, dl-2.1.2), past the 16 GB card from the third fold on
+            _keep_under(inputs)
             if number not in marks:
                 continue
             held = read()
