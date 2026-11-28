@@ -494,6 +494,22 @@ def _give_back(inputs: Inputs) -> None:
         torch.cuda.empty_cache()
 
 
+HELD_LIMIT_GB = 10.0                    # the card has 16.3 GB; the large networks' tensors peaked at 4.6-5.9 GB
+
+
+def _keep_under(inputs: Inputs, limit: float = HELD_LIMIT_GB) -> bool:
+    """2026-11-28: giving the cache back at an epoch's end (dl-6.0.0) and four times an epoch (dl-5.2.0) did not
+    hold it: the folds used 4.6-5.9 GB in tensors while PyTorch held 14.7-22.8 GB, past the card, and dl-5.2.0's
+    folds took 12, 22 and 40 minutes. The cache is now given back after any step that leaves more than ``limit``
+    held, so it cannot grow past the card between two readings. True when it was given back."""
+    import torch
+
+    if inputs.on.type != "cuda" or torch.cuda.memory_reserved() <= limit * 2 ** 30:
+        return False
+    torch.cuda.empty_cache()
+    return True
+
+
 def _peak(inputs: Inputs) -> dict[str, float] | None:
     """The most of the card's memory PyTorch used (in tensors) and held (with its cache) since the last call, GB."""
     import torch
@@ -590,6 +606,8 @@ def _fit(inputs: Inputs, kind: str, seed: int, train_days, held_days, rows, labe
                     group["lr"] = group["full"] * min(1.0, stepped / LARGE_WARMUP)
                 torch.nn.utils.clip_grad_norm_(network.parameters(), LARGE_CLIP)
             optimiser.step()
+            if large:
+                _keep_under(inputs)
             if number not in marks:
                 continue
             held = read()

@@ -678,3 +678,18 @@ def test_the_fine_version_reads_the_held_out_days_four_times_an_epoch(monkeypatc
     monkeypatch.setattr(model_deep2, "_gain", lambda scores, gains: 0.0)          # never better after the first reading
     stopped = model.train(fp, tmp_path / "dl-5.2.0", years=[2017], label="deep2", version="dl-5.2.0")
     assert len(stopped["years"]["2017"]["held_curves"][0]) == 2                  # the first, and one more without a better
+
+
+def test_the_cache_is_given_back_only_on_the_card_and_only_past_the_limit(monkeypatch):
+    import types
+
+    import torch
+
+    held, given = [12 * 2 ** 30], []
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda: held[0])
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: given.append(1))
+    card, plain = types.SimpleNamespace(on=torch.device("cuda")), types.SimpleNamespace(on=torch.device("cpu"))
+    assert model_deep2._keep_under(plain) is False and not given          # not on the card: nothing to give back
+    assert model_deep2._keep_under(card) is True and len(given) == 1      # 12 GB held, the limit is 10
+    held[0] = 6 * 2 ** 30
+    assert model_deep2._keep_under(card) is False and len(given) == 1     # what the folds really used stays
